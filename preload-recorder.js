@@ -45,6 +45,8 @@ contextBridge.exposeInMainWorld('recorder', {
   getOpenAIKey: () => ipcRenderer.invoke('recorder:get-openai-key'),
   transcribeItem: (itemId) => ipcRenderer.invoke('recorder:transcribe-item', itemId),
   writeLiveTranscript: (data) => ipcRenderer.invoke('recorder:write-live-transcript', data),
+  trackTranscriptionUsage: (usage) => ipcRenderer.invoke('recorder:track-transcription-usage', usage),
+  getMeetingCost: (data) => ipcRenderer.invoke('recorder:get-meeting-cost', data),
   saveTranscriptToSpace: (data) => ipcRenderer.invoke('recorder:save-transcript-to-space', data),
 
   // Start/stop the meeting monitor agent

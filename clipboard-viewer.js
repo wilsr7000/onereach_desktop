@@ -10615,30 +10615,44 @@ async function showVideoPreviewModal(itemId) {
     return audioExtensions.some((ext) => lower.endsWith(ext));
   };
 
-  // Collect all possible paths to check
-  const possiblePaths = [
-    metadata.filePath,
-    item.filePath,
-    item.content,
-    metadata.videoPath, // in case we have a separate videoPath field
-  ];
-
-  console.log('[VideoModal] Checking possible paths:', possiblePaths);
-
-  // First, try to find a video file
-  for (const path of possiblePaths) {
-    if (isVideoFile(path)) {
-      videoPath = path;
-      break;
+  // Resolve the real on-disk file via the main process FIRST. Saved meeting
+  // recordings store the file at contentPath (items/<id>/recording_*.webm) with
+  // no absolute filePath on the item, so the raw fields below are null and the
+  // modal used to show "Video file not found" for a perfectly good recording.
+  // getAudioData() maps the item id to its actual path — the same resolver the
+  // inline media player already uses successfully.
+  try {
+    const resolved = await window.clipboard.getAudioData(item.id);
+    if (resolved && resolved.success && resolved.filePath) {
+      videoPath = resolved.filePath;
     }
+  } catch (e) {
+    console.warn('[VideoModal] getAudioData resolve failed:', e && e.message);
   }
 
-  // If no explicit video found, try any non-audio file
+  // Fallback: legacy items that carry an absolute path directly on the item.
   if (!videoPath) {
+    const possiblePaths = [
+      metadata.filePath,
+      item.filePath,
+      item.content,
+      metadata.videoPath, // in case we have a separate videoPath field
+    ];
+    console.log('[VideoModal] Checking possible paths:', possiblePaths);
+    // First, try to find a video file
     for (const path of possiblePaths) {
-      if (path && typeof path === 'string' && !isAudioFile(path) && path.includes('/')) {
+      if (isVideoFile(path)) {
         videoPath = path;
         break;
+      }
+    }
+    // If no explicit video found, try any non-audio file
+    if (!videoPath) {
+      for (const path of possiblePaths) {
+        if (path && typeof path === 'string' && !isAudioFile(path) && path.includes('/')) {
+          videoPath = path;
+          break;
+        }
       }
     }
   }

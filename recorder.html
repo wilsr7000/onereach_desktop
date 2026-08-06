@@ -1970,6 +1970,39 @@
         animation: status-pulse 2s ease-in-out infinite;
       }
 
+      /* Running AI-cost tally for the meeting. Sits directly under the
+         transcription pill (top-right stack) so it stays clear of the
+         top-center overlay/alert anchors. */
+      .cost-tally {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-variant-numeric: tabular-nums;
+        color: var(--text-muted);
+        padding: 6px 10px;
+        background: rgba(10, 10, 18, 0.5);
+        backdrop-filter: blur(20px) saturate(1.3);
+        -webkit-backdrop-filter: blur(20px) saturate(1.3);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: var(--radius-sm);
+        position: absolute;
+        top: 48px;
+        right: 12px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+        z-index: 7;
+        pointer-events: none;
+      }
+
+      .cost-tally.visible {
+        display: flex;
+      }
+
+      .cost-tally .cost-amount {
+        color: var(--text);
+        font-weight: 600;
+      }
+
       @keyframes status-pulse {
         0%,
         100% {
@@ -3519,6 +3552,35 @@
         border-radius: var(--radius-sm);
       }
 
+      /* While sharing, captions occupy the band from 140px up — and the
+         sharing banner's default 145px anchor sat inside it, overlapping the
+         caption text exactly when both are visible. Lift the banner above a
+         typical one-to-two-line caption in the bottom-pinned layouts.
+         NOTE: #sharingBanner is a SIBLING of .preview-container (both live in
+         .preview-wrapper), so this must be :has() on the wrapper — a naive
+         descendant selector never matches (measured: the banner stayed at
+         145px inside the caption text). */
+      .preview-wrapper:has(.preview-container.layout-presentation) .sharing-banner,
+      .preview-wrapper:has(.preview-container.layout-speaker-view) .sharing-banner {
+        bottom: 215px;
+      }
+
+      /* In a session the bottom band is fully spoken for (measured):
+           0–130px   participant camera strip (tiles)
+           140–~200  captions (full-width block)
+           215–~250  sharing banner
+           center    .hud-left/.hud-right side chips (MIC/BG, CAM/CC)
+         Every anchor tried for the pilot HUD's bottom readouts landed on one
+         of them (tiles at 12px, captions at 150, side chips at 255). And in
+         a meeting the readouts are redundant anyway: PARTICIPANTS = the
+         visible tiles, SPEAKING = active-speaker glow + caption names,
+         AUDIO = the left meter. They exist for SOLO full-frame recording —
+         so in session mode they simply go away instead of covering someone's
+         camera. */
+      .preview-container.session-active .hud-bottom {
+        display: none;
+      }
+
       /* Sharing banner shown when host is sharing */
       .sharing-banner {
         display: none;
@@ -3562,7 +3624,11 @@
       /* Meeting Overlay System */
       .meeting-overlay-stack {
         position: absolute;
-        top: 8px;
+        /* Below the monitor-alert container (top: 12px, z50) — the two used
+           to share the top-center anchor and rendered on top of each other.
+           96px clears one to two stacked alerts; alerts keep visual priority
+           since they carry warnings. */
+        top: 96px;
         left: 50%;
         transform: translateX(-50%);
         z-index: 15;
@@ -4178,6 +4244,18 @@
       .hud-active .recording-indicator,
       .hud-active .duration-display {
         display: none !important;
+      }
+
+      /* The pilot HUD's top-right readout (time / clock rows, ends 48px from
+         the right edge) occupies the same corner as the transcription pill
+         and cost tally (right: 12px). Drop the pills below the readout while
+         the HUD is active so the two never overlap. */
+      .hud-active .transcription-status {
+        top: 78px;
+      }
+
+      .hud-active .cost-tally {
+        top: 114px;
       }
 
       /* HUD exceptions: flows that live in the bottom panel must surface.
@@ -5157,6 +5235,12 @@
           <div class="transcription-status" id="transcriptionStatus">
             <div class="status-dot"></div>
             <span id="transcriptionStatusText">Transcribing...</span>
+          </div>
+
+          <!-- Running AI-cost tally (updates while the meeting records) -->
+          <div class="cost-tally" id="costTally" title="AI spend this meeting (transcription + note agents + analysis)">
+            <span>AI cost</span>
+            <span class="cost-amount" id="costTallyAmount">$0.00</span>
           </div>
 
           <div class="duration-display" id="durationDisplay">
@@ -8122,6 +8206,21 @@
               break;
 
             case 'conversation.item.input_audio_transcription.completed':
+              // Record the segment's real usage with the budget manager (the
+              // direct WS bypasses ai-service, so without this the meeting's
+              // transcription spend is invisible). Fire-and-forget.
+              if (data.usage && window.recorder?.trackTranscriptionUsage) {
+                const det = data.usage.input_token_details || {};
+                window.recorder
+                  .trackTranscriptionUsage({
+                    inputTextTokens: det.text_tokens || 0,
+                    inputAudioTokens: det.audio_tokens || 0,
+                    cachedInputTokens: det.cached_tokens || 0,
+                    outputTokens: data.usage.output_tokens || 0,
+                    spaceId: this._captureSpaceId(null),
+                  })
+                  .catch(() => {});
+              }
               if (data.transcript) {
                 const finalText = data.transcript.trim();
                 if (finalText) {
@@ -8825,6 +8924,10 @@
           // Start live transcription (async, non-blocking)
           this.startLiveTranscription();
 
+          // Running AI-cost tally for the meeting (budget-manager spend since
+          // recording began: transcription + note agents + analysis).
+          this._startCostTally();
+
           // Empty-capture watchdog: MediaRecorder.start(1000) emits a chunk
           // every second. If nothing has arrived after ~2.8s, the source is
           // producing no data (camera sending no frames, screen capture
@@ -8973,6 +9076,9 @@
           this.elements.recordLabel.textContent = 'REC';
           this.elements.pauseBtn.classList.remove('visible', 'paused');
           this.elements.pausedOverlay.classList.remove('active');
+
+          // Stop the cost tally (leaves the final figure visible briefly).
+          this._stopCostTally();
 
           // Tear down the "Pause AI" control + clear its paused state.
           this._agentPaused = false;
@@ -11188,6 +11294,41 @@
           }
 
           this.showStatus(paused ? 'AI paused — recording continues' : 'AI resumed', 'info');
+        },
+
+        // ── Running meeting cost tally ─────────────────────────────
+        // Polls the budget manager for spend recorded since this recording
+        // started. Real figures only: transcription usage (forwarded from the
+        // realtime API events), note agents, and post-meeting analysis all
+        // land in the budget manager, so the chip is actual tracked spend,
+        // not an estimate.
+        _startCostTally() {
+          this._costTallySince = new Date(this.recordingStartTime || Date.now()).toISOString();
+          const chip = document.getElementById('costTally');
+          const amount = document.getElementById('costTallyAmount');
+          if (amount) amount.textContent = '$0.00';
+          if (chip) chip.classList.add('visible');
+          clearInterval(this._costTallyInterval);
+          const tick = async () => {
+            try {
+              const r = await window.recorder.getMeetingCost({ sinceIso: this._costTallySince });
+              if (r && r.success && amount) {
+                const t = r.total || 0;
+                amount.textContent = t >= 1 ? '$' + t.toFixed(2) : '$' + t.toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00');
+              }
+            } catch (_e) { /* tally is best-effort */ }
+          };
+          this._costTallyInterval = setInterval(tick, 15000);
+          tick();
+        },
+
+        _stopCostTally() {
+          clearInterval(this._costTallyInterval);
+          this._costTallyInterval = null;
+          // One last refresh so the final figure is accurate, then fade.
+          const chip = document.getElementById('costTally');
+          if (!chip) return;
+          setTimeout(() => chip.classList.remove('visible'), 8000);
         },
 
         // ── Meeting Overlay System ──────────────────────────────

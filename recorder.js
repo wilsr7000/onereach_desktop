@@ -1161,6 +1161,59 @@ Respond with JSON:
       }
     });
 
+    // ==========================================
+    // MEETING COST TALLY
+    // ==========================================
+
+    // Live transcription talks to the realtime API over a direct WebSocket,
+    // bypassing ai-service -- so its spend never reached the budget manager.
+    // The renderer forwards the usage block from each
+    // conversation.item.input_audio_transcription.completed event here, and we
+    // record it like any other AI call (priced by pricing-config's
+    // gpt-realtime-whisper entry). This both fixes the budget blind spot and
+    // feeds the in-meeting running cost tally.
+    ipcMain.handle('recorder:track-transcription-usage', async (event, u = {}) => {
+      try {
+        const { getBudgetManager } = require('./budget-manager');
+        const result = getBudgetManager().trackUsage({
+          provider: 'openai',
+          model: u.model || 'gpt-realtime-whisper',
+          inputTokens: u.inputTextTokens || 0,
+          outputTokens: u.outputTokens || 0,
+          spaceId: u.spaceId || null,
+          feature: 'meeting-transcription',
+          operation: 'realtime-transcription',
+          options: {
+            inputAudioTokens: u.inputAudioTokens || 0,
+            cachedInputTokens: u.cachedInputTokens || 0,
+          },
+        });
+        return { success: true, cost: result?.entry?.cost || 0 };
+      } catch (error) {
+        log.warn('recorder', 'track-transcription-usage failed', { error: error.message });
+        return { success: false, error: error.message };
+      }
+    });
+
+    // Running total of AI spend since the meeting started (transcription usage
+    // recorded above + note agents + post-meeting analysis -- everything the
+    // budget manager saw since `sinceIso`).
+    ipcMain.handle('recorder:get-meeting-cost', async (event, { sinceIso } = {}) => {
+      try {
+        const { getBudgetManager } = require('./budget-manager');
+        const entries = getBudgetManager().getUsageHistory({ startDate: sinceIso || new Date(0).toISOString() });
+        let total = 0;
+        const byFeature = {};
+        for (const e of entries) {
+          total += e.cost || 0;
+          byFeature[e.feature || 'other'] = (byFeature[e.feature || 'other'] || 0) + (e.cost || 0);
+        }
+        return { success: true, total, calls: entries.length, byFeature };
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+    });
+
     // Close recorder
     ipcMain.handle('recorder:close', () => {
       this.close();
