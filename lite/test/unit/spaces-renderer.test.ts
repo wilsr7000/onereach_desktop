@@ -32,6 +32,8 @@ interface RendererTestHandle {
   buildItemCard(item: TestItemSummary, active: boolean): HTMLElement;
   isPdfTitle(title: string): boolean;
   fileExtBadge(title: string): string;
+  fileExtFamily(ext: string): string;
+  parsePlaybookSteps(excerpt: string | undefined): string[];
   buildSpaceChip(chip: TestChip): HTMLElement;
   buildDetailPane(item: TestItem, onClose: () => void): HTMLElement;
   buildBinaryPreview(item: TestItem, url: string): HTMLElement;
@@ -319,6 +321,137 @@ describe('buildItemCard (content-forward asset tile)', () => {
     const preview = card.querySelector('.spaces-card-preview');
     expect(preview?.classList.contains('is-loading')).toBe(false);
     delete (window as unknown as { lite?: unknown }).lite;
+  });
+
+  it('tints extension badges by family (word/sheet/deck/archive)', () => {
+    expect(handle().fileExtFamily('DOCX')).toBe('word');
+    expect(handle().fileExtFamily('xlsx')).toBe('sheet');
+    expect(handle().fileExtFamily('PPTX')).toBe('deck');
+    expect(handle().fileExtFamily('zip')).toBe('archive');
+    expect(handle().fileExtFamily('pdf')).toBe('generic');
+    const card = handle().buildItemCard(
+      baseItem({ title: 'budget.xlsx', fileKey: 'lite-spaces/assets/k4-budget.xlsx' }),
+      false
+    );
+    const badge = card.querySelector('.spaces-card-filecard-ext');
+    expect(badge?.textContent).toBe('XLSX');
+    expect(badge?.getAttribute('data-family')).toBe('sheet');
+  });
+
+  it('swaps a GSX text file tile to a paper excerpt when the bytes decode', async () => {
+    const md = '# Big Notes\n\nFirst line of the plan.';
+    const dataUrl = `data:text/markdown;base64,${Buffer.from(md, 'utf8').toString('base64')}`;
+    (window as unknown as { lite?: unknown }).lite = {
+      spaces: {
+        items: {
+          readFileData: async () => ({ ok: true, value: { dataUrl } }),
+        },
+      },
+    };
+    const card = handle().buildItemCard(
+      baseItem({ title: 'big-notes.md', fileKey: 'lite-spaces/assets/k5-big-notes.md' }),
+      false
+    );
+    // Badge placeholder first (jsdom loads eagerly), then the excerpt.
+    expect(card.querySelector('.spaces-card-filecard-ext')?.textContent).toBe('MD');
+    await new Promise((r) => setTimeout(r, 0));
+    const paper = card.querySelector('.spaces-card-excerpt');
+    expect(paper?.textContent).toContain('# Big Notes');
+    expect(card.querySelector('.spaces-card-filecard-ext')).toBeNull();
+    delete (window as unknown as { lite?: unknown }).lite;
+  });
+
+  it('keeps the extension badge when a GSX text read fails', async () => {
+    (window as unknown as { lite?: unknown }).lite = {
+      spaces: {
+        items: {
+          readFileData: async () => ({ ok: false, error: { message: 'HTTP 404' } }),
+        },
+      },
+    };
+    const card = handle().buildItemCard(
+      baseItem({ title: 'gone.txt', fileKey: 'lite-spaces/assets/k6-gone.txt' }),
+      false
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(card.querySelector('.spaces-card-excerpt')).toBeNull();
+    expect(card.querySelector('.spaces-card-filecard-ext')?.textContent).toBe('TXT');
+    delete (window as unknown as { lite?: unknown }).lite;
+  });
+});
+
+// ─── Playbook tiles ─────────────────────────────────────────────────────
+
+describe('parsePlaybookSteps', () => {
+  it('parses numbered, bulleted, task-list, and Step-heading lines', () => {
+    expect(handle().parsePlaybookSteps('1. Kickoff\n2) Draft outline\n3. Review.')).toEqual([
+      'Kickoff',
+      'Draft outline',
+      'Review.',
+    ]);
+    expect(handle().parsePlaybookSteps('- [ ] Confirm goals\n- [x] Book room\n- Ship it.')).toEqual([
+      'Confirm goals',
+      'Book room',
+      'Ship it.',
+    ]);
+    expect(handle().parsePlaybookSteps('## Step 1: Align\n## Step 2: Build.')).toEqual([
+      'Align',
+      'Build.',
+    ]);
+  });
+
+  it('returns [] for prose-only excerpts', () => {
+    expect(handle().parsePlaybookSteps('A plan with no discrete steps yet.')).toEqual([]);
+    expect(handle().parsePlaybookSteps(undefined)).toEqual([]);
+    expect(handle().parsePlaybookSteps('   ')).toEqual([]);
+  });
+
+  it('drops a final step cut mid-line by the excerpt cap', () => {
+    expect(handle().parsePlaybookSteps('1. First step.\n2. Second step.\n3. Third st')).toEqual([
+      'First step.',
+      'Second step.',
+    ]);
+    // A cleanly-terminated final line stays.
+    expect(handle().parsePlaybookSteps('1. First.\n2. Second.')).toEqual(['First.', 'Second.']);
+  });
+});
+
+describe('playbook tile preview', () => {
+  it('renders the ★ PLAYBOOK chip plus parsed steps with markers', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'playbook',
+        title: 'Q3 Launch Plan',
+        excerpt: '1. Kickoff with team.\n2. Draft the deck.\n3. Dry run.\n4. Ship.\n5. Retro.',
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-preview-playbook')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-playbook-label')?.textContent).toBe('PLAYBOOK');
+    expect(card.querySelector('.spaces-card-playbook-star')?.textContent).toBe('★');
+    const steps = card.querySelectorAll('.spaces-card-playbook-step');
+    expect(steps).toHaveLength(4);
+    expect(steps[0]?.querySelector('.spaces-card-playbook-step-marker')?.textContent).toBe('1');
+    expect(steps[0]?.querySelector('.spaces-card-playbook-step-text')?.textContent).toBe(
+      'Kickoff with team.'
+    );
+    expect(card.querySelector('.spaces-card-playbook-more')?.textContent).toBe('+1 more');
+  });
+
+  it('falls back to prose, then to the plan-lines ornament', () => {
+    const prose = handle().buildItemCard(
+      baseItem({ kind: 'playbook', excerpt: 'Plan prose without steps.' }),
+      false
+    );
+    expect(prose.querySelector('.spaces-card-playbook-label')?.textContent).toBe('PLAYBOOK');
+    expect(prose.querySelector('.spaces-card-excerpt')?.textContent).toBe(
+      'Plan prose without steps.'
+    );
+    expect(prose.querySelectorAll('.spaces-card-playbook-step')).toHaveLength(0);
+
+    const empty = handle().buildItemCard(baseItem({ kind: 'playbook' }), false);
+    expect(empty.querySelector('.spaces-card-playbook-label')?.textContent).toBe('PLAYBOOK');
+    expect(empty.querySelectorAll('.spaces-card-playbook-line').length).toBeGreaterThan(0);
   });
 
   it('renders an audio waveform + play glyph for audio assets', () => {

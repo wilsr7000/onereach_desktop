@@ -25,6 +25,7 @@ const TEXT_EXTENSIONS = [
   '.csv', '.tsv', '.json', '.yaml', '.yml', '.xml',
   '.js', '.mjs', '.cjs', '.ts', '.tsx', '.py', '.sql',
   '.sh', '.bash', '.zsh',
+  '.html', '.htm', '.mmd', '.mermaid',
 ] as const;
 
 /** Whether a file name / mime pair is text-like (renderable as text). */

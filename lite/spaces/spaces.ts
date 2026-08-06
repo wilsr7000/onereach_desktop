@@ -37,7 +37,7 @@ import {
   extractMetadataFromFile,
   extractMetadataFromText,
 } from './metadata-extractor.js';
-import { shouldInlineTextFile, decodeDataUrlText } from './text-asset.js';
+import { shouldInlineTextFile, decodeDataUrlText, isTextLikeFile } from './text-asset.js';
 
 // ─── Home view (chunk 3o) ───────────────────────────────────────────────
 
@@ -1452,6 +1452,8 @@ export function detectTextPreviewLanguage(
   if (name.endsWith('.py')) return 'py';
   if (name.endsWith('.sql')) return 'sql';
   if (name.endsWith('.sh') || name.endsWith('.bash') || name.endsWith('.zsh')) return 'sh';
+  if (mime === 'text/html' || name.endsWith('.html') || name.endsWith('.htm')) return 'html';
+  if (name.endsWith('.mmd') || name.endsWith('.mermaid')) return 'mermaid';
   if (mime === 'text/markdown' || name.endsWith('.md') || name.endsWith('.markdown')) return 'markdown';
   return null;
 }
@@ -3189,7 +3191,7 @@ function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
       buildUrlTilePreview(item, preview);
       break;
     case 'playbook':
-      buildPlaybookTilePreview(preview);
+      buildPlaybookTilePreview(item, preview);
       break;
     case 'ticket':
       buildTicketTilePreview(item, preview);
@@ -3238,6 +3240,8 @@ function getTileImageObserver(): IntersectionObserver | null {
         if (key !== null && key.length > 0) loadTileThumbnail(el, key);
         const pdfKey = el.getAttribute('data-pdf-key');
         if (pdfKey !== null && pdfKey.length > 0) loadTilePdfPreview(el, pdfKey);
+        const textKey = el.getAttribute('data-text-key');
+        if (textKey !== null && textKey.length > 0) loadTileTextPreview(el, textKey);
       }
     },
     { rootMargin: '300px' }
@@ -3377,13 +3381,103 @@ function buildUrlTilePreview(
  * Playbook tile: four stacked rule lines — reads as a ruled notebook
  * page. Distinct enough from generic doc tiles to be scan-able.
  */
-function buildPlaybookTilePreview(preview: HTMLElement): void {
+/**
+ * Playbook tile — the special one. A playbook is the plan that drives
+ * a shared Space, so its tile reads as a miniature plan: a ★ PLAYBOOK
+ * header chip, then the first steps parsed out of the excerpt as a
+ * numbered checklist. Falls back to the excerpt as prose, then to the
+ * abstract plan-lines ornament when there's nothing to parse.
+ */
+function buildPlaybookTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  const head = document.createElement('span');
+  head.className = 'spaces-card-playbook-head';
+  head.setAttribute('aria-hidden', 'true');
+  const star = document.createElement('span');
+  star.className = 'spaces-card-playbook-star';
+  star.textContent = '★';
+  head.appendChild(star);
+  const label = document.createElement('span');
+  label.className = 'spaces-card-playbook-label';
+  label.textContent = 'PLAYBOOK';
+  head.appendChild(label);
+  preview.appendChild(head);
+
+  const steps = parsePlaybookSteps(item.excerpt);
+  if (steps.length > 0) {
+    const list = document.createElement('span');
+    list.className = 'spaces-card-playbook-steps';
+    const shown = steps.slice(0, 4);
+    for (let i = 0; i < shown.length; i++) {
+      const row = document.createElement('span');
+      row.className = 'spaces-card-playbook-step';
+      const marker = document.createElement('span');
+      marker.className = 'spaces-card-playbook-step-marker';
+      marker.textContent = String(i + 1);
+      row.appendChild(marker);
+      const text = document.createElement('span');
+      text.className = 'spaces-card-playbook-step-text';
+      text.textContent = shown[i] ?? '';
+      row.appendChild(text);
+      list.appendChild(row);
+    }
+    if (steps.length > shown.length) {
+      const more = document.createElement('span');
+      more.className = 'spaces-card-playbook-more';
+      more.textContent = `+${steps.length - shown.length} more`;
+      list.appendChild(more);
+    }
+    preview.appendChild(list);
+    return;
+  }
+
+  const excerpt = tileExcerptText(item.excerpt);
+  if (excerpt !== null) {
+    const paper = document.createElement('p');
+    paper.className = 'spaces-card-excerpt';
+    paper.textContent = excerpt;
+    preview.appendChild(paper);
+    return;
+  }
+
   for (let i = 0; i < 4; i++) {
     const line = document.createElement('span');
     line.className = 'spaces-card-playbook-line';
     line.style.setProperty('--line-index', String(i));
     preview.appendChild(line);
   }
+}
+
+/**
+ * Pull step lines out of a playbook excerpt. Recognizes the shapes
+ * plans are actually written in — numbered lists, bullets, task-list
+ * checkboxes, and "Step N:" headings — strips the markers, and drops
+ * markdown heading noise. The last line is dropped when the excerpt
+ * was cut mid-line by the summary's 280-char cap (no trailing
+ * terminator), so tiles never show a half word. Exported for tests.
+ */
+export function parsePlaybookSteps(excerpt: string | undefined): string[] {
+  if (typeof excerpt !== 'string' || excerpt.trim().length === 0) return [];
+  const truncated = !/[\s.!?:;)\]]$/.test(excerpt);
+  const lines = excerpt.split(/\r?\n/);
+  const steps: Array<{ text: string; line: number }> = [];
+  const STEP_RE = /^\s*(?:(?:\d+[.)])|(?:[-*•]\s*(?:\[[ xX]\])?)|(?:#{1,4}\s*step\s*\d*[:.]?))\s*(.+)$/i;
+  for (let i = 0; i < lines.length; i++) {
+    const m = STEP_RE.exec(lines[i] ?? '');
+    if (m === null) continue;
+    const text = (m[1] ?? '').replace(/\*\*/g, '').trim();
+    if (text.length === 0) continue;
+    steps.push({ text, line: i });
+  }
+  if (steps.length === 0) return [];
+  // Drop a final step that sits on the excerpt's cut-off last line.
+  const last = steps[steps.length - 1];
+  if (truncated && last !== undefined && last.line === lines.length - 1) {
+    steps.pop();
+  }
+  return steps.map((s) => s.text);
 }
 
 /**
@@ -3427,9 +3521,10 @@ function buildTextTilePreview(
     return;
   }
   // Binary-backed doc with nothing to excerpt: PDFs get a real
-  // first-page preview (lazy, same near-viewport gate as image
-  // thumbnails); other files get a file-card with the extension so
-  // the tile never reads as an empty grey rectangle.
+  // first-page preview and text-like files fetch a text excerpt
+  // (both lazy, same near-viewport gate as image thumbnails); other
+  // files get a file-card with the extension so the tile never reads
+  // as an empty grey rectangle.
   if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
     if (isPdfTitle(item.title)) {
       preview.classList.add('is-loading');
@@ -3438,6 +3533,18 @@ function buildTextTilePreview(
       const observer = getTileImageObserver();
       if (observer === null) {
         loadTilePdfPreview(preview, item.fileKey);
+        return;
+      }
+      observer.observe(preview);
+      return;
+    }
+    if (isTextLikeFile(item.title, '')) {
+      preview.classList.add('is-loading');
+      swapTilePreviewToFileBadge(preview, item.title, { keepLoading: true });
+      preview.setAttribute('data-text-key', item.fileKey);
+      const observer = getTileImageObserver();
+      if (observer === null) {
+        loadTileTextPreview(preview, item.fileKey);
         return;
       }
       observer.observe(preview);
@@ -3551,11 +3658,84 @@ function swapTilePreviewToFileBadge(
   glyph.className = 'spaces-card-glyph spaces-card-glyph-doc';
   glyph.textContent = '¶';
   card.appendChild(glyph);
+  const badge = fileExtBadge(title);
   const ext = document.createElement('span');
   ext.className = 'spaces-card-filecard-ext';
-  ext.textContent = fileExtBadge(title);
+  ext.setAttribute('data-family', fileExtFamily(badge));
+  ext.textContent = badge;
   card.appendChild(ext);
   preview.appendChild(card);
+}
+
+/**
+ * Coarse family for an extension badge so CSS can tint it (Word-blue,
+ * sheet-green, deck-orange). Exported for tests.
+ */
+export function fileExtFamily(ext: string): string {
+  const e = (ext ?? '').toLowerCase();
+  if (e === 'doc' || e === 'docx' || e === 'rtf' || e === 'odt' || e === 'pages') return 'word';
+  if (e === 'xls' || e === 'xlsx' || e === 'ods' || e === 'numbers') return 'sheet';
+  if (e === 'ppt' || e === 'pptx' || e === 'odp' || e === 'key') return 'deck';
+  if (e === 'zip' || e === 'tar' || e === 'gz' || e === '7z' || e === 'rar') return 'archive';
+  return 'generic';
+}
+
+/**
+ * Tile text-excerpt cache — decoded first-lines of GSX-resident text
+ * files (md/txt/html/code), keyed by fileKey. Entries are tiny
+ * (≤300 chars), so a simple size cap is enough.
+ */
+const tileTextExcerptCache = new Map<string, string>();
+const TILE_TEXT_CACHE_MAX_ENTRIES = 300;
+const TILE_TEXT_EXCERPT_CHARS = 300;
+
+/**
+ * Fetch a text-like file's bytes, decode to UTF-8, and swap the tile
+ * to a paper-style excerpt — the same look inline text assets get.
+ * Any failure (404 key, over the inline cap, binary masquerading as
+ * text) keeps the extension badge.
+ */
+function loadTileTextPreview(preview: HTMLElement, key: string): void {
+  const cached = tileTextExcerptCache.get(key);
+  if (cached !== undefined) {
+    swapTilePreviewToTextExcerpt(preview, cached);
+    return;
+  }
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) {
+    preview.classList.remove('is-loading');
+    return;
+  }
+  void bridge.items
+    .readFileData(key)
+    .then((env) => {
+      const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
+      const text = dataUrl !== null ? decodeDataUrlText(dataUrl) : null;
+      const excerpt = text !== null ? text.trim().slice(0, TILE_TEXT_EXCERPT_CHARS) : '';
+      if (excerpt.length === 0) {
+        preview.classList.remove('is-loading');
+        return;
+      }
+      if (tileTextExcerptCache.size >= TILE_TEXT_CACHE_MAX_ENTRIES) {
+        const oldest = tileTextExcerptCache.keys().next().value;
+        if (oldest !== undefined) tileTextExcerptCache.delete(oldest);
+      }
+      tileTextExcerptCache.set(key, excerpt);
+      swapTilePreviewToTextExcerpt(preview, excerpt);
+    })
+    .catch(() => {
+      preview.classList.remove('is-loading');
+    });
+}
+
+function swapTilePreviewToTextExcerpt(preview: HTMLElement, excerpt: string): void {
+  preview.classList.remove('is-loading');
+  preview.removeAttribute('data-text-key');
+  preview.replaceChildren();
+  const paper = document.createElement('p');
+  paper.className = 'spaces-card-excerpt';
+  paper.textContent = excerpt;
+  preview.appendChild(paper);
 }
 
 /**
@@ -7786,7 +7966,9 @@ function messageFrom(err: unknown): string {
   isBase64DataUrl,
   isPdfTitle,
   fileExtBadge,
+  fileExtFamily,
   tileExcerptText,
+  parsePlaybookSteps,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,
