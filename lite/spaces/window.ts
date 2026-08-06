@@ -45,6 +45,83 @@ interface SpacesWindowConfig {
   loadBounds?: () => Promise<Partial<Rectangle> | null>;
   /** Override the bounds saver (tests). */
   saveBounds?: (bounds: Rectangle) => Promise<void>;
+  /**
+   * Override the diagnostics sink (tests). Defaults to the central log.
+   */
+  onDiagnostic?: (level: 'warn' | 'error', message: string, data: Record<string, unknown>) => void;
+}
+
+/**
+ * Wire renderer failures into the central log.
+ *
+ * Until this existed, a JS exception in the Spaces renderer produced a
+ * blank or half-drawn window and left NO trace anywhere -- not in the
+ * main-process log, not in a crash report, not in the event stream.
+ * "The Spaces window crashes" was unactionable because the app recorded
+ * nothing at all about it.
+ *
+ * These four handlers live in the MAIN process on purpose: they still
+ * fire when the renderer's own JS is dead, which is precisely the case
+ * a renderer-side handler cannot cover.
+ */
+function attachRendererDiagnostics(win: BrowserWindow, config: SpacesWindowConfig): void {
+  const emit =
+    config.onDiagnostic ??
+    ((level, message, data): void => {
+      void import('../logging/api.js')
+        .then((m) => {
+          m.getLoggingApi()[level]('spaces', message, data);
+        })
+        .catch(() => {
+          /* logging must never itself break the window */
+        });
+    });
+
+  // The renderer process died outright (OOM, native crash, kill).
+  win.webContents.on('render-process-gone', (_e, details) => {
+    emit('error', 'spaces renderer process gone', {
+      reason: details.reason,
+      exitCode: details.exitCode,
+    });
+  });
+
+  // The page is wedged -- an infinite loop or a blocking call.
+  win.webContents.on('unresponsive', () => {
+    emit('error', 'spaces renderer unresponsive', {});
+  });
+
+  win.webContents.on('did-fail-load', (_e, errorCode, errorDescription, validatedURL) => {
+    emit('error', 'spaces window failed to load', { errorCode, errorDescription, validatedURL });
+  });
+
+  // Uncaught exceptions and unhandled rejections surface here as
+  // console errors even with no renderer-side handler installed, which
+  // makes this the catch-all for "it broke and we don't know why".
+  win.webContents.on('console-message', (...args: unknown[]) => {
+    // Electron changed this signature across majors: older builds pass
+    // positional (event, level, message, line, sourceId); newer pass a
+    // single details object. Read both so the diagnostic doesn't
+    // silently stop working after an Electron bump.
+    const first = args[0];
+    const details =
+      first !== null && typeof first === 'object' && 'message' in first
+        ? (first as { level?: unknown; message?: unknown; lineNumber?: unknown; sourceId?: unknown })
+        : {
+            level: args[1],
+            message: args[2],
+            lineNumber: args[3],
+            sourceId: args[4],
+          };
+    const level = details.level;
+    // Numeric 3 (legacy) or 'error' (modern) both mean error.
+    const isError = level === 3 || level === 'error';
+    if (!isError) return;
+    emit('error', 'spaces renderer console error', {
+      text: String(details.message ?? '').slice(0, 2000),
+      source: String(details.sourceId ?? ''),
+      line: details.lineNumber ?? null,
+    });
+  });
 }
 
 let openWindow: BrowserWindow | null = null;
@@ -111,6 +188,8 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
     }
     return { action: 'deny' };
   });
+
+  attachRendererDiagnostics(win, config);
 
   void win.loadFile(config.htmlPath);
 
