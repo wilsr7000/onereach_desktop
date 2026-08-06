@@ -107,18 +107,29 @@ export interface Space {
  * lives on `Item.kind`, and `Item.ticket` carries the ticket-specific
  * substructure when applicable.
  */
-export type ItemKind =
-  | 'document'
-  | 'image'
-  | 'url'
-  | 'text'
-  | 'audio'
-  | 'video'
-  | 'playbook'
-  | 'ticket'
-  | 'agent'
-  | 'transcript'
-  | 'other';
+/**
+ * The kinds, as a runtime value. `ItemKind` is derived from this, so the
+ * two can never drift: anything that needs to enumerate the kinds at
+ * runtime (notably the asset-matrix coverage contract, which asserts
+ * every kind has a render test) reads THIS rather than hand-copying the
+ * union. A hand-copied mirror passes vacuously when a kind is added —
+ * which is how `'transcript'` shipped with no matrix row.
+ */
+export const ITEM_KINDS = [
+  'document',
+  'image',
+  'url',
+  'text',
+  'audio',
+  'video',
+  'playbook',
+  'ticket',
+  'agent',
+  'transcript',
+  'other',
+] as const;
+
+export type ItemKind = (typeof ITEM_KINDS)[number];
 
 /**
  * Agent kinds. An agent asset (`Item.kind === 'agent'`) carries an
@@ -182,6 +193,27 @@ export interface AgentEndpoint {
  * `'duplicate'` without breaking the renderer (UI just gets a new pill
  * color and the SDK projection passes the new value through).
  */
+/** One row of the account's agent library (graph `:Agent` nodes). */
+export interface AgentLibraryEntry {
+  id: string;
+  name: string;
+  description: string;
+  agentType: string;
+}
+
+/**
+ * Input for adding a LIBRARY agent to a Space: references the existing
+ * graph `:Agent` (no new agent node) via `[:REPRESENTS]`, copying its
+ * name/description onto the Space-facing asset. Endpoints registered
+ * here attach to the existing agent.
+ */
+export interface CreateAgentFromLibraryInput {
+  spaceId: string;
+  agentId: string;
+  endpoints?: AgentEndpoint[];
+  creatorId?: string;
+}
+
 export type TicketStatus = 'open' | 'in_progress' | 'done' | 'blocked';
 
 /** Ordered status list for stable iteration in renderer + tests. */

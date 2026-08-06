@@ -16,6 +16,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import '../../spaces/spaces.js';
+import { ITEM_KINDS } from '../../spaces/types.js';
 
 interface RendererTestHandle {
   buildItemCard: (item: unknown, opts?: unknown) => HTMLElement;
@@ -50,6 +51,8 @@ const SUPPORTED_ASSETS: AssetCase[] = [
   { kind: 'agent', binary: false },
   { kind: 'ticket', binary: false },
   { kind: 'playbook', binary: false },
+  // Transcripts are converted to markdown on intake and render as text.
+  { kind: 'transcript', binary: false },
   { kind: 'image', mimeType: 'image/png', binary: true, expectTag: 'IMG' },
   { kind: 'audio', mimeType: 'audio/mpeg', binary: true, expectTag: 'AUDIO' },
   { kind: 'video', mimeType: 'video/mp4', binary: true, expectTag: 'VIDEO' },
@@ -136,23 +139,14 @@ describe('asset matrix — detail previews for binary kinds', () => {
 
 describe('asset matrix — coverage contract', () => {
   it('covers every ItemKind the renderer can classify', () => {
-    // Mirrors the ItemKind union in lite/spaces/types.ts. If a kind is
-    // added there, add a row above -- otherwise it ships untested, which
-    // is exactly how the PDF preview regression reached a user.
-    const KNOWN_KINDS = [
-      'text',
-      'url',
-      'image',
-      'audio',
-      'video',
-      'document',
-      'agent',
-      'ticket',
-      'playbook',
-      'other',
-    ];
+    // Read from the SOURCE OF TRUTH, never a hand-copied mirror. The
+    // previous version of this test listed the kinds inline, so when
+    // `'transcript'` was added to the union the list didn't change and
+    // this assertion passed vacuously -- guaranteeing only "every kind
+    // someone remembered to list is tested". Importing ITEM_KINDS means
+    // adding a kind to the union fails HERE until a row exists above.
     const covered = new Set(SUPPORTED_ASSETS.map((c) => c.kind));
-    const missing = KNOWN_KINDS.filter((k) => !covered.has(k));
+    const missing = ITEM_KINDS.filter((k) => !covered.has(k));
     expect(missing, `asset kinds with no matrix row: ${missing.join(', ')}`).toEqual([]);
   });
 });
