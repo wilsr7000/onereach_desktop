@@ -409,8 +409,6 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
-           CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
-                ELSE a.description END AS description,
            CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
@@ -1495,6 +1493,30 @@ export class SdkSpacesClient {
     });
   }
 
+  /**
+   * Read-back for freshly-created nodes. The Edison Neon endpoint has
+   * shown read-after-write inconsistency under load — a CREATE returns
+   * rows, yet an immediate re-read misses the node (observed live
+   * 2026-08-06: mp4 createBinary triggered spurious orphan cleanup;
+   * transcript create surfaced "disappeared after creation" while the
+   * node existed). Retry the read briefly before declaring the asset
+   * gone — the alternative is telling the user a successful create
+   * failed (and, on the binary path, deleting bytes a live node points
+   * at).
+   */
+  private async getItemAfterCreate(id: string): Promise<Item | null> {
+    const delays = [0, 350, 700, 1400];
+    for (let i = 0; i < delays.length; i++) {
+      const delay = delays[i] ?? 0;
+      if (delay > 0) {
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+      const item = await this.getItem(id);
+      if (item !== null) return item;
+    }
+    return null;
+  }
+
   async getItem(id: string): Promise<Item | null> {
     return this.withSpan('spaces.items.get', async () => {
       if (typeof id !== 'string' || id.length === 0) {
@@ -2128,7 +2150,7 @@ export class SdkSpacesClient {
         context: { spaceId: validSpaceId },
       });
     }
-    const created = await this.getItem(id);
+    const created = await this.getItemAfterCreate(id);
     if (created === null) {
       throw new SpacesError({
         code: 'SPACES_NOT_FOUND',
@@ -2302,7 +2324,7 @@ export class SdkSpacesClient {
         });
       }
     }
-    const created = await this.getItem(id);
+    const created = await this.getItemAfterCreate(id);
     if (created === null) {
       throw new SpacesError({
         code: 'SPACES_NOT_FOUND',
@@ -2408,7 +2430,7 @@ export class SdkSpacesClient {
         now,
       });
     }
-    const created = await this.getItem(id);
+    const created = await this.getItemAfterCreate(id);
     if (created === null) {
       throw new SpacesError({
         code: 'SPACES_NOT_FOUND',

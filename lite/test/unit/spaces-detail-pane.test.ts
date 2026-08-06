@@ -716,7 +716,7 @@ describe('buildKindReclassify', () => {
     expect(el.getAttribute('data-current-kind')).toBe('document');
   });
 
-  it('includes the editable kind options (doc, image, url, text, audio, video, agent, other)', () => {
+  it('includes the editable kind options (doc, image, url, text, audio, video, agent, transcript, other)', () => {
     const el = renderer.buildKindReclassify(baseItem({ kind: 'text' }), async () => undefined);
     const values = Array.from(el.querySelectorAll<HTMLOptionElement>('option')).map(
       (o) => o.value
@@ -729,6 +729,7 @@ describe('buildKindReclassify', () => {
       'audio',
       'video',
       'agent',
+      'transcript',
       'other',
     ]);
   });

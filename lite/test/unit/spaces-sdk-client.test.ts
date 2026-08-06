@@ -68,6 +68,22 @@ function makeClient(stub: StubQuery): SdkSpacesClient {
 // ─── Cypher source regression guards ─────────────────────────────────────
 
 describe('CYPHER source strings', () => {
+  it('no query has duplicate aliases in its final RETURN (meta)', () => {
+    // A duplicate `AS <name>` makes Cypher reject the WHOLE query and
+    // the Edison endpoint surfaces that as zero rows — the renderer
+    // then reports "Item not found" for perfectly healthy nodes. This
+    // shipped once (2026-08-06: a second `AS description` in GET_ITEM
+    // broke every detail-open); this test makes the class impossible.
+    for (const [name, query] of Object.entries(CYPHER)) {
+      if (typeof query !== 'string') continue;
+      const idx = query.lastIndexOf('RETURN ');
+      if (idx < 0) continue;
+      const aliases = [...query.slice(idx).matchAll(/\bAS (\w+)/g)].map((m) => m[1]);
+      const dupes = [...new Set(aliases.filter((a) => aliases.indexOf(a) !== aliases.lastIndexOf(a)))];
+      expect(dupes, `${name} has duplicate RETURN aliases`).toEqual([]);
+    }
+  });
+
   it('listSpaces query matches :Space + itemCount via :Asset/:BELONGS_TO', () => {
     expect(CYPHER.LIST_SPACES).toMatch(/MATCH \(s:Space\)/);
     expect(CYPHER.LIST_SPACES).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s\)/);
@@ -125,7 +141,7 @@ describe('CYPHER source strings', () => {
       // carry `description` for all kinds plus a playbook-only
       // `contentHead` (excerpt alone would collapse them).
       expect(q).toMatch(/AS description,/);
-      expect(q).toMatch(/coalesce\(a\.type, a\.assetType\) = 'playbook'/);
+      expect(q).toMatch(/coalesce\(a\.type, a\.assetType\) IN \['playbook', 'transcript'\]/);
       expect(q).toMatch(/AS contentHead,/);
     }
   });

@@ -512,6 +512,58 @@ describe('playbook tile preview', () => {
   });
 });
 
+// ─── Transcript tiles ───────────────────────────────────────────────────
+
+describe('transcript tile preview', () => {
+  const CONTENT_HEAD =
+    '**Participants:** Alice, Bob\n\n**Alice** · *00:00:05*\n\nHello everyone, thanks for joining.\n\n**Bob** · *00:00:12*\n\nHappy to be here.';
+
+  it('renders the ❝ TRANSCRIPT chip + speaker rows + people footer', () => {
+    const card = handle().buildItemCard(
+      baseItem({ kind: 'transcript', title: 'Weekly sync', contentHead: CONTENT_HEAD }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-preview-transcript')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-transcript-label')?.textContent).toBe('TRANSCRIPT');
+    expect(card.querySelector('.spaces-card-transcript-mark')?.textContent).toBe('❝');
+    const turns = card.querySelectorAll('.spaces-card-transcript-turn');
+    expect(turns).toHaveLength(2);
+    expect(turns[0]?.querySelector('.spaces-card-transcript-speaker')?.textContent).toBe('Alice');
+    expect(turns[0]?.querySelector('.spaces-card-transcript-text')?.textContent).toBe(
+      'Hello everyone, thanks for joining.'
+    );
+    expect(card.querySelector('.spaces-card-transcript-foot')?.textContent).toBe('2 people');
+    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Transcript');
+  });
+
+  it('shows the ✎ description line when present', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'transcript',
+        description: 'Weekly partnership sync.',
+        contentHead: CONTENT_HEAD,
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-playbook-desc-pen')?.textContent).toBe('✎');
+    expect(card.querySelector('.spaces-card-playbook-desc-text')?.textContent).toBe(
+      'Weekly partnership sync.'
+    );
+    expect(card.querySelectorAll('.spaces-card-transcript-turn')).toHaveLength(2);
+  });
+
+  it('falls back to excerpt prose, then the doc glyph', () => {
+    const prose = handle().buildItemCard(
+      baseItem({ kind: 'transcript', excerpt: 'A meeting happened.' }),
+      false
+    );
+    expect(prose.querySelector('.spaces-card-excerpt')?.textContent).toBe('A meeting happened.');
+    const empty = handle().buildItemCard(baseItem({ kind: 'transcript' }), false);
+    expect(empty.querySelector('.spaces-card-transcript-label')?.textContent).toBe('TRANSCRIPT');
+    expect(empty.querySelector('.spaces-card-glyph-doc')).not.toBeNull();
+  });
+});
+
 // ─── Video tiles ────────────────────────────────────────────────────────
 
 describe('video tile frame grab', () => {
