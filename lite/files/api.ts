@@ -23,6 +23,7 @@
  */
 
 import { SdkFilesClient } from './sdk-client.js';
+import { FilesTokenMinter } from './token-minter.js';
 import type { SdkFilesClientConfig } from './sdk-client.js';
 import { getLoggingApi } from '../logging/api.js';
 import { ENVIRONMENT_CONFIGS } from '../auth/types.js';
@@ -183,6 +184,7 @@ export function getFilesApi(): FilesApi {
 export function _resetFilesApiForTesting(): void {
   _instance = null;
   _authBindings = null;
+  _tokenMinter = null;
 }
 
 /**
@@ -218,6 +220,7 @@ export interface FilesAuthBindings {
 }
 
 let _authBindings: FilesAuthBindings | null = null;
+let _tokenMinter: FilesTokenMinter | null = null;
 
 /**
  * Wire the files module's default config to a live auth source. Should
@@ -232,10 +235,21 @@ function defaultConfig(): SdkFilesClientConfig {
   if (edisonConfig === undefined) {
     throw new Error('lite/files: no EnvironmentConfig found for edison');
   }
+  // Account-scoped bearer for the Files service (full-app parity --
+  // lib/edison-sdk-manager.js): the raw mult cookie is rejected for
+  // account-scoped writes, so every op runs on a minted refresh_token
+  // value, cached ~50 min and re-minted on 401/403.
+  const minter =
+    _tokenMinter ??
+    (_tokenMinter = new FilesTokenMinter({
+      getAccountId: () => _authBindings?.getAccountId() ?? null,
+    }));
   return {
     token: () => _authBindings?.getToken() ?? '',
     discoveryUrl: edisonConfig.discoveryUrl,
     accountId: () => _authBindings?.getAccountId() ?? null,
+    ensureToken: () => minter.ensure(),
+    onAuthRejected: () => minter.invalidate(),
     logger: (level, message, data) => {
       const log = getLoggingApi();
       log[level]('files', message, data);

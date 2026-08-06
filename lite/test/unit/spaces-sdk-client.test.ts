@@ -359,7 +359,7 @@ describe('SdkSpacesClient.listItems (space)', () => {
     const client = makeClient(stub);
     await client.listItems({ kind: 'space', spaceId: 'sp-77' }, { limit: 20 });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ spaceId: 'sp-77', offset: 0, limit: 20 });
+    expect(call?.parameters).toEqual({ spaceId: 'sp-77', offset: 0, limit: 20, viewerId: '' });
   });
 
   it('keeps non-null otherSpaces chips and drops empty entries', async () => {
@@ -673,7 +673,7 @@ describe('SdkSpacesClient.updateItem', () => {
   it('forwards trimmed fields to the Cypher params and re-fetches', async () => {
     const stub = buildStubQuery();
     stub.setResponse('UPDATE (?:.*)\\bMATCH \\(a:Asset \\{id: \\$id\\}\\)', []);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 'New title',
@@ -707,7 +707,7 @@ describe('SdkSpacesClient.updateItem', () => {
 
   it('omits unchanged fields from params (collapses to null)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-2',
         title: 't',
@@ -732,7 +732,7 @@ describe('SdkSpacesClient.updateItem', () => {
 
   it('throws SPACES_NOT_FOUND when the item disappears between update and re-fetch', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', []);
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', []);
     const client = makeClient(stub);
     await expect(
       client.updateItem('vanished', { title: 'whatever' })
@@ -768,7 +768,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
   it('addTag trims the tag + re-fetches the updated tag list', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (t:Tag {name: $tag})', [{ id: 'i-1', tag: 'q3' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -807,7 +807,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
       'MATCH (a:Asset {id: $id})-[r:TAGGED_AS]->(t:Tag {name: $tag})',
       []
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -1038,7 +1038,7 @@ describe('SdkSpacesClient.listRecentItems', () => {
     const client = makeClient(stub);
     await client.listRecentItems({ limit: 5 });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 5 });
+    expect(call?.parameters).toEqual({ limit: 5, viewerId: '' });
   });
 
   it('clamps limit to default 3 when not provided', async () => {
@@ -1047,7 +1047,7 @@ describe('SdkSpacesClient.listRecentItems', () => {
     const client = makeClient(stub);
     await client.listRecentItems();
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 3 });
+    expect(call?.parameters).toEqual({ limit: 3, viewerId: '' });
   });
 
   it('caps limit at 50 (Home card max-row context)', async () => {
@@ -1056,7 +1056,7 @@ describe('SdkSpacesClient.listRecentItems', () => {
     const client = makeClient(stub);
     await client.listRecentItems({ limit: 999 });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 50 });
+    expect(call?.parameters).toEqual({ limit: 50, viewerId: '' });
   });
 
   it('maps rows to ItemSummary with single-Space chip', async () => {
@@ -2037,7 +2037,7 @@ describe('SdkSpacesClient.getCurrentPlaybook', () => {
   it('re-fetches the playbook via getItem when one is set', async () => {
     const stub = buildStubQuery();
     stub.setResponse('OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]', [{ playbookId: 'pb-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'pb-1',
         title: 'Q1 plan',
@@ -2071,7 +2071,7 @@ describe('SdkSpacesClient.setCurrentPlaybook', () => {
     stub.setResponse('MERGE (s)-[:CURRENT_PLAYBOOK]', [
       { playbookId: 'pb-1', ticketCount: 4 },
     ]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'pb-1',
         title: 'Q1 plan',
@@ -2184,7 +2184,7 @@ describe('SdkSpacesClient.createTicket', () => {
   it('defaults status to open, generates an id, returns the re-fetched Item', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'ticket-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'ticket-stub',
         title: 'Write tests',
@@ -2454,7 +2454,7 @@ describe('SdkSpacesClient.updateTicket', () => {
       "WHERE coalesce(a.type, a.assetType) = 'ticket'",
       [{ id: 't-1' }]
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 't-1',
         title: 't',
@@ -2490,7 +2490,7 @@ describe('SdkSpacesClient.updateTicket', () => {
       "WHERE coalesce(a.type, a.assetType) = 'ticket'",
       [{ id: 't-1' }]
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 't-1',
         title: 'ticket',
@@ -2545,7 +2545,7 @@ describe('toItem ticket projection', () => {
 
   it('toItem skips ticket sub-shape for non-ticket items', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'doc-1',
         title: 'Whitepaper',
@@ -2568,7 +2568,7 @@ describe('toItem ticket projection', () => {
 
   it('toItem assembles ticket sub-shape with status default + assignee + playbookId', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 't-1',
         title: 'Write tests',
@@ -2813,7 +2813,7 @@ describe('SdkSpacesClient.createAsset', () => {
   it('infers kind=text from content when not specified', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'asset-stub',
         title: 'Note',
@@ -2839,7 +2839,7 @@ describe('SdkSpacesClient.createAsset', () => {
   it('infers kind=other when only fileKey is provided', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'asset-stub',
         title: 'Doc',
@@ -2864,7 +2864,7 @@ describe('SdkSpacesClient.createAsset', () => {
   it('uses CREATE_ASSET_UNCATEGORIZED when spaceId is empty', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'asset-stub',
         title: 'Intake',
@@ -2949,7 +2949,7 @@ describe('SdkSpacesClient.restoreAsset', () => {
   it('returns the re-fetched Item on success', async () => {
     const stub = buildStubQuery();
     stub.setResponse('SET a.deletedAt = null', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 'Back',
@@ -3031,7 +3031,7 @@ describe('SdkSpacesClient.moveAssetToSpace', () => {
   it('passes fromSpaceId=null when empty, or the provided id otherwise', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 'x',
@@ -3071,7 +3071,7 @@ describe('SdkSpacesClient.addAssetToSpace', () => {
   it('returns the updated Item on success', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 'x',
@@ -3093,7 +3093,7 @@ describe('SdkSpacesClient.removeAssetFromSpace', () => {
   it('forwards spaceId + id as Cypher params', async () => {
     const stub = buildStubQuery();
     stub.setResponse('-[r:BELONGS_TO]->(s:Space {id: $spaceId})', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 'x',
@@ -3192,7 +3192,7 @@ describe('CYPHER source strings — metadata sprint', () => {
 describe('toItem metadata projection', () => {
   it('parses a JSON string from the graph into an object', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 'meta-thing',
@@ -3216,7 +3216,7 @@ describe('toItem metadata projection', () => {
 
   it('tolerates a legacy object-form metadata projection', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3236,7 +3236,7 @@ describe('toItem metadata projection', () => {
 
   it('drops invalid metadata silently (malformed JSON / wrong shape)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3256,7 +3256,7 @@ describe('toItem metadata projection', () => {
 
   it('drops nested-object values inside arrays (primitive-only enforcement)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3289,7 +3289,7 @@ describe('SdkSpacesClient.setMetadata', () => {
   it('serializes the metadata bag as a JSON string before writing', async () => {
     const stub = buildStubQuery();
     stub.setResponse('SET a.metadata = $metadata', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3322,7 +3322,7 @@ describe('SdkSpacesClient.patchMetadata', () => {
   it('shallow-merges the patch with existing metadata', async () => {
     const stub = buildStubQuery();
     // First getItem returns existing metadata.
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3345,7 +3345,7 @@ describe('SdkSpacesClient.patchMetadata', () => {
 
   it('null in the patch removes the key', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3379,7 +3379,7 @@ describe('SdkSpacesClient.removeMetadataKey', () => {
 
   it('round-trips through patchMetadata with a null value', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'i-1',
         title: 't',
@@ -3406,7 +3406,7 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
   it('serializes the metadata bag to JSON when present in the input', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'asset-stub',
         title: 'X',
@@ -3433,7 +3433,7 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
   it('writes empty string for missing metadata (preserves "absent" semantics)', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
       {
         id: 'asset-stub',
         title: 'No meta',

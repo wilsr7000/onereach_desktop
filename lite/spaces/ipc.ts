@@ -1059,7 +1059,18 @@ function coerceUpdateSpaceInput(raw: unknown): UpdateSpaceInput {
   if (typeof r['description'] === 'string') patch.description = r['description'] as string;
   if (typeof r['color'] === 'string') patch.color = r['color'] as string;
   if (typeof r['iconKey'] === 'string') patch.iconKey = r['iconKey'] as string;
+  // ADR-051 — visibility rides the same update patch. Enum-checked here
+  // (belt) and again in the SDK client (suspenders); anything else is
+  // dropped so a malformed renderer value can't reach the graph.
+  if (r['visibility'] === 'open' || r['visibility'] === 'restricted') {
+    patch.visibility = r['visibility'];
+  }
   return patch;
+}
+
+/** @internal -- exposed for the visibility-coercion regression test. */
+export function _coerceUpdateSpaceInputForTesting(raw: unknown): UpdateSpaceInput {
+  return coerceUpdateSpaceInput(raw);
 }
 
 /** Remove every Spaces IPC handler. Idempotent. */

@@ -100,6 +100,18 @@ describe('SpacesApi (default singleton)', () => {
     });
   });
 
+  it('items.createBinary() rejects with SPACES_NOT_INITIALIZED before init', async () => {
+    const api = getSpacesApi();
+    await expect(
+      api.items.createBinary({
+        spaceId: 's',
+        title: 't',
+        fileName: 'f.png',
+        bytes: new ArrayBuffer(1),
+      })
+    ).rejects.toMatchObject({ code: 'SPACES_NOT_INITIALIZED' });
+  });
+
   it('items.get() rejects with SPACES_NOT_INITIALIZED before init', async () => {
     _resetSpacesApiForTesting();
     const api = getSpacesApi();

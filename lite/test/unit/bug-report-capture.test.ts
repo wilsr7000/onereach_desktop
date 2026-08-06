@@ -45,6 +45,15 @@ describe('capture', () => {
     expect(payload.redactionTelemetry.countsByKind.OPENAI_KEY).toBe(1);
   });
 
+  it('redacts Anthropic-style keys (sk-ant-...) — driven-release-pass regression', () => {
+    const payload = capture({
+      ...baseCtx,
+      userDescription: 'Planted: sk-ant-api03-FAKE1234567890ABCDEF should never persist',
+    });
+    expect(payload.description).toContain('[REDACTED:OPENAI_KEY]');
+    expect(payload.description).not.toContain('sk-ant-api03');
+  });
+
   it('redacts secrets in log lines', () => {
     const payload = capture({
       ...baseCtx,

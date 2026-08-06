@@ -585,9 +585,19 @@ function applySidebarFilter(): void {
   }
 }
 
+/**
+ * Monotonic sequence for loadItems. Concurrent reloads happen by design
+ * (create-flow refresh, enrich-completion refresh, cache-updated
+ * broadcast) — only the LATEST call may paint, and earlier in-flight
+ * responses are dropped. Driven-release-pass hardening (2026-08-05):
+ * an interleaved reload briefly painted "No items" right after an
+ * upload until a manual Refresh.
+ */
+let loadItemsSeq = 0;
+
 async function loadItems(): Promise<void> {
+  const seq = ++loadItemsSeq;
   state.loadingItems = true;
-  state.items = [];
   renderItemList({ loading: true });
   const bridge = window.lite?.spaces;
   if (bridge === undefined) {
@@ -612,17 +622,31 @@ async function loadItems(): Promise<void> {
   }
   try {
     const envelope = await bridge.items.list(state.activeScopeId);
+    if (seq !== loadItemsSeq) return; // superseded by a newer reload
     if (envelope.ok === false) {
       state.loadingItems = false;
-      renderItemList({ error: envelope.error.message });
+      // Keep the current list on a transient failure — a visible error
+      // banner over an intact list beats blanking the pane.
+      if (state.items.length > 0) {
+        showToast(envelope.error.message);
+        renderItemList({});
+      } else {
+        renderItemList({ error: envelope.error.message });
+      }
       return;
     }
     state.items = envelope.value.filter(isWellFormedItem);
     state.loadingItems = false;
     renderItemList({});
   } catch (err) {
+    if (seq !== loadItemsSeq) return; // superseded by a newer reload
     state.loadingItems = false;
-    renderItemList({ error: messageFrom(err) });
+    if (state.items.length > 0) {
+      showToast(messageFrom(err));
+      renderItemList({});
+    } else {
+      renderItemList({ error: messageFrom(err) });
+    }
   }
 }
 

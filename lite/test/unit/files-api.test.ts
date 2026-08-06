@@ -195,7 +195,8 @@ describe('FilesApi behavior', () => {
     expect(call.method).toBe('uploadFileV2');
     const props = call.args[0] as Parameters<FilesSdkLike['uploadFileV2']>[0];
     expect(props.fileName).toBe('shot.png');
-    expect(props.prefix).toBe('bug-attachments');
+    // Trailing slash is deliberate — see 'upload prefix normalization' below.
+    expect(props.prefix).toBe('bug-attachments/');
     expect(props.contentType).toBe('image/png');
     expect(props.rewriteMode).toBe('prevent-rewrite');
     expect(props.isPublic).toBe(false);
@@ -348,5 +349,33 @@ describe('FilesApi auth bindings', () => {
     // bindings store correctly.
     expect(typeof token).toBe('string');
     expect(typeof accountId).toBe('string');
+  });
+});
+
+
+describe('upload prefix normalization (SDK concatenation bug)', () => {
+  // Driven-release-pass regression (2026-08-05): @or-sdk/files joins
+  // prefix + fileName by plain concatenation. Without a trailing slash
+  // the object lands at `lite-spaces/assets<name>` while every reader
+  // signs `lite-spaces/assets/<name>` — permanently unreadable.
+  it('passes a trailing-slash prefix to the SDK so stored and composed keys agree', async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    class FakeSdk {
+      async uploadFileV2(props: Record<string, unknown>): Promise<{ url: string }> {
+        captured.push(props);
+        return { url: 'https://x/y' };
+      }
+    }
+    const api = _buildFilesApiForTesting({
+      token: () => 't',
+      discoveryUrl: 'https://disc.example',
+      accountId: () => 'a-1',
+      sdkCtor: FakeSdk as never,
+    });
+    await api.upload('lite-spaces/assets', 'f.png', Buffer.from('x'));
+    expect(captured[0]!['prefix']).toBe('lite-spaces/assets/');
+    // Already-slashed prefixes pass through unchanged.
+    await api.upload('lite-bugs/attachments/', 'g.png', Buffer.from('x'));
+    expect(captured[1]!['prefix']).toBe('lite-bugs/attachments/');
   });
 });

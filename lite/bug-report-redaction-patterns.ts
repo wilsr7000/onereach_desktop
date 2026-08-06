@@ -26,8 +26,13 @@ export interface RedactionPattern {
 export const REDACTION_PATTERNS: ReadonlyArray<RedactionPattern> = [
   {
     kind: 'OPENAI_KEY',
-    pattern: /sk-[A-Za-z0-9]{20,}/g,
-    description: 'OpenAI API key (sk-...)',
+    // Hyphens/underscores allowed in the tail so Anthropic keys
+    // (sk-ant-api03-...) match too — the driven release pass
+    // (2026-08-05) planted one and it sailed through the old
+    // alphanumeric-only class. Overmatching a hyphenated tail is the
+    // right failure mode for redaction.
+    pattern: /sk-[A-Za-z0-9_-]{20,}/g,
+    description: 'OpenAI / Anthropic API key (sk-..., sk-ant-...)',
   },
   {
     kind: 'AWS_ACCESS_KEY',

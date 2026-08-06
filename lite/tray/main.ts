@@ -369,12 +369,55 @@ export const TRAY_TOOLTIP = TRAY_TOOLTIP_BASE;
 export function buildTooltip(): string {
   let version: string | null = null;
   try {
-    const v = app.getVersion?.();
-    if (typeof v === 'string' && v.length > 0) version = v;
+    // Dev (`npm run lite`): app.getVersion() returns ELECTRON's own
+    // version (e.g. "41.2.1") because no app package.json overrides it.
+    // Read lite/package.json instead so the tray header shows the real
+    // product version in both modes. (Driven-release-pass nit,
+    // 2026-08-05.) Packaged builds get the right value from
+    // electron-builder's extraMetadata, so getVersion() is correct there.
+    if (app.isPackaged !== true) {
+      version = readDevLiteVersion();
+    }
+    if (version === null) {
+      const v = app.getVersion?.();
+      if (typeof v === 'string' && v.length > 0) version = v;
+    }
   } catch {
     /* best-effort -- fall through to base */
   }
   return version !== null ? `${TRAY_TOOLTIP_BASE} v${version}` : TRAY_TOOLTIP_BASE;
+}
+
+/** Cached dev-mode version from lite/package.json (null = unresolved). */
+let _devLiteVersion: string | null | undefined;
+
+function readDevLiteVersion(): string | null {
+  if (_devLiteVersion !== undefined) return _devLiteVersion;
+  _devLiteVersion = null;
+  // `electron dist-lite/build/main-lite.js` is launched from the repo
+  // root, so appPath is either the root (getAppPath falls back to CWD)
+  // or the bundle dir -- probe both shapes.
+  let appPath: string;
+  try {
+    appPath = app.getAppPath();
+  } catch {
+    appPath = process.cwd();
+  }
+  for (const candidate of [
+    path.join(appPath, 'lite', 'package.json'),
+    path.join(appPath, '..', '..', 'lite', 'package.json'),
+  ]) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(candidate, 'utf8')) as { version?: unknown };
+      if (typeof parsed.version === 'string' && parsed.version.length > 0) {
+        _devLiteVersion = parsed.version;
+        break;
+      }
+    } catch {
+      /* try next candidate */
+    }
+  }
+  return _devLiteVersion;
 }
 
 /**

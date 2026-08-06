@@ -2749,6 +2749,18 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
+            "name": "createBinary",
+            "signature": "createBinary(input: CreateBinaryAssetInput): Promise<Item>",
+            "description": "Create a binary asset GSX-first (ADR-050): uploads the raw bytes\nto the account's GSX bucket under `lite-spaces/assets/…`, then\ncreates the `:Asset` with the resulting `fileKey`. Inline base64\nnever enters the graph, so the asset is readable by every app on\nthe account (full app, Lite, agents) via the shared bucket.\n\nIf the graph create fails after the upload succeeded, the\njust-uploaded file is best-effort deleted so no orphan remains.",
+            "tags": [
+              {
+                "tag": "throws",
+                "value": "{SpacesError} `SPACES_INVALID_INPUT` for empty\n  title/fileName/bytes or an over-cap payload;\n  `SPACES_NOT_FOUND` if the target space is missing/soft-deleted.\n  Files-layer failures (`FILES_NOT_AUTHENTICATED`, ...) propagate."
+              }
+            ],
+            "examples": []
+          },
+          {
             "name": "createAgent",
             "signature": "createAgent(input: CreateAgentInput): Promise<Item>",
             "description": "Create an agent asset in a Space. The OKF definition text (already\nAI-converted; see `getAiApi().convertToOkf`) is stored as the\nasset's `content`. In the graph this also writes a parent `:Agent`\nnode + a per-type `:AgentType:<TypeLabel>` child linked via\n`[:REPRESENTS]`/`[:HAS_TYPE]`. Returns the freshly re-fetched Item\n(`kind === 'agent'`, with `agentType` populated).",
@@ -2837,7 +2849,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 27,
+        "count": 31,
         "entries": [
           {
             "constantKey": "LIST_SPACES_START",
@@ -2972,6 +2984,26 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "UNDELETE_FAIL",
             "name": "spaces.undelete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "GSX_MIGRATE_START",
+            "name": "spaces.gsxMigrate.start",
+            "description": ""
+          },
+          {
+            "constantKey": "GSX_MIGRATE_FINISH",
+            "name": "spaces.gsxMigrate.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "GSX_MIGRATE_FAIL",
+            "name": "spaces.gsxMigrate.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "GSX_MIGRATE_ITEM",
+            "name": "spaces.gsxMigrate.item.finish",
             "description": ""
           }
         ]
@@ -3452,5 +3484,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-04T01:13:05.086Z"
+  "generatedAt": "2026-08-06T02:44:33.523Z"
 } as const;

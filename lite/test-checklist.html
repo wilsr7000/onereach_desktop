@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lite Test Runner</title>
+<style>
+  /* ── Onereach.ai Lite test runner — dark-first, self-contained ── */
+  :root {
+    --bg: #121216;
+    --surface: #1a1a19;
+    --card: #1e1e24;
+    --card-hover: #24242b;
+    --border: rgba(255,255,255,0.08);
+    --border-strong: rgba(255,255,255,0.16);
+    --text: #f4f6fb;
+    --text-2: #aab2c5;
+    --text-3: #6f7787;
+    --accent: #3987e5;
+    --accent-soft: #86b6ef;
+    /* Status — validated ≥3:1 on the dark surface; icon+label always. */
+    --pass: #0ca30c;
+    --fail: #d03b3b;
+    --blocked: #fab219;
+    --untested: #4a4f5c;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "SF Pro Text", Segoe UI, sans-serif;
+    padding-bottom: 80px;
+  }
+  /* Dark scrollbars everywhere (house rule). */
+  * { scrollbar-color: #3a3a44 var(--bg); scrollbar-width: thin; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: var(--bg); }
+  *::-webkit-scrollbar-thumb { background: #3a3a44; border-radius: 5px; border: 2px solid var(--bg); }
+  *::-webkit-scrollbar-thumb:hover { background: #4a4a56; }
+
+  header {
+    position: sticky; top: 0; z-index: 20;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+    padding: 14px 22px 12px;
+  }
+  .title-row { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: 0.2px; }
+  h1 .hex { color: var(--accent-soft); }
+  .ver { color: var(--text-3); font-size: 12px; }
+  .spacer { flex: 1; }
+  .btn {
+    background: var(--card); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 5px 12px; font-size: 12.5px; cursor: pointer;
+    transition: border-color .12s, color .12s;
+  }
+  .btn:hover { border-color: var(--border-strong); color: var(--text); }
+  .btn.danger:hover { border-color: var(--fail); color: #ff9b9b; }
+
+  /* Hero: stat + segmented progress (status colors, 2px surface gaps). */
+  .hero { display: flex; align-items: center; gap: 20px; margin-top: 12px; flex-wrap: wrap; }
+  .stat { display: flex; align-items: baseline; gap: 8px; }
+  .stat b { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--text-3); font-size: 12.5px; }
+  .bar-wrap { flex: 1; min-width: 260px; }
+  .bar {
+    display: flex; height: 10px; border-radius: 5px; overflow: hidden;
+    background: var(--card); gap: 2px; /* 2px surface gap between fills */
+  }
+  .bar i { display: block; height: 100%; transition: width .25s ease; }
+  .bar .p { background: var(--pass); border-radius: 4px 0 0 4px; }
+  .bar .f { background: var(--fail); }
+  .bar .b { background: var(--blocked); }
+  .legend { display: flex; gap: 16px; margin-top: 7px; font-size: 12px; color: var(--text-2); flex-wrap: wrap; }
+  .legend b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: 1px; }
+
+  .controls { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  .search {
+    background: var(--card); border: 1px solid var(--border); color: var(--text);
+    border-radius: 7px; padding: 6px 12px; font-size: 13px; width: 220px;
+  }
+  .search:focus { outline: none; border-color: var(--accent); }
+  .chip {
+    background: var(--card); border: 1px solid var(--border); color: var(--text-2);
+    border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer;
+    transition: all .12s;
+  }
+  .chip:hover { color: var(--text); border-color: var(--border-strong); }
+  .chip.on { background: color-mix(in srgb, var(--accent) 18%, var(--card)); border-color: var(--accent); color: #cfe3ff; }
+  .chip.tag-new.on { background: color-mix(in srgb, var(--accent-soft) 20%, var(--card)); }
+
+  main { max-width: 1060px; margin: 0 auto; padding: 18px 22px; }
+
+  section { margin-bottom: 10px; }
+  .sec-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 4px 8px; cursor: pointer; user-select: none;
+  }
+  .sec-head h2 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.2px; }
+  .sec-head .count { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .sec-bar { flex: 1; max-width: 180px; height: 5px; border-radius: 3px; background: var(--card); display: flex; gap: 2px; overflow: hidden; }
+  .sec-bar i { height: 100%; }
+  .caret { color: var(--text-3); font-size: 11px; transition: transform .15s; }
+  section.closed .caret { transform: rotate(-90deg); }
+  section.closed .items { display: none; }
+
+  .items { display: flex; flex-direction: column; gap: 8px; }
+  .item {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 14px;
+    transition: border-color .12s, background .12s;
+  }
+  .item:hover { background: var(--card-hover); }
+  .item.cur { border-color: var(--accent); }
+  .item.st-pass { border-left: 3px solid var(--pass); }
+  .item.st-fail { border-left: 3px solid var(--fail); }
+  .item.st-blocked { border-left: 3px solid var(--blocked); }
+  .item-top { display: flex; align-items: flex-start; gap: 12px; }
+  .item-name { font-weight: 600; font-size: 13.5px; }
+  .badges { display: inline-flex; gap: 5px; margin-left: 8px; vertical-align: 1px; }
+  .badge {
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase;
+    padding: 1px 6px; border-radius: 3px;
+  }
+  .badge.new { background: linear-gradient(135deg, #7bdbff, #6aa9ff); color: #0a1018; }
+  .badge.acct2 { background: #2c2c3a; color: #b9a7ff; border: 1px solid #4a3f78; }
+  .badge.known { background: #332a1a; color: #ffd9a1; border: 1px solid #6b5527; }
+  .item-how { color: var(--text-2); font-size: 12.5px; margin-top: 4px; }
+  .item-how b { color: var(--text-3); font-weight: 600; font-size: 11px; letter-spacing: 0.4px; }
+  .item-actions { margin-left: auto; display: flex; gap: 4px; flex-shrink: 0; }
+  .st-btn {
+    border: 1px solid var(--border); background: transparent; color: var(--text-3);
+    border-radius: 6px; padding: 4px 9px; font-size: 12px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 5px; transition: all .1s;
+  }
+  .st-btn:hover { border-color: var(--border-strong); color: var(--text-2); }
+  .st-btn.on-pass { background: color-mix(in srgb, var(--pass) 22%, transparent); border-color: var(--pass); color: #7be07b; }
+  .st-btn.on-fail { background: color-mix(in srgb, var(--fail) 20%, transparent); border-color: var(--fail); color: #ff9b9b; }
+  .st-btn.on-blocked { background: color-mix(in srgb, var(--blocked) 18%, transparent); border-color: var(--blocked); color: #ffd77e; }
+  .note {
+    width: 100%; margin-top: 8px; background: var(--bg); color: var(--text-2);
+    border: 1px solid var(--border); border-radius: 7px; padding: 6px 10px;
+    font-size: 12.5px; font-family: inherit; resize: vertical; min-height: 30px;
+    display: none;
+  }
+  .note.show, .note:focus { display: block; }
+  .note:focus { outline: none; border-color: var(--accent); color: var(--text); }
+
+  .empty { color: var(--text-3); text-align: center; padding: 40px 0; font-size: 13px; }
+
+  footer {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--border);
+    padding: 8px 22px; font-size: 11.5px; color: var(--text-3);
+    display: flex; gap: 18px; flex-wrap: wrap;
+  }
+  footer kbd {
+    background: var(--card); border: 1px solid var(--border); border-radius: 4px;
+    padding: 0 5px; font-size: 10.5px; font-family: ui-monospace, monospace;
+  }
+  .toast {
+    position: fixed; left: 50%; bottom: 52px; transform: translateX(-50%);
+    background: var(--card); border: 1px solid var(--border-strong);
+    border-radius: 9px; padding: 9px 16px; font-size: 13px;
+    box-shadow: 0 12px 36px rgba(0,0,0,.45); z-index: 50;
+    opacity: 0; pointer-events: none; transition: opacity .18s;
+  }
+  .toast.show { opacity: 1; }
+
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f5f5f7; --surface: #ffffff; --card: #ffffff; --card-hover: #f0f1f5;
+      --border: rgba(0,0,0,0.10); --border-strong: rgba(0,0,0,0.22);
+      --text: #17181c; --text-2: #4c5262; --text-3: #8a90a0;
+      --untested: #c9cdd8;
+    }
+    * { scrollbar-color: #b9bdc9 var(--bg); }
+    *::-webkit-scrollbar-track { background: var(--bg); }
+    *::-webkit-scrollbar-thumb { background: #b9bdc9; border-color: var(--bg); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="title-row">
+    <h1><span class="hex">⬡</span> Onereach.ai Lite — Test Runner</h1>
+    <span class="ver" id="meta"></span>
+    <span class="spacer"></span>
+    <button class="btn" id="exportMd">Copy report (MD)</button>
+    <button class="btn" id="exportJson">Export JSON</button>
+    <button class="btn danger" id="reset">Reset pass</button>
+  </div>
+  <div class="hero">
+    <div class="stat"><b id="doneCount">0</b><span id="totalCount">/ 0 tested</span></div>
+    <div class="bar-wrap">
+      <div class="bar" aria-hidden="true"><i class="p" id="barP"></i><i class="f" id="barF"></i><i class="b" id="barB"></i></div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--pass)"></span>✓ Pass <b id="nPass">0</b></span>
+        <span><span class="dot" style="background:var(--fail)"></span>✕ Fail <b id="nFail">0</b></span>
+        <span><span class="dot" style="background:var(--blocked)"></span>⛔ Blocked <b id="nBlocked">0</b></span>
+        <span><span class="dot" style="background:var(--untested)"></span>· Untested <b id="nUntested">0</b></span>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <input class="search" id="search" type="search" placeholder="Search features…  ( / )">
+    <button class="chip tag-new" data-tagfilter="new">NEW today</button>
+    <button class="chip" data-tagfilter="acct2">Needs 2nd account</button>
+    <button class="chip" data-tagfilter="known">Known issue</button>
+    <button class="chip" id="hideDone">Hide done</button>
+    <button class="chip" id="onlyFail">Failures only</button>
+  </div>
+</header>
+
+<main id="main"></main>
+<div class="empty" id="empty" style="display:none">Nothing matches — clear a filter.</div>
+
+<footer>
+  <span><kbd>j</kbd>/<kbd>k</kbd> next / prev</span>
+  <span><kbd>p</kbd> pass · <kbd>f</kbd> fail · <kbd>b</kbd> blocked · <kbd>u</kbd> untested</span>
+  <span><kbd>n</kbd> note</span>
+  <span><kbd>/</kbd> search</span>
+  <span id="savedAt"></span>
+</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+/* ───────────────────────── item catalog ───────────────────────── */
+const AREAS = [
+  ['boot','1 · Boot & App Shell'], ['tray','2 · Tray'], ['auth','3 · Auth & Identity'],
+  ['mainwin','4 · Main Window'], ['menus','5 · Menus'], ['nav','6 · Spaces — Nav & Home'],
+  ['assets','7 · Spaces — Assets'], ['ai','8 · Spaces — AI (Claude)'],
+  ['share','9 · Sharing & Visibility'], ['dl','10 · Downloads'],
+  ['mgr','11 · Tools / IDW / University / Docs'], ['art','12 · AI Run Times'],
+  ['set','13 · Settings'], ['bug','14 · Bug Reports'], ['obs','15 · Observability & Updater'],
+];
+/* [area, title, how → expect, tags] */
+const ITEMS = [
+ ['boot','Launch + single instance','npm run lite, then launch again → second exits with "Another instance is already running", no crash',[]],
+ ['boot','Boot chat','Watch boot → progress chat surface appears, events compressed into readable lines',[]],
+ ['boot','Dock icon (packaged)','Open packaged app → blue-gradient iDW·LITE squircle, transparent corners (no white box)',['new']],
+ ['boot','Auto sign-in','Relaunch after signing in → session restores, no manual login',[]],
+ ['boot','Quiet signed-out boot','Sign out, relaunch, wait 70s → /logs/stats shows error: 0',[]],
+ ['tray','Icon legible both themes','Flip macOS light/dark appearance → hexagon stays crisp (template auto-invert)',['new']],
+ ['tray','Version header','Open tray menu → first row "Onereach.ai Lite v<version>" (disabled caption)',['new']],
+ ['tray','Show / Hide','Menu items + left-click toggle the main window',[]],
+ ['tray','Spaces / Settings / Help entries','Each opens its window',[]],
+ ['tray','Quit','Exits cleanly',[]],
+ ['tray','Pulse animation','Icon breathes subtly; LITE_TRAY_ANIMATION=0 disables',[]],
+ ['auth','Sign in (edison)','Auth window completes → mult + or cookies captured (see Settings → Account)',[]],
+ ['auth','Multi-env tokens','Also sign into staging/dev → per-env tokens held without clobbering edison',[]],
+ ['auth','Sign out hygiene','Sign out → cookies cleared, Spaces cache invalidated, no stale data on next account',[]],
+ ['auth','Re-sign-in prompt','On token rejection → prompt appears instead of silent failures',[]],
+ ['auth','Account section','Settings → Account → email/accountId/dates + both token values with Copy',[]],
+ ['auth','TOTP two-factor','Settings → Two-Factor → secret to keychain, live 6-digit code, autofill on auth pages',[]],
+ ['auth','IDW per-IDW sessions','Open an IDW, sign in, restart app → persist:idw-<id> keeps the session',[]],
+ ['auth','IDW login-verifier','Force a logged-out IDW → "needs user action" badge, no reload doom-loop. SSO-skip auto-click selectors stale — manual click may be needed (fix pending)',['known']],
+ ['mainwin','Tab persistence','Open tabs, restart → tabs restore; closing one clears its partition',[]],
+ ['mainwin','OR-logo Spaces button','40×40, breathing animation, opens Spaces',[]],
+ ['mainwin','OAGI + Manage Agents buttons','Open the store / roster surfaces',[]],
+ ['mainwin','Auto-signin reload','After sign-in → open tabs reload authenticated',[]],
+ ['menus','App menu','About (version), Settings…, Quit',[]],
+ ['menus','Edit menu','Copy/paste/undo in inputs',[]],
+ ['menus','IDW menu (6 kinds)','IDWs, External Bots, Image/Video Creators, Audio (sub-categories), UI Design Tools → entries open browser; empty state → Manage Agents',[]],
+ ['menus','Tools menu','Curated tools open; Spaces…; Manage Tools…',[]],
+ ['menus','Planning menu','WISER Playbooks launcher opens',[]],
+ ['menus','Agentic University menu','LMS, Quick Starts, Tutorials, AI Run Times, Wiser Method',[]],
+ ['menus','Help menu','Help window (three-pane docs)',[]],
+ ['menus','Dev Tools','Toggles devtools on focused window',[]],
+ ['nav','Sidebar','Home, spaces (color dots), Uncategorized count; AI pill on shared; 🔒 pill on restricted',['new']],
+ ['nav','Home feed','5 cards + unified timeline + filter chips; 60s stale-while-revalidate',[]],
+ ['nav','Space view','Cards with multi-space chips; click-to-edit objective; search; New; Refresh',[]],
+ ['nav','Detail rail behavior','480px rail wide; overlay <1100px; middle pane never crushed',[]],
+ ['assets','Create text asset','New → paste text → card with auto-extracted metadata (word count…)',[]],
+ ['assets','Create file asset — GSX-first','Upload image/PDF → bytes to GSX (lite-spaces/assets/<uuid>-…), node has fileKey only; preview via signed URL; files.upload.finish in /logs',['new']],
+ ['assets','Upload cap','>100MB file → clear rejection message',['new']],
+ ['assets','Drag-and-drop upload','Drop file onto items region → same GSX flow',[]],
+ ['assets','Create agent asset','Add Agent tab → OKF URL/text converts → violet card + :Agent node + endpoints',[]],
+ ['assets','Previews (9 kinds)','image / video / audio / PDF / code / CSV / markdown / URL / text each render sensibly',[]],
+ ['assets','Edit asset','Click-to-edit title, description, content (⌘↵/Esc); tags; metadata add/edit/remove with coercion',[]],
+ ['assets','Delete / undo / restore','Soft delete with undo toast; restore works',[]],
+ ['assets','Move / multi-space','Move, add-to-space, remove-from-space; chips update',[]],
+ ['assets','Search','Substring search in-space and globally',[]],
+ ['assets','Attribution','Detail shows Created by / Last edited provenance',[]],
+ ['assets','Activity log','Per-asset recent commits timeline',[]],
+ ['assets','GSX migration sweep','Boot +20s → legacy base64 stubs upload to GSX, nodes flip to fileKey; spaces.gsxMigrate.finish counts in /logs',['new']],
+ ['ai','AI key management','Settings → AI → save key (keychain, write-only) → pill "Key configured"; Clear works',[]],
+ ['ai','Auto-metadata on create','With key: create text/image/PDF → "✨ Metadata added" toast; ai_* keys present',[]],
+ ['ai','Manual ✨ Auto-fill','Detail metadata editor button regenerates; toast counts fields',[]],
+ ['ai','Space assist','New/edit Space: purpose → drafted description + objectives',[]],
+ ['ai','No key = silent','Without key: creates succeed, zero AI toasts/errors',[]],
+ ['share','Shared dashboard','Flip kind to shared → playbook section, tickets create/update, member chips add/remove',[]],
+ ['share','Shared polling','Dashboard refreshes on cadence',[]],
+ ['share','Visibility toggle','Header chip 🔓 Open ⇄ 🔒 Members only on ANY kind; restricting toasts "you were added as a member"',['new']],
+ ['share','Restricted gating','As non-member: space gone from sidebar, search, Home, direct fetch; members see all; existing spaces stay open',['new','acct2']],
+ ['share','Member strip (restricted)','Restricted user-kind space shows members + "+ Member" in header',['new']],
+ ['share','Playbook-backed agents','Event Manager / Meeting Starter seeded; plan→playbook→generate build flow',[]],
+ ['dl','Download capture','Download in any in-app browser → save-to-space picker → GSX-backed asset (sanitized name)',[]],
+ ['dl','Picker skip','Dismiss → normal download, no asset',[]],
+ ['mgr','Manage Tools','Add/edit/remove tool → menu rebuilds live; persists across restart',[]],
+ ['mgr','Your AI Roster','Inline edit IDW entry; removal asks confirmation; menu updates',[]],
+ ['mgr','OAGI Store','Catalog loads (shimmer → cards); install adds to roster + toast',[]],
+ ['mgr','Agent browser windows','Each agent opens with its own partition',[]],
+ ['mgr','University surfaces','LMS / tutorials / Wiser Method load',[]],
+ ['mgr','API Docs window','Reference renders from generated manifest',[]],
+ ['art','Article feed','List loads (fetcher + extractor)',[]],
+ ['art','TTS + GSX cache','Play article → audio; REPLAY hits cache (no second OpenAI charge) — first live-viable test post token-minter fix',['new']],
+ ['art','Store self-heal','Corrupt store blob recovers, no crash',[]],
+ ['set','Neon/OAGI','Endpoint/URI/user/db shown; connection test passes',[]],
+ ['set','Diagnostics','Health snapshot renders; Refresh; Copy JSON; NO secrets in JSON',[]],
+ ['set','Developer','Dev flags/tools function',[]],
+ ['set','Onboarding','Fresh profile → tour appears once, never re-prompts',[]],
+ ['bug','Report modal','Opens; description required; writes to userData/lite-bugs with health snapshot',[]],
+ ['bug','Attachments','Attach screenshot/log (≤10MB) → uploads with minted token; no "Cross account" error in /logs',['new']],
+ ['bug','Redaction','Payload has no tokens/secrets (search the JSON)',[]],
+ ['obs','Log server','127.0.0.1:47392/logs?category=… serves events; /logs/stats aggregates; module actions emit start/finish/fail + ipc events',[]],
+ ['obs','Updater','Check finds latest GitHub release; signed-unnotarized auto-update installs on relaunch',[]],
+];
+
+/* ───────────────────────── state ───────────────────────── */
+const KEY = 'liteTestPass.v1';
+const CYCLE = ['untested','pass','fail','blocked'];
+const state = load();
+function load() {
+  try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; }
+}
+function save() {
+  state._savedAt = new Date().toISOString();
+  localStorage.setItem(KEY, JSON.stringify(state));
+  document.getElementById('savedAt').textContent =
+    'saved ' + new Date().toLocaleTimeString();
+}
+const idOf = (i) => 't' + i;
+const st = (i) => state[idOf(i)]?.s ?? 'untested';
+const noteOf = (i) => state[idOf(i)]?.n ?? '';
+
+/* filters */
+const filt = { q: '', tags: new Set(), hideDone: false, onlyFail: false };
+
+/* ───────────────────────── render ───────────────────────── */
+const main = document.getElementById('main');
+let cur = -1; // keyboard cursor (index into ITEMS)
+
+function visible(i) {
+  const [area, title, how, tags] = ITEMS[i];
+  const s = st(i);
+  if (filt.hideDone && s !== 'untested') return false;
+  if (filt.onlyFail && s !== 'fail' && s !== 'blocked') return false;
+  for (const t of filt.tags) if (!tags.includes(t)) return false;
+  if (filt.q) {
+    const hay = (title + ' ' + how + ' ' + area).toLowerCase();
+    if (!hay.includes(filt.q)) return false;
+  }
+  return true;
+}
+
+function render() {
+  main.innerHTML = '';
+  let anyShown = false;
+  for (const [areaKey, areaName] of AREAS) {
+    const idxs = ITEMS.map((it, i) => [it, i]).filter(([it]) => it[0] === areaKey).map(([, i]) => i);
+    const shown = idxs.filter(visible);
+    if (shown.length === 0) continue;
+    anyShown = true;
+    const done = idxs.filter((i) => st(i) !== 'untested').length;
+    const p = idxs.filter((i) => st(i) === 'pass').length;
+    const f = idxs.filter((i) => st(i) === 'fail').length;
+    const b = idxs.filter((i) => st(i) === 'blocked').length;
+
+    const sec = document.createElement('section');
+    if (state['sec_' + areaKey] === 'closed') sec.classList.add('closed');
+    const head = document.createElement('div');
+    head.className = 'sec-head';
+    head.innerHTML =
+      '<span class="caret">▼</span><h2>' + areaName + '</h2>' +
+      '<span class="count">' + done + '/' + idxs.length + '</span>' +
+      '<span class="sec-bar" aria-hidden="true">' +
+        '<i style="background:var(--pass);width:' + (p / idxs.length) * 100 + '%"></i>' +
+        '<i style="background:var(--fail);width:' + (f / idxs.length) * 100 + '%"></i>' +
+        '<i style="background:var(--blocked);width:' + (b / idxs.length) * 100 + '%"></i>' +
+      '</span>';
+    head.addEventListener('click', () => {
+      sec.classList.toggle('closed');
+      state['sec_' + areaKey] = sec.classList.contains('closed') ? 'closed' : 'open';
+      save();
+    });
+    sec.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'items';
+    for (const i of shown) list.appendChild(buildItem(i));
+    sec.appendChild(list);
+    main.appendChild(sec);
+  }
+  document.getElementById('empty').style.display = anyShown ? 'none' : 'block';
+  renderHero();
+}
+
+const TAG_LABEL = { new: 'NEW', acct2: '2nd acct', known: 'Known issue' };
+const ST_META = {
+  pass: ['✓', 'Pass'], fail: ['✕', 'Fail'], blocked: ['⛔', 'Blocked'],
+};
+
+function buildItem(i) {
+  const [, title, how, tags] = ITEMS[i];
+  const s = st(i);
+  const el = document.createElement('article');
+  el.className = 'item st-' + s + (i === cur ? ' cur' : '');
+  el.dataset.i = i;
+
+  const top = document.createElement('div');
+  top.className = 'item-top';
+  const left = document.createElement('div');
+  const badges = tags.map((t) =>
+    '<span class="badge ' + t + '">' + TAG_LABEL[t] + '</span>').join('');
+  left.innerHTML =
+    '<div class="item-name">' + title +
+    (badges ? '<span class="badges">' + badges + '</span>' : '') + '</div>' +
+    '<div class="item-how"><b>TEST</b> ' + how + '</div>';
+  top.appendChild(left);
+
+  const actions = document.createElement('div');
+  actions.className = 'item-actions';
+  for (const stKey of ['pass', 'fail', 'blocked']) {
+    const [icon, label] = ST_META[stKey];
+    const btn = document.createElement('button');
+    btn.className = 'st-btn' + (s === stKey ? ' on-' + stKey : '');
+    btn.innerHTML = icon + ' ' + label;
+    btn.title = label + ' (keyboard: ' + label[0].toLowerCase() + ')';
+    btn.addEventListener('click', () => setStatus(i, s === stKey ? 'untested' : stKey));
+    actions.appendChild(btn);
+  }
+  top.appendChild(actions);
+  el.appendChild(top);
+
+  const note = document.createElement('textarea');
+  note.className = 'note' + (noteOf(i) ? ' show' : '');
+  note.placeholder = 'Notes… (repro, env, links)';
+  note.value = noteOf(i);
+  note.addEventListener('input', () => {
+    state[idOf(i)] = { s: st(i), n: note.value };
+    save(); renderHero();
+  });
+  el.appendChild(note);
+
+  el.addEventListener('click', (e) => {
+    if (e.target === el || left.contains(e.target)) { cur = i; refreshCursor(); }
+  });
+  return el;
+}
+
+function setStatus(i, s) {
+  state[idOf(i)] = { s, n: noteOf(i) };
+  cur = i;
+  save(); render();
+}
+
+function renderHero() {
+  const total = ITEMS.length;
+  let p = 0, f = 0, b = 0;
+  for (let i = 0; i < total; i++) {
+    const s = st(i);
+    if (s === 'pass') p++; else if (s === 'fail') f++; else if (s === 'blocked') b++;
+  }
+  const done = p + f + b;
+  document.getElementById('doneCount').textContent = done;
+  document.getElementById('totalCount').textContent = '/ ' + total + ' tested';
+  document.getElementById('nPass').textContent = p;
+  document.getElementById('nFail').textContent = f;
+  document.getElementById('nBlocked').textContent = b;
+  document.getElementById('nUntested').textContent = total - done;
+  document.getElementById('barP').style.width = (p / total) * 100 + '%';
+  document.getElementById('barF').style.width = (f / total) * 100 + '%';
+  document.getElementById('barB').style.width = (b / total) * 100 + '%';
+}
+
+function refreshCursor() {
+  document.querySelectorAll('.item').forEach((el) =>
+    el.classList.toggle('cur', Number(el.dataset.i) === cur));
+  const el = document.querySelector('.item.cur');
+  if (el) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+/* ───────────────────────── controls ───────────────────────── */
+document.getElementById('search').addEventListener('input', (e) => {
+  filt.q = e.target.value.trim().toLowerCase(); render();
+});
+document.querySelectorAll('[data-tagfilter]').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    const t = chip.dataset.tagfilter;
+    if (filt.tags.has(t)) filt.tags.delete(t); else filt.tags.add(t);
+    chip.classList.toggle('on'); render();
+  });
+});
+document.getElementById('hideDone').addEventListener('click', function () {
+  filt.hideDone = !filt.hideDone; this.classList.toggle('on'); render();
+});
+document.getElementById('onlyFail').addEventListener('click', function () {
+  filt.onlyFail = !filt.onlyFail; this.classList.toggle('on'); render();
+});
+document.getElementById('reset').addEventListener('click', () => {
+  if (!confirm('Reset the whole test pass? All statuses and notes clear.')) return;
+  localStorage.removeItem(KEY);
+  for (const k of Object.keys(state)) delete state[k];
+  render(); toast('Pass reset');
+});
+
+/* export */
+function report() {
+  const lines = ['# Lite test pass — ' + new Date().toISOString().slice(0, 16).replace('T', ' '), ''];
+  let p = 0, f = 0, b = 0, u = 0;
+  for (const [areaKey, areaName] of AREAS) {
+    const idxs = ITEMS.map((it, i) => [it, i]).filter(([it]) => it[0] === areaKey).map(([, i]) => i);
+    lines.push('## ' + areaName);
+    for (const i of idxs) {
+      const s = st(i);
+      const mark = s === 'pass' ? 'x' : ' ';
+      const flag = s === 'fail' ? ' **FAIL**' : s === 'blocked' ? ' **BLOCKED**' : '';
+      if (s === 'pass') p++; else if (s === 'fail') f++; else if (s === 'blocked') b++; else u++;
+      let line = '- [' + mark + '] ' + ITEMS[i][1] + flag;
+      const n = noteOf(i);
+      if (n) line += ' — ' + n.replace(/\n/g, ' / ');
+      lines.push(line);
+    }
+    lines.push('');
+  }
+  lines.splice(1, 0, '', '**' + p + ' pass · ' + f + ' fail · ' + b + ' blocked · ' + u + ' untested**');
+  return lines.join('\n');
+}
+document.getElementById('exportMd').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(report());
+  toast('Markdown report copied — paste into the punch list');
+});
+document.getElementById('exportJson').addEventListener('click', () => {
+  const data = ITEMS.map((it, i) => ({ area: it[0], title: it[1], status: st(i), note: noteOf(i) }));
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'lite-test-pass-' + Date.now() + '.json';
+  a.click();
+  toast('JSON downloaded');
+});
+
+/* keyboard */
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, textarea')) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  const shownIdxs = ITEMS.map((_, i) => i).filter(visible);
+  if (shownIdxs.length === 0) return;
+  const pos = shownIdxs.indexOf(cur);
+  if (e.key === 'j') { cur = shownIdxs[Math.min(pos + 1, shownIdxs.length - 1)]; refreshCursor(); }
+  else if (e.key === 'k') { cur = shownIdxs[Math.max(pos - 1, 0)]; refreshCursor(); }
+  else if (e.key === 'p' && cur >= 0) setStatus(cur, 'pass');
+  else if (e.key === 'f' && cur >= 0) setStatus(cur, 'fail');
+  else if (e.key === 'b' && cur >= 0) setStatus(cur, 'blocked');
+  else if (e.key === 'u' && cur >= 0) setStatus(cur, 'untested');
+  else if (e.key === 'n' && cur >= 0) {
+    const el = document.querySelector('.item.cur .note');
+    if (el) { el.classList.add('show'); el.focus(); e.preventDefault(); }
+  }
+  else if (e.key === '/') { document.getElementById('search').focus(); e.preventDefault(); }
+});
+
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+}
+
+document.getElementById('meta').textContent =
+  ITEMS.length + ' features · ' + AREAS.length + ' areas · state saves locally';
+if (state._savedAt) {
+  document.getElementById('savedAt').textContent =
+    'saved ' + new Date(state._savedAt).toLocaleTimeString();
+}
+render();
+if (ITEMS.length) { cur = ITEMS.findIndex((_, i) => visible(i)); refreshCursor(); }
+</script>
+</body>
+</html>

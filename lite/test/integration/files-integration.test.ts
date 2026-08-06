@@ -59,9 +59,14 @@ class FakeFilesSdk implements FilesSdkLike {
 
   async uploadFileV2(props: Parameters<FilesSdkLike['uploadFileV2']>[0]): Promise<string> {
     this.throwIfArmed();
+    // Faithful to the REAL @or-sdk/files: prefix + fileName are joined by
+    // PLAIN CONCATENATION (no inserted slash). The old fake inserted a
+    // '/' here, which is precisely why the mocked suite never caught the
+    // unreadable-key bug the driven release pass found (2026-08-05) —
+    // the client now normalizes the prefix to a trailing slash.
     const key =
       props.prefix !== undefined && props.prefix !== ''
-        ? `${props.prefix}/${props.fileName}`
+        ? `${props.prefix}${props.fileName}`
         : props.fileName;
     const existing = service.store.get(this.storeKey(key, props.isPublic ?? false));
     if (existing !== undefined && props.rewriteMode === 'prevent-rewrite') {

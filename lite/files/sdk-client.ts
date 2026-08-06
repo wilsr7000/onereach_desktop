@@ -97,6 +97,18 @@ export interface SdkFilesClientConfig {
   logger?: (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
   /** Optional span emitter (ADR-030). */
   spanEmitter?: (name: string, data?: unknown) => Span;
+  /**
+   * Optional account-scoped token supplier, awaited before every op.
+   * When it resolves a non-null token, that value is used as the SDK
+   * bearer INSTEAD of `token()` -- the Files service rejects raw mult
+   * cookies for account-scoped writes ("Cross account requests allowed
+   * to SUPER_ADMIN only"), so production wires `FilesTokenMinter.ensure`
+   * here. Null falls back to `token()` (signed-out flows keep their
+   * canonical no-account error). See `token-minter.ts`.
+   */
+  ensureToken?: () => Promise<string | null>;
+  /** Called when an op fails 401/403 so a cached mint can be dropped. */
+  onAuthRejected?: () => void;
 }
 
 /**
@@ -114,9 +126,15 @@ export class SdkFilesClient {
   private readonly sdkCtor: NonNullable<SdkFilesClientConfig['sdkCtor']> | null;
   private sdk: FilesSdkLike | null = null;
   private sdkForAccountId: string | null = null;
+  private readonly ensureToken: (() => Promise<string | null>) | null;
+  private readonly onAuthRejected: (() => void) | null;
+  /** Last minted account-scoped token; wins over `token()` when set. */
+  private mintedToken: string | null = null;
 
   constructor(config: SdkFilesClientConfig) {
     this.token = config.token;
+    this.ensureToken = config.ensureToken ?? null;
+    this.onAuthRejected = config.onAuthRejected ?? null;
     this.discoveryUrl = config.discoveryUrl;
     this.getAccountId = config.accountId;
     this.log =
@@ -141,12 +159,20 @@ export class SdkFilesClient {
     options: FilesUploadOptions = {}
   ): Promise<string> {
     this.assertNonEmpty(fileName, 'fileName');
+    // The SDK's uploadFileV2 joins `prefix + fileName` by PLAIN
+    // CONCATENATION — a prefix without a trailing slash stores the
+    // object at `lite-spaces/assets<name>` while composeKey (and every
+    // reader) expects `lite-spaces/assets/<name>`, making the file
+    // unreadable forever. Normalize here so the stored key and the
+    // composed key always agree. (Driven-release-pass finding,
+    // 2026-08-05: first-ever GSX read-back 404'd on exactly this.)
+    const sdkPrefix = prefix !== '' && !prefix.endsWith('/') ? `${prefix}/` : prefix;
     return this.runRequest('upload', this.composeKey(prefix, fileName), async () => {
       const sdk = this.getSdk();
       const onProgress = options.onProgress;
       const props: Parameters<FilesSdkLike['uploadFileV2']>[0] = {
         fileName,
-        ...(prefix !== '' ? { prefix } : {}),
+        ...(sdkPrefix !== '' ? { prefix: sdkPrefix } : {}),
         fileContent: content,
         contentType: options.contentType ?? 'application/octet-stream',
         isPublic: options.isPublic ?? false,
@@ -354,7 +380,7 @@ export class SdkFilesClient {
     if (this.sdk !== null && this.sdkForAccountId === accountId) return this.sdk;
     if (this.sdkCtor !== null) {
       this.sdk = new this.sdkCtor({
-        token: this.token,
+        token: () => this.mintedToken ?? this.token(),
         discoveryUrl: this.discoveryUrl,
         accountId,
       });
@@ -368,7 +394,7 @@ export class SdkFilesClient {
         }) => FilesSdkLike;
       };
       this.sdk = new Files({
-        token: this.token,
+        token: () => this.mintedToken ?? this.token(),
         discoveryUrl: this.discoveryUrl,
         accountId,
       });
@@ -380,12 +406,23 @@ export class SdkFilesClient {
   private async runRequest<T>(op: string, key: string | undefined, fn: () => Promise<T>): Promise<T> {
     const span = this.spanEmitter?.(`files.${op}`, key !== undefined ? { key } : undefined);
     try {
+      // Account-scoped bearer (see token-minter.ts). Resolved before
+      // the op so the SDK's token getter reads a fresh value; a null
+      // result falls back to the raw binding token.
+      if (this.ensureToken !== null) {
+        this.mintedToken = await this.ensureToken();
+      }
       const result = await fn();
       this.log('info', `files-client: ${op} ok`, { key });
       span?.finish();
       return result;
     } catch (err) {
       const wrapped = this.normalizeError(err, op, key);
+      if (wrapped.status === 401 || wrapped.status === 403) {
+        // A stale/revoked minted token: drop it so the next op re-mints.
+        this.mintedToken = null;
+        this.onAuthRejected?.();
+      }
       this.log('error', `files-client: ${op} failed`, {
         key,
         code: wrapped.code,
