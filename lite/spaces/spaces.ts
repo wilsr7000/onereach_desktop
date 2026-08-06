@@ -524,6 +524,7 @@ async function loadSpaces(): Promise<void> {
     }
     state.spaces = envelope.value.filter(isWellFormedSpace);
     renderSpaceList();
+    spacesBootSucceeded = true;
   } catch (err) {
     state.loadingSpaces = false;
     renderSpaceListError(messageFrom(err));
@@ -1487,6 +1488,11 @@ function setActiveScope(scopeId: string): void {
   // Switching scope clears the open detail rail.
   state.activeItemId = null;
   showDetailRail(false);
+  // Clear the previous scope's items IMMEDIATELY: the keep-on-error
+  // behavior in loadItems must only ever preserve the SAME scope's
+  // list — without this, Space A's grid renders under Space B's
+  // header during the fetch and sticks there if the fetch fails.
+  state.items = [];
   // Sprint 3: clear any active items search on scope switch.
   state.itemsSearchQuery = '';
   state.itemsSearchResults = null;
@@ -2272,33 +2278,167 @@ async function openCreateTicketPrompt(spaceId: string): Promise<void> {
   }
 }
 
+/**
+ * Add-member picker — replaces the old raw window.prompt. Lists the
+ * account's people + agents pulled from the graph (searchable), with
+ * an invite-by-email row for addresses not in the graph yet. Adding a
+ * member grants `[:HAS_ACCESS]` (they see the Space + its graph).
+ */
 async function openAddMemberPrompt(
   spaceId: string,
   refresh?: () => Promise<void>
 ): Promise<void> {
-  const id = window.prompt('Add member by id (email for a Person, agent id for an Agent)');
-  if (id === null) return;
-  const trimmed = id.trim().toLowerCase();
-  if (trimmed.length === 0) return;
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
-  try {
-    // First, ensure a :Person exists for an email-shaped id. Agents
-    // are assumed to exist via the upstream agent registry.
-    if (trimmed.includes('@')) {
-      await bridge.identity.getOrCreatePerson({ id: trimmed, email: trimmed });
+  document.querySelector('.spaces-member-picker-backdrop')?.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-member-picker-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-member-picker';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-member-picker-head';
+  const title = document.createElement('span');
+  title.textContent = 'Add member';
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'spaces-member-picker-close';
+  close.setAttribute('aria-label', 'Close');
+  close.textContent = '×';
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  const search = document.createElement('input');
+  search.type = 'text';
+  search.className = 'spaces-new-asset-input';
+  search.placeholder = 'Search people and agents in your account…';
+  search.autocomplete = 'off';
+  panel.appendChild(search);
+
+  const results = document.createElement('div');
+  results.className = 'spaces-member-picker-results';
+  panel.appendChild(results);
+
+  const hint = document.createElement('p');
+  hint.className = 'spaces-member-picker-hint';
+  hint.textContent = 'Members get access to this Space and its graph.';
+  panel.appendChild(hint);
+
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+
+  const dispose = (): void => {
+    backdrop.remove();
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (ev: KeyboardEvent): void => {
+    if (ev.key === 'Escape') dispose();
+  };
+  document.addEventListener('keydown', onKey);
+  close.addEventListener('click', dispose);
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) dispose();
+  });
+
+  const addMember = async (memberId: string, isNewEmail: boolean): Promise<void> => {
+    const bridge = window.lite?.spaces;
+    if (bridge === undefined) return;
+    try {
+      if (isNewEmail) {
+        await bridge.identity.getOrCreatePerson({ id: memberId, email: memberId });
+      }
+      const envelope = await bridge.members.add(spaceId, memberId);
+      if (envelope.ok === false) {
+        showToast(envelope.error.message);
+        return;
+      }
+      showToast(`Added ${envelope.value.name || memberId}`);
+      dispose();
+      if (refresh !== undefined) await refresh();
+      else await loadSharedSpaceDashboard(spaceId);
+    } catch (err) {
+      showToast(messageFrom(err));
     }
-    const envelope = await bridge.members.add(spaceId, trimmed);
-    if (envelope.ok === false) {
-      showToast(envelope.error.message);
-      return;
+  };
+
+  let searchSeq = 0;
+  const runSearch = async (q: string): Promise<void> => {
+    const bridge = window.lite?.spaces;
+    if (bridge === undefined) return;
+    const seq = ++searchSeq;
+    results.replaceChildren(buildAgentLibraryStatus('Searching…'));
+    try {
+      const envelope = await bridge.members.searchLibrary(q, 25);
+      if (seq !== searchSeq) return; // superseded by a newer keystroke
+      results.replaceChildren();
+      const entries = envelope.ok === true ? envelope.value : [];
+      for (const entry of entries) {
+        results.appendChild(
+          buildMemberPickerRow(entry, () => void addMember(entry.id, false))
+        );
+      }
+      // Email not in the graph yet → offer to invite as a new Person.
+      const email = q.trim().toLowerCase();
+      const emailShaped = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      const exists = entries.some((e) => e.id.toLowerCase() === email);
+      if (emailShaped && !exists) {
+        results.appendChild(
+          buildMemberPickerRow(
+            { kind: 'Person', id: email, name: `Add "${email}" as a new person`, email: '' },
+            () => void addMember(email, true)
+          )
+        );
+      }
+      if (results.childElementCount === 0) {
+        results.appendChild(
+          buildAgentLibraryStatus('No matches — type an email to invite someone new.')
+        );
+      }
+    } catch (err) {
+      if (seq !== searchSeq) return;
+      results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
     }
-    showToast(`Added ${envelope.value.name || trimmed}`);
-    if (refresh !== undefined) await refresh();
-    else await loadSharedSpaceDashboard(spaceId);
-  } catch (err) {
-    showToast(messageFrom(err));
+  };
+
+  let debounce: number | null = null;
+  search.addEventListener('input', () => {
+    if (debounce !== null) window.clearTimeout(debounce);
+    debounce = window.setTimeout(() => {
+      debounce = null;
+      void runSearch(search.value);
+    }, 250);
+  });
+
+  search.focus();
+  void runSearch('');
+}
+
+/** One selectable row of the add-member picker. Exported for tests. */
+export function buildMemberPickerRow(
+  entry: { kind: 'Person' | 'Agent'; id: string; name: string; email: string },
+  onPick: () => void
+): HTMLElement {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'spaces-member-picker-row';
+  row.setAttribute('data-member-id', entry.id);
+  const kind = document.createElement('span');
+  kind.className = `spaces-member-picker-kind spaces-member-picker-kind-${entry.kind.toLowerCase()}`;
+  kind.textContent = entry.kind === 'Agent' ? 'AGENT' : 'PERSON';
+  row.appendChild(kind);
+  const name = document.createElement('span');
+  name.className = 'spaces-member-picker-name';
+  name.textContent = entry.name.length > 0 ? entry.name : entry.id;
+  row.appendChild(name);
+  const idHint = entry.email.length > 0 ? entry.email : entry.id;
+  if (idHint !== name.textContent) {
+    const sub = document.createElement('span');
+    sub.className = 'spaces-member-picker-id';
+    sub.textContent = idHint;
+    row.appendChild(sub);
   }
+  row.addEventListener('click', onPick);
+  return row;
 }
 
 async function removeMember(
@@ -3023,6 +3163,10 @@ export function buildItemCard(
       (isNew ? ', new' : '') +
       (byAgent ? `, produced by ${item.producedBy?.name ?? 'an agent'}` : '')
   );
+  // Mouse-over: surface the asset's objective / AI summary / tags from
+  // its metadata without opening the detail pane.
+  const hover = buildTileHoverText(item);
+  if (hover !== null) card.title = hover;
 
   // Click → open the detail pane. Cmd/Ctrl-click → toggle bulk
   // selection without opening the pane (parity with the former
@@ -3128,9 +3272,47 @@ export function buildItemCard(
 
   meta.appendChild(metaRow);
 
+  // Public / expiring pills. A file being world-readable must be
+  // visible at a glance in the grid, not only after opening the item.
+  const sharingBadges = buildSharingBadges(item as { metadata?: Record<string, unknown> });
+  if (sharingBadges !== null) {
+    const row = document.createElement('div');
+    row.className = 'spaces-card-share-row';
+    row.appendChild(sharingBadges);
+    meta.appendChild(row);
+  }
+
   card.appendChild(meta);
 
   return card;
+}
+
+/**
+ * Compose the tile mouse-over from the asset's metadata: the
+ * user-authored `objective` (or AI's), the AI summary, the
+ * description, and up to 6 tags. Returns null when there's nothing —
+ * no title attribute gets set, so no empty tooltip. Exported for tests.
+ */
+export function buildTileHoverText(item: RendererItemSummary): string | null {
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  const pick = (k: string): string | null => {
+    const v = meta[k];
+    return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+  };
+  const lines: string[] = [];
+  const objective = pick('objective') ?? pick('ai_objective');
+  if (objective !== null) lines.push(`Objective: ${objective}`);
+  const summary = pick('ai_summary');
+  if (summary !== null && summary !== objective) lines.push(`Summary: ${summary}`);
+  const description = (item.description ?? '').trim();
+  if (description.length > 0 && description !== objective) lines.push(description);
+  const tags = meta['ai_tags'];
+  if (Array.isArray(tags)) {
+    const t = tags.filter((x): x is string => typeof x === 'string').slice(0, 6);
+    if (t.length > 0) lines.push(`Tags: ${t.join(', ')}`);
+  }
+  if (lines.length === 0) return null;
+  return lines.join('\n\n');
 }
 
 /**
@@ -3400,15 +3582,27 @@ function loadTileVideoFrame(preview: HTMLElement, key: string): void {
     swapTilePreviewToVideoFrame(preview, cached);
     return;
   }
+  if (tilePreviewFailedKeys.has(key) || tileLoadsInFlight.has(key)) return;
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
+  tileLoadsInFlight.add(key);
   void bridge.items
     .readFileData(key)
     .then(async (env) => {
       const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
-      if (typeof dataUrl !== 'string' || dataUrl.length === 0) return;
+      if (typeof dataUrl !== 'string' || dataUrl.length === 0) {
+        tileLoadsInFlight.delete(key);
+        // Over-cap or missing — do NOT redownload the whole file on
+        // every grid rebuild (measured ~GBs/hour for one big video).
+        tilePreviewFailedKeys.add(key);
+        return;
+      }
       const frame = await grabVideoFrame(dataUrl);
-      if (frame === null) return;
+      tileLoadsInFlight.delete(key);
+      if (frame === null) {
+        tilePreviewFailedKeys.add(key);
+        return;
+      }
       if (tileVideoFrameCache.size >= TILE_VIDEO_CACHE_MAX_ENTRIES) {
         const oldest = tileVideoFrameCache.keys().next().value;
         if (oldest !== undefined) tileVideoFrameCache.delete(oldest);
@@ -3416,7 +3610,10 @@ function loadTileVideoFrame(preview: HTMLElement, key: string): void {
       tileVideoFrameCache.set(key, frame);
       swapTilePreviewToVideoFrame(preview, frame);
     })
-    .catch(() => undefined);
+    .catch(() => {
+      tileLoadsInFlight.delete(key);
+      tilePreviewFailedKeys.add(key);
+    });
 }
 
 /**
@@ -3900,7 +4097,10 @@ export function shortStageLabel(stage: string): string {
  */
 export function parsePlaybookSteps(excerpt: string | undefined): string[] {
   if (typeof excerpt !== 'string' || excerpt.trim().length === 0) return [];
-  const truncated = !/[\s.!?:;)\]]$/.test(excerpt);
+  // "Cut by the 280-char summary cap" needs BOTH signals: at/near the
+  // cap AND no clean terminator — otherwise a short complete list
+  // that simply lacks trailing punctuation loses its last step.
+  const truncated = excerpt.length >= 278 && !/[\s.!?:;)\]]$/.test(excerpt);
   const lines = excerpt.split(/\r?\n/);
   const steps: Array<{ text: string; line: number }> = [];
   const STEP_RE = /^\s*(?:(?:\d+[.)])|(?:[-*•]\s*(?:\[[ xX]\])?)|(?:#{1,4}\s*step\s*\d*[:.]?))\s*(.+)$/i;
@@ -4024,6 +4224,19 @@ export function fileExtBadge(title: string): string {
 const tilePdfDataCache = new Map<string, string>();
 const TILE_PDF_CACHE_MAX_CHARS = 24_000_000;
 
+/**
+ * Negative cache: fileKeys whose preview fetch/decodes FAILED (404
+ * key, over the inline cap, undecodable). Without it every grid
+ * rebuild (≥1/min from background refresh, ×3 renders per burst)
+ * re-downloads the entire file just to fail again — a >25MB video
+ * tile was measured at ~GBs/hour of silent egress. Per-session;
+ * a manual app restart retries.
+ */
+const tilePreviewFailedKeys = new Set<string>();
+
+/** In-flight dedup: keys currently being fetched by ANY tile loader. */
+const tileLoadsInFlight = new Set<string>();
+
 function tilePdfCachePut(key: string, dataUrl: string): void {
   tilePdfDataCache.delete(key);
   tilePdfDataCache.set(key, dataUrl);
@@ -4031,6 +4244,10 @@ function tilePdfCachePut(key: string, dataUrl: string): void {
   for (const v of tilePdfDataCache.values()) total += v.length;
   for (const k of tilePdfDataCache.keys()) {
     if (total <= TILE_PDF_CACHE_MAX_CHARS) break;
+    // Never evict the entry we just inserted — a single over-cap
+    // dataUrl would otherwise evict ITSELF and re-download on every
+    // grid rebuild forever.
+    if (k === key) break;
     const v = tilePdfDataCache.get(k);
     tilePdfDataCache.delete(k);
     total -= v?.length ?? 0;
@@ -4048,16 +4265,23 @@ function loadTilePdfPreview(preview: HTMLElement, key: string): void {
     swapTilePreviewToPdf(preview, cached);
     return;
   }
+  if (tilePreviewFailedKeys.has(key) || tileLoadsInFlight.has(key)) {
+    preview.classList.remove('is-loading');
+    return;
+  }
   const bridge = window.lite?.spaces;
   if (bridge === undefined) {
     preview.classList.remove('is-loading');
     return;
   }
+  tileLoadsInFlight.add(key);
   void bridge.items
     .readFileData(key)
     .then((env) => {
+      tileLoadsInFlight.delete(key);
       const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
       if (typeof dataUrl !== 'string' || dataUrl.length === 0) {
+        tilePreviewFailedKeys.add(key);
         preview.classList.remove('is-loading');
         return;
       }
@@ -4065,6 +4289,8 @@ function loadTilePdfPreview(preview: HTMLElement, key: string): void {
       swapTilePreviewToPdf(preview, dataUrl);
     })
     .catch(() => {
+      tileLoadsInFlight.delete(key);
+      tilePreviewFailedKeys.add(key);
       preview.classList.remove('is-loading');
     });
 }
@@ -4138,7 +4364,12 @@ const TILE_TEXT_EXCERPT_CHARS = 300;
 function loadTileTextPreview(preview: HTMLElement, key: string): void {
   const cached = tileTextExcerptCache.get(key);
   if (cached !== undefined) {
-    swapTilePreviewToTextExcerpt(preview, cached);
+    if (cached.length > 0) swapTilePreviewToTextExcerpt(preview, cached);
+    else preview.classList.remove('is-loading');
+    return;
+  }
+  if (tilePreviewFailedKeys.has(key) || tileLoadsInFlight.has(key)) {
+    preview.classList.remove('is-loading');
     return;
   }
   const bridge = window.lite?.spaces;
@@ -4146,24 +4377,30 @@ function loadTileTextPreview(preview: HTMLElement, key: string): void {
     preview.classList.remove('is-loading');
     return;
   }
+  tileLoadsInFlight.add(key);
   void bridge.items
     .readFileData(key)
     .then((env) => {
+      tileLoadsInFlight.delete(key);
       const dataUrl = env.ok === true && env.value !== null ? env.value.dataUrl : null;
       const text = dataUrl !== null ? decodeDataUrlText(dataUrl) : null;
       const excerpt = text !== null ? text.trim().slice(0, TILE_TEXT_EXCERPT_CHARS) : '';
-      if (excerpt.length === 0) {
-        preview.classList.remove('is-loading');
-        return;
-      }
+      // Cache EMPTY verdicts too — an empty/binary-masquerading file
+      // must not refetch its full bytes on every rebuild.
       if (tileTextExcerptCache.size >= TILE_TEXT_CACHE_MAX_ENTRIES) {
         const oldest = tileTextExcerptCache.keys().next().value;
         if (oldest !== undefined) tileTextExcerptCache.delete(oldest);
       }
       tileTextExcerptCache.set(key, excerpt);
+      if (excerpt.length === 0) {
+        preview.classList.remove('is-loading');
+        return;
+      }
       swapTilePreviewToTextExcerpt(preview, excerpt);
     })
     .catch(() => {
+      tileLoadsInFlight.delete(key);
+      tilePreviewFailedKeys.add(key);
       preview.classList.remove('is-loading');
     });
 }
@@ -4495,6 +4732,8 @@ function renderDetail(opts: RenderDetailOpts): void {
       state.activeScopeId !== UNCATEGORIZED_SPACE_ID ? state.activeScopeId : null;
     aside.appendChild(buildMoveToSpaceAffordance(item, currentSpaceId));
     aside.appendChild(buildSpaceMembershipPanel(item));
+    const sharing = buildSharingStatus(item);
+    if (sharing !== null) aside.appendChild(sharing);
   }
 
   // Sprint 1: Delete affordance at the bottom of the detail pane.
@@ -8703,6 +8942,9 @@ function messageFrom(err: unknown): string {
   parseKnowledgePreview,
   shortStageLabel,
   buildAgentLibraryRow,
+  buildTileHoverText,
+  buildMemberPickerRow,
+  buildExistingAssetRow,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,
@@ -9976,7 +10218,7 @@ async function runItemsSearch(): Promise<void> {
 
 // ─── Sprint 1: new-asset modal + drag-drop upload + delete action ───────
 
-let newAssetMode: 'text' | 'upload' | 'agent' | 'knowledge' = 'text';
+let newAssetMode: 'text' | 'upload' | 'agent' | 'knowledge' | 'existing' = 'text';
 let newAssetFile: File | null = null;
 
 /** The reachability endpoint kinds shown in the add-agent dialog. */
@@ -10057,6 +10299,8 @@ function wireNewAssetDialog(): void {
   const fileInput = document.getElementById('spaces-new-asset-file-input');
   const dropzone = document.getElementById('spaces-new-asset-dropzone');
 
+  wireShareControls();
+
   if (form instanceof HTMLFormElement) {
     form.addEventListener('submit', (ev) => {
       ev.preventDefault();
@@ -10077,7 +10321,7 @@ function wireNewAssetDialog(): void {
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
       const mode = tab.getAttribute('data-asset-tab');
-      if (mode !== 'text' && mode !== 'upload' && mode !== 'agent' && mode !== 'knowledge') return;
+      if (mode !== 'text' && mode !== 'upload' && mode !== 'agent' && mode !== 'knowledge' && mode !== 'existing') return;
       switchNewAssetMode(mode);
     });
   });
@@ -10087,6 +10331,20 @@ function wireNewAssetDialog(): void {
       handleNewAssetFileSelection(file);
     });
   }
+  // Existing-assets tab: global search across every visible Space,
+  // per-row Add files the asset into the current Space (multi-space).
+  const existingSearch = document.getElementById('spaces-new-asset-existing-search');
+  if (existingSearch instanceof HTMLInputElement) {
+    let existingDebounce: number | null = null;
+    existingSearch.addEventListener('input', () => {
+      if (existingDebounce !== null) window.clearTimeout(existingDebounce);
+      existingDebounce = window.setTimeout(() => {
+        existingDebounce = null;
+        void runExistingAssetSearch(existingSearch.value.trim());
+      }, 250);
+    });
+  }
+
   // Agent-library picker: source toggle + debounced search.
   document.querySelectorAll<HTMLElement>('[data-agent-source]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -10147,6 +10405,225 @@ function wireNewAssetDialog(): void {
   });
 }
 
+// ─── Sharing status (read side) ──────────────────────────────────────
+//
+// A file being public is invisible unless we SAY so. These read the
+// stamps `create-binary.ts` writes (`metadata.fileIsPublic` /
+// `metadata.fileExpiresAt`) so the state a user chose at upload stays
+// visible afterwards, on the tile and in the detail pane.
+
+/** True when the asset's bytes live in the public bucket. */
+export function itemIsPublic(item: { metadata?: Record<string, unknown> } | null): boolean {
+  return item?.metadata?.['fileIsPublic'] === true;
+}
+
+/** The asset's expiry as an ISO string, or null when it never expires. */
+export function itemExpiresAt(item: { metadata?: Record<string, unknown> } | null): string | null {
+  const raw = item?.metadata?.['fileExpiresAt'];
+  if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : raw;
+}
+
+/**
+ * Compact relative expiry, e.g. "expires in 3h". Past expiries read as
+ * "expired" rather than a negative duration -- the bucket may not have
+ * collected it yet, and "expires in -2h" is nonsense to a reader.
+ */
+export function formatExpiry(iso: string, now: number = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return '';
+  const ms = at - now;
+  if (ms <= 0) return 'expired';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `expires in ${Math.max(1, mins)}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 48) return `expires in ${hours}h`;
+  return `expires in ${Math.round(hours / 24)}d`;
+}
+
+/** True when an expiry is close enough to warrant the urgent styling. */
+export function expiresSoon(iso: string, now: number = Date.now()): boolean {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return false;
+  return at - now <= 24 * 60 * 60 * 1000;
+}
+
+/** Small pills for a tile: public and/or expiring. */
+export function buildSharingBadges(item: {
+  metadata?: Record<string, unknown>;
+}): DocumentFragment | null {
+  const isPublic = itemIsPublic(item);
+  const expiry = itemExpiresAt(item);
+  if (!isPublic && expiry === null) return null;
+  const frag = document.createDocumentFragment();
+  if (isPublic) {
+    const pill = document.createElement('span');
+    pill.className = 'spaces-public-badge';
+    pill.textContent = 'Public';
+    pill.title = 'Anyone with the link can open this file';
+    frag.appendChild(pill);
+  }
+  if (expiry !== null) {
+    const pill = document.createElement('span');
+    pill.className = `spaces-expiry-badge${expiresSoon(expiry) ? ' is-soon' : ''}`;
+    pill.textContent = formatExpiry(expiry);
+    pill.title = `Automatically deleted at ${expiry}`;
+    frag.appendChild(pill);
+  }
+  return frag;
+}
+
+/** Detail-pane sharing summary. Null when there is nothing to say. */
+function buildSharingStatus(item: { metadata?: Record<string, unknown> }): HTMLElement | null {
+  const badges = buildSharingBadges(item);
+  if (badges === null) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-share spaces-share-status';
+  if (itemIsPublic(item)) wrap.classList.add('is-public');
+  const row = document.createElement('div');
+  row.className = 'spaces-share-row';
+  const copy = document.createElement('div');
+  copy.className = 'spaces-share-copy';
+  const title = document.createElement('span');
+  title.className = 'spaces-share-title';
+  title.textContent = 'Sharing';
+  const sub = document.createElement('span');
+  sub.className = 'spaces-share-sub';
+  sub.textContent = itemIsPublic(item)
+    ? 'Anyone with the link can open this file.'
+    : 'Only people in this account can open it.';
+  copy.append(title, sub);
+  const pills = document.createElement('div');
+  pills.className = 'spaces-share-pills';
+  pills.appendChild(badges);
+  row.append(copy, pills);
+  wrap.appendChild(row);
+  return wrap;
+}
+
+// ─── Sharing controls (visibility + auto-delete) ─────────────────────
+//
+// Private is the default and the UI SAYS SO in words, rather than
+// leaving the user to infer it from an unchecked box. Turning a file
+// public is the deliberate act, so that is where the consequence
+// ("anyone with the link") is spelled out.
+
+/**
+ * Confirmation copy after a create.
+ *
+ * States the consequence rather than the setting: "anyone with the
+ * link" beats "isPublic: true". A private upload with no expiry gets
+ * the plain message — no ceremony for the default case.
+ */
+export function buildCreatedToast(
+  title: string,
+  isPublic: boolean,
+  expiresAt: string | undefined,
+  now: number = Date.now()
+): string {
+  const parts: string[] = [];
+  if (isPublic) parts.push('public — anyone with the link can open it');
+  if (expiresAt !== undefined) parts.push(formatExpiry(expiresAt, now));
+  return parts.length === 0 ? `Created "${title}"` : `Created "${title}" · ${parts.join(' · ')}`;
+}
+
+/** Expiry presets, in the order they appear. Value '' means never. */
+const EXPIRY_PRESETS: ReadonlyArray<{ value: string; ms: number; label: string }> = [
+  { value: '1h', ms: 60 * 60 * 1000, label: 'in 1 hour' },
+  { value: '24h', ms: 24 * 60 * 60 * 1000, label: 'in 24 hours' },
+  { value: '7d', ms: 7 * 24 * 60 * 60 * 1000, label: 'in 7 days' },
+  { value: '30d', ms: 30 * 24 * 60 * 60 * 1000, label: 'in 30 days' },
+];
+
+/**
+ * Resolve a preset to an absolute ISO timestamp.
+ *
+ * Absolute, not relative: the value is computed when the user submits,
+ * so a dialog left open for an hour still means "24h from upload", and
+ * the main process receives an unambiguous instant rather than a
+ * duration it would have to interpret.
+ */
+export function expiryPresetToIso(value: string, now: number = Date.now()): string | undefined {
+  const preset = EXPIRY_PRESETS.find((p) => p.value === value);
+  if (preset === undefined) return undefined;
+  return new Date(now + preset.ms).toISOString();
+}
+
+/** Human label for a preset, used in the sub-line. */
+export function expiryPresetLabel(value: string): string {
+  const preset = EXPIRY_PRESETS.find((p) => p.value === value);
+  return preset === undefined ? 'Kept until you delete it.' : `Deleted automatically ${preset.label}.`;
+}
+
+/** Reflect the visibility switch into copy, colour, and the warning. */
+function renderShareState(isPublic: boolean): void {
+  const wrap = document.querySelector('.spaces-share');
+  const title = document.getElementById('spaces-share-title');
+  const sub = document.getElementById('spaces-share-sub');
+  const warn = document.getElementById('spaces-share-warn');
+  const toggle = document.getElementById('spaces-new-asset-public');
+  if (wrap instanceof HTMLElement) wrap.classList.toggle('is-public', isPublic);
+  if (title !== null) title.textContent = isPublic ? 'Public' : 'Private';
+  if (sub !== null) {
+    sub.textContent = isPublic
+      ? 'Anyone with the link can open it.'
+      : 'Only people in this account can open it.';
+  }
+  if (warn !== null) warn.hidden = !isPublic;
+  if (toggle !== null) toggle.setAttribute('aria-checked', isPublic ? 'true' : 'false');
+}
+
+/** True when the user has switched this upload to public. */
+function isNewAssetPublic(): boolean {
+  const toggle = document.getElementById('spaces-new-asset-public');
+  return toggle !== null && toggle.getAttribute('aria-checked') === 'true';
+}
+
+/** The chosen expiry as an absolute ISO string, or undefined for never. */
+function newAssetExpiryIso(): string | undefined {
+  const select = document.getElementById('spaces-new-asset-expiry');
+  if (!(select instanceof HTMLSelectElement)) return undefined;
+  return expiryPresetToIso(select.value);
+}
+
+/**
+ * Put the sharing controls back to the safe defaults.
+ *
+ * Called on EVERY dialog open. The new-asset dialog is reused, so
+ * without this a "public" choice from one upload silently carries into
+ * the next — publishing a file the user never meant to share.
+ */
+export function resetShareControls(): void {
+  renderShareState(false);
+  const select = document.getElementById('spaces-new-asset-expiry');
+  if (select instanceof HTMLSelectElement) select.value = '';
+  const sub = document.getElementById('spaces-expiry-sub');
+  if (sub !== null) sub.textContent = expiryPresetLabel('');
+}
+
+function wireShareControls(): void {
+  const toggle = document.getElementById('spaces-new-asset-public');
+  if (toggle !== null) {
+    toggle.addEventListener('click', () => {
+      renderShareState(!isNewAssetPublic());
+    });
+    // role="switch" must respond to Space/Enter like a native control.
+    toggle.addEventListener('keydown', (ev) => {
+      if (ev.key !== ' ' && ev.key !== 'Enter') return;
+      ev.preventDefault();
+      renderShareState(!isNewAssetPublic());
+    });
+  }
+  const select = document.getElementById('spaces-new-asset-expiry');
+  if (select instanceof HTMLSelectElement) {
+    select.addEventListener('change', () => {
+      const sub = document.getElementById('spaces-expiry-sub');
+      if (sub !== null) sub.textContent = expiryPresetLabel(select.value);
+    });
+  }
+}
+
 function handleNewAssetFileSelection(file: File | null): void {
   newAssetFile = file;
   const chip = document.getElementById('spaces-new-asset-file-hint');
@@ -10178,7 +10655,7 @@ function handleNewAssetFileSelection(file: File | null): void {
   }
 }
 
-function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge'): void {
+function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge' | 'existing'): void {
   newAssetMode = mode;
   document.querySelectorAll<HTMLElement>('[data-asset-tab]').forEach((tab) => {
     const isActive = tab.getAttribute('data-asset-tab') === mode;
@@ -10194,6 +10671,19 @@ function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge'): vo
     agentLibraryLoadedOnce = true;
     void runAgentLibrarySearch('');
   }
+  // The Existing tab adds per-row (no Create step) — the submit button
+  // is meaningless there, so disable it for the duration.
+  const submit = document.getElementById('spaces-new-asset-submit');
+  if (submit instanceof HTMLButtonElement) submit.disabled = mode === 'existing';
+  if (mode === 'existing') {
+    const search = document.getElementById('spaces-new-asset-existing-search');
+    if (search instanceof HTMLInputElement && search.value.trim().length === 0) {
+      const results = document.getElementById('spaces-new-asset-existing-results');
+      results?.replaceChildren(
+        buildAgentLibraryStatus('Type to search assets across every Space you can see.')
+      );
+    }
+  }
 }
 
 // ─── Agent library picker ───────────────────────────────────────────────
@@ -10203,6 +10693,7 @@ let agentSourceMode: AgentSourceMode = 'library';
 let agentLibrarySelection: { id: string; name: string } | null = null;
 let agentLibraryLoadedOnce = false;
 let agentLibrarySearchTimer: number | null = null;
+let agentLibrarySearchSeq = 0;
 
 function switchAgentSourceMode(mode: AgentSourceMode): void {
   agentSourceMode = mode;
@@ -10222,15 +10713,26 @@ async function runAgentLibrarySearch(q: string): Promise<void> {
   const results = document.getElementById('spaces-new-asset-agent-results');
   const bridge = window.lite?.spaces;
   if (results === null || bridge === undefined) return;
+  const seq = ++agentLibrarySearchSeq;
   results.replaceChildren(buildAgentLibraryStatus('Searching the library…'));
   try {
     const envelope = await bridge.items.agentLibrarySearch(q, 25);
+    if (seq !== agentLibrarySearchSeq) return; // superseded (slow prime vs typed query)
     if (envelope.ok === false) {
       results.replaceChildren(buildAgentLibraryStatus(envelope.error.message));
       return;
     }
+    // A selection pointing outside the new result set would be
+    // invisible yet still drive Create — drop it.
+    if (
+      agentLibrarySelection !== null &&
+      !envelope.value.some((e) => e.id === agentLibrarySelection?.id)
+    ) {
+      agentLibrarySelection = null;
+    }
     renderAgentLibraryResults(results, envelope.value);
   } catch (err) {
+    if (seq !== agentLibrarySearchSeq) return;
     results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
   }
 }
@@ -10300,6 +10802,120 @@ export function buildAgentLibraryRow(entry: {
   return row;
 }
 
+// ─── Existing-asset picker (the "Existing" tab) ─────────────────────────
+
+let existingSearchSeq = 0;
+
+async function runExistingAssetSearch(q: string): Promise<void> {
+  const results = document.getElementById('spaces-new-asset-existing-results');
+  const bridge = window.lite?.spaces;
+  if (results === null || bridge === undefined) return;
+  if (q.length === 0) {
+    results.replaceChildren(
+      buildAgentLibraryStatus('Type to search assets across every Space you can see.')
+    );
+    return;
+  }
+  const seq = ++existingSearchSeq;
+  results.replaceChildren(buildAgentLibraryStatus('Searching all Spaces…'));
+  try {
+    const envelope = await bridge.items.search({ query: q, limit: 25 });
+    if (seq !== existingSearchSeq) return; // superseded
+    if (envelope.ok === false) {
+      results.replaceChildren(buildAgentLibraryStatus(envelope.error.message));
+      return;
+    }
+    const rows = envelope.value as RendererItemSummary[];
+    const currentSpaceId =
+      state.activeScopeId !== HOME_SCOPE_ID &&
+      state.activeScopeId !== UNCATEGORIZED_SPACE_ID
+        ? state.activeScopeId
+        : '';
+    results.replaceChildren();
+    for (const row of rows) {
+      results.appendChild(buildExistingAssetRow(row, currentSpaceId));
+    }
+    if (results.childElementCount === 0) {
+      results.appendChild(buildAgentLibraryStatus('No assets matched.'));
+    }
+  } catch (err) {
+    if (seq !== existingSearchSeq) return;
+    results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
+  }
+}
+
+/**
+ * One search result in the Existing tab: kind + title + where it
+ * lives, with an Add button that files it into the current Space
+ * (multi-space — the asset stays everywhere it already is). Exported
+ * for tests.
+ */
+export function buildExistingAssetRow(
+  item: RendererItemSummary,
+  currentSpaceId: string
+): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'spaces-existing-row';
+  row.setAttribute('data-item-id', item.id);
+
+  const main = document.createElement('div');
+  main.className = 'spaces-existing-row-main';
+  const top = document.createElement('span');
+  top.className = 'spaces-agent-result-top';
+  const name = document.createElement('span');
+  name.className = 'spaces-agent-result-name';
+  name.textContent = generateItemTitle(item);
+  top.appendChild(name);
+  const kind = document.createElement('span');
+  kind.className = 'spaces-agent-result-type';
+  kind.textContent = kindLabel(item.kind);
+  top.appendChild(kind);
+  main.appendChild(top);
+  const inSpaces = item.otherSpaces.map((s) => friendlySpaceName(s.name)).join(', ');
+  if (inSpaces.length > 0) {
+    const sub = document.createElement('span');
+    sub.className = 'spaces-agent-result-desc';
+    sub.textContent = `In: ${inSpaces}`;
+    main.appendChild(sub);
+  }
+  row.appendChild(main);
+
+  const alreadyHere =
+    currentSpaceId !== '' && item.otherSpaces.some((s) => s.id === currentSpaceId);
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'spaces-existing-row-add';
+  add.textContent = alreadyHere ? 'Added ✓' : '+ Add';
+  add.disabled = alreadyHere || currentSpaceId === '';
+  if (currentSpaceId === '') add.title = 'Open a Space first';
+  add.addEventListener('click', () => {
+    add.disabled = true;
+    add.textContent = 'Adding…';
+    const bridge = window.lite?.spaces;
+    if (bridge === undefined) return;
+    void bridge.items
+      .addToSpace(item.id, currentSpaceId)
+      .then(async (envelope) => {
+        if (envelope.ok === false) {
+          showToast(envelope.error.message);
+          add.disabled = false;
+          add.textContent = '+ Add';
+          return;
+        }
+        add.textContent = 'Added ✓';
+        showToast(`Added "${generateItemTitle(item)}" to this Space`);
+        await loadItems();
+      })
+      .catch((err) => {
+        showToast(messageFrom(err));
+        add.disabled = false;
+        add.textContent = '+ Add';
+      });
+  });
+  row.appendChild(add);
+  return row;
+}
+
 function resetAgentLibraryPicker(): void {
   agentLibrarySelection = null;
   const search = document.getElementById('spaces-new-asset-agent-search');
@@ -10334,6 +10950,14 @@ function openNewAssetDialog(presetFile: File | null = null): void {
   if (knowledgeInput instanceof HTMLTextAreaElement) knowledgeInput.value = '';
   const knowledgeEndpoint = document.getElementById('spaces-new-asset-knowledge-endpoint');
   if (knowledgeEndpoint instanceof HTMLInputElement) knowledgeEndpoint.value = '';
+  const existingSearch = document.getElementById('spaces-new-asset-existing-search');
+  if (existingSearch instanceof HTMLInputElement) existingSearch.value = '';
+  document.getElementById('spaces-new-asset-existing-results')?.replaceChildren();
+  updateTranscriptHint(null);
+  // Sharing goes back to private + no expiry on EVERY open. Carrying a
+  // previous "public" choice into the next upload is how a file gets
+  // published by accident.
+  resetShareControls();
   // Reset the file chip (and clear stashed file).
   handleNewAssetFileSelection(null);
   if (error !== null) {
@@ -10360,6 +10984,8 @@ function closeNewAssetDialog(): void {
 }
 
 async function submitNewAsset(): Promise<void> {
+  // The Existing tab adds assets per-row; there is nothing to submit.
+  if (newAssetMode === 'existing') return;
   const titleInput = document.getElementById('spaces-new-asset-title-input');
   const contentInput = document.getElementById('spaces-new-asset-content-input');
   const error = document.getElementById('spaces-new-asset-error');
@@ -10528,9 +11154,13 @@ async function submitNewAsset(): Promise<void> {
         const text = await file.text();
         // Transcript intake: .vtt/.srt exports and speaker-labeled
         // text convert to consistent Markdown and land as kind
-        // 'transcript' (conservative detection — non-transcripts pass
-        // through untouched).
-        const transcript = convertTranscript(text);
+        // 'transcript'. Gated to dialogue-plausible EXTENSIONS —
+        // YAML/JSON/code files with repeated `key: value` lines can
+        // false-positive the speaker-line detector, and conversion
+        // rewrites content irreversibly (the paste path keeps its
+        // live hint as the consent surface).
+        const transcriptEligible = /\.(vtt|srt|txt|text|md|markdown)$/i.test(file.name);
+        const transcript = transcriptEligible ? convertTranscript(text) : null;
         const content = transcript !== null ? transcript.markdown : text;
         const kind = transcript !== null ? 'transcript' : 'document';
         const mimeType =
@@ -10588,6 +11218,11 @@ async function submitNewAsset(): Promise<void> {
         | 'audio'
         | 'document'
         | 'other';
+      // Sharing choices. Both are opt-in; omitted entirely when the
+      // user left the defaults alone, so a private upload sends no
+      // visibility flag at all and cannot be misread downstream.
+      const isPublic = isNewAssetPublic();
+      const expiresAt = newAssetExpiryIso();
       const envelope = await bridge.items.createBinary({
         spaceId,
         title,
@@ -10597,6 +11232,8 @@ async function submitNewAsset(): Promise<void> {
         bytes,
         metadata: metadata as Record<string, unknown>,
         ...(creatorId !== null ? { creatorId } : {}),
+        ...(isPublic ? { isPublic: true } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
       });
       if (envelope.ok === false) {
         showDialogError(error, envelope.error.message);
@@ -10662,8 +11299,14 @@ async function submitNewAsset(): Promise<void> {
         hasContent: content.trim().length > 0,
       };
     }
+    // Capture the sharing choices BEFORE the dialog resets them, so the
+    // confirmation can restate what was actually done. Publishing a
+    // file is worth confirming in words -- a bare "Created" leaves the
+    // user with no signal that the thing is now world-readable.
+    const sharedPublicly = newAssetMode === 'upload' && isNewAssetPublic();
+    const sharedExpiry = newAssetMode === 'upload' ? newAssetExpiryIso() : undefined;
     closeNewAssetDialog();
-    showToast(`Created "${title}"`);
+    showToast(buildCreatedToast(title, sharedPublicly, sharedExpiry));
     await loadItems();
     // Fire Claude enrichment in the background (no await) so the create
     // flow stays snappy. Silent when AI isn't configured.
@@ -10792,10 +11435,17 @@ async function performAssetRestore(itemId: string, title: string): Promise<void>
  * even when the failure happened while wiring up the app, so it cannot
  * rely on `showToast`, the bridge, or any DOM this file normally builds.
  */
+let spacesBootSucceeded = false;
+
 function reportFatalRendererError(scope: string, err: unknown): void {
   const detail = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
   // Routed to the central log by the main process.
   console.error(`[spaces] fatal in ${scope}: ${detail}`);
+  // The opaque full-screen overlay is a BOOT-failure surface. After
+  // the first successful paint, a stray uncaught error in some click
+  // handler must not blank a working app — the console.error above
+  // already reaches the central log.
+  if (spacesBootSucceeded) return;
   try {
     if (document.getElementById('spaces-fatal') !== null) return;
     const banner = document.createElement('div');

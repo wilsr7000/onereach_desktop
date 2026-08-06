@@ -57,6 +57,7 @@ import type {
   CreateAgentInput,
   CreateAgentFromLibraryInput,
   AgentLibraryEntry,
+  MemberLibraryEntry,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -471,6 +472,12 @@ export interface SpacesMembersApi {
 
   /** Revoke access. No-op when the edge is already absent. */
   remove(spaceId: string, memberId: string): Promise<void>;
+
+  /**
+   * Search the account's people + agents (graph `:Person`/`:Agent`)
+   * for the add-member picker. People sort first.
+   */
+  searchLibrary(q: string, limit?: number): Promise<MemberLibraryEntry[]>;
 }
 
 /**
@@ -785,6 +792,9 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async remove(_spaceId: string, _memberId: string): Promise<void> {
       throw notInitialized('members.remove');
+    },
+    async searchLibrary(_q: string, _limit?: number): Promise<MemberLibraryEntry[]> {
+      throw notInitialized('members.searchLibrary');
     },
   };
 

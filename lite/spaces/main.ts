@@ -131,6 +131,7 @@ import type {
   CreateAgentInput,
   CreateAgentFromLibraryInput,
   AgentLibraryEntry,
+  MemberLibraryEntry,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -531,7 +532,8 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         {
           files: getFilesApi(),
           createAsset: (assetInput) => client.createAsset(assetInput),
-          warn: (message, data) => getLoggingApi().warn('spaces', message, data),
+          assetExistsForFileKey: (fileKey: string) => client.assetExistsForFileKey(fileKey),
+        warn: (message, data) => getLoggingApi().warn('spaces', message, data),
         },
         input
       );
@@ -656,6 +658,9 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     async remove(spaceId: string, memberId: string): Promise<void> {
       await client.removeSpaceMember(spaceId, memberId);
       nukeReadCache();
+    },
+    searchLibrary(q: string, limit?: number): Promise<MemberLibraryEntry[]> {
+      return client.searchMemberLibrary(q, limit);
     },
   };
 

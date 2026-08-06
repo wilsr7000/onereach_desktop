@@ -46,6 +46,13 @@ export interface CreateBinaryDeps {
   createAsset(input: CreateAssetInput): Promise<Item>;
   /** Best-effort warn channel for the orphan-cleanup failure path. */
   warn(message: string, data?: unknown): void;
+  /**
+   * True when a live asset points at the fileKey — the ambiguity
+   * guard consulted before orphan cleanup deletes uploaded bytes.
+   * Optional so hermetic tests (and legacy callers) keep working;
+   * absent = never delete (safe default).
+   */
+  assetExistsForFileKey?(fileKey: string): Promise<boolean>;
   /** Test override for the generated unique file name. */
   uniqueNameFor?(originalName: string): string;
 }

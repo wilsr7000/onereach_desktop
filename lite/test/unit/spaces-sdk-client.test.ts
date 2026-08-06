@@ -76,11 +76,15 @@ describe('CYPHER source strings', () => {
     // broke every detail-open); this test makes the class impossible.
     for (const [name, query] of Object.entries(CYPHER)) {
       if (typeof query !== 'string') continue;
-      const idx = query.lastIndexOf('RETURN ');
-      if (idx < 0) continue;
-      const aliases = [...query.slice(idx).matchAll(/\bAS (\w+)/g)].map((m) => m[1]);
-      const dupes = [...new Set(aliases.filter((a) => aliases.indexOf(a) !== aliases.lastIndexOf(a)))];
-      expect(dupes, `${name} has duplicate RETURN aliases`).toEqual([]);
+      // Split into projection clauses: every WITH and every RETURN
+      // owns its aliases; a duplicate WITHIN one clause is the bug
+      // (across clauses is normal — `count(a) AS n ... n AS n`).
+      const clauses = query.split(/\b(?=WITH\s|RETURN\s)/g).slice(1);
+      for (const clause of clauses) {
+        const aliases = [...clause.matchAll(/\bAS (\w+)/g)].map((m) => m[1]);
+        const dupes = [...new Set(aliases.filter((a) => aliases.indexOf(a) !== aliases.lastIndexOf(a)))];
+        expect(dupes, `${name} has duplicate aliases in a projection clause`).toEqual([]);
+      }
     }
   });
 
@@ -148,8 +152,27 @@ describe('CYPHER source strings', () => {
       // full getItem round-trip.
       expect(q).toMatch(/AS tileAgentType,/);
       expect(q).toMatch(/AS tileAgentEndpoints,/);
+      expect(q).toMatch(/a\.metadata AS tileMetadata,/);
       expect(q).toMatch(/AS contentHead,/);
     }
+  });
+
+  it('member library searches Person + Agent with people first', () => {
+    expect(CYPHER.MEMBER_LIBRARY_SEARCH).toMatch(/member:Person OR member:Agent/);
+    expect(CYPHER.MEMBER_LIBRARY_SEARCH).toMatch(/CASE WHEN member:Person THEN 0 ELSE 1 END/);
+    expect(CYPHER.MEMBER_LIBRARY_SEARCH).toMatch(/LIMIT toInteger\(\$limit\)/);
+  });
+
+  it('library-agent create falls back to a REPRESENTS source asset for content', () => {
+    expect(CYPHER.CREATE_AGENT_FROM_LIBRARY).toMatch(/OPTIONAL MATCH \(src:Asset\)-\[:REPRESENTS\]->\(g\)/);
+    expect(CYPHER.CREATE_AGENT_FROM_LIBRARY).toMatch(/coalesce\(g\.okf, g\.definition, srcAsset\.content, ''\)/);
+    // Blank agent names fall back to the id, never an empty title.
+    expect(CYPHER.CREATE_AGENT_FROM_LIBRARY).toMatch(/CASE WHEN trim\(coalesce\(g\.name, g\.title, ''\)\) = ''/);
+  });
+
+  it('endpoint registration MERGEs by url (no duplicate REACHABLE_VIA children)', () => {
+    expect(CYPHER.CREATE_AGENT_ENDPOINT_MERGED).toMatch(/MERGE \(ag\)-\[:REACHABLE_VIA\]->\(e:AgentEndpoint:__KIND_LABEL__ \{url: \$url\}\)/);
+    expect(CYPHER.CREATE_AGENT_ENDPOINT_MERGED).toMatch(/ON CREATE SET/);
   });
 
   it('list-items-in-space takes a spaceId param and filters otherSpaces', () => {

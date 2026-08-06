@@ -45,6 +45,9 @@ function deps(over: { failCreate?: boolean } = {}): { deps: CreateBinaryDeps; re
         return { id: 'i1', title: input.title } as unknown as Item;
       },
       warn: (message) => rec.warnings.push(message),
+      // Ambiguity guard (2026-08-06 review): cleanup only deletes when
+      // no live asset references the key. False = create truly failed.
+      assetExistsForFileKey: async () => false,
       uniqueNameFor: (n) => n,
     },
   };

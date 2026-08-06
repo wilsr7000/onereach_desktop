@@ -244,6 +244,10 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
   loader()
     .then((saved) => {
       if (win.isDestroyed()) return;
+      // The watchdog already centered + revealed the window — moving
+      // it NOW (possibly to another display) is the teleport this
+      // path exists to prevent. Late bounds lose.
+      if (positioned) return;
       if (saved !== null) {
         // Strict `exactOptionalPropertyTypes` rejects `{ x: undefined }`,
         // so only spread x/y in when they're actually numbers.

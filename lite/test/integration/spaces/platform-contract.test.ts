@@ -237,6 +237,7 @@ function buildStubConsumer(): {
       remove: async (_spaceId, _memberId) => {
         maybeFail(undefined);
       },
+      searchLibrary: async (_q, _limit) => maybeFail([]),
     },
     setSpaceKind: async (_id, kind) => maybeFail(kind),
   };

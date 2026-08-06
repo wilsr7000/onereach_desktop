@@ -21,6 +21,8 @@ function makeDeps(over: {
   createFails?: boolean;
   deleteFails?: boolean;
   uploadFails?: Error;
+  /** True when a live asset already points at the uploaded key. */
+  assetExists?: boolean;
 } = {}): { deps: CreateBinaryDeps; rec: Recorded } {
   const rec: Recorded = { uploads: [], deletes: [], creates: [], warns: [] };
   const deps: CreateBinaryDeps = {
@@ -43,6 +45,10 @@ function makeDeps(over: {
     warn: (message) => {
       rec.warns.push(message);
     },
+    // Ambiguity guard (2026-08-06 review): cleanup only deletes bytes
+    // when NO live asset references the key. Default false = the
+    // create genuinely failed, so cleanup proceeds.
+    assetExistsForFileKey: async () => over.assetExists === true,
     uniqueNameFor: (name) => `uuid-${name}`,
   };
   return { deps, rec };
@@ -138,6 +144,16 @@ describe('createBinaryAsset', () => {
     await expect(createBinaryAsset(deps, INPUT)).rejects.toThrow('graph down');
     expect(rec.uploads).toHaveLength(1);
     expect(rec.deletes).toEqual([`${SPACES_ASSETS_PREFIX}/uuid-chart.png`]);
+  });
+
+  it('KEEPS the bytes when a live asset already points at the key', async () => {
+    // Ambiguity guard: the graph write can LAND while the call reports
+    // failure (Edison read-after-write, observed live 2026-08-06).
+    // Deleting then destroys a live asset's bytes.
+    const { deps, rec } = makeDeps({ createFails: true, assetExists: true });
+    await expect(createBinaryAsset(deps, INPUT)).rejects.toThrow('graph down');
+    expect(rec.deletes).toEqual([]);
+    expect(rec.warns.some((w) => w.includes('bytes kept'))).toBe(true);
   });
 
   it('swallows a cleanup failure (warn) and still rethrows the create error', async () => {

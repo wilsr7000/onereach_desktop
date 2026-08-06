@@ -152,6 +152,16 @@
             <span class="spaces-new-asset-tab-icon" aria-hidden="true">⬡</span>
             <span>Knowledge</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            class="spaces-new-asset-tab"
+            data-asset-tab="existing"
+            aria-selected="false"
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">⧉</span>
+            <span>Existing</span>
+          </button>
         </div>
 
         <form id="spaces-new-asset-form" class="spaces-new-asset-form">
@@ -204,6 +214,54 @@
               id="spaces-new-asset-file-hint"
               hidden
             ></div>
+
+            <!--
+              Sharing. Private is the default and is stated as the
+              CURRENT state, not as an unchecked box the user has to
+              infer. Going public is the deliberate act, and the
+              consequence is spelled out at the moment of choosing
+              rather than buried in a tooltip.
+            -->
+            <div class="spaces-share">
+              <div class="spaces-share-row">
+                <div class="spaces-share-copy">
+                  <span class="spaces-share-title" id="spaces-share-title">Private</span>
+                  <span class="spaces-share-sub" id="spaces-share-sub"
+                    >Only people in this account can open it.</span
+                  >
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked="false"
+                  aria-labelledby="spaces-share-title"
+                  class="spaces-switch"
+                  id="spaces-new-asset-public"
+                >
+                  <span class="spaces-switch-knob" aria-hidden="true"></span>
+                </button>
+              </div>
+
+              <div class="spaces-share-warn" id="spaces-share-warn" hidden>
+                Anyone with the link can open this file — no sign-in required.
+              </div>
+
+              <div class="spaces-share-row spaces-share-expiry">
+                <div class="spaces-share-copy">
+                  <label class="spaces-share-title" for="spaces-new-asset-expiry">Auto-delete</label>
+                  <span class="spaces-share-sub" id="spaces-expiry-sub"
+                    >Kept until you delete it.</span
+                  >
+                </div>
+                <select class="spaces-share-select" id="spaces-new-asset-expiry">
+                  <option value="" selected>Never</option>
+                  <option value="1h">In 1 hour</option>
+                  <option value="24h">In 24 hours</option>
+                  <option value="7d">In 7 days</option>
+                  <option value="30d">In 30 days</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           <div class="spaces-new-asset-field" data-asset-pane="agent" hidden>
@@ -292,6 +350,21 @@
               placeholder="https://…/query"
               autocomplete="off"
             />
+          </div>
+
+          <div class="spaces-new-asset-field" data-asset-pane="existing" hidden>
+            <div class="spaces-new-asset-label-row">
+              <label for="spaces-new-asset-existing-search" class="spaces-new-asset-label">Add existing assets</label>
+              <span class="spaces-new-asset-label-hint">Search every Space you can see — click Add to file an asset here too</span>
+            </div>
+            <input
+              type="text"
+              id="spaces-new-asset-existing-search"
+              class="spaces-new-asset-input"
+              placeholder="Search all assets by title, description, or content…"
+              autocomplete="off"
+            />
+            <div id="spaces-new-asset-existing-results" class="spaces-agent-results" role="listbox"></div>
           </div>
 
           <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>

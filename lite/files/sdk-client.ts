@@ -408,9 +408,17 @@ export class SdkFilesClient {
     try {
       // Account-scoped bearer (see token-minter.ts). Resolved before
       // the op so the SDK's token getter reads a fresh value; a null
-      // result falls back to the raw binding token.
+      // result falls back to the raw binding token. Minting is an
+      // ENHANCEMENT — account-scoped writes need it, reads work on the
+      // raw binding token — so a mint outage (unreachable mint host)
+      // must not fail thumbnails/previews/downloads: swallow and let
+      // the files service itself be the judge.
       if (this.ensureToken !== null) {
-        this.mintedToken = await this.ensureToken();
+        try {
+          this.mintedToken = await this.ensureToken();
+        } catch {
+          this.mintedToken = null;
+        }
       }
       const result = await fn();
       this.log('info', `files-client: ${op} ok`, { key });

@@ -54,6 +54,8 @@ export class FilesTokenMinter {
   private cache: MintCache | null = null;
   /** In-flight mint so concurrent ops share one request. */
   private pending: Promise<string> | null = null;
+  /** Account the in-flight mint belongs to (guards account switches). */
+  private pendingAccountId: string | null = null;
 
   constructor(config: FilesTokenMinterConfig) {
     this.getAccountId = config.getAccountId;
@@ -91,13 +93,17 @@ export class FilesTokenMinter {
     if (accountId === null || accountId.length === 0) return null;
     const cached = this.get();
     if (cached !== null) return cached;
-    if (this.pending !== null) return this.pending;
+    if (this.pending !== null && this.pendingAccountId === accountId) {
+      return this.pending;
+    }
 
     this.pending = this.mint(accountId);
+    this.pendingAccountId = accountId;
     try {
       return await this.pending;
     } finally {
       this.pending = null;
+      this.pendingAccountId = null;
     }
   }
 

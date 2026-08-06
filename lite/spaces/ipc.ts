@@ -43,6 +43,7 @@ import type {
   CreateAgentInput,
   CreateAgentFromLibraryInput,
   AgentLibraryEntry,
+  MemberLibraryEntry,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -91,6 +92,7 @@ export const SPACES_IPC = {
   IDENTITY_GET_OR_CREATE_PERSON: 'lite:spaces:identity:getOrCreatePerson',
   MEMBERS_LIST: 'lite:spaces:members:list',
   MEMBERS_ADD: 'lite:spaces:members:add',
+  MEMBERS_SEARCH_LIBRARY: 'lite:spaces:members:searchLibrary',
   MEMBERS_REMOVE: 'lite:spaces:members:remove',
   /** Sprint 1 — asset CRUD. */
   ITEMS_CREATE: 'lite:spaces:items:create',
@@ -771,6 +773,29 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         const memberId =
           typeof payload?.memberId === 'string' ? payload.memberId : '';
         const value = await getSpacesApi().members.add(spaceId, memberId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.MEMBERS_SEARCH_LIBRARY,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { q?: unknown; limit?: unknown }
+    ): Promise<SpacesIpcResult<MemberLibraryEntry[]>> => {
+      try {
+        const q = typeof payload?.q === 'string' ? payload.q : '';
+        const limit =
+          typeof payload?.limit === 'number' && Number.isFinite(payload.limit)
+            ? payload.limit
+            : undefined;
+        const value = await getSpacesApi().members.searchLibrary(
+          q,
+          ...(limit !== undefined ? [limit] : [])
+        );
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

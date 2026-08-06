@@ -66,6 +66,7 @@ import type {
   CreateAgentInput,
   CreateAgentFromLibraryInput,
   AgentLibraryEntry,
+  MemberLibraryEntry,
   AgentEndpoint,
   AgentEndpointKind,
   DeleteAssetOpts,
@@ -232,6 +233,7 @@ export const CYPHER = {
                 THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
+           a.metadata AS tileMetadata,
            [] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -283,6 +285,7 @@ export const CYPHER = {
                 THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
+           a.metadata AS tileMetadata,
            [x IN otherSpacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -427,6 +430,7 @@ export const CYPHER = {
                 THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
+           a.metadata AS tileMetadata,
            coalesce(a.description, '') AS description,
            coalesce(a.content, '') AS content,
            coalesce(a.size, a.fileSize, a.byteCount) AS size,
@@ -523,6 +527,7 @@ export const CYPHER = {
                 THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
+           a.metadata AS tileMetadata,
            CASE WHEN firstSpace IS NULL
                 THEN []
                 ELSE [{ id: firstSpace.id,
@@ -611,6 +616,44 @@ export const CYPHER = {
   `,
 
   /**
+   * Ambiguous-failure guard for createBinary: does ANY live asset
+   * point at this fileKey? Checked before orphan cleanup deletes the
+   * uploaded bytes — a create that "failed" at the HTTP layer may
+   * still have landed (Edison read-after-write/timeout ambiguity,
+   * observed live 2026-08-06), and deleting then destroys a live
+   * asset's bytes.
+   */
+  FIND_ASSET_BY_FILE_KEY: `
+    MATCH (a:Asset)
+      WHERE coalesce(a.url, a.fileUrl) = $fileKey
+        AND a.deletedAt IS NULL
+    RETURN a.id AS id
+    LIMIT 1
+  `,
+
+  /**
+   * Idempotency guard for library adds: an asset already representing
+   * this agent in this Space (repeat picks return it instead of
+   * creating a twin tile).
+   */
+  FIND_AGENT_ASSET_IN_SPACE: `
+    MATCH (a:Asset {agentRefId: $agentId})-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE a.deletedAt IS NULL
+    RETURN a.id AS id
+    LIMIT 1
+  `,
+
+  /**
+   * Existing reachability endpoints on an `:Agent` — merged into the
+   * asset's tile-endpoint property so library-added tiles report the
+   * agent's FULL reachability, not just what the adder typed.
+   */
+  GET_AGENT_ENDPOINTS: `
+    MATCH (g:Agent {id: $agentId})-[:REACHABLE_VIA]->(e:AgentEndpoint)
+    RETURN e.kind AS kind, e.url AS url, coalesce(e.channels, '') AS channels
+  `,
+
+  /**
    * Add a LIBRARY agent to a Space: a Space-facing `:Asset` that
    * `[:REPRESENTS]` the EXISTING graph `:Agent` (no new agent node —
    * that's `CREATE_AGENT`'s job for pasted OKF). Name/description are
@@ -620,12 +663,21 @@ export const CYPHER = {
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
     MATCH (g:Agent {id: $agentId})
+    // OKF lives on the ASSET for Lite-created agents (the :Agent node
+    // never carries okf/definition) — fall back to any existing
+    // source asset that REPRESENTS this agent so library copies keep
+    // their definition.
+    OPTIONAL MATCH (src:Asset)-[:REPRESENTS]->(g)
+      WHERE src.deletedAt IS NULL AND trim(coalesce(src.content, '')) <> ''
+    WITH s, g, head(collect(src)) AS srcAsset
     CREATE (a:Asset {
       id: $id,
       type: 'agent',
-      name: coalesce(g.name, g.title, g.id),
-      title: coalesce(g.name, g.title, g.id),
-      content: coalesce(g.okf, g.definition, ''),
+      name: CASE WHEN trim(coalesce(g.name, g.title, '')) = ''
+                 THEN g.id ELSE coalesce(g.name, g.title) END,
+      title: CASE WHEN trim(coalesce(g.name, g.title, '')) = ''
+                  THEN g.id ELSE coalesce(g.name, g.title) END,
+      content: coalesce(g.okf, g.definition, srcAsset.content, ''),
       description: coalesce(g.description, g.summary, ''),
       agentType: coalesce(g.agentType, 'other'),
       agentRefId: g.id,
@@ -947,6 +999,7 @@ export const CYPHER = {
                 THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
+           a.metadata AS tileMetadata,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
            coalesce(a.status, 'open') AS status,
@@ -1091,6 +1144,27 @@ export const CYPHER = {
     RETURN head(labels(member)) AS kind,
            member.id AS id,
            coalesce(member.name, member.title, '') AS name
+  `,
+
+  /**
+   * Member library — the account's `:Person` and `:Agent` nodes,
+   * searchable by name/email/id substring. Powers the add-member
+   * picker (people sort first). Empty query returns the head.
+   */
+  MEMBER_LIBRARY_SEARCH: `
+    MATCH (member)
+    WHERE (member:Person OR member:Agent)
+      AND ($q = ''
+           OR toLower(coalesce(member.name, member.title, '')) CONTAINS toLower($q)
+           OR toLower(coalesce(member.email, '')) CONTAINS toLower($q)
+           OR toLower(member.id) CONTAINS toLower($q))
+    RETURN head(labels(member)) AS kind,
+           member.id AS id,
+           coalesce(member.name, member.title, member.id) AS name,
+           coalesce(member.email, '') AS email
+    ORDER BY CASE WHEN member:Person THEN 0 ELSE 1 END,
+             toLower(coalesce(member.name, member.id, '')) ASC
+    LIMIT toInteger($limit)
   `,
 
   /**
@@ -1269,6 +1343,16 @@ export const CYPHER = {
    * PascalCase label (`Mcp`/`Api`/`Skill`); `kind`/`url`/`channels` are
    * parameters. `channels` is a comma-joined string.
    */
+  CREATE_AGENT_ENDPOINT_MERGED: `
+    MATCH (ag:Agent {id: $agentId})
+    MERGE (ag)-[:REACHABLE_VIA]->(e:AgentEndpoint:__KIND_LABEL__ {url: $url})
+    ON CREATE SET e.id = $endpointId,
+                  e.kind = $kind,
+                  e.channels = $channels,
+                  e.createdAt = $now
+    RETURN e.id AS id
+  `,
+
   CREATE_AGENT_ENDPOINT: `
     MATCH (ag:Agent {id: $agentId})
     CREATE (ag)-[:REACHABLE_VIA]->(e:AgentEndpoint:__KIND_LABEL__ {
@@ -1436,6 +1520,7 @@ export const CYPHER = {
                 THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
+           a.metadata AS tileMetadata,
            [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -2036,7 +2121,9 @@ export class SdkSpacesClient {
         }
         // Exists but wasn't soft-deleted -- nothing to restore. Idempotent:
         // re-fetch and return the current row.
-        const refreshed = await this.run(CYPHER.LIST_SPACES);
+        const refreshed = await this.run(CYPHER.LIST_SPACES, {
+          viewerId: this.viewerParam(),
+        });
         const match = refreshed
           .map(toSpace)
           .find((s) => s.id === validId);
@@ -2529,12 +2616,53 @@ export class SdkSpacesClient {
       q: query,
       limit: cappedLimit,
     });
-    return rows.map((r) => ({
-      id: requireString(r, 'id'),
-      name: optString(r, 'name') ?? '',
-      description: optString(r, 'description') ?? '',
-      agentType: optString(r, 'agentType') ?? 'other',
-    }));
+    // Skip malformed (id-less) rows — one junk node must not break
+    // the whole directory (LIST_SPACE_MEMBERS behaves the same way).
+    const out: AgentLibraryEntry[] = [];
+    for (const r of rows) {
+      const id = optString(r, 'id');
+      if (id === undefined || id.length === 0) continue;
+      out.push({
+        id,
+        name: optString(r, 'name') ?? '',
+        description: optString(r, 'description') ?? '',
+        agentType: optString(r, 'agentType') ?? 'other',
+      });
+    }
+    return out;
+  }
+
+  /** True when a live asset points at the given GSX fileKey. */
+  async assetExistsForFileKey(fileKey: string): Promise<boolean> {
+    const rows = await this.run(CYPHER.FIND_ASSET_BY_FILE_KEY, { fileKey });
+    return rows.length > 0;
+  }
+
+  /**
+   * Search the account's people + agents for the add-member picker.
+   * People sort first; empty query returns the alphabetical head.
+   */
+  async searchMemberLibrary(q: string, limit = 25): Promise<MemberLibraryEntry[]> {
+    const query = typeof q === 'string' ? q.trim() : '';
+    const cappedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    const rows = await this.run(CYPHER.MEMBER_LIBRARY_SEARCH, {
+      q: query,
+      limit: cappedLimit,
+    });
+    // Skip malformed (id-less) rows — same contract as the agent
+    // library and LIST_SPACE_MEMBERS.
+    const out: MemberLibraryEntry[] = [];
+    for (const r of rows) {
+      const id = optString(r, 'id');
+      if (id === undefined || id.length === 0) continue;
+      out.push({
+        kind: optString(r, 'kind') === 'Agent' ? ('Agent' as const) : ('Person' as const),
+        id,
+        name: optString(r, 'name') ?? '',
+        email: optString(r, 'email') ?? '',
+      });
+    }
+    return out;
   }
 
   /**
@@ -2558,8 +2686,42 @@ export class SdkSpacesClient {
       typeof input.creatorId === 'string' && input.creatorId.length > 0
         ? input.creatorId
         : null;
-    const endpoints = normalizeAgentEndpoints(input.endpoints);
-    const agentEndpointsJson = endpoints.length > 0 ? JSON.stringify(endpoints) : '';
+    const requested = normalizeAgentEndpoints(input.endpoints);
+
+    // Idempotent: picking the same agent for the same Space again
+    // returns the existing tile instead of creating a twin.
+    const existing = await this.run(CYPHER.FIND_AGENT_ASSET_IN_SPACE, {
+      spaceId,
+      agentId,
+    });
+    const existingId = existing.length > 0 ? optString(existing[0] ?? {}, 'id') : undefined;
+    if (existingId !== undefined) {
+      const found = await this.getItem(existingId);
+      if (found !== null) return found;
+    }
+
+    // Merge the agent's EXISTING reachability with what the adder
+    // typed, so the tile reports full reachability (requested wins on
+    // kind+url collisions; both get deduped).
+    const currentRows = await this.run(CYPHER.GET_AGENT_ENDPOINTS, { agentId });
+    const current: AgentEndpoint[] = [];
+    for (const r of currentRows) {
+      const kind = optString(r, 'kind');
+      const url = optString(r, 'url');
+      if ((kind !== 'mcp' && kind !== 'api' && kind !== 'skill') || url === undefined || url.length === 0) continue;
+      const channelsRaw = optString(r, 'channels') ?? '';
+      current.push({
+        kind,
+        url,
+        channels: channelsRaw.length > 0 ? channelsRaw.split(',') : [],
+      });
+    }
+    const merged: AgentEndpoint[] = [...requested];
+    for (const ep of current) {
+      if (!merged.some((m) => m.kind === ep.kind && m.url === ep.url)) merged.push(ep);
+    }
+    const agentEndpointsJson = merged.length > 0 ? JSON.stringify(merged) : '';
+
     const id = generateAssetId();
     const now = nowIso();
     const rows = await this.run(CYPHER.CREATE_AGENT_FROM_LIBRARY, {
@@ -2579,8 +2741,11 @@ export class SdkSpacesClient {
         context: { spaceId, agentId },
       });
     }
-    for (const ep of endpoints) {
-      const epCypher = CYPHER.CREATE_AGENT_ENDPOINT.replace(
+    // Register only the ADDER's endpoints on the shared agent —
+    // MERGEd by (kind, url) so repeat registrations never duplicate
+    // the agent's REACHABLE_VIA children.
+    for (const ep of requested) {
+      const epCypher = CYPHER.CREATE_AGENT_ENDPOINT_MERGED.replace(
         '__KIND_LABEL__',
         sanitizeAgentTypeLabel(ep.kind)
       );
@@ -3382,6 +3547,8 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
   if (tileAgentType !== undefined) summary.agentType = tileAgentType;
   const tileEndpoints = parseAgentEndpointsJson(row['tileAgentEndpoints']);
   if (tileEndpoints !== null) summary.agentEndpoints = tileEndpoints;
+  const tileMeta = parseMetadataField(row['tileMetadata']);
+  if (tileMeta !== null) summary.metadata = tileMeta;
   return summary;
 }
 

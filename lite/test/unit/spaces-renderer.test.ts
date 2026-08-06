@@ -38,6 +38,12 @@ interface RendererTestHandle {
   buildHexMazeLogo(): SVGSVGElement;
   parseKnowledgePreview(head: string | undefined): { intro: string; domains: string[] };
   shortStageLabel(stage: string): string;
+  buildTileHoverText(item: unknown): string | null;
+  buildMemberPickerRow(
+    entry: { kind: 'Person' | 'Agent'; id: string; name: string; email: string },
+    onPick: () => void
+  ): HTMLElement;
+  buildExistingAssetRow(item: unknown, currentSpaceId: string): HTMLElement;
   buildSpaceChip(chip: TestChip): HTMLElement;
   buildDetailPane(item: TestItem, onClose: () => void): HTMLElement;
   buildBinaryPreview(item: TestItem, url: string): HTMLElement;
@@ -86,6 +92,7 @@ interface TestItemSummary {
   contentHead?: string;
   agentType?: string;
   agentEndpoints?: Array<{ kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }>;
+  metadata?: Record<string, unknown>;
   sourceUrl?: string;
   fileKey?: string;
   otherSpaces: TestChip[];
@@ -414,12 +421,19 @@ describe('parsePlaybookSteps', () => {
     expect(handle().parsePlaybookSteps('   ')).toEqual([]);
   });
 
-  it('drops a final step cut mid-line by the excerpt cap', () => {
-    expect(handle().parsePlaybookSteps('1. First step.\n2. Second step.\n3. Third st')).toEqual([
-      'First step.',
-      'Second step.',
+  it('drops the final step ONLY for cap-length excerpts cut mid-line', () => {
+    // At the 280-char cap with no terminator → the tail is a cut line.
+    const filler = '1. ' + 'Long opening step that pads the excerpt toward the cap. '.repeat(4);
+    const capped = (filler + '\n2. Second step.\n3. Third st').slice(0, 280);
+    const cappedSteps = handle().parsePlaybookSteps(capped.padEnd(280, 'x'));
+    expect(cappedSteps[cappedSteps.length - 1]).not.toMatch(/x$/);
+    // A SHORT complete list keeps its last step even without trailing
+    // punctuation (the 2026-08-06 review catch).
+    expect(handle().parsePlaybookSteps('1. Draft the plan\n2. Review with team\n3. Publish')).toEqual([
+      'Draft the plan',
+      'Review with team',
+      'Publish',
     ]);
-    // A cleanly-terminated final line stays.
     expect(handle().parsePlaybookSteps('1. First.\n2. Second.')).toEqual(['First.', 'Second.']);
   });
 });
@@ -693,6 +707,98 @@ describe('journey tile', () => {
     expect(card.querySelector('.spaces-card-excerpt')?.textContent).toBe(
       'A blueprint narrative.'
     );
+  });
+});
+
+// ─── Tile hover text (objectives on mouse-over) ─────────────────────────
+
+describe('buildTileHoverText', () => {
+  it('composes objective, summary, description, and tags', () => {
+    const text = handle().buildTileHoverText(
+      baseItem({
+        description: 'Deck for the working session.',
+        metadata: {
+          objective: 'Close the InfoBip pilot.',
+          ai_summary: 'A 12-page partnership deck.',
+          ai_tags: ['infobip', 'pilot', 'partnership'],
+        },
+      }) as never
+    );
+    expect(text).toContain('Objective: Close the InfoBip pilot.');
+    expect(text).toContain('Summary: A 12-page partnership deck.');
+    expect(text).toContain('Deck for the working session.');
+    expect(text).toContain('Tags: infobip, pilot, partnership');
+  });
+
+  it('returns null when there is nothing to show (no empty tooltip)', () => {
+    expect(handle().buildTileHoverText(baseItem() as never)).toBeNull();
+  });
+
+  it('sets the card title attribute only when hover text exists', () => {
+    const withMeta = handle().buildItemCard(
+      baseItem({ metadata: { objective: 'Ship it.' } }),
+      false
+    );
+    expect(withMeta.getAttribute('title')).toContain('Objective: Ship it.');
+    const bare = handle().buildItemCard(baseItem(), false);
+    expect(bare.getAttribute('title')).toBeNull();
+  });
+});
+
+// ─── Member picker rows ─────────────────────────────────────────────────
+
+describe('buildMemberPickerRow', () => {
+  it('renders kind badge, name, and id hint; click fires onPick', () => {
+    let picked = 0;
+    const row = handle().buildMemberPickerRow(
+      { kind: 'Person', id: 'dana@onereach.com', name: 'Dana', email: 'dana@onereach.com' },
+      () => {
+        picked++;
+      }
+    );
+    expect(row.querySelector('.spaces-member-picker-kind')?.textContent).toBe('PERSON');
+    expect(row.querySelector('.spaces-member-picker-name')?.textContent).toBe('Dana');
+    expect(row.querySelector('.spaces-member-picker-id')?.textContent).toBe('dana@onereach.com');
+    (row as HTMLButtonElement).click();
+    expect(picked).toBe(1);
+  });
+
+  it('agents get the agent badge', () => {
+    const row = handle().buildMemberPickerRow(
+      { kind: 'Agent', id: 'agent-1', name: 'Risk Analyst', email: '' },
+      () => undefined
+    );
+    expect(row.querySelector('.spaces-member-picker-kind')?.textContent).toBe('AGENT');
+  });
+});
+
+// ─── Existing-asset rows ────────────────────────────────────────────────
+
+describe('buildExistingAssetRow', () => {
+  it('shows title, kind, spaces, and an enabled Add button', () => {
+    const row = handle().buildExistingAssetRow(
+      baseItem({
+        title: 'Q3 Deck',
+        kind: 'document',
+        otherSpaces: [{ id: 'sp-a', name: 'Marketing' }],
+      }) as never,
+      'sp-current'
+    );
+    expect(row.querySelector('.spaces-agent-result-name')?.textContent).toBe('Q3 Deck');
+    expect(row.querySelector('.spaces-agent-result-desc')?.textContent).toBe('In: Marketing');
+    const add = row.querySelector<HTMLButtonElement>('.spaces-existing-row-add');
+    expect(add?.disabled).toBe(false);
+    expect(add?.textContent).toBe('+ Add');
+  });
+
+  it('disables the button when the asset is already in the space', () => {
+    const row = handle().buildExistingAssetRow(
+      baseItem({ otherSpaces: [{ id: 'sp-current', name: 'Here' }] }) as never,
+      'sp-current'
+    );
+    const add = row.querySelector<HTMLButtonElement>('.spaces-existing-row-add');
+    expect(add?.disabled).toBe(true);
+    expect(add?.textContent).toBe('Added ✓');
   });
 });
 
