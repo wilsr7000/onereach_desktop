@@ -31,6 +31,16 @@ export interface InitTrayOptions {
    * one-click access to the three most-used surfaces.
    */
   onOpenSpaces?: () => void;
+  /**
+   * Optional: open the Report a Bug modal from the context menu.
+   *
+   * The tray is the ONE surface that is still reachable when the app is
+   * misbehaving -- a window that won't load, a login that spins, a main
+   * window hidden behind a broken state. Those are exactly the moments
+   * a user wants to file a bug, and until now the only entry point was
+   * the Help menu, which needs a functioning window to reach.
+   */
+  onReportBug?: () => void;
   /** Optional: quit handler. Defaults to `app.quit()`. */
   onQuit?: () => void;
   /**
@@ -490,6 +500,9 @@ export function buildTrayMenuTemplate(
   }
   if (opts.onOpenHelp !== undefined) {
     template.push({ label: 'Onereach.ai Lite Help', click: opts.onOpenHelp });
+  }
+  if (opts.onReportBug !== undefined) {
+    template.push({ label: 'Report a Bug…', click: opts.onReportBug });
   }
   template.push({ type: 'separator' });
   template.push({

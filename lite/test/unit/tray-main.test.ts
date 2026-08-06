@@ -148,6 +148,31 @@ describe('buildTrayMenuTemplate', () => {
     expect(labels).toContain('Quit Onereach.ai Lite');
   });
 
+  // The tray is the only surface still reachable when a window won't
+  // load or a login spins -- which is exactly when someone wants to
+  // file a bug. Before this, the sole entry point was the Help menu,
+  // which needs a working window to reach.
+  it('offers Report a Bug when a handler is supplied, and wires it', () => {
+    let clicked = 0;
+    const template = buildTrayMenuTemplate({
+      getMainWindow: (() => null) as GetMain as () => never,
+      onReportBug: () => {
+        clicked += 1;
+      },
+    });
+    const entry = template.find((t) => t.label === 'Report a Bug…');
+    expect(entry, 'tray must expose a bug-report entry point').toBeDefined();
+    (entry?.click as (() => void) | undefined)?.();
+    expect(clicked).toBe(1);
+  });
+
+  it('omits Report a Bug when no handler is supplied', () => {
+    const template = buildTrayMenuTemplate({
+      getMainWindow: (() => null) as GetMain as () => never,
+    });
+    expect(template.some((t) => t.label === 'Report a Bug…')).toBe(false);
+  });
+
   it('omits Spaces / Settings / Help when no handler is provided', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => null) as GetMain as () => never,

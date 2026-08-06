@@ -288,5 +288,15 @@ function defaultConfig(): StoreConfig {
     // and friends would surface a generic 401 to the user. Refusing
     // the operation up-front yields a clearer "sign in first" error.
     getActiveAccountId: () => getAuthApi().getSession('edison')?.accountId ?? null,
+    // Mirror each saved report into the "Onereach.ai Lite Bugs" Space
+    // so filed bugs are visible and triageable alongside every other
+    // kind of work -- KV stays the system of record. Soft-fails by
+    // contract: see `mirrorToGraph` on StoreConfig.
+    mirrorToGraph: async (payload) => {
+      const { fileBugReportToGraph } = await import('./space.js');
+      const { getSpacesApi } = await import('../spaces/api.js');
+      const result = await fileBugReportToGraph(payload, getSpacesApi());
+      return { filed: result.filed, ...(result.error !== undefined ? { error: result.error } : {}) };
+    },
   };
 }

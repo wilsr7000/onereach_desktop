@@ -665,6 +665,7 @@ app
         onOpenSettings: () => settingsHandle?.open(),
         onOpenHelp: () => helpHandle?.open(),
         onOpenSpaces: () => spacesHandle?.open(),
+        onReportBug: () => openBugReportModal(),
         logger: {
           info: (msg, data) => logQueue.info('tray', msg, data),
           warn: (msg, data) => logQueue.warn('tray', msg, data),

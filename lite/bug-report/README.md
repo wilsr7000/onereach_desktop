@@ -17,6 +17,27 @@ User-filed bug reports with mandatory PII/secret redaction, KV-backed CRUD, and 
 
 Bug reports are user-filed records of "this app misbehaved". Each report carries the user's description, the app version + platform, the last several log lines, and redacted notes/status mutations from triage. Records live in the Edison KV store under collection `lite-bugs`, keyed by ISO timestamp.
 
+### Where reports go
+
+KV is the **system of record** — it carries the redaction guarantee, the triage status, and the CRUD surface the modal drives. What KV does not give anyone is a place to *look*, so each saved report is also mirrored into the graph as a text item in a well-known Space (see [`space.ts`](space.ts)):
+
+| | KV (`lite-bugs`) | Graph (`Onereach.ai Lite Bugs` Space) |
+|---|---|---|
+| Role | System of record | Visibility + triage surface |
+| Written by | `store.save()` | `mirrorToGraph` hook, after the KV write |
+| On failure | `save()` **throws** | **Soft-fails** — user still sees "report sent" |
+
+The Space is created on first use (`ensureLiteBugsSpace`), idempotently and race-safely: a create that loses to another client comes back as a duplicate-name error, which is treated as success — we re-list and adopt the winner. Items carry `metadata.bugReportTimestamp`, which is the join back to the KV record.
+
+**The mirror is additive and must stay that way.** A graph outage costs visibility, not the report. `save()` swallows every mirror failure (rejection, throw, soft-fail) and still returns `kvWritten: true` — a bug reporter that fails when the backend is unhealthy is broken exactly when it is needed most.
+
+### Entry points
+
+| Surface | Path | Notes |
+|---|---|---|
+| Help menu | Help → Report a Bug… | Needs a working window to reach. |
+| Tray menu | tray icon → Report a Bug… | Reachable when a window won't load or login is stuck — i.e. when people most want to file. |
+
 Mandatory PII/secret redaction runs on every save and every notes update — the user cannot disable it. See [`bug-report-redaction-patterns.ts`](../bug-report-redaction-patterns.ts) for the regex catalog.
 
 ```typescript

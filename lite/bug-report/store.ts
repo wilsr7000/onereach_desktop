@@ -125,6 +125,18 @@ export interface StoreConfig {
    * back to allowing all operations -- preserves backward compat.
    */
   getActiveAccountId?: () => string | null;
+  /**
+   * Optional post-save mirror. Called with the redacted payload AFTER a
+   * successful KV write, to file the report into the Onereach.ai Lite
+   * Bugs Space so it is visible alongside every other kind of work.
+   *
+   * Deliberately fire-and-report, never fire-and-block: `save()` awaits
+   * it but treats ANY rejection as non-fatal and still returns
+   * `kvWritten: true`. The KV write is what saved the report; a graph
+   * outage must not turn a filed bug into a failed one. Wired in
+   * `lite/bug-report/api.ts` to `fileBugReportToGraph`.
+   */
+  mirrorToGraph?: (payload: BugReportPayload) => Promise<{ filed: boolean; error?: string }>;
 }
 
 /**
@@ -145,6 +157,7 @@ export class BugReportStore {
   private readonly log: NonNullable<StoreConfig['logger']>;
   private readonly spanEmitter: NonNullable<StoreConfig['spanEmitter']> | null;
   private readonly getActiveAccountId: NonNullable<StoreConfig['getActiveAccountId']> | null;
+  private readonly mirrorToGraph: NonNullable<StoreConfig['mirrorToGraph']> | null;
 
   constructor(config: StoreConfig = {}) {
     this.kv = config.kvApi ?? getKVApi();
@@ -155,6 +168,35 @@ export class BugReportStore {
       });
     this.spanEmitter = config.spanEmitter ?? null;
     this.getActiveAccountId = config.getActiveAccountId ?? null;
+    this.mirrorToGraph = config.mirrorToGraph ?? null;
+  }
+
+  /**
+   * Mirror a saved report into the bugs Space. Swallows EVERYTHING --
+   * a rejected promise, a thrown synchronous error, a soft-failed
+   * result. By the time this runs the report is already in KV, so the
+   * only thing a failure here costs is graph visibility, and the user
+   * must still be told their report was filed. Failures are logged so
+   * the gap is diagnosable rather than silent.
+   */
+  private async mirrorToGraphSafely(payload: BugReportPayload): Promise<void> {
+    if (this.mirrorToGraph === null) return;
+    try {
+      const result = await this.mirrorToGraph(payload);
+      if (result.filed) {
+        this.log('info', 'store: graph mirror ok', { key: payload.timestamp });
+      } else {
+        this.log('warn', 'store: graph mirror skipped', {
+          key: payload.timestamp,
+          error: result.error ?? 'unknown',
+        });
+      }
+    } catch (err) {
+      this.log('warn', 'store: graph mirror threw', {
+        key: payload.timestamp,
+        error: (err as Error).message,
+      });
+    }
   }
 
   /**
@@ -186,6 +228,7 @@ export class BugReportStore {
     try {
       await this.kv.set(KV_COLLECTION, payload.timestamp, payload);
       this.log('info', 'store: kv save ok', { key: payload.timestamp });
+      await this.mirrorToGraphSafely(payload);
       span?.finish({ kvWritten: true });
       return { kvWritten: true, kvError: null };
     } catch (err) {
