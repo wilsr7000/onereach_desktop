@@ -126,6 +126,8 @@ export const ITEM_KINDS = [
   'ticket',
   'agent',
   'transcript',
+  'knowledge',
+  'journey',
   'other',
 ] as const;
 
@@ -298,12 +300,16 @@ export interface ItemSummary {
    */
   description?: string;
   /**
-   * First ~280 chars of `content` for playbook rows only (other kinds
-   * return null to keep list payloads lean). Lets the playbook tile
-   * parse plan steps even when `excerpt` was taken from the
-   * description.
+   * First ~280 chars of `content` for playbook / transcript /
+   * knowledge / journey rows (other kinds return null to keep list
+   * payloads lean). Lets special tiles parse structure even when
+   * `excerpt` was taken from the description.
    */
   contentHead?: string;
+  /** Agent rows only: the behavioral type driving the tile chip. */
+  agentType?: string;
+  /** Agent rows only: reachability endpoints for the tile chips. */
+  agentEndpoints?: AgentEndpoint[];
   /**
    * Spaces this item participates in OTHER than the currently-viewed
    * Space. Already permission-filtered server-side (Phase 0.5 Q4/Q6).

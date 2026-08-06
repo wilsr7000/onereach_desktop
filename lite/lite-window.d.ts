@@ -579,6 +579,8 @@ type LiteSpaceItemKind =
   | 'ticket'
   | 'agent'
   | 'transcript'
+  | 'knowledge'
+  | 'journey'
   | 'other';
 
 type LiteSpaceKind = 'user' | 'shared';
@@ -633,10 +635,14 @@ interface LiteSpaceItemSummary {
    *  (which may itself be derived from description OR content) — tiles
    *  that need both, like the playbook tile, read this directly. */
   description?: string;
-  /** First ~280 chars of `content` for playbook rows only (null for
-   *  other kinds) — lets the playbook tile parse plan steps even when
-   *  `excerpt` carries the description. */
+  /** First ~280 chars of `content` for playbook/transcript/knowledge/
+   *  journey rows (null for other kinds) — lets special tiles parse
+   *  structure even when `excerpt` carries the description. */
   contentHead?: string;
+  /** Agent rows only: behavioral type for the tile chip. */
+  agentType?: string;
+  /** Agent rows only: reachability endpoints for the tile chips. */
+  agentEndpoints?: LiteAgentEndpoint[];
   otherSpaces: LiteSpaceChipRef[];
   producedBy: LiteSpaceItemProvenance | null;
 }
@@ -760,6 +766,22 @@ interface LiteSpacesItemsBridge {
     endpoints?: LiteAgentEndpoint[];
     sourceUrl?: string;
     description?: string;
+    creatorId?: string;
+  }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
+  /** Search the account's agent library (graph :Agent nodes). */
+  agentLibrarySearch(
+    q: string,
+    limit?: number
+  ): Promise<
+    LiteSpacesIpcResult<
+      Array<{ id: string; name: string; description: string; agentType: string }>
+    >
+  >;
+  /** Add a LIBRARY agent to the Space — references the existing :Agent. */
+  createAgentFromLibrary(input: {
+    spaceId: string;
+    agentId: string;
+    endpoints?: LiteAgentEndpoint[];
     creatorId?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Sprint 1 — soft delete (default) or hard delete an asset. */

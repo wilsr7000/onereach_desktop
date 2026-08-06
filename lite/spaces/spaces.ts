@@ -3201,6 +3201,12 @@ function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
     case 'transcript':
       buildTranscriptTilePreview(item, preview);
       break;
+    case 'knowledge':
+      buildKnowledgeTilePreview(item, preview);
+      break;
+    case 'journey':
+      buildJourneyTilePreview(item, preview);
+      break;
     case 'ticket':
       buildTicketTilePreview(item, preview);
       break;
@@ -3703,6 +3709,188 @@ function buildTranscriptTilePreview(
 }
 
 /**
+ * Knowledge-model tile — the hexagon mark with a KNOWLEDGE MODEL chip,
+ * the ✎ description, and what it knows: domain chips parsed from the
+ * content's bullet lines plus the intro prose. Reads as "a mind with
+ * named domains," not a document.
+ */
+function buildKnowledgeTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  const logo = buildHexMazeLogo();
+  logo.classList.add('spaces-card-knowledge-hex');
+  preview.appendChild(logo);
+
+  const head = document.createElement('span');
+  head.className = 'spaces-card-knowledge-head';
+  head.setAttribute('aria-hidden', 'true');
+  const mark = document.createElement('span');
+  mark.className = 'spaces-card-knowledge-mark';
+  mark.textContent = '⬡';
+  head.appendChild(mark);
+  const label = document.createElement('span');
+  label.className = 'spaces-card-knowledge-label';
+  label.textContent = 'KNOWLEDGE MODEL';
+  head.appendChild(label);
+  preview.appendChild(head);
+
+  const description = (item.description ?? '').trim();
+  if (description.length > 0) {
+    const desc = document.createElement('span');
+    desc.className = 'spaces-card-playbook-desc';
+    const pen = document.createElement('span');
+    pen.className = 'spaces-card-playbook-desc-pen';
+    pen.textContent = '✎';
+    desc.appendChild(pen);
+    const text = document.createElement('span');
+    text.className = 'spaces-card-playbook-desc-text';
+    text.textContent = description;
+    desc.appendChild(text);
+    preview.appendChild(desc);
+  }
+
+  const parsed = parseKnowledgePreview(item.contentHead ?? item.excerpt);
+  if (parsed.intro.length > 0) {
+    const intro = document.createElement('p');
+    intro.className = 'spaces-card-knowledge-intro';
+    intro.textContent = parsed.intro;
+    preview.appendChild(intro);
+  }
+  if (parsed.domains.length > 0) {
+    const chips = document.createElement('span');
+    chips.className = 'spaces-card-knowledge-domains';
+    for (const domain of parsed.domains.slice(0, 4)) {
+      const chip = document.createElement('span');
+      chip.className = 'spaces-card-knowledge-domain';
+      chip.textContent = domain;
+      chips.appendChild(chip);
+    }
+    if (parsed.domains.length > 4) {
+      const more = document.createElement('span');
+      more.className = 'spaces-card-knowledge-more';
+      more.textContent = `+${parsed.domains.length - 4}`;
+      chips.appendChild(more);
+    }
+    preview.appendChild(chips);
+  }
+}
+
+/**
+ * Split a knowledge model's content head into intro prose + domain
+ * chips (its bullet lines, markers stripped). Exported for tests.
+ */
+export function parseKnowledgePreview(
+  head: string | undefined
+): { intro: string; domains: string[] } {
+  if (typeof head !== 'string' || head.trim().length === 0) {
+    return { intro: '', domains: [] };
+  }
+  const lines = head.split(/\r?\n/);
+  const domains: string[] = [];
+  const intro: string[] = [];
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.length === 0) continue;
+    const bullet = /^[-*•]\s+(.+)$/.exec(line);
+    if (bullet !== null) {
+      const text = (bullet[1] ?? '').replace(/\*\*/g, '').trim();
+      if (text.length > 0 && text.length <= 60) domains.push(text);
+      continue;
+    }
+    if (intro.length < 2 && !line.startsWith('#')) {
+      intro.push(line.replace(/\*\*/g, ''));
+    }
+  }
+  // Drop a cap-truncated final domain (mid-word cut).
+  if (head.length >= 278 && domains.length > 0 && !/[\s.!?)]$/.test(head)) {
+    domains.pop();
+  }
+  return { intro: intro.join(' ').slice(0, 160), domains };
+}
+
+/**
+ * Journey-map / service-blueprint tile — a JOURNEY chip and the stages
+ * parsed from the content rendered as a connected left-to-right flow.
+ */
+function buildJourneyTilePreview(
+  item: RendererItemSummary,
+  preview: HTMLElement
+): void {
+  const head = document.createElement('span');
+  head.className = 'spaces-card-journey-head';
+  head.setAttribute('aria-hidden', 'true');
+  const mark = document.createElement('span');
+  mark.className = 'spaces-card-journey-mark';
+  mark.textContent = '⇢';
+  head.appendChild(mark);
+  const label = document.createElement('span');
+  label.className = 'spaces-card-journey-label';
+  label.textContent = 'JOURNEY';
+  head.appendChild(label);
+  preview.appendChild(head);
+
+  const description = (item.description ?? '').trim();
+  if (description.length > 0) {
+    const desc = document.createElement('span');
+    desc.className = 'spaces-card-playbook-desc';
+    const pen = document.createElement('span');
+    pen.className = 'spaces-card-playbook-desc-pen';
+    pen.textContent = '✎';
+    desc.appendChild(pen);
+    const text = document.createElement('span');
+    text.className = 'spaces-card-playbook-desc-text';
+    text.textContent = description;
+    desc.appendChild(text);
+    preview.appendChild(desc);
+  }
+
+  // Stages share the playbook step grammar (numbered / bulleted /
+  // "Stage N:"-style headings all parse).
+  const stages = parsePlaybookSteps(item.contentHead ?? item.excerpt);
+  if (stages.length > 0) {
+    const flow = document.createElement('span');
+    flow.className = 'spaces-card-journey-flow';
+    const shown = stages.slice(0, 4);
+    for (let i = 0; i < shown.length; i++) {
+      if (i > 0) {
+        const arrow = document.createElement('span');
+        arrow.className = 'spaces-card-journey-arrow';
+        arrow.textContent = '→';
+        flow.appendChild(arrow);
+      }
+      const stage = document.createElement('span');
+      stage.className = 'spaces-card-journey-stage';
+      stage.textContent = shortStageLabel(shown[i] ?? '');
+      flow.appendChild(stage);
+    }
+    if (stages.length > shown.length) {
+      const more = document.createElement('span');
+      more.className = 'spaces-card-journey-more';
+      more.textContent = `+${stages.length - shown.length}`;
+      flow.appendChild(more);
+    }
+    preview.appendChild(flow);
+    return;
+  }
+
+  const excerpt = tileExcerptText(item.excerpt);
+  if (excerpt !== null && excerpt !== description) {
+    const paper = document.createElement('p');
+    paper.className = 'spaces-card-excerpt';
+    paper.textContent = excerpt;
+    preview.appendChild(paper);
+  }
+}
+
+/** First clause of a stage line, tightened for a flow chip. */
+export function shortStageLabel(stage: string): string {
+  const clause = stage.split(/[.:—–-]\s/)[0] ?? stage;
+  const words = clause.trim().split(/\s+/).slice(0, 3).join(' ');
+  return words.length > 24 ? `${words.slice(0, 23)}…` : words;
+}
+
+/**
  * Pull step lines out of a playbook excerpt. Recognizes the shapes
  * plans are actually written in — numbered lists, bullets, task-list
  * checkboxes, and "Step N:" headings — strips the markers, and drops
@@ -4003,17 +4191,114 @@ export function tileExcerptText(excerpt: string | undefined): string | null {
   return text;
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
 /**
- * Agent tile: a distinct violet surface (via `.spaces-card-preview-agent`)
- * with an agent glyph + a snippet of the OKF definition, so an agent
- * reads as something other than a document at a glance.
+ * The OneReach hexagon-maze mark, recreated as inline SVG: concentric
+ * hexagon rings with maze-like gaps around a dotted isometric cube.
+ * Vector so it stays crisp at tile size and tints per kind via
+ * `currentColor`. Swap point for the real raster asset: replace this
+ * builder's output with an <img> once the PNG lands in the repo.
+ */
+export function buildHexMazeLogo(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '-100 -100 200 200');
+  svg.setAttribute('class', 'spaces-hex-logo');
+  svg.setAttribute('aria-hidden', 'true');
+
+  const hexPoints = (r: number): string => {
+    const pts: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 2;
+      pts.push(`${(r * Math.cos(angle)).toFixed(1)},${(r * Math.sin(angle)).toFixed(1)}`);
+    }
+    return pts.join(' ');
+  };
+
+  // Concentric rings; per-ring dash pattern + rotation gives the
+  // maze-with-gaps read of the original mark.
+  for (let ring = 0; ring < 8; ring++) {
+    const r = 30 + ring * 9;
+    const hex = document.createElementNS(SVG_NS, 'polygon');
+    hex.setAttribute('points', hexPoints(r));
+    hex.setAttribute('fill', 'none');
+    hex.setAttribute('stroke', 'currentColor');
+    hex.setAttribute('stroke-width', '2.4');
+    const seg = 14 + ring * 5;
+    hex.setAttribute('stroke-dasharray', `${seg} ${4 + (ring % 3) * 3}`);
+    hex.setAttribute('stroke-dashoffset', String(ring * 11));
+    hex.setAttribute('transform', `rotate(${(ring % 2) * 6})`);
+    hex.setAttribute('opacity', String(0.35 + ring * 0.07));
+    svg.appendChild(hex);
+  }
+
+  // Central dotted cube (isometric): top diamond + two side faces.
+  const cube = document.createElementNS(SVG_NS, 'g');
+  cube.setAttribute('stroke', 'currentColor');
+  cube.setAttribute('fill', 'none');
+  cube.setAttribute('stroke-width', '2');
+  cube.setAttribute('stroke-dasharray', '3.5 3');
+  const faces = [
+    '0,-16 14,-8 0,0 -14,-8',   // top
+    '-14,-8 0,0 0,16 -14,8',    // left
+    '14,-8 0,0 0,16 14,8',      // right
+  ];
+  for (const pts of faces) {
+    const face = document.createElementNS(SVG_NS, 'polygon');
+    face.setAttribute('points', pts);
+    cube.appendChild(face);
+  }
+  svg.appendChild(cube);
+  return svg;
+}
+
+/**
+ * Agent tile v2 — the hexagon mark as the visual anchor, an AGENT chip
+ * with the behavioral type, reachability chips (MCP/API/SKILL), and a
+ * description/OKF snippet. Library-added and OKF-pasted agents render
+ * identically.
  */
 function buildAgentTilePreview(item: RendererItemSummary, preview: HTMLElement): void {
-  const glyph = document.createElement('span');
-  glyph.className = 'spaces-card-glyph spaces-card-glyph-agent';
-  glyph.setAttribute('aria-hidden', 'true');
-  glyph.textContent = '◈';
-  preview.appendChild(glyph);
+  const logo = buildHexMazeLogo();
+  logo.classList.add('spaces-card-agent-hex');
+  preview.appendChild(logo);
+
+  const head = document.createElement('span');
+  head.className = 'spaces-card-agent-head';
+  head.setAttribute('aria-hidden', 'true');
+  const mark = document.createElement('span');
+  mark.className = 'spaces-card-agent-mark';
+  mark.textContent = '◈';
+  head.appendChild(mark);
+  const label = document.createElement('span');
+  label.className = 'spaces-card-agent-label';
+  label.textContent = 'AGENT';
+  head.appendChild(label);
+  const agentType = (item.agentType ?? '').trim();
+  if (agentType.length > 0 && agentType !== 'other') {
+    const type = document.createElement('span');
+    type.className = 'spaces-card-agent-type';
+    type.textContent = agentType;
+    head.appendChild(type);
+  }
+  preview.appendChild(head);
+
+  const endpoints = item.agentEndpoints ?? [];
+  if (endpoints.length > 0) {
+    const chips = document.createElement('span');
+    chips.className = 'spaces-card-agent-endpoints';
+    const seen = new Set<string>();
+    for (const ep of endpoints) {
+      if (seen.has(ep.kind)) continue;
+      seen.add(ep.kind);
+      const chip = document.createElement('span');
+      chip.className = `spaces-card-agent-endpoint spaces-card-agent-endpoint-${ep.kind}`;
+      chip.textContent = ep.kind === 'api' ? 'RESTful' : ep.kind.toUpperCase();
+      chips.appendChild(chip);
+    }
+    preview.appendChild(chips);
+  }
+
   const excerpt = tileExcerptText(item.excerpt);
   if (excerpt !== null) {
     const body = document.createElement('p');
@@ -4902,6 +5187,8 @@ const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'video', label: 'Video' },
   { id: 'agent', label: 'Agent' },
   { id: 'transcript', label: 'Transcript' },
+  { id: 'knowledge', label: 'Knowledge' },
+  { id: 'journey', label: 'Journey' },
   { id: 'other', label: 'Other' },
 ];
 
@@ -8311,6 +8598,8 @@ const KIND_LABELS: Readonly<Record<string, string>> = {
   ticket: 'Ticket',
   agent: 'Agent',
   transcript: 'Transcript',
+  knowledge: 'Knowledge',
+  journey: 'Journey',
   other: 'Other',
 };
 
@@ -8410,6 +8699,10 @@ function messageFrom(err: unknown): string {
   tileExcerptText,
   parsePlaybookSteps,
   grabVideoFrame,
+  buildHexMazeLogo,
+  parseKnowledgePreview,
+  shortStageLabel,
+  buildAgentLibraryRow,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,
@@ -9683,7 +9976,7 @@ async function runItemsSearch(): Promise<void> {
 
 // ─── Sprint 1: new-asset modal + drag-drop upload + delete action ───────
 
-let newAssetMode: 'text' | 'upload' | 'agent' = 'text';
+let newAssetMode: 'text' | 'upload' | 'agent' | 'knowledge' = 'text';
 let newAssetFile: File | null = null;
 
 /** The reachability endpoint kinds shown in the add-agent dialog. */
@@ -9784,7 +10077,7 @@ function wireNewAssetDialog(): void {
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
       const mode = tab.getAttribute('data-asset-tab');
-      if (mode !== 'text' && mode !== 'upload' && mode !== 'agent') return;
+      if (mode !== 'text' && mode !== 'upload' && mode !== 'agent' && mode !== 'knowledge') return;
       switchNewAssetMode(mode);
     });
   });
@@ -9794,6 +10087,24 @@ function wireNewAssetDialog(): void {
       handleNewAssetFileSelection(file);
     });
   }
+  // Agent-library picker: source toggle + debounced search.
+  document.querySelectorAll<HTMLElement>('[data-agent-source]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const mode = btn.getAttribute('data-agent-source');
+      if (mode === 'library' || mode === 'okf') switchAgentSourceMode(mode);
+    });
+  });
+  const agentSearch = document.getElementById('spaces-new-asset-agent-search');
+  if (agentSearch instanceof HTMLInputElement) {
+    agentSearch.addEventListener('input', () => {
+      if (agentLibrarySearchTimer !== null) window.clearTimeout(agentLibrarySearchTimer);
+      agentLibrarySearchTimer = window.setTimeout(() => {
+        agentLibrarySearchTimer = null;
+        void runAgentLibrarySearch(agentSearch.value.trim());
+      }, 250);
+    });
+  }
+
   // Live transcript hint on the paste tab: when the pasted text looks
   // like a transcript, tell the user it will be formatted (debounced —
   // detection scans every line).
@@ -9867,7 +10178,7 @@ function handleNewAssetFileSelection(file: File | null): void {
   }
 }
 
-function switchNewAssetMode(mode: 'text' | 'upload' | 'agent'): void {
+function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge'): void {
   newAssetMode = mode;
   document.querySelectorAll<HTMLElement>('[data-asset-tab]').forEach((tab) => {
     const isActive = tab.getAttribute('data-asset-tab') === mode;
@@ -9877,6 +10188,129 @@ function switchNewAssetMode(mode: 'text' | 'upload' | 'agent'): void {
   document.querySelectorAll<HTMLElement>('[data-asset-pane]').forEach((pane) => {
     pane.hidden = pane.getAttribute('data-asset-pane') !== mode;
   });
+  // First visit to the Agent tab primes the library with the
+  // alphabetical head so the picker never opens empty.
+  if (mode === 'agent' && !agentLibraryLoadedOnce) {
+    agentLibraryLoadedOnce = true;
+    void runAgentLibrarySearch('');
+  }
+}
+
+// ─── Agent library picker ───────────────────────────────────────────────
+
+type AgentSourceMode = 'library' | 'okf';
+let agentSourceMode: AgentSourceMode = 'library';
+let agentLibrarySelection: { id: string; name: string } | null = null;
+let agentLibraryLoadedOnce = false;
+let agentLibrarySearchTimer: number | null = null;
+
+function switchAgentSourceMode(mode: AgentSourceMode): void {
+  agentSourceMode = mode;
+  document
+    .querySelectorAll<HTMLElement>('[data-agent-source]')
+    .forEach((btn) => {
+      btn.classList.toggle('is-active', btn.getAttribute('data-agent-source') === mode);
+    });
+  document
+    .querySelectorAll<HTMLElement>('[data-agent-source-pane]')
+    .forEach((pane) => {
+      pane.hidden = pane.getAttribute('data-agent-source-pane') !== mode;
+    });
+}
+
+async function runAgentLibrarySearch(q: string): Promise<void> {
+  const results = document.getElementById('spaces-new-asset-agent-results');
+  const bridge = window.lite?.spaces;
+  if (results === null || bridge === undefined) return;
+  results.replaceChildren(buildAgentLibraryStatus('Searching the library…'));
+  try {
+    const envelope = await bridge.items.agentLibrarySearch(q, 25);
+    if (envelope.ok === false) {
+      results.replaceChildren(buildAgentLibraryStatus(envelope.error.message));
+      return;
+    }
+    renderAgentLibraryResults(results, envelope.value);
+  } catch (err) {
+    results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
+  }
+}
+
+function buildAgentLibraryStatus(text: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'spaces-agent-results-status';
+  el.textContent = text;
+  return el;
+}
+
+function renderAgentLibraryResults(
+  container: HTMLElement,
+  entries: Array<{ id: string; name: string; description: string; agentType: string }>
+): void {
+  container.replaceChildren();
+  if (entries.length === 0) {
+    container.appendChild(buildAgentLibraryStatus('No agents matched.'));
+    return;
+  }
+  for (const entry of entries) {
+    container.appendChild(buildAgentLibraryRow(entry));
+  }
+}
+
+/** One selectable library row: name + type badge + description snippet. */
+export function buildAgentLibraryRow(entry: {
+  id: string;
+  name: string;
+  description: string;
+  agentType: string;
+}): HTMLElement {
+  const row = document.createElement('button');
+  row.type = 'button';
+  row.className = 'spaces-agent-result';
+  row.setAttribute('role', 'option');
+  row.setAttribute('data-agent-id', entry.id);
+  if (agentLibrarySelection?.id === entry.id) row.classList.add('is-selected');
+
+  const top = document.createElement('span');
+  top.className = 'spaces-agent-result-top';
+  const name = document.createElement('span');
+  name.className = 'spaces-agent-result-name';
+  name.textContent = entry.name;
+  top.appendChild(name);
+  const type = document.createElement('span');
+  type.className = 'spaces-agent-result-type';
+  type.textContent = entry.agentType;
+  top.appendChild(type);
+  row.appendChild(top);
+
+  if (entry.description.trim().length > 0) {
+    const desc = document.createElement('span');
+    desc.className = 'spaces-agent-result-desc';
+    desc.textContent = entry.description;
+    row.appendChild(desc);
+  }
+
+  row.addEventListener('click', () => {
+    agentLibrarySelection = { id: entry.id, name: entry.name };
+    const container = row.parentElement;
+    container
+      ?.querySelectorAll('.spaces-agent-result.is-selected')
+      .forEach((el) => el.classList.remove('is-selected'));
+    row.classList.add('is-selected');
+  });
+  return row;
+}
+
+function resetAgentLibraryPicker(): void {
+  agentLibrarySelection = null;
+  const search = document.getElementById('spaces-new-asset-agent-search');
+  if (search instanceof HTMLInputElement) search.value = '';
+  const results = document.getElementById('spaces-new-asset-agent-results');
+  if (results !== null) {
+    results
+      .querySelectorAll('.spaces-agent-result.is-selected')
+      .forEach((el) => el.classList.remove('is-selected'));
+  }
+  switchAgentSourceMode('library');
 }
 
 function openNewAssetDialog(presetFile: File | null = null): void {
@@ -9895,6 +10329,11 @@ function openNewAssetDialog(presetFile: File | null = null): void {
   const agentInput = document.getElementById('spaces-new-asset-agent-input');
   if (agentInput instanceof HTMLTextAreaElement) agentInput.value = '';
   clearAgentEndpointFields();
+  resetAgentLibraryPicker();
+  const knowledgeInput = document.getElementById('spaces-new-asset-knowledge-input');
+  if (knowledgeInput instanceof HTMLTextAreaElement) knowledgeInput.value = '';
+  const knowledgeEndpoint = document.getElementById('spaces-new-asset-knowledge-endpoint');
+  if (knowledgeEndpoint instanceof HTMLInputElement) knowledgeEndpoint.value = '';
   // Reset the file chip (and clear stashed file).
   handleNewAssetFileSelection(null);
   if (error !== null) {
@@ -9962,6 +10401,33 @@ async function submitNewAsset(): Promise<void> {
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
+      // Library mode: reference the selected graph :Agent directly — no
+      // AI conversion; endpoints from the reachability inputs attach to
+      // the existing agent.
+      if (agentSourceMode === 'library') {
+        if (agentLibrarySelection === null) {
+          showDialogError(error, 'Pick an agent from the library first.');
+          if (submit instanceof HTMLButtonElement) submit.disabled = false;
+          return;
+        }
+        const endpoints = collectAgentEndpoints();
+        const envelope = await bridge.items.createAgentFromLibrary({
+          spaceId,
+          agentId: agentLibrarySelection.id,
+          ...(endpoints.length > 0 ? { endpoints } : {}),
+          ...(creatorId !== null ? { creatorId } : {}),
+        });
+        if (envelope.ok === false) {
+          showDialogError(error, envelope.error.message);
+          if (submit instanceof HTMLButtonElement) submit.disabled = false;
+          return;
+        }
+        const pickedName = agentLibrarySelection.name;
+        closeNewAssetDialog();
+        showToast(`Added agent "${pickedName}" from the library`);
+        await loadItems();
+        return;
+      }
       const agentInput = document.getElementById('spaces-new-asset-agent-input');
       const source =
         agentInput instanceof HTMLTextAreaElement ? agentInput.value.trim() : '';
@@ -10012,7 +10478,41 @@ async function submitNewAsset(): Promise<void> {
       await loadItems();
       return;
     }
-    if (newAssetMode === 'upload' && newAssetFile !== null) {
+    if (newAssetMode === 'knowledge') {
+      const knowledgeInput = document.getElementById('spaces-new-asset-knowledge-input');
+      const endpointInput = document.getElementById('spaces-new-asset-knowledge-endpoint');
+      const body =
+        knowledgeInput instanceof HTMLTextAreaElement ? knowledgeInput.value.trim() : '';
+      if (body.length === 0) {
+        showDialogError(error, "Describe what the model knows — that's the asset.");
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      const endpoint =
+        endpointInput instanceof HTMLInputElement ? endpointInput.value.trim() : '';
+      const envelope = await bridge.items.create({
+        spaceId,
+        title,
+        kind: 'knowledge',
+        content: body,
+        mimeType: 'text/markdown',
+        metadata: {
+          ...(endpoint.length > 0 ? { knowledge_endpoint: endpoint } : {}),
+        },
+        ...(creatorId !== null ? { creatorId } : {}),
+      });
+      if (envelope.ok === false) {
+        showDialogError(error, envelope.error.message);
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      createdEnrich = {
+        id: envelope.value.id,
+        kind: 'knowledge',
+        mimeType: 'text/markdown',
+        hasContent: true,
+      };
+    } else if (newAssetMode === 'upload' && newAssetFile !== null) {
       const file = newAssetFile;
       // Auto-extract metadata before upload — image dimensions, audio/
       // video duration, PDF page count, CSV row/col, etc. Best-effort

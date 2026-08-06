@@ -53,6 +53,10 @@ const SUPPORTED_ASSETS: AssetCase[] = [
   { kind: 'playbook', binary: false },
   // Transcripts are converted to markdown on intake and render as text.
   { kind: 'transcript', binary: false },
+  // Knowledge models: inline markdown describing what the model knows.
+  { kind: 'knowledge', binary: false },
+  // Journey maps / service blueprints: inline markdown of stages.
+  { kind: 'journey', binary: false },
   { kind: 'image', mimeType: 'image/png', binary: true, expectTag: 'IMG' },
   { kind: 'audio', mimeType: 'audio/mpeg', binary: true, expectTag: 'AUDIO' },
   { kind: 'video', mimeType: 'video/mp4', binary: true, expectTag: 'VIDEO' },

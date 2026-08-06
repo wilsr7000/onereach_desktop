@@ -129,6 +129,8 @@ import type {
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
+  CreateAgentFromLibraryInput,
+  AgentLibraryEntry,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -538,6 +540,14 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     async createAgent(input: CreateAgentInput): Promise<Item> {
       const result = await client.createAgent(input);
+      nukeReadCache();
+      return result;
+    },
+    async searchAgentLibrary(q: string, limit?: number): Promise<AgentLibraryEntry[]> {
+      return client.searchAgentLibrary(q, limit);
+    },
+    async createAgentFromLibrary(input: CreateAgentFromLibraryInput): Promise<Item> {
+      const result = await client.createAgentFromLibrary(input);
       nukeReadCache();
       return result;
     },

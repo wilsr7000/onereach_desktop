@@ -88,6 +88,8 @@ const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
 const SPACES_ITEMS_CREATE_BINARY = 'lite:spaces:items:createBinary';
 const SPACES_ITEMS_CREATE_AGENT = 'lite:spaces:items:createAgent';
+const SPACES_ITEMS_AGENT_LIBRARY_SEARCH = 'lite:spaces:items:agentLibrarySearch';
+const SPACES_ITEMS_CREATE_AGENT_FROM_LIBRARY = 'lite:spaces:items:createAgentFromLibrary';
 const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
 const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
 const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
@@ -595,6 +597,18 @@ interface SpacesItemsBridge {
     endpoints?: Array<{ kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }>;
     sourceUrl?: string;
     description?: string;
+    creatorId?: string;
+  }): Promise<SpacesIpcResultView<unknown>>;
+  /** Search the account's agent library (graph :Agent nodes). */
+  agentLibrarySearch(
+    q: string,
+    limit?: number
+  ): Promise<SpacesIpcResultView<Array<{ id: string; name: string; description: string; agentType: string }>>>;
+  /** Add a LIBRARY agent to the Space (references the existing :Agent). */
+  createAgentFromLibrary(input: {
+    spaceId: string;
+    agentId: string;
+    endpoints?: Array<{ kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }>;
     creatorId?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   delete(
@@ -1491,6 +1505,19 @@ const spaces: SpacesBridge = {
       >,
     createAgent: (input) =>
       ipcRenderer.invoke(SPACES_ITEMS_CREATE_AGENT, { input }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    agentLibrarySearch: (q, limit) =>
+      ipcRenderer.invoke(SPACES_ITEMS_AGENT_LIBRARY_SEARCH, {
+        q,
+        ...(limit !== undefined ? { limit } : {}),
+      }) as Promise<
+        SpacesIpcResultView<
+          Array<{ id: string; name: string; description: string; agentType: string }>
+        >
+      >,
+    createAgentFromLibrary: (input) =>
+      ipcRenderer.invoke(SPACES_ITEMS_CREATE_AGENT_FROM_LIBRARY, { input }) as Promise<
         SpacesIpcResultView<unknown>
       >,
     delete: (id, opts) =>

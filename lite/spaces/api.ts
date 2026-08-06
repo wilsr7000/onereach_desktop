@@ -55,6 +55,8 @@ import type {
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
+  CreateAgentFromLibraryInput,
+  AgentLibraryEntry,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -301,6 +303,18 @@ export interface SpacesItemsApi {
    *   missing spaceId; `SPACES_NOT_FOUND` if the target Space is missing.
    */
   createAgent(input: CreateAgentInput): Promise<Item>;
+
+  /**
+   * Search the account's agent library (graph `:Agent` nodes) by
+   * name/description substring for the "From library" picker.
+   */
+  searchAgentLibrary(q: string, limit?: number): Promise<AgentLibraryEntry[]>;
+
+  /**
+   * Add a LIBRARY agent to a Space — the asset `[:REPRESENTS]` the
+   * existing `:Agent` (no new agent node); endpoints attach to it.
+   */
+  createAgentFromLibrary(input: CreateAgentFromLibraryInput): Promise<Item>;
 
   /**
    * Delete an asset. Soft by default (sets `a.deletedAt`; reversible
@@ -699,6 +713,12 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async createAgent(_input: CreateAgentInput): Promise<Item> {
       throw notInitialized('items.createAgent');
+    },
+    async searchAgentLibrary(_q: string, _limit?: number): Promise<AgentLibraryEntry[]> {
+      throw notInitialized('items.searchAgentLibrary');
+    },
+    async createAgentFromLibrary(_input: CreateAgentFromLibraryInput): Promise<Item> {
+      throw notInitialized('items.createAgentFromLibrary');
     },
     async delete(_id: string, _opts?: DeleteAssetOpts): Promise<void> {
       throw notInitialized('items.delete');

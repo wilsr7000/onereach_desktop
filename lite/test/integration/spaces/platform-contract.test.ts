@@ -167,6 +167,8 @@ function buildStubConsumer(): {
       create: async (_input) => maybeFail({} as unknown as Item),
       createBinary: async (_input) => maybeFail({} as unknown as Item),
       createAgent: async (_input) => maybeFail({} as unknown as Item),
+      searchAgentLibrary: async (_q, _limit) => maybeFail([]),
+      createAgentFromLibrary: async (_input) => maybeFail({} as unknown as Item),
       delete: async (_id, _opts) => {
         maybeFail(undefined);
       },

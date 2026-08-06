@@ -41,6 +41,8 @@ import type {
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
+  CreateAgentFromLibraryInput,
+  AgentLibraryEntry,
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
@@ -94,6 +96,8 @@ export const SPACES_IPC = {
   ITEMS_CREATE: 'lite:spaces:items:create',
   ITEMS_CREATE_BINARY: 'lite:spaces:items:createBinary',
   ITEMS_CREATE_AGENT: 'lite:spaces:items:createAgent',
+  ITEMS_AGENT_LIBRARY_SEARCH: 'lite:spaces:items:agentLibrarySearch',
+  ITEMS_CREATE_AGENT_FROM_LIBRARY: 'lite:spaces:items:createAgentFromLibrary',
   ITEMS_DELETE: 'lite:spaces:items:delete',
   ITEMS_RESTORE: 'lite:spaces:items:restore',
   /** Sprint 3 — move / copy / search. */
@@ -853,6 +857,48 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? (payload?.input as CreateAgentInput)
             : ({ spaceId: '', name: '', okf: '', agentType: '' } as CreateAgentInput);
         const value = await getSpacesApi().items.createAgent(input);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_AGENT_LIBRARY_SEARCH,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { q?: unknown; limit?: unknown }
+    ): Promise<SpacesIpcResult<AgentLibraryEntry[]>> => {
+      try {
+        const q = typeof payload?.q === 'string' ? payload.q : '';
+        const limit =
+          typeof payload?.limit === 'number' && Number.isFinite(payload.limit)
+            ? payload.limit
+            : undefined;
+        const value = await getSpacesApi().items.searchAgentLibrary(
+          q,
+          ...(limit !== undefined ? [limit] : [])
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_CREATE_AGENT_FROM_LIBRARY,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const input =
+          payload?.input !== null && typeof payload?.input === 'object'
+            ? (payload?.input as CreateAgentFromLibraryInput)
+            : ({ spaceId: '', agentId: '' } as CreateAgentFromLibraryInput);
+        const value = await getSpacesApi().items.createAgentFromLibrary(input);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

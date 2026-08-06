@@ -64,6 +64,8 @@ import type {
   SpaceMember,
   CreateAssetInput,
   CreateAgentInput,
+  CreateAgentFromLibraryInput,
+  AgentLibraryEntry,
   AgentEndpoint,
   AgentEndpointKind,
   DeleteAssetOpts,
@@ -222,10 +224,14 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            [] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -269,10 +275,14 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            [x IN otherSpacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -409,10 +419,14 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            coalesce(a.description, '') AS description,
            coalesce(a.content, '') AS content,
            coalesce(a.size, a.fileSize, a.byteCount) AS size,
@@ -501,10 +515,14 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            CASE WHEN firstSpace IS NULL
                 THEN []
                 ELSE [{ id: firstSpace.id,
@@ -572,6 +590,57 @@ export const CYPHER = {
            coalesce(a.description, a.summary, '') AS description
     ORDER BY toLower(coalesce(a.name, a.id, '')) ASC
     LIMIT toInteger($limit)
+  `,
+
+  /**
+   * Agent library search — the account's `:Agent` nodes, filterable by
+   * name/description substring. Powers the "From library" picker in the
+   * Add-agent tab. Empty query returns the alphabetical head.
+   */
+  AGENT_LIBRARY_SEARCH: `
+    MATCH (g:Agent)
+    WHERE $q = ''
+       OR toLower(coalesce(g.name, g.title, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.description, g.summary, '')) CONTAINS toLower($q)
+    RETURN g.id AS id,
+           coalesce(g.name, g.title, g.id) AS name,
+           coalesce(g.description, g.summary, '') AS description,
+           coalesce(g.agentType, 'other') AS agentType
+    ORDER BY toLower(coalesce(g.name, g.id, '')) ASC
+    LIMIT toInteger($limit)
+  `,
+
+  /**
+   * Add a LIBRARY agent to a Space: a Space-facing `:Asset` that
+   * `[:REPRESENTS]` the EXISTING graph `:Agent` (no new agent node —
+   * that's `CREATE_AGENT`'s job for pasted OKF). Name/description are
+   * copied from the agent so tiles render without a join.
+   */
+  CREATE_AGENT_FROM_LIBRARY: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+    MATCH (g:Agent {id: $agentId})
+    CREATE (a:Asset {
+      id: $id,
+      type: 'agent',
+      name: coalesce(g.name, g.title, g.id),
+      title: coalesce(g.name, g.title, g.id),
+      content: coalesce(g.okf, g.definition, ''),
+      description: coalesce(g.description, g.summary, ''),
+      agentType: coalesce(g.agentType, 'other'),
+      agentRefId: g.id,
+      agentEndpoints: $agentEndpointsJson,
+      metadata: $metadata,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    MERGE (a)-[:BELONGS_TO]->(s)
+    MERGE (a)-[:REPRESENTS]->(g)
+    WITH a, g
+    OPTIONAL MATCH (p:Person {id: $creatorId})
+    FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+      MERGE (x)-[:CREATED]->(a))
+    RETURN a.id AS id, g.id AS agentId
   `,
 
   /**
@@ -870,10 +939,14 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
            coalesce(toString(a.updatedAt), toString(a.updated_at), '') AS updatedAt,
            coalesce(a.status, 'open') AS status,
@@ -1355,10 +1428,14 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript']
+           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN coalesce(a.agentType, 'other') ELSE NULL END AS tileAgentType,
+           CASE WHEN coalesce(a.type, a.assetType) = 'agent'
+                THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            [x IN spacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -2442,6 +2519,92 @@ export class SdkSpacesClient {
   }
 
   /**
+   * Search the account's agent library (graph `:Agent` nodes) by
+   * name/description substring. Empty query = alphabetical head.
+   */
+  async searchAgentLibrary(q: string, limit = 25): Promise<AgentLibraryEntry[]> {
+    const query = typeof q === 'string' ? q.trim() : '';
+    const cappedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
+    const rows = await this.run(CYPHER.AGENT_LIBRARY_SEARCH, {
+      q: query,
+      limit: cappedLimit,
+    });
+    return rows.map((r) => ({
+      id: requireString(r, 'id'),
+      name: optString(r, 'name') ?? '',
+      description: optString(r, 'description') ?? '',
+      agentType: optString(r, 'agentType') ?? 'other',
+    }));
+  }
+
+  /**
+   * Add a LIBRARY agent to a Space — references the existing `:Agent`
+   * via `[:REPRESENTS]` (no new agent node), copies name/description
+   * onto the asset, and registers any reachability endpoints on the
+   * EXISTING agent.
+   */
+  async createAgentFromLibrary(input: CreateAgentFromLibraryInput): Promise<Item> {
+    const spaceId = typeof input.spaceId === 'string' ? input.spaceId.trim() : '';
+    const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : '';
+    if (spaceId.length === 0 || agentId.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'Adding a library agent requires a Space and an agent.',
+        remediation: 'Open a Space, then pick an agent from the library.',
+        context: { op: 'createAgentFromLibrary' },
+      });
+    }
+    const creatorId =
+      typeof input.creatorId === 'string' && input.creatorId.length > 0
+        ? input.creatorId
+        : null;
+    const endpoints = normalizeAgentEndpoints(input.endpoints);
+    const agentEndpointsJson = endpoints.length > 0 ? JSON.stringify(endpoints) : '';
+    const id = generateAssetId();
+    const now = nowIso();
+    const rows = await this.run(CYPHER.CREATE_AGENT_FROM_LIBRARY, {
+      id,
+      spaceId,
+      agentId,
+      agentEndpointsJson,
+      metadata: stringifyMetadata(undefined),
+      creatorId,
+      now,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${spaceId} or agent ${agentId} not found`,
+        remediation: 'Refresh the library and try again.',
+        context: { spaceId, agentId },
+      });
+    }
+    for (const ep of endpoints) {
+      const epCypher = CYPHER.CREATE_AGENT_ENDPOINT.replace(
+        '__KIND_LABEL__',
+        sanitizeAgentTypeLabel(ep.kind)
+      );
+      await this.run(epCypher, {
+        agentId,
+        endpointId: generateAssetId(),
+        kind: ep.kind,
+        url: ep.url,
+        channels: ep.channels.join(','),
+        now,
+      });
+    }
+    const created = await this.getItemAfterCreate(id);
+    if (created === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Asset ${id} disappeared after creation`,
+        context: { id },
+      });
+    }
+    return created;
+  }
+
+  /**
    * Soft delete an asset (default) or hard delete (when
    * `opts.soft === false`). Soft is the boring default — reversible
    * via `restoreAsset`, and the asset disappears from every listing
@@ -3215,7 +3378,35 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
   if (description !== undefined) summary.description = description;
   const contentHead = optString(row, 'contentHead');
   if (contentHead !== undefined) summary.contentHead = contentHead;
+  const tileAgentType = optString(row, 'tileAgentType');
+  if (tileAgentType !== undefined) summary.agentType = tileAgentType;
+  const tileEndpoints = parseAgentEndpointsJson(row['tileAgentEndpoints']);
+  if (tileEndpoints !== null) summary.agentEndpoints = tileEndpoints;
   return summary;
+}
+
+/** Parse the `a.agentEndpoints` JSON property; null on junk/absence. */
+function parseAgentEndpointsJson(v: unknown): AgentEndpoint[] | null {
+  if (typeof v !== 'string' || v.trim().length === 0) return null;
+  try {
+    const parsed = JSON.parse(v) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    const out: AgentEndpoint[] = [];
+    for (const e of parsed) {
+      const kind = (e as { kind?: unknown })?.kind;
+      const url = (e as { url?: unknown })?.url;
+      if (kind !== 'mcp' && kind !== 'api' && kind !== 'skill') continue;
+      if (typeof url !== 'string' || url.length === 0) continue;
+      const rawChannels = (e as { channels?: unknown })?.channels;
+      const channels = Array.isArray(rawChannels)
+        ? rawChannels.filter((c): c is string => typeof c === 'string')
+        : [];
+      out.push({ kind, url, channels });
+    }
+    return out.length > 0 ? out : null;
+  } catch {
+    return null;
+  }
 }
 
 function toItem(row: Record<string, unknown>): Item {
@@ -3406,6 +3597,8 @@ const ITEM_KINDS: ReadonlySet<ItemKind> = new Set([
   'ticket',
   'agent',
   'transcript',
+  'knowledge',
+  'journey',
   'other',
 ]);
 

@@ -141,7 +141,13 @@ describe('CYPHER source strings', () => {
       // carry `description` for all kinds plus a playbook-only
       // `contentHead` (excerpt alone would collapse them).
       expect(q).toMatch(/AS description,/);
-      expect(q).toMatch(/coalesce\(a\.type, a\.assetType\) IN \['playbook', 'transcript'\]/);
+      expect(q).toMatch(
+        /coalesce\(a\.type, a\.assetType\) IN \['playbook', 'transcript', 'knowledge', 'journey'\]/
+      );
+      // Agent tiles need the behavioral type + endpoints without a
+      // full getItem round-trip.
+      expect(q).toMatch(/AS tileAgentType,/);
+      expect(q).toMatch(/AS tileAgentEndpoints,/);
       expect(q).toMatch(/AS contentHead,/);
     }
   });

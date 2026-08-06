@@ -35,6 +35,9 @@ interface RendererTestHandle {
   fileExtFamily(ext: string): string;
   parsePlaybookSteps(excerpt: string | undefined): string[];
   grabVideoFrame(dataUrl: string, timeoutMs?: number): Promise<string | null>;
+  buildHexMazeLogo(): SVGSVGElement;
+  parseKnowledgePreview(head: string | undefined): { intro: string; domains: string[] };
+  shortStageLabel(stage: string): string;
   buildSpaceChip(chip: TestChip): HTMLElement;
   buildDetailPane(item: TestItem, onClose: () => void): HTMLElement;
   buildBinaryPreview(item: TestItem, url: string): HTMLElement;
@@ -81,6 +84,8 @@ interface TestItemSummary {
   excerpt?: string;
   description?: string;
   contentHead?: string;
+  agentType?: string;
+  agentEndpoints?: Array<{ kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }>;
   sourceUrl?: string;
   fileKey?: string;
   otherSpaces: TestChip[];
@@ -564,6 +569,133 @@ describe('transcript tile preview', () => {
   });
 });
 
+// ─── Agent tiles v2 (hexagon + endpoints) ───────────────────────────────
+
+describe('agent tile v2', () => {
+  it('renders the hexagon mark, AGENT chip, type, and endpoint chips', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'agent',
+        title: 'Billing Bot',
+        agentType: 'workflow',
+        agentEndpoints: [
+          { kind: 'mcp', url: 'https://x/mcp', channels: ['web'] },
+          { kind: 'api', url: 'https://x/api', channels: [] },
+        ],
+        excerpt: 'Handles billing questions.',
+      }),
+      false
+    );
+    expect(card.querySelector('svg.spaces-hex-logo')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-agent-label')?.textContent).toBe('AGENT');
+    expect(card.querySelector('.spaces-card-agent-type')?.textContent).toBe('workflow');
+    const chips = Array.from(card.querySelectorAll('.spaces-card-agent-endpoint')).map(
+      (c) => c.textContent
+    );
+    expect(chips).toEqual(['MCP', 'RESTful']);
+    expect(card.querySelector('.spaces-card-agent-okf')?.textContent).toBe(
+      'Handles billing questions.'
+    );
+  });
+
+  it('renders cleanly with no type/endpoints (legacy agents)', () => {
+    const card = handle().buildItemCard(baseItem({ kind: 'agent' }), false);
+    expect(card.querySelector('svg.spaces-hex-logo')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-agent-type')).toBeNull();
+    expect(card.querySelectorAll('.spaces-card-agent-endpoint')).toHaveLength(0);
+  });
+});
+
+// ─── Knowledge tiles ────────────────────────────────────────────────────
+
+describe('knowledge tile', () => {
+  it('parses intro + domain chips from bullet lines', () => {
+    const parsed = handle().parseKnowledgePreview(
+      'Covers the billing domain end to end.\n- Refund policies\n- Carrier integrations\n- Escalation runbooks'
+    );
+    expect(parsed.intro).toBe('Covers the billing domain end to end.');
+    expect(parsed.domains).toEqual([
+      'Refund policies',
+      'Carrier integrations',
+      'Escalation runbooks',
+    ]);
+    expect(handle().parseKnowledgePreview(undefined)).toEqual({ intro: '', domains: [] });
+  });
+
+  it('renders the hexagon, KNOWLEDGE MODEL chip, intro, and domains', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'knowledge',
+        title: 'Billing KM',
+        description: 'The billing brain.',
+        contentHead:
+          'Everything support needs about billing.\n- Refunds\n- Chargebacks\n- Invoices\n- Tax rules\n- Credits',
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-preview-knowledge')).not.toBeNull();
+    expect(card.querySelector('svg.spaces-hex-logo')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-knowledge-label')?.textContent).toBe(
+      'KNOWLEDGE MODEL'
+    );
+    expect(card.querySelector('.spaces-card-playbook-desc-text')?.textContent).toBe(
+      'The billing brain.'
+    );
+    expect(card.querySelector('.spaces-card-knowledge-intro')?.textContent).toBe(
+      'Everything support needs about billing.'
+    );
+    const chips = Array.from(card.querySelectorAll('.spaces-card-knowledge-domain')).map(
+      (c) => c.textContent
+    );
+    expect(chips).toEqual(['Refunds', 'Chargebacks', 'Invoices', 'Tax rules']);
+    expect(card.querySelector('.spaces-card-knowledge-more')?.textContent).toBe('+1');
+    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Knowledge');
+  });
+});
+
+// ─── Journey tiles ──────────────────────────────────────────────────────
+
+describe('journey tile', () => {
+  it('tightens stage labels for flow chips', () => {
+    expect(handle().shortStageLabel('Awareness: user hears about us via ads.')).toBe(
+      'Awareness'
+    );
+    expect(handle().shortStageLabel('Compare plans side by side')).toBe('Compare plans side');
+  });
+
+  it('renders the JOURNEY chip and connected stage flow', () => {
+    const card = handle().buildItemCard(
+      baseItem({
+        kind: 'journey',
+        title: 'Onboarding journey',
+        contentHead:
+          '1. Awareness: ads and referrals.\n2. Signup: create the account.\n3. Activation: first agent live.\n4. Retention: weekly value.\n5. Advocacy: refers a friend.',
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-preview-journey')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-journey-label')?.textContent).toBe('JOURNEY');
+    const stages = Array.from(card.querySelectorAll('.spaces-card-journey-stage')).map(
+      (c) => c.textContent
+    );
+    expect(stages).toEqual(['Awareness', 'Signup', 'Activation', 'Retention']);
+    expect(card.querySelectorAll('.spaces-card-journey-arrow')).toHaveLength(3);
+    expect(card.querySelector('.spaces-card-journey-more')?.textContent).toBe('+1');
+    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Journey');
+  });
+
+  it('falls back to excerpt prose when no stages parse', () => {
+    const card = handle().buildItemCard(
+      baseItem({ kind: 'journey', excerpt: 'A blueprint narrative.' }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-journey-label')?.textContent).toBe('JOURNEY');
+    expect(card.querySelector('.spaces-card-excerpt')?.textContent).toBe(
+      'A blueprint narrative.'
+    );
+  });
+});
+
 // ─── Video tiles ────────────────────────────────────────────────────────
 
 describe('video tile frame grab', () => {
@@ -612,7 +744,9 @@ describe('video tile frame grab', () => {
     );
     expect(card.querySelector('.spaces-card-preview-agent')).not.toBeNull();
     expect(card.classList.contains('spaces-card-agent')).toBe(true);
-    expect(card.querySelector('.spaces-card-glyph-agent')).not.toBeNull();
+    // v2: the ◈ mark lives in the AGENT chip; the hexagon anchors the tile.
+    expect(card.querySelector('.spaces-card-agent-mark')?.textContent).toBe('◈');
+    expect(card.querySelector('svg.spaces-hex-logo')).not.toBeNull();
     expect(card.querySelector('.spaces-card-agent-okf')?.textContent).toBe('name: Support Bot');
     expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Agent');
   });

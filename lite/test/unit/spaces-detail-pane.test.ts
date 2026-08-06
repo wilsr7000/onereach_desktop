@@ -730,6 +730,8 @@ describe('buildKindReclassify', () => {
       'video',
       'agent',
       'transcript',
+      'knowledge',
+      'journey',
       'other',
     ]);
   });

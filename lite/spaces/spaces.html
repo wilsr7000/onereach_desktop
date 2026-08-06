@@ -142,6 +142,16 @@
             <span class="spaces-new-asset-tab-icon" aria-hidden="true">◈</span>
             <span>Add agent</span>
           </button>
+          <button
+            type="button"
+            role="tab"
+            class="spaces-new-asset-tab"
+            data-asset-tab="knowledge"
+            aria-selected="false"
+          >
+            <span class="spaces-new-asset-tab-icon" aria-hidden="true">⬡</span>
+            <span>Knowledge</span>
+          </button>
         </div>
 
         <form id="spaces-new-asset-form" class="spaces-new-asset-form">
@@ -197,18 +207,44 @@
           </div>
 
           <div class="spaces-new-asset-field" data-asset-pane="agent" hidden>
-            <div class="spaces-new-asset-label-row">
-              <label for="spaces-new-asset-agent-input" class="spaces-new-asset-label">Agent source</label>
-              <span class="spaces-new-asset-label-hint">Paste a URL or text — Lite converts it to OKF with AI</span>
+            <div class="spaces-agent-source-toggle" role="tablist" aria-label="Agent source">
+              <button type="button" class="spaces-agent-source-btn is-active" data-agent-source="library">
+                From library
+              </button>
+              <button type="button" class="spaces-agent-source-btn" data-agent-source="okf">
+                Paste OKF
+              </button>
             </div>
-            <textarea
-              id="spaces-new-asset-agent-input"
-              class="spaces-new-asset-textarea"
-              rows="10"
-              placeholder="Paste an OKF URL, or the agent's definition text…"
-              spellcheck="false"
-            ></textarea>
-            <p class="spaces-new-asset-label-hint">Title is optional for agents — AI will suggest a name.</p>
+
+            <div data-agent-source-pane="library">
+              <div class="spaces-new-asset-label-row">
+                <label for="spaces-new-asset-agent-search" class="spaces-new-asset-label">Agent library</label>
+                <span class="spaces-new-asset-label-hint">Agents from your account's graph — search, then pick one</span>
+              </div>
+              <input
+                type="text"
+                id="spaces-new-asset-agent-search"
+                class="spaces-new-asset-input"
+                placeholder="Search agents by name or description…"
+                autocomplete="off"
+              />
+              <div id="spaces-new-asset-agent-results" class="spaces-agent-results" role="listbox"></div>
+            </div>
+
+            <div data-agent-source-pane="okf" hidden>
+              <div class="spaces-new-asset-label-row">
+                <label for="spaces-new-asset-agent-input" class="spaces-new-asset-label">Agent source</label>
+                <span class="spaces-new-asset-label-hint">Paste a URL or text — Lite converts it to OKF with AI</span>
+              </div>
+              <textarea
+                id="spaces-new-asset-agent-input"
+                class="spaces-new-asset-textarea"
+                rows="10"
+                placeholder="Paste an OKF URL, or the agent's definition text…"
+                spellcheck="false"
+              ></textarea>
+              <p class="spaces-new-asset-label-hint">Title is optional for agents — AI will suggest a name.</p>
+            </div>
 
             <div class="spaces-new-asset-endpoints">
               <div class="spaces-new-asset-label-row">
@@ -231,6 +267,31 @@
                 <input type="text" id="spaces-new-asset-agent-skill-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. voice, sms)" autocomplete="off" />
               </div>
             </div>
+          </div>
+
+          <div class="spaces-new-asset-field" data-asset-pane="knowledge" hidden>
+            <div class="spaces-new-asset-label-row">
+              <label for="spaces-new-asset-knowledge-input" class="spaces-new-asset-label">What it knows</label>
+              <span class="spaces-new-asset-label-hint">Describe the model's knowledge — bullet lines become domain chips</span>
+            </div>
+            <textarea
+              id="spaces-new-asset-knowledge-input"
+              class="spaces-new-asset-textarea"
+              rows="9"
+              placeholder="A short intro sentence, then bullet the domains…&#10;&#10;- Billing policies and refunds&#10;- Carrier integrations (SMS, WhatsApp)&#10;- Escalation runbooks"
+              spellcheck="true"
+            ></textarea>
+            <div class="spaces-new-asset-label-row">
+              <label for="spaces-new-asset-knowledge-endpoint" class="spaces-new-asset-label">Endpoint</label>
+              <span class="spaces-new-asset-label-hint">Optional — where the model is queryable</span>
+            </div>
+            <input
+              type="url"
+              id="spaces-new-asset-knowledge-endpoint"
+              class="spaces-new-asset-input"
+              placeholder="https://…/query"
+              autocomplete="off"
+            />
           </div>
 
           <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>
