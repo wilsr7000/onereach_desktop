@@ -34,6 +34,12 @@ const MIN_WIDTH = 920;
 const MIN_HEIGHT = 600;
 /** Debounce window for resize/move tail-saves. Short enough to feel snappy, long enough not to thrash KV. */
 const SAVE_DEBOUNCE_MS = 500;
+/**
+ * How long the window stays hidden waiting to be positioned before it
+ * is shown centered anyway. Bounds come from a KV read; if that read is
+ * slow or hung, an unshown window looks exactly like a broken one.
+ */
+const POSITION_TIMEOUT_MS = 1_200;
 
 interface SpacesWindowConfig {
   parent: BrowserWindow | null;
@@ -199,11 +205,45 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
   const loader = config.loadBounds ?? defaultLoadBounds(config.kvApi);
   const saver = config.saveBounds ?? defaultSaveBounds(config.kvApi);
 
-  let restored = false;
+  // POSITION BEFORE SHOWING.
+  //
+  // This used to show the window as soon as `ready-to-show` fired and
+  // let the KV read snap it into place afterwards -- described in the
+  // old comment as "a minor re-flow". It isn't minor when the saved
+  // bounds are on ANOTHER DISPLAY: the window appears centered on the
+  // screen you're looking at, then teleports to the other monitor. The
+  // user-visible behaviour is "the Spaces window opens, then
+  // disappears", which is indistinguishable from a crash and was
+  // reported as one.
+  //
+  // Now the window stays hidden until it has been positioned. A slow
+  // or hung KV read must never leave it invisible forever, so a
+  // watchdog shows it centered after POSITION_TIMEOUT_MS regardless.
+  let readyToShow = false;
+  let positioned = false;
+  let shown = false;
+
+  const showIfReady = (): void => {
+    if (shown || !readyToShow || !positioned || win.isDestroyed()) return;
+    shown = true;
+    win.show();
+  };
+
+  const markPositioned = (): void => {
+    if (positioned) return;
+    positioned = true;
+    showIfReady();
+  };
+
+  const positionWatchdog = setTimeout(() => {
+    if (win.isDestroyed() || positioned) return;
+    centerOnParent(win, config.parent);
+    markPositioned();
+  }, POSITION_TIMEOUT_MS);
+
   loader()
     .then((saved) => {
       if (win.isDestroyed()) return;
-      restored = true;
       if (saved !== null) {
         // Strict `exactOptionalPropertyTypes` rejects `{ x: undefined }`,
         // so only spread x/y in when they're actually numbers.
@@ -217,19 +257,23 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
           win.setBounds(safeBounds);
         } catch {
           // best-effort -- bad bounds fall back to defaults
+          centerOnParent(win, config.parent);
         }
+      } else {
+        centerOnParent(win, config.parent);
       }
     })
     .catch(() => {
-      restored = true;
+      if (!win.isDestroyed()) centerOnParent(win, config.parent);
+    })
+    .finally(() => {
+      clearTimeout(positionWatchdog);
+      markPositioned();
     });
 
   win.once('ready-to-show', () => {
-    // If the loader hasn't resolved yet we use the centered-on-parent
-    // default. When the loader resolves shortly after, it snaps the
-    // window into the restored position with a minor re-flow.
-    if (!restored) centerOnParent(win, config.parent);
-    win.show();
+    readyToShow = true;
+    showIfReady();
   });
 
   // Persist bounds on a debounced trailing edge for resize/move. Calls
@@ -403,9 +447,26 @@ export function clampToDisplay(
       height,
     };
   }
+  // Overlapping a display is not the same as being USABLE on it. A
+  // window restored to a negative y (observed in the wild at y=-21)
+  // has its title bar above the top of the screen, tucked behind the
+  // macOS menu bar -- visible, but impossible to grab and move back.
+  // Push the top edge down onto the host display; never push it up, so
+  // a deliberately-placed window keeps its position.
+  const host =
+    all.find(
+      ({ bounds: db }) =>
+        bounds.x !== undefined &&
+        bounds.y !== undefined &&
+        bounds.x + width > db.x &&
+        bounds.x < db.x + db.width &&
+        bounds.y + height > db.y &&
+        bounds.y < db.y + db.height
+    )?.bounds ?? all[0]?.bounds;
+  const y = host !== undefined ? Math.max(bounds.y, host.y) : bounds.y;
   return {
     x: bounds.x,
-    y: bounds.y,
+    y,
     width,
     height,
   };
