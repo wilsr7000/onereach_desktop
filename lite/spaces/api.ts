@@ -52,6 +52,7 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  AddSpaceMemberOptions,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -100,6 +101,7 @@ export type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  AddSpaceMemberOptions,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -468,7 +470,11 @@ export interface SpacesMembersApi {
    * @throws {SpacesError} `SPACES_NOT_FOUND` if either the Space or
    *   the principal is missing from the graph.
    */
-  add(spaceId: string, memberId: string): Promise<SpaceMember>;
+  add(
+    spaceId: string,
+    memberId: string,
+    opts?: AddSpaceMemberOptions
+  ): Promise<SpaceMember>;
 
   /** Revoke access. No-op when the edge is already absent. */
   remove(spaceId: string, memberId: string): Promise<void>;

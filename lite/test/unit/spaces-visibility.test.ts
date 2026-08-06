@@ -67,13 +67,19 @@ describe('visibility predicates in the Cypher surface', () => {
   it.each(gatedSpaceQueries)('%s gates on the space visibility predicate', (_name, q) => {
     expect(q).toContain("coalesce(s.visibility, 'open') <> 'restricted'");
     expect(q).toContain('$viewerId');
-    expect(q).toContain('[:HAS_ACCESS]->(s)');
+    expect(q).toContain('[r:HAS_ACCESS]->(s)');
+    // ADR-052 — an EXISTING grant is not enough; it must still be live.
+    expect(
+      q.includes('r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs'),
+      'expired grants must not confer visibility'
+    ).toBe(true);
   });
 
   it.each(gatedAssetQueries)('%s gates on the asset visibility rule', (_name, q) => {
     expect(q).toContain("coalesce(vs.visibility, 'open') <> 'restricted'");
     expect(q).toContain('$viewerId');
-    expect(q).toContain('[:HAS_ACCESS]->(vs)');
+    expect(q).toContain('[r:HAS_ACCESS]->(vs)');
+    expect(q).toContain('r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs');
     // Uncategorized assets stay visible.
     expect(q).toContain('NOT EXISTS { MATCH (a)-[:BELONGS_TO]->(:Space) }');
   });

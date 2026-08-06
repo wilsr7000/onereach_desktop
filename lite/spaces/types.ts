@@ -808,6 +808,31 @@ export interface SpaceMember {
   id: string;
   /** Display name. */
   name: string;
+  /**
+   * ADR-052 — when this member's access ends (ISO-8601). Absent means
+   * permanent, which is what every grant written before expiry existed
+   * resolves to.
+   */
+  accessExpiresAt?: string;
+}
+
+/** Options for `members.add(spaceId, memberId, opts)`. */
+export interface AddSpaceMemberOptions {
+  /**
+   * When the grant should lapse (ISO-8601).
+   *
+   * Three distinct intents, deliberately not collapsed:
+   *   - **omitted** — leave an existing grant's expiry untouched, so
+   *     re-adding a member never silently extends or revokes access;
+   *   - **`null`** — permanent access;
+   *   - **ISO string** — access ends at that instant.
+   *
+   * Validated, not trusted: a malformed or past value is rejected. A
+   * grant an admin believes expires on Friday but which was quietly
+   * stored as permanent is a security hole wearing the costume of a
+   * working feature.
+   */
+  expiresAt?: string | null;
 }
 
 // ─── Asset CRUD (Sprint 1) ───────────────────────────────────────────────

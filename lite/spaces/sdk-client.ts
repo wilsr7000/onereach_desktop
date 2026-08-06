@@ -62,6 +62,7 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  AddSpaceMemberOptions,
   CreateAssetInput,
   CreateAgentInput,
   CreateAgentFromLibraryInput,
@@ -121,6 +122,12 @@ export interface SdkSpacesClientConfig {
    * means "unknown viewer" and every restricted Space is gated out.
    */
   viewerId?: () => string | null;
+  /**
+   * ADR-052 — clock seam. Injected into every query as `$nowMs` so
+   * expiring access grants can be evaluated in Cypher. Tests pin it to
+   * assert grant expiry deterministically; production uses `Date.now`.
+   */
+  now?: () => number;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -152,10 +159,27 @@ const MAX_LIMIT = 500;
  * signed-out / unknown viewer sees only open content). Alias contract:
  * the space being tested must be bound as `s`.
  */
+/**
+ * ADR-052 — a grant is live when it has no expiry, or its expiry is
+ * still in the future. `$nowMs` is injected by `run()` for every query,
+ * so no call site can forget to bind it.
+ *
+ * `r.expiresUnixMs IS NULL` means permanent. Every grant written before
+ * expiry existed has no such property, so all of them stay valid — the
+ * feature is additive and cannot retroactively lock anyone out.
+ *
+ * Epoch millis rather than an ISO string on purpose: numeric comparison
+ * has no timezone or zero-padding hazard, and a lexicographic compare
+ * of mixed-format timestamps fails silently in exactly the direction
+ * that grants access.
+ */
+const GRANT_LIVE = `(r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs)`;
+
 const SPACE_VISIBLE = `(
         coalesce(s.visibility, 'open') <> 'restricted'
         OR ($viewerId <> '' AND EXISTS {
-          MATCH (:Person {id: $viewerId})-[:HAS_ACCESS]->(s)
+          MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(s)
+          WHERE ${GRANT_LIVE}
         })
       )`;
 
@@ -172,7 +196,8 @@ const ASSET_VISIBLE = `(
           WHERE vs.deletedAt IS NULL
             AND (coalesce(vs.visibility, 'open') <> 'restricted'
                  OR ($viewerId <> '' AND EXISTS {
-                   MATCH (:Person {id: $viewerId})-[:HAS_ACCESS]->(vs)
+                   MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(vs)
+                   WHERE ${GRANT_LIVE}
                  }))
         }
       )`;
@@ -1140,10 +1165,20 @@ export const CYPHER = {
       WHERE s.deletedAt IS NULL
     MATCH (member {id: $memberId})
       WHERE member:Person OR member:Agent
-    MERGE (member)-[:HAS_ACCESS]->(s)
+    MERGE (member)-[r:HAS_ACCESS]->(s)
+    // ADR-052 — time-limited access. $writeExpiry distinguishes "no
+    // expiry was requested" (leave whatever is there) from "make this
+    // permanent" ($expiresUnixMs null), so re-adding a member without
+    // specifying an expiry never silently extends or revokes an
+    // existing grant.
+    FOREACH (_ IN CASE WHEN $writeExpiry THEN [1] ELSE [] END |
+      SET r.expiresUnixMs = $expiresUnixMs
+    )
+    SET r.grantedUnixMs = coalesce(r.grantedUnixMs, $nowMs)
     RETURN head(labels(member)) AS kind,
            member.id AS id,
-           coalesce(member.name, member.title, '') AS name
+           coalesce(member.name, member.title, '') AS name,
+           r.expiresUnixMs AS expiresUnixMs
   `,
 
   /**
@@ -1543,11 +1578,14 @@ export class SdkSpacesClient {
   protected readonly queryFn: SpacesQueryFn;
   protected readonly spanEmitter: NonNullable<SdkSpacesClientConfig['spanEmitter']> | null;
   protected readonly getViewerId: (() => string | null) | null;
+  /** ADR-052 — clock for `$nowMs`; overridable so tests can pin it. */
+  protected readonly now: () => number;
 
   constructor(config: SdkSpacesClientConfig = {}) {
     this.getAuthEnv = config.getAuthEnv ?? ((): string | null => null);
     this.spanEmitter = config.spanEmitter ?? null;
     this.getViewerId = config.viewerId ?? null;
+    this.now = config.now ?? ((): number => Date.now());
     this.queryFn =
       config.query ??
       (async (): Promise<Array<Record<string, unknown>>> => {
@@ -3154,7 +3192,11 @@ export class SdkSpacesClient {
    * @throws {SpacesError} `SPACES_NOT_FOUND` if either the Space or
    *   the principal is missing.
    */
-  async addSpaceMember(spaceId: string, memberId: string): Promise<SpaceMember> {
+  async addSpaceMember(
+    spaceId: string,
+    memberId: string,
+    opts: AddSpaceMemberOptions = {}
+  ): Promise<SpaceMember> {
     const validSpaceId = validateSpaceId(spaceId);
     if (typeof memberId !== 'string' || memberId.length === 0) {
       throw new SpacesError({
@@ -3163,9 +3205,20 @@ export class SdkSpacesClient {
         context: { memberId },
       });
     }
+    // Three distinct intents, and conflating them loses access control:
+    //   - `expiresAt` absent      -> leave any existing grant alone
+    //   - `expiresAt: null`       -> make it permanent
+    //   - `expiresAt: <iso>`      -> expire at that instant
+    const writeExpiry = 'expiresAt' in opts;
+    const expiresUnixMs =
+      opts.expiresAt === undefined || opts.expiresAt === null
+        ? null
+        : parseGrantExpiry(opts.expiresAt, this.now());
     const rows = await this.run(CYPHER.ADD_SPACE_MEMBER, {
       spaceId: validSpaceId,
       memberId,
+      writeExpiry,
+      expiresUnixMs,
     });
     const row = rows[0] as Record<string, unknown> | undefined;
     if (row === undefined) {
@@ -3176,10 +3229,14 @@ export class SdkSpacesClient {
         context: { spaceId: validSpaceId, memberId },
       });
     }
+    const expiry = row['expiresUnixMs'];
     return {
       kind: optString(row, 'kind') ?? 'Person',
       id: requireString(row, 'id'),
       name: optString(row, 'name') ?? '',
+      ...(typeof expiry === 'number'
+        ? { accessExpiresAt: new Date(expiry).toISOString() }
+        : {}),
     };
   }
 
@@ -3226,11 +3283,62 @@ export class SdkSpacesClient {
     parameters?: Record<string, unknown>
   ): Promise<Array<Record<string, unknown>>> {
     try {
-      return await this.queryFn(cypher, parameters);
+      // `$nowMs` is injected for EVERY query rather than bound per call
+      // site. Access grants can expire (ADR-052), so the visibility
+      // predicate needs the current time -- and that predicate is
+      // interpolated into a dozen different queries. Binding it at each
+      // one would mean a single forgotten parameter silently breaking
+      // access control, which is the kind of bug that fails open. Here
+      // it cannot be forgotten. An explicit `nowMs` in `parameters`
+      // still wins, so tests can pin the clock.
+      const withClock =
+        parameters === undefined
+          ? { nowMs: this.now() }
+          : { nowMs: this.now(), ...parameters };
+      return await this.queryFn(cypher, withClock);
     } catch (err) {
       throw normalizeError(err);
     }
   }
+}
+
+/**
+ * ADR-052 — validate an access-grant expiry into epoch millis.
+ *
+ * Rejects rather than ignores, for the same reason `create-binary.ts`
+ * rejects a bad file TTL: a grant the admin believes expires on Friday
+ * but which was silently stored as permanent is a security hole that
+ * looks like a working feature. A past instant is refused too — if the
+ * intent is "no access", remove the member instead of adding one that
+ * is dead on arrival.
+ */
+export function parseGrantExpiry(value: string, now: number): number {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'Access expiry must be a non-empty ISO-8601 timestamp',
+      remediation: 'Pass an ISO string, null for permanent access, or omit to leave it unchanged.',
+      context: { op: 'members.add', expiresAt: String(value) },
+    });
+  }
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: `Access expiry is not a valid date: ${value}`,
+      remediation: 'Pass an ISO-8601 timestamp, or null for permanent access.',
+      context: { op: 'members.add', expiresAt: value },
+    });
+  }
+  if (parsed <= now) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'Access expiry is in the past — the grant would be dead on arrival',
+      remediation: 'Pick a future time, or remove the member instead of granting expired access.',
+      context: { op: 'members.add', expiresAt: value },
+    });
+  }
+  return parsed;
 }
 
 // ─── Mutation helpers (Phase 3a) ─────────────────────────────────────────

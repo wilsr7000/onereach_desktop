@@ -44,7 +44,18 @@ function buildStubQuery(): StubQuery {
   const responses = new Map<string, Array<Record<string, unknown>>>();
   const errors = new Map<string, unknown>();
   const fn: SpacesQueryFn = async (cypher, parameters) => {
-    calls.push({ cypher, parameters });
+    // ADR-052 — `run()` injects `$nowMs` into EVERY query so the
+    // access-expiry predicate can never be evaluated without a clock.
+    // It is infrastructure, not something any individual call site
+    // passes, so strip it here: these tests assert the parameters a
+    // method actually builds, and every one of them would otherwise
+    // have to carry an unpredictable wall-clock value. `run()`'s
+    // injection is covered directly in spaces-access-expiry.test.ts.
+    const { nowMs: _nowMs, ...callerParams } = (parameters ?? {}) as Record<string, unknown>;
+    calls.push({
+      cypher,
+      parameters: parameters === undefined ? undefined : callerParams,
+    });
     for (const [needle, err] of errors) {
       if (cypher.includes(needle)) throw err;
     }
@@ -2692,8 +2703,14 @@ describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
   });
 
   it('ADD_SPACE_MEMBER MERGEs HAS_ACCESS idempotently', () => {
-    expect(CYPHER.ADD_SPACE_MEMBER).toMatch(/MERGE \(member\)-\[:HAS_ACCESS\]->\(s\)/);
+    // ADR-052 — the edge is now bound (`r`) so a per-grant expiry can
+    // be written onto it.
+    expect(CYPHER.ADD_SPACE_MEMBER).toMatch(/MERGE \(member\)-\[r:HAS_ACCESS\]->\(s\)/);
     expect(CYPHER.ADD_SPACE_MEMBER).toMatch(/member:Person OR member:Agent/);
+    // Expiry is written only when the caller asked, so re-adding a
+    // member never silently changes an existing deadline.
+    expect(CYPHER.ADD_SPACE_MEMBER).toContain('$writeExpiry');
+    expect(CYPHER.ADD_SPACE_MEMBER).toContain('r.expiresUnixMs = $expiresUnixMs');
   });
 
   it('REMOVE_SPACE_MEMBER deletes the HAS_ACCESS edge', () => {
@@ -2794,7 +2811,7 @@ describe('SdkSpacesClient.addSpaceMember', () => {
 
   it('throws SPACES_NOT_FOUND when MERGE returns no rows', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MERGE (member)-[:HAS_ACCESS]->(s)', []);
+    stub.setResponse('MERGE (member)-[r:HAS_ACCESS]->(s)', []);
     const client = makeClient(stub);
     await expect(
       client.addSpaceMember('sp-1', 'alice')
@@ -2803,7 +2820,7 @@ describe('SdkSpacesClient.addSpaceMember', () => {
 
   it('returns the canonical (kind, id, name) tuple', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MERGE (member)-[:HAS_ACCESS]->(s)', [
+    stub.setResponse('MERGE (member)-[r:HAS_ACCESS]->(s)', [
       { kind: 'Agent', id: 'audit', name: 'Audit Agent' },
     ]);
     const client = makeClient(stub);

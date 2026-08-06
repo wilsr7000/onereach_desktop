@@ -766,13 +766,25 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     SPACES_IPC.MEMBERS_ADD,
     async (
       _event: IpcMainInvokeEvent,
-      payload?: { spaceId?: unknown; memberId?: unknown }
+      payload?: { spaceId?: unknown; memberId?: unknown; expiresAt?: unknown }
     ): Promise<SpacesIpcResult<SpaceMember>> => {
       try {
         const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
         const memberId =
           typeof payload?.memberId === 'string' ? payload.memberId : '';
-        const value = await getSpacesApi().members.add(spaceId, memberId);
+        // ADR-052: absent vs null vs value are three different
+        // intents (leave / permanent / expire), so only forward the
+        // key when the renderer actually sent it.
+        const hasExpiry = payload !== undefined && 'expiresAt' in payload;
+        const expiresAt =
+          payload?.expiresAt === null || typeof payload?.expiresAt === 'string'
+            ? (payload.expiresAt as string | null)
+            : null;
+        const value = await getSpacesApi().members.add(
+          spaceId,
+          memberId,
+          hasExpiry ? { expiresAt } : {}
+        );
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

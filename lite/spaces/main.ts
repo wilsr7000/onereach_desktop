@@ -126,6 +126,7 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  AddSpaceMemberOptions,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -650,8 +651,12 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         client.listSpaceMembers(spaceId)
       );
     },
-    async add(spaceId: string, memberId: string): Promise<SpaceMember> {
-      const result = await client.addSpaceMember(spaceId, memberId);
+    async add(
+      spaceId: string,
+      memberId: string,
+      opts?: AddSpaceMemberOptions
+    ): Promise<SpaceMember> {
+      const result = await client.addSpaceMember(spaceId, memberId, opts);
       nukeReadCache();
       return result;
     },
