@@ -149,10 +149,15 @@ if [ ! -f "package.json" ]; then
     exit 1
 fi
 
-# Check git status
-if [[ $(git status --porcelain) ]]; then
-    echo -e "${YELLOW}Warning: You have uncommitted changes:${NC}"
-    git status --short
+# Check git status -- but only for files that actually SHIP in the full-app
+# build. lite/, dist-lite/, docs/, test/ and markdown are excluded from
+# electron-builder's files config, so uncommitted changes there (e.g. a
+# parallel Lite session mid-flight) cannot contaminate this release and
+# must not block it.
+DIRTY_SHIPPING=$(git status --porcelain | grep -vE ' (lite/|dist-lite/|docs/|test/)' | grep -vE '\.md$' || true)
+if [[ -n "$DIRTY_SHIPPING" ]]; then
+    echo -e "${YELLOW}Warning: You have uncommitted changes in SHIPPED paths:${NC}"
+    echo "$DIRTY_SHIPPING"
     echo ""
     read -p "Commit these changes as part of the release? (y/n): " COMMIT_CHANGES
     if [ "$COMMIT_CHANGES" != "y" ]; then
