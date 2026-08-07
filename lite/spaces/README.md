@@ -81,6 +81,45 @@ Each item-list query and `getItem` optionally project a `producedBy` row via the
 
 The SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes above so callers only ever see one error taxonomy. See `normalizeError()` in `sdk-client.ts`.
 
+## Enforcement model — read this before saying "restricted"
+
+ADR-051 visibility ("restricted" Spaces), ADR-052 expiring grants, and
+the per-query gates in `sdk-client.ts` are **client-side honesty, not a
+security boundary**. Two facts make that unavoidable today:
+
+1. `window.lite.neon.query()` accepts arbitrary Cypher from any Lite
+   renderer (`validateCypher` checks only "non-empty string"), so any
+   surface with the preload can read or mutate anything the account's
+   Neon credentials can. Third-party tab content cannot reach it
+   (ADR-038: no preload on remote tabs) — the exposure is Lite's own
+   windows, not the open web.
+2. The graph endpoint enforces account-level auth only. Nothing
+   server-side knows about `HAS_ACCESS`, visibility, or expiry.
+
+What the gates ARE for: the UI never *shows* someone a restricted
+Space's contents, name, tickets, playbook, or activity — an honest
+interface and defense-in-depth, worth maintaining rigorously. What
+they are NOT: a promise that a motivated user of a signed-in Lite
+install cannot read that data. Until enforcement moves server-side
+(punch-listed), do not describe Space visibility to users or alpha
+testers as access control.
+
+**Deliberately ungated queries** (system-correctness reads; gating
+them converts a read leak into data loss or breakage — each is
+main-process internal and not renderer-reachable through the gated
+surface):
+
+- `FIND_ASSET_BY_FILE_KEY` — the orphan-cleanup ambiguity guard.
+  Gated, a restricted asset becomes invisible to the guard, which then
+  concludes "no asset references this key" and **deletes the file**.
+- `SPACE_ITEM_COUNT` — the hard-delete pre-flight; the delete
+  mutations themselves carry `SPACE_VISIBLE`.
+- `AGENT_LIBRARY_SEARCH` / `MEMBER_LIBRARY_SEARCH` /
+  `HOME_AGENTS_SAMPLE` — account-wide directories by design (pickers
+  must list people/agents you could add).
+- Uncategorized lanes — items in no Space are account-visible by the
+  ADR-051 rule itself.
+
 ## Conformance
 
 `lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']` (the new Home methods extend the surface but are not part of the conformance baseline yet).
@@ -101,7 +140,6 @@ The SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes
 
 ## Out of scope (this phase)
 
-- `addToSpace` / `removeFromSpace` mutations (Phase 3 chunks 3a-3c)
 - Per-Space activity-tab drill-down (extension of 3k in v2)
 - Real bidirectional sync (v2 chunk 3l)
 - Auto-metadata pipeline beyond Space suggestions (v2 chunk 3j)
