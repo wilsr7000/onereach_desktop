@@ -122,6 +122,12 @@ function attachRendererDiagnostics(win: BrowserWindow, config: SpacesWindowConfi
     // Numeric 3 (legacy) or 'error' (modern) both mean error.
     const isError = level === 3 || level === 'error';
     if (!isError) return;
+    // Known Electron noise: the Chromium PDF-viewer plugin renderer
+    // fails to run Electron's sandbox bundle (plugin processes get no
+    // preload data) and logs two errors per boot from
+    // node:electron/js2c/sandbox_bundle. PDFs render fine; keep the
+    // bug-report channel high-signal by dropping exactly that source.
+    if (String(details.sourceId ?? '').includes('sandbox_bundle')) return;
     emit('error', 'spaces renderer console error', {
       text: String(details.message ?? '').slice(0, 2000),
       source: String(details.sourceId ?? ''),

@@ -198,6 +198,7 @@ export async function createBinaryAsset(
       size: buf.byteLength,
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.creatorId !== undefined ? { creatorId: input.creatorId } : {}),
+      ...(input.creatorName !== undefined ? { creatorName: input.creatorName } : {}),
       ...(metadata !== undefined ? { metadata } : {}),
     });
   } catch (err) {

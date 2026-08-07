@@ -293,6 +293,35 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(body).toMatch(/renderedItemsSignature = null/);
   });
 
+  it('the identity bootstrap never manufactures a UUID-named Person', () => {
+    // Found live: a session without email upserted Person{id: accountId,
+    // name: accountId, email: ''} — every asset then read "Created by
+    // (unknown)" and the Home timeline said "Someone added".
+    const body = bodyOf('async function loadCurrentUser', 2200);
+    expect(body).toMatch(/if \(email\.length === 0\) \{/);
+    expect(body).toMatch(/skipping person bootstrap/);
+    // The accountId-as-id fallback must be gone.
+    expect(body).not.toMatch(/email\.length > 0 \? email : session\.accountId/);
+  });
+
+  it('creates carry creatorName so activity attributes a real person', () => {
+    const src = source();
+    expect(src).toMatch(/function readCurrentEditorName/);
+    expect(src).toMatch(/\.\.\.\(creatorName !== null \? \{ creatorName \} : \{\}\),/);
+  });
+
+  it('the console forwarder drops the known PDF-plugin sandbox noise', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const candidates = [path.resolve('spaces/window.ts'), path.resolve('lite/spaces/window.ts')];
+    const found = candidates.find((p) => fs.existsSync(p));
+    expect(found).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    expect(src).toMatch(/sourceId \?\? ''\)\.includes\('sandbox_bundle'\)\) return;/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

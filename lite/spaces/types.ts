@@ -222,6 +222,8 @@ export interface CreateAgentFromLibraryInput {
   agentId: string;
   endpoints?: AgentEndpoint[];
   creatorId?: string;
+  /** Display name for activity attribution (falls back to creatorId). */
+  creatorName?: string;
 }
 
 export type TicketStatus = 'open' | 'in_progress' | 'done' | 'blocked';
@@ -871,6 +873,8 @@ export interface CreateAssetInput {
   sourceUrl?: string;
   /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
   creatorId?: string;
+  /** Display name for activity attribution (falls back to creatorId). */
+  creatorName?: string;
   /**
    * Free-form metadata to persist on creation. Round-trips through
    * `a.metadata` (JSON). Populated automatically by the renderer's
@@ -904,6 +908,8 @@ export interface CreateBinaryAssetInput {
   description?: string;
   /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
   creatorId?: string;
+  /** Display name for activity attribution (falls back to creatorId). */
+  creatorName?: string;
   /** Free-form metadata to persist on creation (renderer auto-extract). */
   metadata?: ItemMetadata;
   /**
@@ -960,6 +966,8 @@ export interface CreateAgentInput {
   description?: string;
   /** Optional :Person.id of the creator — MERGEs [:CREATED] edge. */
   creatorId?: string;
+  /** Display name for activity attribution (falls back to creatorId). */
+  creatorName?: string;
   /**
    * Reachability endpoints (MCP / API / Skill) the agent exposes — one
    * or more. Each becomes a `(:Agent)-[:REACHABLE_VIA]->(:AgentEndpoint)`

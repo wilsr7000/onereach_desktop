@@ -1327,10 +1327,24 @@ export const CYPHER = {
       updatedAt: $now
     })
     MERGE (a)-[:BELONGS_TO]->(s)
-    WITH a
+    WITH a, s
     OPTIONAL MATCH (p:Person {id: $creatorId})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
+    // Activity: one Commit per create, so the asset's ACTIVITY panel
+    // and the Home timeline attribute the add to a real person instead
+    // of "Someone" (2026-08-07). Written only when the author is known.
+    FOREACH (x IN CASE WHEN $commitAuthor IS NULL THEN [] ELSE [1] END |
+      CREATE (c:Commit {
+        hash: $commitHash,
+        author: $commitAuthor,
+        message: 'item:added',
+        timestamp: $commitTimestampMs,
+        assetId: a.id,
+        spaceId: s.id
+      })
+      MERGE (c)-[:IN_SPACE]->(s)
+      MERGE (c)-[:TOUCHED]->(a))
     RETURN a.id AS id
   `,
 
@@ -2575,6 +2589,12 @@ export class SdkSpacesClient {
       metadata,
       creatorId,
       now,
+      commitAuthor:
+        typeof input.creatorName === 'string' && input.creatorName.trim().length > 0
+          ? input.creatorName.trim()
+          : creatorId,
+      commitHash: generateCommitHash(),
+      commitTimestampMs: Date.now(),
     };
     const targetSpaceId =
       typeof input.spaceId === 'string' && input.spaceId.length > 0
@@ -3522,6 +3542,20 @@ function generateTicketId(): string {
 }
 
 /** Generate an :Asset id. Same UUID-with-prefix scheme as Space + Ticket. */
+/** Git-shaped 40-hex commit hash (matches the existing Commit rows). */
+function generateCommitHash(): string {
+  const hex = '0123456789abcdef';
+  let out = '';
+  const c = (globalThis as { crypto?: { getRandomValues?: (a: Uint8Array) => Uint8Array } }).crypto;
+  if (c !== undefined && typeof c.getRandomValues === 'function') {
+    const bytes = c.getRandomValues(new Uint8Array(20));
+    for (const b of bytes) out += hex[b >> 4]! + hex[b & 15]!;
+    return out;
+  }
+  for (let i = 0; i < 40; i++) out += hex[Math.floor(Math.random() * 16)]!;
+  return out;
+}
+
 function generateAssetId(): string {
   try {
     const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;

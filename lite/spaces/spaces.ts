@@ -481,13 +481,22 @@ async function loadCurrentUser(): Promise<void> {
     const session = res.session;
     if (session === null) return;
     const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
-    const id = email.length > 0 ? email : session.accountId;
-    const name = personNameFromEmail(email) ?? session.accountId;
+    if (email.length === 0) {
+      // No email on the session → we cannot name this person. Upserting
+      // with the accountId manufactured a Person whose id AND name were
+      // the raw UUID, which every read then rendered as "(unknown)"
+      // (found live 2026-08-07). Better no attribution than a junk
+      // identity poisoning the graph.
+      console.warn('[spaces] session has no email; skipping person bootstrap');
+      return;
+    }
+    const id = email;
+    const name = personNameFromEmail(email) ?? email;
     const upsertPayload: { id: string; name: string; email?: string } = {
       id,
       name,
+      email,
     };
-    if (email.length > 0) upsertPayload.email = email;
     const envelope = await identity.getOrCreatePerson(upsertPayload);
     if (envelope.ok === false) return;
     state.currentUser = {
@@ -6023,6 +6032,12 @@ function coerceMetadataValue(raw: string): unknown {
  */
 function readCurrentEditorId(): string | null {
   return state.currentUser?.id ?? null;
+}
+
+/** Display name for activity attribution; null when identity unknown. */
+function readCurrentEditorName(): string | null {
+  const name = state.currentUser?.name ?? '';
+  return name.length > 0 ? name : null;
 }
 
 function showDetailRail(show: boolean): void {
@@ -11717,6 +11732,7 @@ async function submitNewAsset(): Promise<void> {
 
   try {
     const creatorId = readCurrentEditorId();
+    const creatorName = readCurrentEditorName();
     if (newAssetMode === 'agent') {
       // Agents must live in a real Space (not Home / Uncategorized).
       if (spaceId === '') {
@@ -11739,6 +11755,7 @@ async function submitNewAsset(): Promise<void> {
           agentId: agentLibrarySelection.id,
           ...(endpoints.length > 0 ? { endpoints } : {}),
           ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
         });
         if (envelope.ok === false) {
           showDialogError(error, envelope.error.message);
@@ -11790,6 +11807,7 @@ async function submitNewAsset(): Promise<void> {
         ...(endpoints.length > 0 ? { endpoints } : {}),
         ...(isUrl ? { sourceUrl: source } : {}),
         ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
       });
       if (envelope.ok === false) {
         showDialogError(error, envelope.error.message);
@@ -11823,6 +11841,7 @@ async function submitNewAsset(): Promise<void> {
           ...(endpoint.length > 0 ? { knowledge_endpoint: endpoint } : {}),
         },
         ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
       });
       if (envelope.ok === false) {
         showDialogError(error, envelope.error.message);
@@ -11882,6 +11901,7 @@ async function submitNewAsset(): Promise<void> {
           ...(mimeType !== '' ? { mimeType } : {}),
           metadata: meta,
           ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
         });
         if (envelope.ok === false) {
           showDialogError(error, envelope.error.message);
@@ -11929,6 +11949,7 @@ async function submitNewAsset(): Promise<void> {
         bytes,
         metadata: metadata as Record<string, unknown>,
         ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
         ...(isPublic ? { isPublic: true } : {}),
         ...(expiresAt !== undefined ? { expiresAt } : {}),
       });
@@ -11975,6 +11996,7 @@ async function submitNewAsset(): Promise<void> {
         ...(transcript !== null ? { mimeType: 'text/markdown' } : {}),
         metadata: meta,
         ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
       });
       if (envelope.ok === false) {
         showDialogError(error, envelope.error.message);

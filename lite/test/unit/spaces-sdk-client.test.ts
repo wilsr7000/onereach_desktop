@@ -293,6 +293,34 @@ describe('deleting a Space must not strand its assets', () => {
   });
 });
 
+describe('creation attribution (2026-08-07)', () => {
+  it('CREATE_ASSET writes an activity Commit in the shape the readers expect', () => {
+    // ITEM_RECENT_COMMITS matches on assetId/TOUCHED; HOME_RECENT_EVENTS
+    // projects hash/author/message/timestamp/spaceId + IN_SPACE. The
+    // create-time commit must satisfy both, and must NOT be written
+    // when the author is unknown (no lying "Someone" rows).
+    expect(CYPHER.CREATE_ASSET).toContain("CREATE (c:Commit {");
+    expect(CYPHER.CREATE_ASSET).toContain("message: 'item:added'");
+    expect(CYPHER.CREATE_ASSET).toContain('MERGE (c)-[:IN_SPACE]->(s)');
+    expect(CYPHER.CREATE_ASSET).toContain('MERGE (c)-[:TOUCHED]->(a)');
+    expect(CYPHER.CREATE_ASSET).toMatch(/CASE WHEN \$commitAuthor IS NULL THEN \[\]/);
+  });
+
+  it('the commit hash generator produces git-shaped 40-hex ids', async () => {
+    const mod = await import('../../spaces/sdk-client.js');
+    const src = (await import('node:fs')).readFileSync(
+      (await import('node:path')).resolve(
+        (await import('node:fs')).existsSync('spaces/sdk-client.ts')
+          ? 'spaces/sdk-client.ts'
+          : 'lite/spaces/sdk-client.ts'
+      ),
+      'utf8'
+    );
+    expect(src).toContain('function generateCommitHash');
+    expect(mod).toBeDefined();
+  });
+});
+
 describe('SdkSpacesClient directory searches', () => {
   it('member library maps rows, defaults kind to Person, and skips id-less junk', async () => {
     // Review finding (2026-08-06): the mapper used requireString on

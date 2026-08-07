@@ -768,6 +768,7 @@ interface LiteSpacesItemsBridge {
     description?: string;
     sourceUrl?: string;
     creatorId?: string;
+  creatorName?: string;
     metadata?: Record<string, unknown>;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /**
@@ -784,6 +785,7 @@ interface LiteSpacesItemsBridge {
     bytes: ArrayBuffer;
     description?: string;
     creatorId?: string;
+  creatorName?: string;
     metadata?: Record<string, unknown>;
     /**
      * Write to the PUBLIC bucket. Omit or false (the default) keeps the
@@ -809,6 +811,7 @@ interface LiteSpacesItemsBridge {
     sourceUrl?: string;
     description?: string;
     creatorId?: string;
+  creatorName?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Search the account's agent library (graph :Agent nodes). */
   agentLibrarySearch(
@@ -825,6 +828,7 @@ interface LiteSpacesItemsBridge {
     agentId: string;
     endpoints?: LiteAgentEndpoint[];
     creatorId?: string;
+  creatorName?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Sprint 1 — soft delete (default) or hard delete an asset. */
   delete(
