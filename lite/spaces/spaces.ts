@@ -462,6 +462,9 @@ async function loadCurrentUser(): Promise<void> {
       };
       spaces?: {
         identity?: {
+          attributionEmailGet(): Promise<
+            { ok: true; value: string | null } | { ok: false }
+          >;
           getOrCreatePerson(input: {
             id: string;
             name?: string;
@@ -480,14 +483,19 @@ async function loadCurrentUser(): Promise<void> {
     const res = await auth.getSession('edison');
     const session = res.session;
     if (session === null) return;
-    const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
+    let email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
     if (email.length === 0) {
-      // No email on the session → we cannot name this person. Upserting
-      // with the accountId manufactured a Person whose id AND name were
-      // the raw UUID, which every read then rendered as "(unknown)"
-      // (found live 2026-08-07). Better no attribution than a junk
-      // identity poisoning the graph.
-      console.warn('[spaces] session has no email; skipping person bootstrap');
+      // Some sign-in flows never put an email in the or-cookie
+      // (verified live on this install). Fall back to the
+      // user-declared attribution email (Settings → Account) before
+      // giving up — never manufacture a UUID Person.
+      const fallback = await identity.attributionEmailGet();
+      if (fallback.ok && fallback.value !== null) {
+        email = fallback.value;
+      }
+    }
+    if (email.length === 0) {
+      console.warn('[spaces] no session or attribution email; skipping person bootstrap');
       return;
     }
     const id = email;

@@ -32,13 +32,22 @@ function auth(): LiteAuthBridge {
 export const mountAccount: SectionDescriptor['mount'] = (container) => {
   let detachSessionListener: (() => void) | null = null;
 
+  // Auth content re-renders wholesale on session change; the
+  // attribution block below must survive that, so each gets its own
+  // host div (2026-08-07).
+  const authHost = document.createElement('div');
+  container.appendChild(authHost);
+  const attributionHost = document.createElement('div');
+  container.appendChild(attributionHost);
+  mountAttributionEmail(attributionHost);
+
   // Initial render against last-known session, then listen for changes.
-  void renderState(container);
+  void renderState(authHost);
 
   try {
     detachSessionListener = auth().onSessionChanged((payload) => {
       if (payload.env !== ENV) return;
-      renderSession(container, payload.session);
+      renderSession(authHost, payload.session);
     });
   } catch {
     // Bridge missing; renderState already handled the error path.
@@ -407,4 +416,96 @@ function escapeHtml(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ---------------------------------------------------------------------------
+// Attribution email (2026-08-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * Some sign-in flows never put an email in the or-cookie (verified
+ * live on this install), so the identity bootstrap has nothing to
+ * attribute creations to. This block lets the user declare the email
+ * that names them in Spaces ("Created by …"). Used ONLY when the
+ * session lacks an email.
+ */
+function mountAttributionEmail(host: HTMLElement): void {
+  const wrap = document.createElement('div');
+  wrap.className = 'attribution-block';
+
+  const heading = document.createElement('h3');
+  heading.className = 'attribution-heading';
+  heading.textContent = 'Attribution';
+  wrap.appendChild(heading);
+
+  const intro = document.createElement('p');
+  intro.className = 'pane-note';
+  intro.textContent =
+    'Names you on things you create in Spaces ("Created by …") when the sign-in cookie carries no email. Takes effect the next time a Spaces window opens.';
+  wrap.appendChild(intro);
+
+  const row = document.createElement('div');
+  row.className = 'attribution-row';
+
+  const input = document.createElement('input');
+  input.type = 'email';
+  input.className = 'attribution-input';
+  input.placeholder = 'you@company.com';
+  input.spellcheck = false;
+  row.appendChild(input);
+
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'btn-primary';
+  save.textContent = 'Save';
+  row.appendChild(save);
+
+  wrap.appendChild(row);
+
+  const note = document.createElement('p');
+  note.className = 'pane-note attribution-note';
+  wrap.appendChild(note);
+
+  host.appendChild(wrap);
+
+  const bridge = window.lite?.spaces?.identity;
+  if (bridge === undefined) {
+    note.textContent = 'Bridge unavailable — reload the window.';
+    return;
+  }
+
+  void bridge
+    .attributionEmailGet()
+    .then((envelope) => {
+      if (envelope.ok && envelope.value !== null) {
+        input.value = envelope.value;
+        note.textContent = 'Set.';
+      } else {
+        note.textContent = 'Not set.';
+      }
+    })
+    .catch(() => {
+      note.textContent = 'Could not read the setting.';
+    });
+
+  save.addEventListener('click', () => {
+    save.disabled = true;
+    const raw = input.value.trim();
+    void bridge
+      .attributionEmailSet(raw.length === 0 ? null : raw)
+      .then((envelope) => {
+        if (envelope.ok) {
+          note.textContent =
+            envelope.value === null ? 'Cleared.' : 'Saved — applies on the next Spaces open.';
+        } else {
+          note.textContent = envelope.error.message;
+        }
+      })
+      .catch(() => {
+        note.textContent = 'Save failed.';
+      })
+      .finally(() => {
+        save.disabled = false;
+      });
+  });
 }

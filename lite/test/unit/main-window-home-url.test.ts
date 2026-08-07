@@ -111,9 +111,12 @@ describe('main-window remote-home wiring (source-level)', () => {
     expect(body).toContain('resolveHomeUrl(configured, accountId)');
     expect(body).not.toContain('preload:');
     expect(body).toContain('setPermissionRequestHandler');
-    expect(body).toContain("permission === 'media' && requesterOrigin === origin");
+    // Fail-closed: anything that is not a media request from the
+    // configured page's own origin gets callback(false).
+    expect(body).toMatch(/permission !== 'media' \|\| allowedOrigin === null/);
+    expect(body).toContain('callback(requesterOrigin === allowedOrigin)');
     // The join link's fragment carries the room key — never log the URL.
-    expect(body).toContain('do not log the URL');
+    expect(body).toContain('never log the URL');
   });
 
   it('the Settings section + IPC + bridge are wired end to end', () => {

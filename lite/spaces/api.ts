@@ -471,6 +471,14 @@ export interface SpacesIdentityApi {
    * yet.
    */
   getOrCreatePerson(input: PersonUpsertInput): Promise<Person>;
+
+  /**
+   * Attribution email fallback: user-declared identity email used by
+   * the renderer bootstrap when the auth session carries none (some
+   * sign-in flows never put an email in the or-cookie).
+   */
+  attributionEmailGet(): Promise<string | null>;
+  attributionEmailSet(raw: string | null): Promise<string | null>;
 }
 
 /**
@@ -822,6 +830,14 @@ class UninitializedSpacesApi implements SpacesApi {
   };
 
   readonly identity: SpacesIdentityApi = {
+    async attributionEmailGet(): Promise<string | null> {
+      throw notInitialized('identity.attributionEmailGet');
+    },
+
+    async attributionEmailSet(): Promise<string | null> {
+      throw notInitialized('identity.attributionEmailSet');
+    },
+
     async getOrCreatePerson(_input: PersonUpsertInput): Promise<Person> {
       throw notInitialized('identity.getOrCreatePerson');
     },

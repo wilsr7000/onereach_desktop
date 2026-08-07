@@ -141,6 +141,7 @@ import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
 import { runGsxMigration } from './gsx-migration.js';
 import { readLearnProgress, writeLearnProgress } from './learn-store.js';
+import { readAttributionEmail, writeAttributionEmail } from './identity-store.js';
 
 // ─── Menu wiring ────────────────────────────────────────────────────────
 
@@ -667,6 +668,14 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
   };
 
   const identity: SpacesIdentityApi = {
+    attributionEmailGet() {
+      return readAttributionEmail();
+    },
+
+    attributionEmailSet(raw: string | null) {
+      return writeAttributionEmail(raw);
+    },
+
     async getOrCreatePerson(input: PersonUpsertInput): Promise<Person> {
       const result = await client.getOrCreatePerson(input);
       // Person changes can ripple into producedBy on items; nuke

@@ -619,7 +619,7 @@ Currently porting from full into lite (one at a time):
 
 ### chunk: auth-totp-autofill-v1
 
-- **status**: porting (detection model upgraded 2026-05-04)
+- **status**: hardening (shipped + in daily use; autofill verified against live GSX logins — status synced 2026-08-07 per the auth feedback: tracking drift hides real open work)
 - **plan reference**: ADR-034 (with 2026-05-04 amendment) in `lite/DECISIONS.md`
 - **borrowed from full** (studied or reused as noted):
   - `lib/auth-scripts.js` -- reused directly (allowed `lib/` import) for `buildWaitForAuthFormScript`, `buildFillTOTPScript`, `buildSubmitButtonScript`
@@ -740,7 +740,7 @@ Currently porting from full into lite (one at a time):
 
 ### chunk: settings-window-v1
 
-- **status**: porting
+- **status**: hardening (Settings window shipped long since: Account, Two-Factor, OAGI, IDWs, AI, Updates, Diagnostics, Home, Developer, About — synced 2026-08-07)
 - **plan reference**: ADR-031 in `lite/DECISIONS.md`
 - **borrowed from full** (studied, not imported):
   - `settings.html:481-551` -- sidebar tab structure (lite uses a vertical scroll-list instead of tabs)
@@ -874,7 +874,7 @@ Currently porting from full into lite (one at a time):
 
 ### chunk: totp-authenticator-v1
 
-- **status**: porting
+- **status**: hardening (keychain-backed TOTP + Settings Two-Factor shipped and in daily use — synced 2026-08-07)
 - **plan reference**: ADR-027 in `lite/DECISIONS.md`
 - **borrowed from full** (studied, not imported):
   - `lib/totp-manager.js` -- TOTP code generation + otpauth URI parsing (rewritten in TS-strict)

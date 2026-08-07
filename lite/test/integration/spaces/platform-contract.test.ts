@@ -243,6 +243,8 @@ function buildStubConsumer(): {
     },
     // Phase 4 v2 — identity + sharing stubs.
     identity: {
+      attributionEmailGet: async () => null,
+      attributionEmailSet: async () => null,
       getOrCreatePerson: async (input) =>
         maybeFail({ id: input.id, name: input.name ?? '' }),
     },

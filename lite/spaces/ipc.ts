@@ -95,6 +95,8 @@ export const SPACES_IPC = {
   MEMBERS_LIST: 'lite:spaces:members:list',
   MEMBERS_ADD: 'lite:spaces:members:add',
   MEMBERS_SEARCH_LIBRARY: 'lite:spaces:members:searchLibrary',
+  IDENTITY_ATTRIBUTION_EMAIL_GET: 'lite:spaces:identity:attributionEmail:get',
+  IDENTITY_ATTRIBUTION_EMAIL_SET: 'lite:spaces:identity:attributionEmail:set',
   MEMBERS_REMOVE: 'lite:spaces:members:remove',
   /** Sprint 1 — asset CRUD. */
   ITEMS_CREATE: 'lite:spaces:items:create',
@@ -214,6 +216,36 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<Space[]>> => {
       try {
         const value = await getSpacesApi().listSpaces();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.IDENTITY_ATTRIBUTION_EMAIL_GET,
+    async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<string | null>> => {
+      try {
+        const value = await getSpacesApi().identity.attributionEmailGet();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.IDENTITY_ATTRIBUTION_EMAIL_SET,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload: unknown
+    ): Promise<SpacesIpcResult<string | null>> => {
+      try {
+        const raw = (payload as { email?: unknown })?.email;
+        const value = await getSpacesApi().identity.attributionEmailSet(
+          raw === null ? null : typeof raw === 'string' ? raw : null
+        );
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
