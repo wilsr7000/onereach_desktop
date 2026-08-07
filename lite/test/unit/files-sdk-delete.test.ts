@@ -69,6 +69,16 @@ describe('files.delete — FileItem index lag', () => {
     vi.useRealTimers();
   });
 
+  it('does NOT retry a generic FileItem-mentioning error (matcher is specific)', async () => {
+    const boom = new Error('FileItem validation failed: name too long');
+    (boom as { response?: { status: number } }).response = { status: 422 };
+    const { client, calls } = buildClient(async () => {
+      throw boom;
+    });
+    await expect(client.delete('k')).rejects.toThrow(/validation/);
+    expect(calls()).toBe(1);
+  });
+
   it('does NOT retry non-FileItem errors; 404 still means already-gone', async () => {
     const boom = new Error('HTTP 500');
     (boom as { response?: { status: number } }).response = { status: 500 };

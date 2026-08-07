@@ -243,9 +243,14 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     ): Promise<SpacesIpcResult<string | null>> => {
       try {
         const raw = (payload as { email?: unknown })?.email;
-        const value = await getSpacesApi().identity.attributionEmailSet(
-          raw === null ? null : typeof raw === 'string' ? raw : null
-        );
+        // Reject, don't drop: only an EXPLICIT null clears the stored
+        // identity. A malformed payload (undefined, number, object)
+        // must not silently delete the user's declared email
+        // (v0.0.40 delta review).
+        if (raw !== null && typeof raw !== 'string') {
+          throw new Error(`email must be a string or null (got ${typeof raw})`);
+        }
+        const value = await getSpacesApi().identity.attributionEmailSet(raw);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

@@ -573,7 +573,8 @@ function isFileItemIndexLag(err: unknown): boolean {
         : '';
   const body = (err as { response?: { data?: unknown } })?.response?.data;
   const bodyText = typeof body === 'string' ? body : JSON.stringify(body ?? '');
-  return /FileItem/i.test(message) || /FileItem/i.test(bodyText);
+  const pattern = /could not find any entity of type .?"?FileItem"?/i;
+  return pattern.test(message) || pattern.test(bodyText);
 }
 
 function filesHttpRemediation(status: number): string {
