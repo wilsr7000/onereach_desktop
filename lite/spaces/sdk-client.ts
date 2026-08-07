@@ -1370,14 +1370,12 @@ export const CYPHER = {
     // and the Home timeline attribute the add to a real person instead
     // of "Someone" (2026-08-07). Written only when the author is known.
     FOREACH (x IN CASE WHEN $commitAuthor IS NULL THEN [] ELSE [1] END |
-      CREATE (c:Commit {
-        hash: $commitHash,
-        author: $commitAuthor,
-        message: 'item:added',
-        timestamp: $commitTimestampMs,
-        assetId: a.id,
-        spaceId: s.id
-      })
+      MERGE (c:Commit {hash: $commitHash})
+      ON CREATE SET c.author = $commitAuthor,
+                    c.message = 'item:added',
+                    c.timestamp = $commitTimestampMs,
+                    c.assetId = a.id,
+                    c.spaceId = s.id
       MERGE (c)-[:IN_SPACE]->(s)
       MERGE (c)-[:TOUCHED]->(a))
     RETURN a.id AS id
@@ -1408,6 +1406,13 @@ export const CYPHER = {
     OPTIONAL MATCH (p:Person {id: $creatorId})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
+    FOREACH (x IN CASE WHEN $commitAuthor IS NULL THEN [] ELSE [1] END |
+      MERGE (c:Commit {hash: $commitHash})
+      ON CREATE SET c.author = $commitAuthor,
+                    c.message = 'item:added',
+                    c.timestamp = $commitTimestampMs,
+                    c.assetId = a.id
+      MERGE (c)-[:TOUCHED]->(a))
     RETURN a.id AS id
   `,
 
@@ -2626,7 +2631,7 @@ export class SdkSpacesClient {
       now,
       commitAuthor:
         typeof input.creatorName === 'string' && input.creatorName.trim().length > 0
-          ? input.creatorName.trim()
+          ? input.creatorName.trim().slice(0, 120)
           : creatorId,
       commitHash: generateCommitHash(),
       commitTimestampMs: Date.now(),

@@ -570,6 +570,7 @@ interface SpacesItemsBridge {
     bytes: ArrayBuffer;
     description?: string;
     creatorId?: string;
+    creatorName?: string;
     metadata?: Record<string, unknown>;
     /** Public bucket. Omit or false (the default) keeps the file private. */
     isPublic?: boolean;
@@ -602,6 +603,7 @@ interface SpacesItemsBridge {
     description?: string;
     sourceUrl?: string;
     creatorId?: string;
+    creatorName?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   /** Add an agent asset (OKF text stored as content; per-type graph node). */
   createAgent(input: {
@@ -614,6 +616,7 @@ interface SpacesItemsBridge {
     sourceUrl?: string;
     description?: string;
     creatorId?: string;
+    creatorName?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   /** Search the account's agent library (graph :Agent nodes). */
   agentLibrarySearch(
@@ -626,6 +629,7 @@ interface SpacesItemsBridge {
     agentId: string;
     endpoints?: Array<{ kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }>;
     creatorId?: string;
+    creatorName?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   delete(
     id: string,

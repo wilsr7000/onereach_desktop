@@ -299,11 +299,34 @@ describe('creation attribution (2026-08-07)', () => {
     // projects hash/author/message/timestamp/spaceId + IN_SPACE. The
     // create-time commit must satisfy both, and must NOT be written
     // when the author is unknown (no lying "Someone" rows).
-    expect(CYPHER.CREATE_ASSET).toContain("CREATE (c:Commit {");
-    expect(CYPHER.CREATE_ASSET).toContain("message: 'item:added'");
+    expect(CYPHER.CREATE_ASSET).toContain('MERGE (c:Commit {hash: $commitHash})');
+    expect(CYPHER.CREATE_ASSET).toContain("c.message = 'item:added'");
     expect(CYPHER.CREATE_ASSET).toContain('MERGE (c)-[:IN_SPACE]->(s)');
     expect(CYPHER.CREATE_ASSET).toContain('MERGE (c)-[:TOUCHED]->(a)');
     expect(CYPHER.CREATE_ASSET).toMatch(/CASE WHEN \$commitAuthor IS NULL THEN \[\]/);
+  });
+
+  it('BOTH create variants write the commit; MERGE-by-hash keeps it idempotent', () => {
+    for (const q of [CYPHER.CREATE_ASSET, CYPHER.CREATE_ASSET_UNCATEGORIZED]) {
+      expect(q).toContain('MERGE (c:Commit {hash: $commitHash})');
+      expect(q).toContain("c.message = 'item:added'");
+      expect(q).toContain('MERGE (c)-[:TOUCHED]->(a)');
+      // Non-idempotent CREATE under a fanned-out OPTIONAL MATCH row set
+      // would duplicate commits — the MERGE form cannot.
+      expect(q).not.toMatch(/CREATE \(c:Commit/);
+    }
+    expect(CYPHER.CREATE_ASSET).toContain('MERGE (c)-[:IN_SPACE]->(s)');
+  });
+
+  it('creatorName is capped before persisting as Commit.author', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const found = ['spaces/sdk-client.ts', 'lite/spaces/sdk-client.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    expect(found).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    expect(src).toContain('.trim().slice(0, 120)');
   });
 
   it('the commit hash generator produces git-shaped 40-hex ids', async () => {
