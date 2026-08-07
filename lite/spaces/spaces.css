@@ -5991,6 +5991,35 @@ body {
   white-space: nowrap;
 }
 
+.spaces-member-picker-access {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.spaces-member-picker-access-label {
+  font-size: 11.5px;
+  color: #8a8a93;
+}
+
+.spaces-member-picker-duration {
+  flex: 1 1 auto;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: #e2e2e6;
+  font-size: 12px;
+  padding: 5px 8px;
+}
+
+.spaces-access-popover { width: 320px; }
+
+.spaces-text-prompt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .spaces-member-picker-hint {
   margin: 0;
   font-size: 11px;

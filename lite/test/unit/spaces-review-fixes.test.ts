@@ -215,6 +215,23 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(body).toMatch(/agentLibrarySelection = null/);
   });
 
+  it('no window.prompt survives in the Spaces renderer', () => {
+    // Electron renderers do not implement prompt() at all — the app
+    // toasts "prompt() is not supported" and the flow dead-ends. Two
+    // member-access paths shipped this way and were caught only by
+    // clicking (2026-08-06 driven pass).
+    // Strip comments first — the fix notes MENTION window.prompt() in
+    // prose, and a doc comment is not a call.
+    const code = source()
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    const hits = [...code.matchAll(/window\.prompt\s*\(/g)];
+    expect(
+      hits.length,
+      'window.prompt is a no-op in Electron — use askForText / an inline panel instead'
+    ).toBe(0);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

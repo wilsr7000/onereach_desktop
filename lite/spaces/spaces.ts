@@ -2033,27 +2033,76 @@ export function accessLabel(
 }
 
 /**
- * Ask for an access duration. Returns `undefined` when cancelled —
+ * Ask for an access duration. Resolves `undefined` when cancelled —
  * distinct from `null`, which means "permanent".
+ *
+ * This was a `window.prompt()`, which Electron renderers DO NOT
+ * SUPPORT — the app just toasted "prompt() is not supported" and the
+ * whole flow dead-ended (found in the 2026-08-06 driven pass). It is
+ * now a small inline popover built from the same ACCESS_PRESETS.
  */
-function promptAccessDuration(who: string): string | null | undefined {
-  const options = ACCESS_PRESETS.map((p, i) => `${i + 1}. ${p.label}`).join('\n');
-  const answer = window.prompt(
-    `How long should ${who} have access?\n\n${options}\n0. Permanent\n\n` +
-      `Enter a number, or an ISO date (2026-12-31T00:00:00Z).`,
-    '0'
-  );
-  if (answer === null) return undefined;
-  const trimmed = answer.trim();
-  if (trimmed === '' || trimmed === '0') return null;
-  const idx = Number.parseInt(trimmed, 10);
-  if (Number.isFinite(idx) && idx >= 1 && idx <= ACCESS_PRESETS.length) {
-    return accessPresetToIso(ACCESS_PRESETS[idx - 1]?.value ?? '');
-  }
-  // Anything else is treated as an explicit instant. Invalid values are
-  // rejected by the SDK with a readable message rather than silently
-  // becoming permanent access.
-  return trimmed;
+function promptAccessDuration(who: string): Promise<string | null | undefined> {
+  return new Promise((resolve) => {
+    document.querySelector('.spaces-access-popover-backdrop')?.remove();
+    let settled = false;
+    const finish = (value: string | null | undefined): void => {
+      if (settled) return;
+      settled = true;
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') finish(undefined);
+    };
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'spaces-member-picker-backdrop spaces-access-popover-backdrop';
+    const panel = document.createElement('div');
+    panel.className = 'spaces-member-picker spaces-access-popover';
+
+    const head = document.createElement('div');
+    head.className = 'spaces-member-picker-head';
+    const title = document.createElement('span');
+    title.textContent = `Access for ${who}`;
+    head.appendChild(title);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'spaces-member-picker-close';
+    close.setAttribute('aria-label', 'Cancel');
+    close.textContent = '×';
+    close.addEventListener('click', () => finish(undefined));
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    const list = document.createElement('div');
+    list.className = 'spaces-member-picker-results';
+    const choices: Array<{ label: string; value: string | null }> = [
+      { label: 'Permanent', value: null },
+      ...ACCESS_PRESETS.map((p) => ({ label: p.label, value: p.value })),
+    ];
+    for (const choice of choices) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'spaces-member-picker-row';
+      const name = document.createElement('span');
+      name.className = 'spaces-member-picker-name';
+      name.textContent = choice.label;
+      row.appendChild(name);
+      row.addEventListener('click', () => {
+        finish(choice.value === null ? null : accessPresetToIso(choice.value));
+      });
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+
+    backdrop.appendChild(panel);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop) finish(undefined);
+    });
+    document.addEventListener('keydown', onKey);
+  });
 }
 
 /** Change (or renew) a member's access duration. */
@@ -2065,7 +2114,7 @@ async function changeMemberAccess(
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
   const who = member.name.length > 0 ? member.name : member.id;
-  const choice = promptAccessDuration(who);
+  const choice = await promptAccessDuration(who);
   if (choice === undefined) return;
   try {
     const envelope = await bridge.members.add(spaceId, member.id, { expiresAt: choice });
@@ -2405,9 +2454,86 @@ async function cycleTicketStatus(ticket: RendererItem): Promise<void> {
   }
 }
 
-/** Simple prompt-based "+ Ticket" UI. */
+/**
+ * Ask for a single line of text in an inline panel. Resolves null when
+ * cancelled. Electron renderers do not implement `window.prompt` at
+ * all (it toasts "prompt() is not supported"), so every text prompt in
+ * this renderer goes through here.
+ */
+function askForText(title: string, placeholder = ''): Promise<string | null> {
+  return new Promise((resolve) => {
+    document.querySelector('.spaces-text-prompt-backdrop')?.remove();
+    let settled = false;
+    const finish = (value: string | null): void => {
+      if (settled) return;
+      settled = true;
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') finish(null);
+    };
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'spaces-member-picker-backdrop spaces-text-prompt-backdrop';
+    const panel = document.createElement('div');
+    panel.className = 'spaces-member-picker spaces-access-popover';
+
+    const head = document.createElement('div');
+    head.className = 'spaces-member-picker-head';
+    const heading = document.createElement('span');
+    heading.textContent = title;
+    head.appendChild(heading);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'spaces-member-picker-close';
+    close.setAttribute('aria-label', 'Cancel');
+    close.textContent = '×';
+    close.addEventListener('click', () => finish(null));
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'spaces-new-asset-input';
+    input.placeholder = placeholder;
+    input.autocomplete = 'off';
+    panel.appendChild(input);
+
+    const actions = document.createElement('div');
+    actions.className = 'spaces-text-prompt-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'spaces-new-asset-button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => finish(null));
+    actions.appendChild(cancel);
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'spaces-new-asset-button is-primary';
+    ok.textContent = 'Create';
+    ok.addEventListener('click', () => finish(input.value));
+    actions.appendChild(ok);
+    panel.appendChild(actions);
+
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') finish(input.value);
+    });
+
+    backdrop.appendChild(panel);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop) finish(null);
+    });
+    document.addEventListener('keydown', onKey);
+    input.focus();
+  });
+}
+
+/** Inline "+ Ticket" UI. */
 async function openCreateTicketPrompt(spaceId: string): Promise<void> {
-  const title = window.prompt('Ticket title?');
+  const title = await askForText('New ticket', 'Ticket title');
   if (title === null) return;
   const trimmed = title.trim();
   if (trimmed.length === 0) return;
@@ -2467,6 +2593,33 @@ async function openAddMemberPrompt(
   results.className = 'spaces-member-picker-results';
   panel.appendChild(results);
 
+  // ADR-052 access duration. This used to call window.prompt(), which
+  // Electron renderers do not support at all ("prompt() is not
+  // supported" — caught by the 2026-08-06 driven pass), so the choice
+  // lives inline in the picker.
+  const accessRow = document.createElement('div');
+  accessRow.className = 'spaces-member-picker-access';
+  const accessLabelEl = document.createElement('label');
+  accessLabelEl.className = 'spaces-member-picker-access-label';
+  accessLabelEl.htmlFor = 'spaces-member-picker-duration';
+  accessLabelEl.textContent = 'Access';
+  accessRow.appendChild(accessLabelEl);
+  const durationSelect = document.createElement('select');
+  durationSelect.id = 'spaces-member-picker-duration';
+  durationSelect.className = 'spaces-member-picker-duration';
+  const permanent = document.createElement('option');
+  permanent.value = '';
+  permanent.textContent = 'Permanent';
+  durationSelect.appendChild(permanent);
+  for (const preset of ACCESS_PRESETS) {
+    const opt = document.createElement('option');
+    opt.value = preset.value;
+    opt.textContent = preset.label;
+    durationSelect.appendChild(opt);
+  }
+  accessRow.appendChild(durationSelect);
+  panel.appendChild(accessRow);
+
   const hint = document.createElement('p');
   hint.className = 'spaces-member-picker-hint';
   hint.textContent = 'Members get access to this Space and its graph.';
@@ -2499,8 +2652,7 @@ async function openAddMemberPrompt(
       // permanent (least surprise), but putting the question here means
       // time-limited access is a first-class choice rather than
       // something you have to remember to go back and set.
-      const expiresAt = promptAccessDuration(memberId);
-      if (expiresAt === undefined) return; // cancelled
+      const expiresAt = accessPresetToIso(durationSelect.value);
       const envelope = await bridge.members.add(spaceId, memberId, { expiresAt });
       if (envelope.ok === false) {
         showToast(envelope.error.message);
