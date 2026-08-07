@@ -35,6 +35,7 @@ export interface CreateBinaryFiles {
       maxFileSize?: number;
       isPublic?: boolean;
       expiresAt?: string;
+      waitTillFileAddedInDb?: boolean;
     }
   ): Promise<string>;
   delete(key: string, options?: { isPublic?: boolean }): Promise<void>;
@@ -165,6 +166,12 @@ export async function createBinaryAsset(
     rewriteMode: 'prevent-rewrite',
     maxFileSize: MAX_BINARY_ASSET_BYTES,
     isPublic,
+    // The service indexes the FileItem DB row asynchronously; without
+    // waiting, a delete issued moments later (our own failure-path
+    // cleanup) races the indexer and dies with 'Could not find any
+    // entity of type "FileItem"' (punch list, 2026-08-06). Waiting
+    // costs a beat of upload latency and makes the file addressable.
+    waitTillFileAddedInDb: true,
     ...(expiresAt !== undefined ? { expiresAt } : {}),
   });
 

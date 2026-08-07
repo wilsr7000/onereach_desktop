@@ -11,7 +11,7 @@ Status: **work in progress** -- this README is a stub kept in
 place so the api-docs manifest test (`api-docs-manifest.test.ts`)
 keeps passing while the module's public surface stabilizes. Add
 the full design notes (error catalog, events, partitions, etc.)
-before promoting this module out of WIP.
+before promoting this module out of WIP. (Done 2026-08-07 — public API below.)
 
 ## Sketch
 
@@ -45,3 +45,29 @@ lite/main-window/
 ```
 
 Per Rule 11, **only `api.ts` is importable from other modules.**
+
+## Public API (2026-08-07)
+
+Per ADR-019 / Rule 11, consumers import ONLY from `api.ts`
+(`getMainWindowApi()`), never internal files.
+
+- `createMainWindow(config)` — factory (boot-time, `main.ts` owns the
+  call). Config carries `chromeHtmlPath` + `preloadPath`.
+- `getMainWindowApi().openTab(entry)` / `closeTab(id)` /
+  `activateTab(id)` / `listTabs()` / `getActive()` — tab orchestration
+  over `WebContentsView`s. IDW tabs get stable `persist:idw-<id>`
+  partitions; ad-hoc tabs `persist:tab-<uuid>` (ADR-038: no preload on
+  tab views).
+- `goHome()` / `reloadActive()` — Home-pill + refresh behavior.
+- IPC `lite:main-window:homeUrl:get|set` (preload:
+  `window.lite.homeUrl`) — the configurable Home-tab URL
+  (`home-url-store.ts`; default = GSX Product Expert email-triage;
+  `{accountId}` placeholder substitution; Settings → Home is the UI).
+- Home-tab modes: default remote page → `LITE_HOME=learn` (local
+  Learning Center) → `=feed` (legacy IDW feed) → `=chrome` (boot-chat).
+
+Window rescue is NOT this module: `lite/window-rescue.ts` owns
+reachability (auto-sweep on show + app-menu "Bring Windows Into
+View"); this module only needs to never fight its bounds corrections.
+Edge cases stay covered by `test/unit/window-rescue.test.ts` (16
+tests, real observed coordinates).

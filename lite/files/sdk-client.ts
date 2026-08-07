@@ -286,12 +286,27 @@ export class SdkFilesClient {
     return this.runRequest('delete', key, async () => {
       const sdk = this.getSdk();
       const isPublic = wantsPublicBucket(options);
-      try {
-        await sdk.deleteFile(key, isPublic);
-      } catch (err) {
-        if (isNotFoundError(err)) return;
-        throw err;
+      // The service writes the FileItem DB row ASYNCHRONOUSLY after
+      // the S3 upload (that's what uploadFileV2's waitTillFileAddedInDb
+      // exists for). Reads use signed URLs and never notice; DELETE
+      // consults the DB and fails with 'Could not find any entity of
+      // type "FileItem"' when it races the indexer — the exact error
+      // that made delete-by-key look permanently broken (punch list,
+      // 2026-08-06). Retry across the indexing window before giving up.
+      const delays = [0, 600, 1800];
+      let lastErr: unknown = null;
+      for (const delayMs of delays) {
+        if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs));
+        try {
+          await sdk.deleteFile(key, isPublic);
+          return;
+        } catch (err) {
+          if (isNotFoundError(err)) return;
+          if (!isFileItemIndexLag(err)) throw err;
+          lastErr = err;
+        }
       }
+      throw lastErr;
     });
   }
 
@@ -542,6 +557,23 @@ export function wantsPublicBucket(options: { isPublic?: boolean }): boolean {
 function isNotFoundError(err: unknown): boolean {
   const e = err as { response?: { status?: number } };
   return e?.response?.status === 404;
+}
+
+/**
+ * The service's FileItem row lags the S3 write (async indexing). This
+ * error shape means "the DB row isn't there YET", not "the file does
+ * not exist" — retryable for a short window.
+ */
+function isFileItemIndexLag(err: unknown): boolean {
+  const message =
+    err instanceof Error
+      ? err.message
+      : typeof (err as { message?: unknown })?.message === 'string'
+        ? String((err as { message: string }).message)
+        : '';
+  const body = (err as { response?: { data?: unknown } })?.response?.data;
+  const bodyText = typeof body === 'string' ? body : JSON.stringify(body ?? '');
+  return /FileItem/i.test(message) || /FileItem/i.test(bodyText);
 }
 
 function filesHttpRemediation(status: number): string {

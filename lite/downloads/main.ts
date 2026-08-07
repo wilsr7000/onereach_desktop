@@ -14,7 +14,7 @@
  * `lite/downloads/api.ts`. This file is the implementation boundary.
  */
 
-import { session as defaultSessions, type BrowserWindow, type Session } from 'electron';
+import { app, session as defaultSessions, type BrowserWindow, type Session } from 'electron';
 import {
   attachWillDownloadHandler,
   type DownloadsHandlerOptions,
@@ -65,6 +65,7 @@ let active: {
   unhooks: Array<() => void>;
   attachedSessions: WeakSet<Session>;
   opts: InitDownloadsOptions;
+  detachSessionCreated?: () => void;
 } | null = null;
 
 /**
@@ -118,6 +119,23 @@ export function initDownloads(opts: InitDownloadsOptions): DownloadsHandle {
 
   active = { unhooks, attachedSessions, opts };
 
+  // Sessions are born all over the app: per-IDW tabs
+  // (persist:idw-<id>), ad-hoc tabs (persist:tab-<uuid>), the remote
+  // Home page, the standalone IDW browser… Every one Electron creates
+  // AFTER init fires 'session-created' — attach there so a partition
+  // added next month can never silently lose its downloads (2026-08-07
+  // platform review: "missed partitions = silent download failures").
+  const onSessionCreated = (s: Session): void => {
+    if (active === null || active.attachedSessions.has(s)) return;
+    const unhook = attachWillDownloadHandler(s, handlerOpts);
+    active.unhooks.push(unhook);
+    active.attachedSessions.add(s);
+  };
+  app.on('session-created', onSessionCreated);
+  active.detachSessionCreated = (): void => {
+    app.removeListener('session-created', onSessionCreated);
+  };
+
   const handle: DownloadsHandle = {
     attachToSession(s: Session) {
       if (active === null) {
@@ -135,6 +153,7 @@ export function initDownloads(opts: InitDownloadsOptions): DownloadsHandle {
       return unhook;
     },
     dispose() {
+      active?.detachSessionCreated?.();
       if (active === null) return;
       for (const fn of active.unhooks) {
         try {

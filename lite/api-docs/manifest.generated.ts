@@ -1552,6 +1552,330 @@ export const MANIFEST: Manifest = {
       "readme": "# `lite/files/` -- File storage on OneReach\n\nWraps `@or-sdk/files` so other Lite modules can upload, download, list, and delete files in OneReach storage without touching the SDK directly. Per-user isolation is enforced server-side: every request carries the user's `mult` token and the active `accountId`, so files in your account are never visible to anyone else's install.\n\n- **Public API**: [`api.ts`](api.ts) -- `FilesApi`, `getFilesApi()`, `FilesError`, `FILES_ERROR_CODES`\n- **Internal**:\n  - [`sdk-client.ts`](sdk-client.ts) -- `SdkFilesClient` SDK wrapper (`@internal`)\n  - [`types.ts`](types.ts) -- `FilesItem`, content + option shapes\n  - [`errors.ts`](errors.ts) -- `FilesError` + code catalog\n  - [`events.ts`](events.ts) -- typed event surface (ADR-032)\n- **Tests**: [`../test/unit/files-api.test.ts`](../test/unit/files-api.test.ts), [`../test/integration/files-integration.test.ts`](../test/integration/files-integration.test.ts)\n\n## Usage\n\n```typescript\nimport { getFilesApi } from '../files/api.js';\n\n// Upload bytes\nconst url = await getFilesApi().upload('bug-attachments', 'screenshot.png', bytes, {\n  contentType: 'image/png',\n  rewriteMode: 'prevent-rewrite',\n  expiresAt: new Date(Date.now() + 7 * 86400_000).toISOString(), // 7 days\n});\n\n// Get a fresh signed URL later\nconst fresh = await getFilesApi().getDownloadUrl('bug-attachments/screenshot.png');\n\n// Convenience: download bytes directly\nconst buf = await getFilesApi().download('bug-attachments/screenshot.png');\n\n// List\nconst items = await getFilesApi().list('bug-attachments');\n// [{ key, size, contentType, lastModified, downloadUrl, ... }]\n\n// Delete\nawait getFilesApi().delete('bug-attachments/screenshot.png');\n```\n\n## Auth\n\nEvery method requires a signed-in OneReach account. Signed-out callers see `FILES_NOT_AUTHENTICATED`. The auth bindings are wired by `lite/main-lite.ts` after `initAuth()` returns, via `setFilesAuthBindings({ getToken, getAccountId })` -- the files module never imports `lite/auth/` directly so dep-cruiser's `no-circular-in-lite` rule stays clean (mirrors the `setKVAuthBindings` pattern from ADR-044).\n\n## Public vs private\n\nEvery method takes an optional `isPublic: boolean` (default `false`). Private files require a signed URL to download -- the platform documents those links as valid for **24 hours** -- while public files can be hot-linked with no stated expiry. There is no per-account ACL layer beyond this -- if you need fine-grained sharing, layer it in the consumer module.\n\n> **This client inverts the platform default.** The OneReach Files docs state: *\"If no preference is specified by default, the file is set to public.\"* Every call site here resolves the bucket through `wantsPublicBucket()`, which returns true only for a literal `true`. Omitting the flag — or passing a JSON-round-tripped `'true'` string — yields **private**. Publishing a user's file is the failure mode worth engineering against; refusing to publish is the recoverable one. Guarded by `test/unit/files-private-by-default.test.ts`, one case per operation.\n\nTwo platform constraints worth knowing:\n\n- **You can only overwrite a file with another file of the same privacy.** Asset uploads use `rewriteMode: 'prevent-rewrite'`, so this never bites today — but it becomes live the moment anyone switches to `'rewrite'`.\n- **`setPrivacy`'s options carry the file's CURRENT bucket, not the target.** `setPrivacy(key, 'private', { isPublic: true })` demotes a public file. Get it backwards and the call addresses the wrong bucket.\n\n**The bucket is part of the file's identity, not a transient upload setting.** A key written to the public bucket cannot be read, TTL'd, or deleted as private -- every later call must pass the same `isPublic` the upload used. Consumers that persist a key must therefore persist its bucket alongside it; `lite/spaces/create-binary.ts` records `metadata.fileIsPublic` on the asset for exactly this reason.\n\nUse `setPrivacy(key, 'public' | 'private')` to flip an existing file in place, rather than re-uploading.\n\n## TTL (auto-expiry)\n\n`upload({ expiresAt })` sets an expiry at write time; `setTtl(key, expiresAt | null, { isPublic })` adds, changes, or (with `null`) clears one afterwards. No TTL is the default -- files persist until explicitly deleted.\n\nCallers should **validate the timestamp rather than forward it blindly**. A malformed or past `expiresAt` that the bucket quietly ignores leaves the user believing a file self-destructs when it never will; `create-binary.ts` rejects both cases up front.\n\n## Error catalog\n\n| Code | When | Remediation |\n|------|------|-------------|\n| `FILES_NOT_AUTHENTICATED` | No `mult` token / no active account | Sign in via Settings -> Account |\n| `FILES_NOT_FOUND` | Server returned 404 (key doesn't exist) | Check the key + isPublic flag |\n| `FILES_HTTP` | Non-2xx other than 404 / 409 / 413 (incl. 401/403) | Sign out + back in to refresh the token |\n| `FILES_NETWORK` | Underlying fetch rejected (DNS / TCP / TLS) | Check network connectivity |\n| `FILES_ALREADY_EXISTS` | `prevent-rewrite` upload found an existing file | Use `rewriteMode: 'rewrite'` or pick a different name |\n| `FILES_TOO_LARGE` | Upload exceeded the configured `maxFileSize` | Lower the file size or raise `maxFileSize` |\n| `FILES_INVALID_INPUT` | Caller passed an empty key, bad TTL, etc. | Fix the call site |\n\n`get()` and `delete()` soft-fail not-found (return `null` / no-op) -- mirrors `kv.get` / `kv.delete`.\n\n## Hardening roadmap\n\n- **F1: Per-renderer bridge** -- `window.lite.files.*` IPC bridge for renderer-driven uploads (file pickers, drag-and-drop). Today the module is main-process only; renderers go through their own module's IPC (e.g. bug-report's \"attach file\" handler).\n- **F2: Files Sync** -- thin `lite/files-sync/` wrapper around `@or-sdk/files-sync-node` for the \"mirror a local folder to the cloud\" use case (`gsx-file-sync.js` does this in the full app). Deferred -- different mental model, no in-app consumer yet.\n- **F3: Multi-env** -- when the auth-multi-env chunk lands, files inherits per-env discoveryUrl + accountId from auth.\n- **F4: Resumable uploads** -- the SDK's `uploadFileV2` is single-shot. Large-file uploads with resumable behavior would need a separate code path.\n\n## Borrowed pattern\n\nThe construction shape (token getter + discoveryUrl + accountId) mirrors `lib/edison-sdk-manager.js:349-358` -- the full app's pattern, studied but not imported (per `lite/LITE-RULES.md`). The `setFilesAuthBindings` indirection mirrors `setKVAuthBindings` (ADR-044) and is documented in ADR-045.\n"
     },
     {
+      "slug": "gsx",
+      "title": "Gsx",
+      "summary": "GSX automation module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts` -- never reach into `store.ts`,\n`runner.ts`, `window.ts`, or any other internal file.\n\nWhat this module does\n--------------------------------------------------------------------\nOpens GSX studio windows (Designer, Flows, Files -- any\n`studio.<env>.onereach.ai` surface) and drives their UI with\nDETERMINISTIC SCRIPTS, wrapped in an evaluation feedback loop:\n\n  - Every script carries its own assertions; every run is graded\n    (`pass` / `fail` / `error` / `repaired-pass` / `repaired-fail`).\n  - A failing run snapshots the live page and asks the AI module\n    (Claude, main-process key) to REPAIR the steps. A repaired\n    script that passes is saved as a `learned` variant that shadows\n    the seed -- so the next run replays deterministically, with no\n    model call on the happy path.\n  - A learned variant that keeps failing is demoted back to the\n    seed. Every transition is a typed event (`gsx.run.verdict`,\n    `gsx.script.learned`, `gsx.script.invalidated`).\n\nThe LLM edits scripts; it never free-drives the page. Scripts are\nJSON, auditable, and versioned; run records are the eval corpus.\n\nThis file is deliberately electron-free so the conformance unit test\nimports it under plain Node. The window layer (`window.ts`) is wired\nin by `gsx/main.ts` (`initGsx`) via {@link setGsxWindowPortFactory};\nuserData comes in via {@link setGsxPersistDir}.\n\nUsage from another module (main process only):\n\n  import { getGsxApi } from '../gsx/api.js';\n  const gsx = getGsxApi();\n  const win = await gsx.openWindow({ env: 'edison' });\n  const run = await gsx.runScript({ scriptId: 'designer.open' });\n  if (run.verdict !== 'pass') console.warn(run.failure);\n\nTests: `_setGsxApiForTesting(stub)` to inject a custom\nimplementation, `_resetGsxApiForTesting()` to clear the singleton.",
+      "surface": {
+        "interfaceName": "GsxApi",
+        "interfaceDescription": "The public surface of the GSX automation module. All cross-module\ncallers (and, via IPC + the preload bridge, renderers) route through\nthis interface.\n\n**Error contract**: methods throw {@link GsxError} (extends\n`LiteError`). Branch on `.code`: `GSX_UNSUPPORTED_ENV`,\n`GSX_WINDOW_NOT_FOUND`, `GSX_SCRIPT_NOT_FOUND`, `GSX_INVALID_SCRIPT`,\n`GSX_RUN_NOT_FOUND`, `GSX_URL_NOT_ALLOWED`, `GSX_NAVIGATION_FAILED`,\n`GSX_SEED_READ_ONLY`. Repair-path failures never throw out of\n`runScript` -- they land in the run record's `repair` summary.\n\nSee `lite/gsx/README.md` for the script format and eval-loop recipe.",
+        "methods": [
+          {
+            "name": "openWindow",
+            "signature": "openWindow(opts?: GsxOpenWindowOptions): Promise<GsxWindowInfo>",
+            "description": "Open a GSX window. The URL defaults to the studio root for the env\n(with `?accountId=<signed-in account>`); relative paths resolve\nagainst `https://studio.<env>.onereach.ai`. Auth cookies are\ninjected into the window's partition BEFORE navigation (ADR-042),\nso a signed-in user lands authenticated.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "closeWindow",
+            "signature": "closeWindow(windowId: string): Promise<{ closed: boolean }>",
+            "description": "Close a GSX window. `{ closed: false }` when the id is unknown.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listWindows",
+            "signature": "listWindows(): Promise<GsxWindowInfo[]>",
+            "description": "List the open GSX windows.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "navigate",
+            "signature": "navigate(windowId: string, url: string): Promise<GsxWindowInfo>",
+            "description": "Navigate an open window (same URL resolution + auth as openWindow).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "snapshot",
+            "signature": "snapshot(windowId: string): Promise<GsxPageSnapshot>",
+            "description": "Census of the window's interactive elements (capped at 150). This\nis the same picture the repair LLM sees -- useful for authoring\nnew script selectors against the live UI.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listScripts",
+            "signature": "listScripts(): Promise<GsxScript[]>",
+            "description": "List the EFFECTIVE scripts: learned/custom variants shadow the\nseed with the same id; untouched seeds appear as-is.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getScript",
+            "signature": "getScript(id: string): Promise<GsxScript>",
+            "description": "Get the effective script for an id. Throws `GSX_SCRIPT_NOT_FOUND`.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "saveScript",
+            "signature": "saveScript(script: GsxScript): Promise<GsxScript>",
+            "description": "Register or update a script. `source` must be `learned` (seeds are\nread-only; a learned script with a seed's id shadows it). The\nscript passes the same structural validation the AI repair output\ndoes. Throws `GSX_INVALID_SCRIPT` / `GSX_SEED_READ_ONLY`.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "deleteScript",
+            "signature": "deleteScript(id: string): Promise<{ deleted: boolean }>",
+            "description": "Delete a learned/custom script. Deleting a learned variant reverts\nits id to the seed. Throws `GSX_SEED_READ_ONLY` for seed ids.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "runScript",
+            "signature": "runScript(opts: GsxRunScriptOptions): Promise<GsxRunRecord>",
+            "description": "Run a script and grade it -- the heart of the module. Opens a\nwindow when `windowId` is omitted. On a failing run (and unless\n`repair: false`), snapshots the page, asks the AI module to repair\nthe steps, re-runs, and promotes a passing repair to a `learned`\nvariant. The returned {@link GsxRunRecord} carries the verdict,\nper-step results, and the repair summary.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "startRecording",
+            "signature": "startRecording(windowId: string): Promise<GsxRecordingStatus>",
+            "description": "TEACH MODE. Start recording the user's own navigation in an open\nGSX window. A page-side recorder captures every click and final\ninput value with ranked selector candidates and human labels\n(aria-label / <label> / placeholder); the main process drains it\non a poll and tracks navigations. Idempotent per window.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getRecording",
+            "signature": "getRecording(windowId: string): Promise<GsxRecordingStatus>",
+            "description": "Live recording status for a window (recording + event count).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "stopRecording",
+            "signature": "stopRecording(windowId: string, opts: GsxStopRecordingOptions): Promise<GsxScript>",
+            "description": "Finish a recording and save it as a `learned` template script.\nThe recorded actions become deterministic steps (best selector +\ntext fallback, `{accountId}`/`{env}` back-substituted, a final\n`assertUrl` pinning the destination). Unless `generalize: false`,\nthe AI module then promotes content-specific literals -- the item\nyou clicked, the text you typed -- to NAMED `{param}` placeholders\nderived from the elements' labels, so the template can click\nDIFFERENT elements on replay (`runScript({ params })`). If\ngeneralization fails, the deterministic recording is saved as-is.\nThrows `GSX_NOT_RECORDING` / `GSX_EMPTY_RECORDING` /\n`GSX_INVALID_SCRIPT` / `GSX_SEED_READ_ONLY`.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "cancelRecording",
+            "signature": "cancelRecording(windowId: string): Promise<{ cancelled: boolean }>",
+            "description": "Abandon a recording without saving. `{ cancelled: false }` when idle.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listRuns",
+            "signature": "listRuns(scriptId?: string): Promise<GsxRunRecord[]>",
+            "description": "Run history, newest first (capped ring buffer).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getRun",
+            "signature": "getRun(runId: string): Promise<GsxRunRecord>",
+            "description": "One run record. Throws `GSX_RUN_NOT_FOUND`.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getStats",
+            "signature": "getStats(scriptId?: string): Promise<GsxScriptStats[]>",
+            "description": "Per-script health: runs/passes/failures/consecutive failures.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "onEvent",
+            "signature": "onEvent(handler: (event: GsxEvent) => void): () => void;",
+            "description": "Subscribe to typed GSX events (ADR-032): run verdicts, step\nresults, learned/invalidated transitions, window lifecycle.\nReturns an unsubscribe function.",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": {
+        "constantName": "GSX_EVENTS",
+        "count": 36,
+        "entries": [
+          {
+            "constantKey": "OPEN_WINDOW_START",
+            "name": "gsx.open-window.start",
+            "description": ""
+          },
+          {
+            "constantKey": "OPEN_WINDOW_FINISH",
+            "name": "gsx.open-window.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "OPEN_WINDOW_FAIL",
+            "name": "gsx.open-window.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "RUN_SCRIPT_START",
+            "name": "gsx.run-script.start",
+            "description": ""
+          },
+          {
+            "constantKey": "RUN_SCRIPT_FINISH",
+            "name": "gsx.run-script.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "RUN_SCRIPT_FAIL",
+            "name": "gsx.run-script.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "REPAIR_START",
+            "name": "gsx.repair.start",
+            "description": ""
+          },
+          {
+            "constantKey": "REPAIR_FINISH",
+            "name": "gsx.repair.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "REPAIR_FAIL",
+            "name": "gsx.repair.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "RECORD_START",
+            "name": "gsx.record.start",
+            "description": ""
+          },
+          {
+            "constantKey": "RECORD_FINISH",
+            "name": "gsx.record.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "RECORD_FAIL",
+            "name": "gsx.record.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "STEP_RESULT",
+            "name": "gsx.step.result",
+            "description": ""
+          },
+          {
+            "constantKey": "RECORD_CANCELLED",
+            "name": "gsx.record.cancelled",
+            "description": ""
+          },
+          {
+            "constantKey": "RECORD_GENERALIZED",
+            "name": "gsx.record.generalized",
+            "description": ""
+          },
+          {
+            "constantKey": "RUN_VERDICT",
+            "name": "gsx.run.verdict",
+            "description": ""
+          },
+          {
+            "constantKey": "SCRIPT_LEARNED",
+            "name": "gsx.script.learned",
+            "description": ""
+          },
+          {
+            "constantKey": "SCRIPT_INVALIDATED",
+            "name": "gsx.script.invalidated",
+            "description": ""
+          },
+          {
+            "constantKey": "WINDOW_CLOSED",
+            "name": "gsx.window.closed",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_OPEN_WINDOW",
+            "name": "gsx.ipc.open-window",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_CLOSE_WINDOW",
+            "name": "gsx.ipc.close-window",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_LIST_WINDOWS",
+            "name": "gsx.ipc.list-windows",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_NAVIGATE",
+            "name": "gsx.ipc.navigate",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_LIST_SCRIPTS",
+            "name": "gsx.ipc.list-scripts",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_SCRIPT",
+            "name": "gsx.ipc.get-script",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_SAVE_SCRIPT",
+            "name": "gsx.ipc.save-script",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_DELETE_SCRIPT",
+            "name": "gsx.ipc.delete-script",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_RUN_SCRIPT",
+            "name": "gsx.ipc.run-script",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_LIST_RUNS",
+            "name": "gsx.ipc.list-runs",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_RUN",
+            "name": "gsx.ipc.get-run",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_STATS",
+            "name": "gsx.ipc.get-stats",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_SNAPSHOT",
+            "name": "gsx.ipc.snapshot",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_START_RECORDING",
+            "name": "gsx.ipc.start-recording",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_STOP_RECORDING",
+            "name": "gsx.ipc.stop-recording",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_CANCEL_RECORDING",
+            "name": "gsx.ipc.cancel-recording",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_RECORDING",
+            "name": "gsx.ipc.get-recording",
+            "description": ""
+          }
+        ]
+      },
+      "readme": "# GSX Automation (`lite/gsx/`)\n\nOpen GSX studio windows (Designer, Flows, Files — any\n`studio.<env>.onereach.ai` surface) and drive their UI with\n**deterministic scripts** wrapped in an **evaluation feedback loop**.\n\n## The model\n\n- A **script** is versioned JSON: a list of steps\n  (`navigate` / `waitFor` / `click` / `fill` / `assertVisible` /\n  `assertUrl` / `assertText` / `wait`). Selector steps can carry a\n  `textFallback` so one selector drift doesn't kill the script.\n  `{accountId}`, `{env}`, and custom `{param}`s substitute at run time.\n- Every script carries its own **assertions** — they ARE the evaluation\n  criteria. Every run is graded: `pass`, `fail`, `error`,\n  `repaired-pass`, `repaired-fail`, and recorded as a `GsxRunRecord`.\n- **Hybrid repair**: when a run fails, the module snapshots the live\n  page (interactive elements + attributes), asks the AI module\n  (`lite/ai/`, Claude, main-process key) to correct the steps, and\n  re-runs. The LLM **edits scripts — it never free-drives the page.**\n- A repaired script that passes is saved as a **`learned` variant**\n  that shadows the seed: the next run replays deterministically with\n  no model call. A learned variant that fails\n  `GSX_INVALIDATE_AFTER_CONSECUTIVE_FAILURES` (3) runs in a row is\n  demoted back to the seed.\n\n```\nrun ──▶ grade (script's own assertions)\n         ├─ pass ────────────────────────────▶ record + stats\n         └─ fail/error\n              └─▶ snapshot page ─▶ AI repairs steps ─▶ re-run\n                    ├─ pass ─▶ save `learned` vN+1 (shadows seed)\n                    └─ fail ─▶ record `repaired-fail`\n   learned fails 3× in a row ─▶ demoted back to seed\n```\n\n## Windows\n\n- Standalone `BrowserWindow`, partition `persist:lite-gsx-<env>`\n  (stable per env — the GSX session sticks across restarts).\n- Auth cookies are injected **before** `loadURL` (ADR-042), so a\n  signed-in user lands authenticated.\n- **No preload** (ADR-038): automated pages never see `window.lite.*`.\n  All driving happens from the main process via `executeJavaScript`.\n- Navigation is contained to `https://*.onereach.ai`.\n\n## Usage (main process)\n\n```typescript\nimport { getGsxApi } from '../gsx/api.js';\n\nconst gsx = getGsxApi();\nconst win = await gsx.openWindow({ env: 'edison' });          // Designer shell\nconst run = await gsx.runScript({ scriptId: 'flows.open-by-name',\n                                  params: { flowName: 'My Flow' } });\nif (run.verdict !== 'pass') console.warn(run.failure, run.repair);\n```\n\nRenderer: same surface on `window.lite.gsx.*`.\n\n## Seed scripts\n\n| id | what it does |\n|---|---|\n| `designer.open` | Studio root for the signed-in account; asserts app shell + nav chrome |\n| `flows.list` | Flows view; asserts a flow collection rendered |\n| `flows.open-by-name` | Clicks the flow named `{flowName}`; asserts a designer canvas |\n| `files.open` | Files view |\n\nSeeds are read-only. `saveScript` with `source: \"learned\"` shadows a\nseed (or registers a new custom id); `deleteScript` on a learned id\nreverts to the seed.\n\n## The eval trail\n\nEvery transition is a typed event (ADR-032): `gsx.run.verdict`,\n`gsx.step.result`, `gsx.script.learned`, `gsx.script.invalidated`,\nplus spans for `gsx.open-window` / `gsx.run-script` / `gsx.repair`.\n`getStats()` returns per-script health (runs / passes / failures /\nconsecutive failures); `listRuns()` is the run corpus, capped at 200\nrecords, persisted in `gsx-automation.json` under userData.\n\n## Error catalog\n\n| Code | Meaning |\n|---|---|\n| `GSX_UNSUPPORTED_ENV` | Env not in `SUPPORTED_ENVIRONMENTS` |\n| `GSX_WINDOW_NOT_FOUND` | Unknown/closed windowId (or initGsx never ran) |\n| `GSX_SCRIPT_NOT_FOUND` | No script under that id |\n| `GSX_INVALID_SCRIPT` | Script (saved or AI-repaired) failed validation |\n| `GSX_RUN_NOT_FOUND` | Run record aged out of the ring buffer |\n| `GSX_URL_NOT_ALLOWED` | Non-`*.onereach.ai` URL refused |\n| `GSX_NAVIGATION_FAILED` | loadURL failed (network, auth) |\n| `GSX_AI_UNAVAILABLE` | Repair requested but AI module unusable |\n| `GSX_REPAIR_FAILED` | Model output didn't parse into a valid script |\n| `GSX_PERSIST_FAILED` | gsx-automation.json write failed (soft, logged) |\n| `GSX_SEED_READ_ONLY` | Attempted to overwrite/delete a seed |\n\nRepair-path failures never throw out of `runScript` — they land in the\nrun record's `repair.skippedReason`.\n"
+    },
+    {
       "slug": "health",
       "title": "Health",
       "summary": "Health module -- PUBLIC API.\n\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts` -- never reach into `store.ts` or\n`main.ts`.\n\nHealth answers \"what is true right now?\" -- a pull-based current-\nstate snapshot across documented lite modules. The counterpart to\nthe central event log (which answers \"what happened over time?\").\nNo mutable state is maintained; every call re-reads.\n\nUsage from another module:\n\n  import { getHealthApi } from '../health/api.js';\n  const snap = await getHealthApi().snapshot();\n  console.log(snap.auth.signedIn, snap.totp.configured);\n\nTests: `_setHealthApiForTesting(stub)` injects a custom\nimplementation, `_resetHealthApiForTesting()` clears the singleton.\n\nSecurity: the snapshot type (and its branches in `types.ts`) has\nNO fields for secrets. Token values, TOTP code/secret, and Neon\npasswords cannot be expressed in the type and are not produced by\nthe default store. See `lite/health/README.md` \"Security posture.\"",
@@ -2400,7 +2724,7 @@ export const MANIFEST: Manifest = {
           }
         ]
       },
-      "readme": "# lite/main-window -- main window + tab store\n\nPublic surface: `getMainWindowApi()` from `./api.ts`. Renderer\nsurface: `window.lite.mainWindow` (under construction).\n\nThis module owns the Lite main window's `BrowserWindow` factory\nand a per-tab persistence store. Tabs persist to KV (per\n`./store.ts`) so the user's open tabs survive restart.\n\nStatus: **work in progress** -- this README is a stub kept in\nplace so the api-docs manifest test (`api-docs-manifest.test.ts`)\nkeeps passing while the module's public surface stabilizes. Add\nthe full design notes (error catalog, events, partitions, etc.)\nbefore promoting this module out of WIP.\n\n## Sketch\n\n| Method | Purpose |\n|---|---|\n| `openTab(input)` | Create a new tab, persist it, broadcast `lite:main-window:changed` |\n| `closeTab(id)` | Remove a tab by id |\n| `activateTab(id)` | Mark a tab active |\n| `listTabs()` | All tabs in display order |\n| `getActive()` | Currently-active tab id |\n| `goHome()` | Activate the home tab |\n\n## Errors (from `./errors.ts`)\n\n- `MAIN_WINDOW_NOT_FOUND` -- tab id doesn't exist\n- `MAIN_WINDOW_DUPLICATE_PARTITION` -- attempted to open two tabs with the same persistent partition\n- `MAIN_WINDOW_INVALID_URL` -- non-http/https URL passed to `openTab`\n- `MAIN_WINDOW_INVALID_INPUT` -- malformed payload\n- `MAIN_WINDOW_PERSISTENCE_FAILED` -- KV write failed\n\n## File layout\n\n```\nlite/main-window/\n  README.md   (this file -- stub)\n  api.ts      PUBLIC -- MainWindowApi singleton\n  errors.ts   INTERNAL -- MainWindowError\n  events.ts   INTERNAL -- MAIN_WINDOW_EVENTS\n  main.ts     INTERNAL -- initMainWindow(): IPC handlers + window factory wiring\n  store.ts    INTERNAL -- TabStore, KV-backed\n```\n\nPer Rule 11, **only `api.ts` is importable from other modules.**\n"
+      "readme": "# lite/main-window -- main window + tab store\n\nPublic surface: `getMainWindowApi()` from `./api.ts`. Renderer\nsurface: `window.lite.mainWindow` (under construction).\n\nThis module owns the Lite main window's `BrowserWindow` factory\nand a per-tab persistence store. Tabs persist to KV (per\n`./store.ts`) so the user's open tabs survive restart.\n\nStatus: **work in progress** -- this README is a stub kept in\nplace so the api-docs manifest test (`api-docs-manifest.test.ts`)\nkeeps passing while the module's public surface stabilizes. Add\nthe full design notes (error catalog, events, partitions, etc.)\nbefore promoting this module out of WIP. (Done 2026-08-07 — public API below.)\n\n## Sketch\n\n| Method | Purpose |\n|---|---|\n| `openTab(input)` | Create a new tab, persist it, broadcast `lite:main-window:changed` |\n| `closeTab(id)` | Remove a tab by id |\n| `activateTab(id)` | Mark a tab active |\n| `listTabs()` | All tabs in display order |\n| `getActive()` | Currently-active tab id |\n| `goHome()` | Activate the home tab |\n\n## Errors (from `./errors.ts`)\n\n- `MAIN_WINDOW_NOT_FOUND` -- tab id doesn't exist\n- `MAIN_WINDOW_DUPLICATE_PARTITION` -- attempted to open two tabs with the same persistent partition\n- `MAIN_WINDOW_INVALID_URL` -- non-http/https URL passed to `openTab`\n- `MAIN_WINDOW_INVALID_INPUT` -- malformed payload\n- `MAIN_WINDOW_PERSISTENCE_FAILED` -- KV write failed\n\n## File layout\n\n```\nlite/main-window/\n  README.md   (this file -- stub)\n  api.ts      PUBLIC -- MainWindowApi singleton\n  errors.ts   INTERNAL -- MainWindowError\n  events.ts   INTERNAL -- MAIN_WINDOW_EVENTS\n  main.ts     INTERNAL -- initMainWindow(): IPC handlers + window factory wiring\n  store.ts    INTERNAL -- TabStore, KV-backed\n```\n\nPer Rule 11, **only `api.ts` is importable from other modules.**\n\n## Public API (2026-08-07)\n\nPer ADR-019 / Rule 11, consumers import ONLY from `api.ts`\n(`getMainWindowApi()`), never internal files.\n\n- `createMainWindow(config)` — factory (boot-time, `main.ts` owns the\n  call). Config carries `chromeHtmlPath` + `preloadPath`.\n- `getMainWindowApi().openTab(entry)` / `closeTab(id)` /\n  `activateTab(id)` / `listTabs()` / `getActive()` — tab orchestration\n  over `WebContentsView`s. IDW tabs get stable `persist:idw-<id>`\n  partitions; ad-hoc tabs `persist:tab-<uuid>` (ADR-038: no preload on\n  tab views).\n- `goHome()` / `reloadActive()` — Home-pill + refresh behavior.\n- IPC `lite:main-window:homeUrl:get|set` (preload:\n  `window.lite.homeUrl`) — the configurable Home-tab URL\n  (`home-url-store.ts`; default = GSX Product Expert email-triage;\n  `{accountId}` placeholder substitution; Settings → Home is the UI).\n- Home-tab modes: default remote page → `LITE_HOME=learn` (local\n  Learning Center) → `=feed` (legacy IDW feed) → `=chrome` (boot-chat).\n\nWindow rescue is NOT this module: `lite/window-rescue.ts` owns\nreachability (auto-sweep on show + app-menu \"Bring Windows Into\nView\"); this module only needs to never fight its bounds corrections.\nEdge cases stay covered by `test/unit/window-rescue.test.ts` (16\ntests, real observed coordinates).\n"
     },
     {
       "slug": "neon",
@@ -3058,7 +3382,7 @@ export const MANIFEST: Manifest = {
           }
         ]
       },
-      "readme": "# Spaces Module\n\n**Status**: Phase 1 + Phase 2 + chunk 3k/3o (Home view) shipped. The Spaces window opens with **Home** as the default scope — a 5-card news feed that surfaces what's in your data room (entity counts + 30-day sparklines, top contributors over the last week, agents in your account, your visible-Space count, and the most-recently-added items). Sidebar lists every `:Space` the active account can see and surfaces the Uncategorized intake count. When you click into a Space (or Uncategorized) the main pane switches to the existing item-cards view: `:Asset` cards (surfaced as \"Items\" in the renderer naming) with multi-Space chips, optional provenance, and a right-rail detail panel. Cypher-backed throughout; no stubs remain.\n\nThe Phase 0.5 Discovery panel that previously lived at the bottom of the Spaces window has moved to **Settings → Diagnostics → \"Spaces Discovery (engineer)\"** — same runner, same JSON output, but no longer crowding the user-facing UI. See [`HOME-V1.md`](./HOME-V1.md) for the chunk detail.\n\n**Schema**: queries follow the canonical OneReach graph schema documented in the `(:Schema)` nodes themselves: node label `:Asset`, edge `[:BELONGS_TO]` from Asset to Space, creator edge `[:CREATED]` from Person to Asset. Every projected field uses `coalesce(canonical, legacy, default)` so existing data written by the legacy `omnigraph-client.js` push path (which writes `title` / `assetType` / `fileUrl` / snake_case timestamps) still renders alongside data using the canonical names. The TypeScript surface (`Item`, `ItemSummary`) keeps the friendlier \"Item\" naming for renderers; only the Cypher uses the storage label.\n\n> Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan (\"Spaces as Platform Primitive\" section).\n\n## Public surface (`api.ts`)\n\n```ts\nimport { getSpacesApi } from '../spaces/api.js';\n\nconst api = getSpacesApi();\napi.open();                                          // launch / focus the window\n\n// Phase 1 + 2 (browse)\nawait api.listSpaces();                              // every :Space the account can read\nawait api.getUncategorizedCount();                   // :Asset nodes with no :BELONGS_TO edge\nawait api.items.list({ kind: 'uncategorized' });     // Items without a :Space\nawait api.items.list({ kind: 'space', spaceId: '…' }); // Items in one :Space (+ chips)\nawait api.items.get(itemId);                          // full Item incl. content + metadata\n\n// Home view (chunk 3k + 3o) — read-only news-feed data\nawait api.getEntityCounts();                          // { spaces, assets, people, agents }\nawait api.listRecentItems({ limit: 3 });              // most-recent :Asset, ItemSummary shape\nawait api.topContributors({ window: 'week', limit: 4 }); // :Commit aggregates by author\nawait api.listRecentEvents({ limit: 50 });            // :Commit projection (id/author/kind/timestamp/space)\nawait api.listAgentsSample({ limit: 3 });             // first N :Agent alphabetically\nawait api.getPermissionSummary();                     // { visibleSpaceCount, totalSpaceCount? }\n```\n\nUse `resolveSpaceScope(id)` at any UI/IPC boundary that hands a plain id into the SDK. The synthetic Uncategorized id is exported as `UNCATEGORIZED_SPACE_ID` and is the only string the renderer/IPC layer ever uses; the typed `SpaceScope` union is what every internal call site sees.\n\n### Cypher\n\nAll eleven queries live as module constants on `lite/spaces/sdk-client.ts` so they're greppable, diffable in code review, and asserted on by unit tests (regression-guarded against accidental drift):\n\n- `CYPHER.LIST_SPACES`, `UNCATEGORIZED_COUNT`, `LIST_ITEMS_UNCATEGORIZED`, `LIST_ITEMS_IN_SPACE`, `GET_ITEM` — Phase 1 + 2 browse\n- `CYPHER.HOME_ENTITY_COUNTS` (+ `_FALLBACK`), `HOME_RECENT_ITEMS`, `HOME_TOP_CONTRIBUTORS`, `HOME_RECENT_EVENTS`, `HOME_AGENTS_SAMPLE`, `HOME_PERMISSION_SUMMARY` — Home view (chunk 3k)\n\n### Provenance projection\n\nEach item-list query and `getItem` optionally project a `producedBy` row via the canonical creator edge `(:Person)-[:CREATED]->(:Asset)` (per the `_RelationshipTypes` Schema node). When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. Future producer types (`:Agent`, `:Workflow`, etc.) will widen the OPTIONAL MATCH as those modules port over.\n\n## Internal layout\n\n| File                  | Role                                                                       |\n| --------------------- | -------------------------------------------------------------------------- |\n| `api.ts`              | Public surface + singleton swap pattern. The only allowed importer.        |\n| `types.ts`            | `Space`, `Item`, `ItemSummary`, `ListOpts`, etc.                           |\n| `scope.ts`            | `SpaceScope` union + `resolveSpaceScope` helper.                           |\n| `errors.ts`           | `SpacesError` + `SPACES_ERROR_CODES`.                                      |\n| `events.ts`           | `SpacesEvent` taxonomy + `SPACES_EVENTS` catalog.                          |\n| `sdk-client.ts`       | Cypher wrapper. Phase 1+ injects `getNeonApi().query` at boot.             |\n| `discovery.ts`        | Phase 0.5 query runner (main-process; uses `getNeonApi()`). Now invoked from Settings → Diagnostics, not the Spaces window. |\n| `discovery-format.ts` | Renderer-safe types + Markdown formatter for discovery results.            |\n| `window.ts`           | Single-instance `BrowserWindow` factory.                                   |\n| `ipc.ts`              | `lite:spaces:*` IPC handler registration (incl. `lite:spaces:home:*`).      |\n| `main.ts`             | `initSpaces()` orchestrator + Tools-menu wiring.                           |\n| `spaces.html/css`     | Renderer chrome + Home view + item card / chip / detail-pane styles.       |\n| `spaces.ts`           | Renderer entrypoint (IIFE bundled by esbuild). Default scope is Home.       |\n| `DISCOVERY.md`        | Phase 0.5 reference: Q1–Q6 queries + Q5/Q6 operational template.           |\n| `DISCOVERY-PHASE-3.md`| Phase 3 D-series operational questions for Edison; gates 3d/3g.             |\n| `HOME-V1.md`          | Chunk detail for Home (3k + 3o).                                            |\n| `ROADMAP.md`          | Phases shipped / sketched / out of scope.                                  |\n\n## Error catalog\n\n| Code                          | Trigger                                                          |\n| ----------------------------- | ---------------------------------------------------------------- |\n| `SPACES_NOT_AUTHENTICATED`    | No `mult` token / no active account.                             |\n| `SPACES_NOT_FOUND`            | Space / item missing, or filtered out by ACL.                    |\n| `SPACES_FORBIDDEN`            | Caller lacks read/mutate permission on the target.               |\n| `SPACES_CYPHER`               | Neon query failed (transient, syntax, or malformed result).      |\n| `SPACES_NETWORK`              | DNS / TCP / TLS / fetch reject on the way to Edison.             |\n| `SPACES_INVALID_INPUT`        | Empty id, bad limit, malformed payload.                          |\n| `SPACES_NOT_INITIALIZED`      | SDK called before `initSpaces()` ran.                            |\n\nThe SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes above so callers only ever see one error taxonomy. See `normalizeError()` in `sdk-client.ts`.\n\n## Enforcement model — read this before saying \"restricted\"\n\nADR-051 visibility (\"restricted\" Spaces), ADR-052 expiring grants, and\nthe per-query gates in `sdk-client.ts` are **client-side honesty, not a\nsecurity boundary**. Two facts make that unavoidable today:\n\n1. `window.lite.neon.query()` accepts arbitrary Cypher from any Lite\n   renderer (`validateCypher` checks only \"non-empty string\"), so any\n   surface with the preload can read or mutate anything the account's\n   Neon credentials can. Third-party tab content cannot reach it\n   (ADR-038: no preload on remote tabs) — the exposure is Lite's own\n   windows, not the open web.\n2. The graph endpoint enforces account-level auth only. Nothing\n   server-side knows about `HAS_ACCESS`, visibility, or expiry.\n\nWhat the gates ARE for: the UI never *shows* someone a restricted\nSpace's contents, name, tickets, playbook, or activity — an honest\ninterface and defense-in-depth, worth maintaining rigorously. What\nthey are NOT: a promise that a motivated user of a signed-in Lite\ninstall cannot read that data. Until enforcement moves server-side\n(punch-listed), do not describe Space visibility to users or alpha\ntesters as access control.\n\n**Deliberately ungated queries** (system-correctness reads; gating\nthem converts a read leak into data loss or breakage — each is\nmain-process internal and not renderer-reachable through the gated\nsurface):\n\n- `FIND_ASSET_BY_FILE_KEY` — the orphan-cleanup ambiguity guard.\n  Gated, a restricted asset becomes invisible to the guard, which then\n  concludes \"no asset references this key\" and **deletes the file**.\n- `SPACE_ITEM_COUNT` — the hard-delete pre-flight; the delete\n  mutations themselves carry `SPACE_VISIBLE`.\n- `AGENT_LIBRARY_SEARCH` / `MEMBER_LIBRARY_SEARCH` /\n  `HOME_AGENTS_SAMPLE` — account-wide directories by design (pickers\n  must list people/agents you could add).\n- Uncategorized lanes — items in no Space are account-visible by the\n  ADR-051 rule itself.\n\n## Conformance\n\n`lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']` (the new Home methods extend the surface but are not part of the conformance baseline yet).\n\n## Test coverage\n\n| File                                       | Layer covered                                                                |\n| ------------------------------------------ | ---------------------------------------------------------------------------- |\n| `spaces-api.test.ts`                       | Singleton swap + conformance contract.                                       |\n| `spaces-discovery.test.ts`                 | Phase 0.5 Q1–Q4 runner shape.                                                |\n| `spaces-sdk-client.test.ts`                | Cypher source regression guards (incl. 6 Home queries), row-to-domain mapping, error normalization. |\n| `spaces-renderer.test.ts`                  | Pure DOM builders (sidebar rows, item cards, chips, detail pane, formatters). |\n| `spaces-home-cards.test.ts`                | Home view pure builders + `formatBigNumber` / `formatRecency` / `sparklinePath` rules. |\n| `spaces-renderer-integration.test.ts`      | Sidebar search filter + intake pulse (driven via the renderer bundle).        |\n| `spaces/home-flow.test.ts` (integration)   | End-to-end Home view: 5 cards loaded / empty / error states against an in-memory bridge. |\n| `spaces/platform-contract.test.ts` (integration) | Platform-primitive contract assertions across the SDK surface.            |\n| `spaces/trust-principles.test.ts` (integration)  | Reversibility harness across mutation methods (Phase 3+).                  |\n\n## Out of scope (this phase)\n\n- Per-Space activity-tab drill-down (extension of 3k in v2)\n- Real bidirectional sync (v2 chunk 3l)\n- Auto-metadata pipeline beyond Space suggestions (v2 chunk 3j)\n- Ontology-aware navigation (v2 chunk 3m)\n- Agents as first-class room participants — subscribe-and-react (v2 chunk 3n)\n- Real-time activity pulse (server WebSocket prerequisite; no plan to add)\n- Pin / favorite Spaces (small follow-up; not roadmap-level)\n"
+      "readme": "# Spaces Module\n\n**Status**: Phase 1 + Phase 2 + chunk 3k/3o (Home view) shipped. The Spaces window opens with **Home** as the default scope — a 5-card news feed that surfaces what's in your data room (entity counts + 30-day sparklines, top contributors over the last week, agents in your account, your visible-Space count, and the most-recently-added items). Sidebar lists every `:Space` the active account can see and surfaces the Uncategorized intake count. When you click into a Space (or Uncategorized) the main pane switches to the existing item-cards view: `:Asset` cards (surfaced as \"Items\" in the renderer naming) with multi-Space chips, optional provenance, and a right-rail detail panel. Cypher-backed throughout; no stubs remain.\n\nThe Phase 0.5 Discovery panel that previously lived at the bottom of the Spaces window has moved to **Settings → Diagnostics → \"Spaces Discovery (engineer)\"** — same runner, same JSON output, but no longer crowding the user-facing UI. See [`HOME-V1.md`](./HOME-V1.md) for the chunk detail.\n\n**Schema**: queries follow the canonical OneReach graph schema documented in the `(:Schema)` nodes themselves: node label `:Asset`, edge `[:BELONGS_TO]` from Asset to Space, creator edge `[:CREATED]` from Person to Asset. Every projected field uses `coalesce(canonical, legacy, default)` so existing data written by the legacy `omnigraph-client.js` push path (which writes `title` / `assetType` / `fileUrl` / snake_case timestamps) still renders alongside data using the canonical names. The TypeScript surface (`Item`, `ItemSummary`) keeps the friendlier \"Item\" naming for renderers; only the Cypher uses the storage label.\n\n> Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan (\"Spaces as Platform Primitive\" section).\n\n## Public surface (`api.ts`)\n\n```ts\nimport { getSpacesApi } from '../spaces/api.js';\n\nconst api = getSpacesApi();\napi.open();                                          // launch / focus the window\n\n// Phase 1 + 2 (browse)\nawait api.listSpaces();                              // every :Space the account can read\nawait api.getUncategorizedCount();                   // :Asset nodes with no :BELONGS_TO edge\nawait api.items.list({ kind: 'uncategorized' });     // Items without a :Space\nawait api.items.list({ kind: 'space', spaceId: '…' }); // Items in one :Space (+ chips)\nawait api.items.get(itemId);                          // full Item incl. content + metadata\n\n// Home view (chunk 3k + 3o) — read-only news-feed data\nawait api.getEntityCounts();                          // { spaces, assets, people, agents }\nawait api.listRecentItems({ limit: 3 });              // most-recent :Asset, ItemSummary shape\nawait api.topContributors({ window: 'week', limit: 4 }); // :Commit aggregates by author\nawait api.listRecentEvents({ limit: 50 });            // :Commit projection (id/author/kind/timestamp/space)\nawait api.listAgentsSample({ limit: 3 });             // first N :Agent alphabetically\nawait api.getPermissionSummary();                     // { visibleSpaceCount, totalSpaceCount? }\n```\n\nUse `resolveSpaceScope(id)` at any UI/IPC boundary that hands a plain id into the SDK. The synthetic Uncategorized id is exported as `UNCATEGORIZED_SPACE_ID` and is the only string the renderer/IPC layer ever uses; the typed `SpaceScope` union is what every internal call site sees.\n\n### Cypher\n\nAll eleven queries live as module constants on `lite/spaces/sdk-client.ts` so they're greppable, diffable in code review, and asserted on by unit tests (regression-guarded against accidental drift):\n\n- `CYPHER.LIST_SPACES`, `UNCATEGORIZED_COUNT`, `LIST_ITEMS_UNCATEGORIZED`, `LIST_ITEMS_IN_SPACE`, `GET_ITEM` — Phase 1 + 2 browse\n- `CYPHER.HOME_ENTITY_COUNTS` (+ `_FALLBACK`), `HOME_RECENT_ITEMS`, `HOME_TOP_CONTRIBUTORS`, `HOME_RECENT_EVENTS`, `HOME_AGENTS_SAMPLE`, `HOME_PERMISSION_SUMMARY` — Home view (chunk 3k)\n\n### Provenance projection\n\nEach item-list query and `getItem` optionally project a `producedBy` row via the canonical creator edge `(:Person)-[:CREATED]->(:Asset)` (per the `_RelationshipTypes` Schema node). When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. Future producer types (`:Agent`, `:Workflow`, etc.) will widen the OPTIONAL MATCH as those modules port over.\n\n## Internal layout\n\n| File                  | Role                                                                       |\n| --------------------- | -------------------------------------------------------------------------- |\n| `api.ts`              | Public surface + singleton swap pattern. The only allowed importer.        |\n| `types.ts`            | `Space`, `Item`, `ItemSummary`, `ListOpts`, etc.                           |\n| `scope.ts`            | `SpaceScope` union + `resolveSpaceScope` helper.                           |\n| `errors.ts`           | `SpacesError` + `SPACES_ERROR_CODES`.                                      |\n| `events.ts`           | `SpacesEvent` taxonomy + `SPACES_EVENTS` catalog.                          |\n| `sdk-client.ts`       | Cypher wrapper. Phase 1+ injects `getNeonApi().query` at boot.             |\n| `discovery.ts`        | Phase 0.5 query runner (main-process; uses `getNeonApi()`). Now invoked from Settings → Diagnostics, not the Spaces window. |\n| `discovery-format.ts` | Renderer-safe types + Markdown formatter for discovery results.            |\n| `window.ts`           | Single-instance `BrowserWindow` factory.                                   |\n| `ipc.ts`              | `lite:spaces:*` IPC handler registration (incl. `lite:spaces:home:*`).      |\n| `main.ts`             | `initSpaces()` orchestrator + Tools-menu wiring.                           |\n| `spaces.html/css`     | Renderer chrome + Home view + item card / chip / detail-pane styles.       |\n| `spaces.ts`           | Renderer entrypoint (IIFE bundled by esbuild). Default scope is Home.       |\n| `DISCOVERY.md`        | Phase 0.5 reference: Q1–Q6 queries + Q5/Q6 operational template.           |\n| `DISCOVERY-PHASE-3.md`| Phase 3 D-series operational questions for Edison; gates 3d/3g.             |\n| `HOME-V1.md`          | Chunk detail for Home (3k + 3o).                                            |\n| `ROADMAP.md`          | Phases shipped / sketched / out of scope.                                  |\n\n## Error catalog\n\n| Code                          | Trigger                                                          |\n| ----------------------------- | ---------------------------------------------------------------- |\n| `SPACES_NOT_AUTHENTICATED`    | No `mult` token / no active account.                             |\n| `SPACES_NOT_FOUND`            | Space / item missing, or filtered out by ACL.                    |\n| `SPACES_FORBIDDEN`            | Caller lacks read/mutate permission on the target.               |\n| `SPACES_CYPHER`               | Neon query failed (transient, syntax, or malformed result).      |\n| `SPACES_NETWORK`              | DNS / TCP / TLS / fetch reject on the way to Edison.             |\n| `SPACES_INVALID_INPUT`        | Empty id, bad limit, malformed payload.                          |\n| `SPACES_NOT_INITIALIZED`      | SDK called before `initSpaces()` ran.                            |\n\nThe SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes above so callers only ever see one error taxonomy. See `normalizeError()` in `sdk-client.ts`.\n\n## Enforcement model — read this before saying \"restricted\"\n\nADR-051 visibility (\"restricted\" Spaces), ADR-052 expiring grants, and\nthe per-query gates in `sdk-client.ts` are **client-side honesty, not a\nsecurity boundary**. Two facts make that unavoidable today:\n\n1. ~~`window.lite.neon.query()` accepts arbitrary Cypher~~ **Closed\n   2026-08-07 (N4):** the raw query bridge is gone. Renderers can only\n   invoke Cypher REGISTERED BY NAME at init (`lite/neon/named-queries.ts`);\n   the query text never crosses IPC, and unknown names are rejected in\n   main. Locked by `neon-named-queries.test.ts`. The residual exposure\n   is main-process code and anyone holding the account's graph\n   credentials outside Lite — which is why point 2 still stands.\n2. The graph endpoint enforces account-level auth only. Nothing\n   server-side knows about `HAS_ACCESS`, visibility, or expiry.\n\nWhat the gates ARE for: the UI never *shows* someone a restricted\nSpace's contents, name, tickets, playbook, or activity — an honest\ninterface and defense-in-depth, worth maintaining rigorously. What\nthey are NOT: a promise that a motivated user of a signed-in Lite\ninstall cannot read that data. Until enforcement moves server-side\n(punch-listed), do not describe Space visibility to users or alpha\ntesters as access control.\n\n**Deliberately ungated queries** (system-correctness reads; gating\nthem converts a read leak into data loss or breakage — each is\nmain-process internal and not renderer-reachable through the gated\nsurface):\n\n- `FIND_ASSET_BY_FILE_KEY` — the orphan-cleanup ambiguity guard.\n  Gated, a restricted asset becomes invisible to the guard, which then\n  concludes \"no asset references this key\" and **deletes the file**.\n- `SPACE_ITEM_COUNT` — the hard-delete pre-flight; the delete\n  mutations themselves carry `SPACE_VISIBLE`.\n- `AGENT_LIBRARY_SEARCH` / `MEMBER_LIBRARY_SEARCH` /\n  `HOME_AGENTS_SAMPLE` — account-wide directories by design (pickers\n  must list people/agents you could add).\n- Uncategorized lanes — items in no Space are account-visible by the\n  ADR-051 rule itself.\n\n## Conformance\n\n`lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']` (the new Home methods extend the surface but are not part of the conformance baseline yet).\n\n## Test coverage\n\n| File                                       | Layer covered                                                                |\n| ------------------------------------------ | ---------------------------------------------------------------------------- |\n| `spaces-api.test.ts`                       | Singleton swap + conformance contract.                                       |\n| `spaces-discovery.test.ts`                 | Phase 0.5 Q1–Q4 runner shape.                                                |\n| `spaces-sdk-client.test.ts`                | Cypher source regression guards (incl. 6 Home queries), row-to-domain mapping, error normalization. |\n| `spaces-renderer.test.ts`                  | Pure DOM builders (sidebar rows, item cards, chips, detail pane, formatters). |\n| `spaces-home-cards.test.ts`                | Home view pure builders + `formatBigNumber` / `formatRecency` / `sparklinePath` rules. |\n| `spaces-renderer-integration.test.ts`      | Sidebar search filter + intake pulse (driven via the renderer bundle).        |\n| `spaces/home-flow.test.ts` (integration)   | End-to-end Home view: 5 cards loaded / empty / error states against an in-memory bridge. |\n| `spaces/platform-contract.test.ts` (integration) | Platform-primitive contract assertions across the SDK surface.            |\n| `spaces/trust-principles.test.ts` (integration)  | Reversibility harness across mutation methods (Phase 3+).                  |\n\n## Out of scope (this phase)\n\n- Per-Space activity-tab drill-down (extension of 3k in v2)\n- Real bidirectional sync (v2 chunk 3l)\n- Auto-metadata pipeline beyond Space suggestions (v2 chunk 3j)\n- Ontology-aware navigation (v2 chunk 3m)\n- Agents as first-class room participants — subscribe-and-react (v2 chunk 3n)\n- Real-time activity pulse (server WebSocket prerequisite; no plan to add)\n- Pin / favorite Spaces (small follow-up; not roadmap-level)\n"
     },
     {
       "slug": "telemetry",
@@ -3587,5 +3911,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-07T19:11:42.256Z"
+  "generatedAt": "2026-08-07T21:43:55.520Z"
 } as const;

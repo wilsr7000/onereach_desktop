@@ -26,6 +26,7 @@ describe('API docs manifest', () => {
         'downloads',
         'event-bus',
         'files',
+      'gsx',
         'health',
         'idw',
         'kv',
