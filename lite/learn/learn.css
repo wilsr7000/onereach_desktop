@@ -15,6 +15,11 @@
   scrollbar-width: thin;
 }
 
+/* The hidden attribute always wins (same guard as spaces.css). */
+[hidden] {
+  display: none !important;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

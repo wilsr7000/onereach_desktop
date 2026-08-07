@@ -22,6 +22,14 @@
   scrollbar-width: thin;
 }
 
+/* The hidden attribute always wins. Any class that sets `display:` on
+ * an element the renderer toggles via `.hidden = …` silently overrides
+ * the UA's [hidden] { display: none } — found live when the upload
+ * dialog's public-link warning stayed visible in the Private state. */
+[hidden] {
+  display: none !important;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;

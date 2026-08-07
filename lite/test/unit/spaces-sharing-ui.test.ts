@@ -250,3 +250,25 @@ describe('reset is wired to dialog open', () => {
     ).toBe(true);
   });
 });
+
+describe('the hidden attribute always wins over display classes', () => {
+  it('spaces.css carries the global [hidden] guard', () => {
+    // Found live (2026-08-07): .spaces-share-warn has display:flex,
+    // which overrides the UA's [hidden]{display:none} — the "anyone
+    // with the link can open this file" warning stayed visible while
+    // Private was selected, telling users the opposite of the truth.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    for (const rel of ['spaces/spaces.css', 'learn/learn.css']) {
+      const candidates = [path.resolve(rel), path.resolve('lite', rel)];
+      const found = candidates.find((f) => fs.existsSync(f));
+      expect(found, `${rel} not found`).toBeDefined();
+      const css = fs.readFileSync(found as string, 'utf8');
+      expect(css, `${rel} must guard [hidden]`).toMatch(
+        /\[hidden\]\s*\{\s*display:\s*none !important;\s*\}/
+      );
+    }
+  });
+});
