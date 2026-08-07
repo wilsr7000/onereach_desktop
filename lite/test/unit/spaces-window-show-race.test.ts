@@ -67,3 +67,40 @@ describe('clampToDisplay — title bar must stay grabbable', () => {
     expect(got.y).toBe(900);
   });
 });
+
+/**
+ * Defect 1's remaining hole, found in the 2026-08-06 review: the
+ * watchdog centers + SHOWS the window after 1200ms, but the bounds
+ * loader's `.then` still applied `setBounds` whenever it eventually
+ * resolved — so a slow KV read teleported the now-visible window to
+ * another display. Late bounds must lose to an already-positioned
+ * window. Asserted at source level: the guard is one early return
+ * inside a promise chain wired to Electron's window lifecycle, which
+ * a unit test cannot instantiate.
+ */
+describe('late bounds must not move an already-shown window', () => {
+  it('the loader bails out when the watchdog already positioned it', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const candidates = [
+      path.resolve('spaces/window.ts'),
+      path.resolve('lite/spaces/window.ts'),
+    ];
+    const found = candidates.find((p) => fs.existsSync(p));
+    expect(found, `window.ts not found: ${candidates.join(', ')}`).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+
+    const start = src.indexOf('loader()');
+    expect(start, 'loader() chain not found — renamed?').toBeGreaterThan(-1);
+    const chain = src.slice(start, start + 900);
+    // The guard must sit BEFORE the setBounds call in the same chain.
+    const guardAt = chain.indexOf('if (positioned) return;');
+    const setBoundsAt = chain.indexOf('win.setBounds(safeBounds)');
+    expect(guardAt, 'late-bounds guard missing from the loader chain').toBeGreaterThan(-1);
+    expect(setBoundsAt).toBeGreaterThan(-1);
+    expect(
+      guardAt < setBoundsAt,
+      'the positioned-guard must precede setBounds, or the window still teleports'
+    ).toBe(true);
+  });
+});

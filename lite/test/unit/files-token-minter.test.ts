@@ -147,6 +147,40 @@ describe('FilesTokenMinter', () => {
   });
 });
 
+describe('FilesTokenMinter — account switching', () => {
+  it('an in-flight mint is not reused across an account switch', async () => {
+    // Review finding (2026-08-06): `pending` was not keyed by account,
+    // so a mint started for acct-A could be handed to the next op
+    // after the user switched to acct-B (server 403s until the
+    // invalidate self-heal).
+    let account = 'acct-A';
+    const seen: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      seen.push(String(url));
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ token: `tok-for-${String(url).match(/http\/([^/]+)\//)?.[1] ?? '?'}` }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    const minter = new FilesTokenMinter({
+      getAccountId: () => account,
+      fetchImpl,
+    });
+
+    const first = minter.ensure();
+    account = 'acct-B';
+    const second = minter.ensure();
+    await Promise.all([first, second]);
+    // Two DIFFERENT accounts must produce two mint requests — the
+    // second must not piggy-back on the first account's in-flight one.
+    expect(seen.length, `mint URLs seen: ${seen.join(', ')}`).toBe(2);
+    expect(seen[0]).toContain('acct-A');
+    expect(seen[1]).toContain('acct-B');
+  });
+});
+
 describe('SdkFilesClient + minted bearer', () => {
   interface CapturedSdkParams {
     token: () => string;
@@ -179,6 +213,40 @@ describe('SdkFilesClient + minted bearer', () => {
     // …and the raw binding is the fallback when the mint is unavailable.
     minted = null;
     await api.upload('p', 'f2.png', Buffer.from('x'));
+    expect(captured[0]!.token()).toBe('raw-mult');
+  });
+
+  it('a mint OUTAGE does not fail the op — reads ride the raw binding token', async () => {
+    // Review finding (2026-08-06): minting is an ENHANCEMENT (only
+    // account-scoped WRITES need it). Hard-failing on a mint error
+    // took down every thumbnail / preview / download whenever the
+    // mint host was unreachable, where the raw token worked fine.
+    const captured: CapturedSdkParams[] = [];
+    let downloaded = 0;
+    class FakeSdk {
+      constructor(params: CapturedSdkParams) {
+        captured.push(params);
+      }
+      async getDownloadUrl(): Promise<string> {
+        downloaded++;
+        return 'https://signed.example/f';
+      }
+      async uploadFileV2(): Promise<{ url: string }> {
+        return { url: 'https://x/y' };
+      }
+    }
+    const api = _buildFilesApiForTesting({
+      token: () => 'raw-mult',
+      discoveryUrl: 'https://disc.example',
+      accountId: () => 'acct-1',
+      sdkCtor: FakeSdk as never,
+      ensureToken: async () => {
+        throw new Error('mint host unreachable');
+      },
+    });
+    // The op must still run, on the raw binding token.
+    await expect(api.getDownloadUrl('some/key.png')).resolves.toBeTruthy();
+    expect(downloaded).toBe(1);
     expect(captured[0]!.token()).toBe('raw-mult');
   });
 });
