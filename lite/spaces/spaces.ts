@@ -602,10 +602,37 @@ function applySidebarFilter(): void {
  */
 let loadItemsSeq = 0;
 
+/**
+ * Fingerprint of the item list AS RENDERED. `renderItemList` tears the
+ * whole grid down with `replaceChildren()`, so a background refresh
+ * that returns identical data still destroys and rebuilds every tile —
+ * PDF <embed>s re-instantiate, frame grabs and thumbnails re-decode,
+ * and the user sees the grid flash. Polling runs every 15s and the
+ * main-process cache broadcasts every 60s, so this was a visible blink
+ * on a timer ("why is spaces keep refreshing or flashing?",
+ * 2026-08-07). Comparing this signature lets an unchanged refresh be a
+ * no-op.
+ */
+function itemListSignature(items: ReadonlyArray<RendererItemSummary>): string {
+  return items
+    .map((i) => `${i.id}:${i.updatedAt}:${i.kind}:${i.title}`)
+    .join('|');
+}
+
+/** Signature of the grid currently on screen (null = nothing painted). */
+let renderedItemsSignature: string | null = null;
+/** Scope the painted grid belongs to — a scope switch must always repaint. */
+let renderedItemsScopeId: string | null = null;
+
 async function loadItems(): Promise<void> {
   const seq = ++loadItemsSeq;
   state.loadingItems = true;
-  renderItemList({ loading: true });
+  // Only paint the loading state when there is nothing to look at yet.
+  // Tearing down a populated grid to show "loading" is what made a
+  // silent background refresh flash.
+  if (state.items.length === 0) {
+    renderItemList({ loading: true });
+  }
   const bridge = window.lite?.spaces;
   if (bridge === undefined) {
     state.loadingItems = false;
@@ -642,8 +669,17 @@ async function loadItems(): Promise<void> {
       }
       return;
     }
-    state.items = envelope.value.filter(isWellFormedItem);
+    const next = envelope.value.filter(isWellFormedItem);
+    const nextSignature = itemListSignature(next);
+    const unchanged =
+      renderedItemsSignature === nextSignature &&
+      renderedItemsScopeId === state.activeScopeId &&
+      state.itemsSearchResults === null;
+    state.items = next;
     state.loadingItems = false;
+    // A refresh that changed nothing must not repaint: rebuilding the
+    // grid re-instantiates every PDF embed / frame grab / thumbnail.
+    if (unchanged) return;
     renderItemList({});
   } catch (err) {
     if (seq !== loadItemsSeq) return; // superseded by a newer reload
@@ -675,7 +711,10 @@ async function loadSpaceEvents(spaceId: string): Promise<void> {
     state.spaceEvents.value !== null &&
     now - state.spaceEvents.fetchedAt < HOME_CACHE_TTL_MS;
   if (fresh) {
-    renderItemList({});
+    // Cache hit — the events already on screen ARE these events, so a
+    // repaint would only tear the grid down and rebuild it (each
+    // rebuild re-instantiates PDF embeds, frame grabs and thumbnails).
+    if (renderedItemsSignature === null) renderItemList({});
     return;
   }
   // New scope → invalidate the previous Space's cache entry.
@@ -697,10 +736,31 @@ async function loadSpaceEvents(spaceId: string): Promise<void> {
     state.spaceEvents.error = messageFrom(err);
   } finally {
     state.spaceEvents.loading = false;
-    // Bail if the user switched scope mid-flight.
-    if (state.spaceEventsForScopeId === spaceId) renderItemList({});
+    // Bail if the user switched scope mid-flight, and only repaint
+    // when the events actually changed — polling refetches these every
+    // 15s and an identical result used to rebuild the entire grid.
+    const nextEventsSignature = eventsSignature(state.spaceEvents.value);
+    if (
+      state.spaceEventsForScopeId === spaceId &&
+      (nextEventsSignature !== renderedEventsSignature ||
+        renderedItemsSignature === null)
+    ) {
+      renderedEventsSignature = nextEventsSignature;
+      renderItemList({});
+    } else {
+      renderedEventsSignature = nextEventsSignature;
+    }
   }
 }
+
+/** Fingerprint of the scoped events list, for the same reason. */
+function eventsSignature(events: ReadonlyArray<RendererEvent> | null): string {
+  if (events === null) return '';
+  return events.map((e) => `${e.id}:${e.timestamp}`).join('|');
+}
+
+/** Events signature currently reflected on screen. */
+let renderedEventsSignature = '';
 
 async function loadItemDetail(itemId: string): Promise<void> {
   state.loadingDetail = true;
@@ -1493,6 +1553,8 @@ function setActiveScope(scopeId: string): void {
   // list — without this, Space A's grid renders under Space B's
   // header during the fetch and sticks there if the fetch fails.
   state.items = [];
+  renderedItemsSignature = null;
+  renderedItemsScopeId = null;
   // Sprint 3: clear any active items search on scope switch.
   state.itemsSearchQuery = '';
   state.itemsSearchResults = null;
@@ -1563,10 +1625,26 @@ function renderSpaceList(): void {
   if (list === null) return;
   list.replaceChildren();
   if (state.spaces.length === 0) {
+    // This is the FIRST screen a new user sees, and it used to say
+    // "No Spaces yet." and stop — a dead end at the exact moment
+    // someone most needs to be told what to do. It now says what a
+    // Space is for and offers the one action that resolves the state.
     const hint = document.createElement('li');
     hint.className = 'spaces-empty-hint';
     hint.id = 'spaces-empty-hint';
-    hint.textContent = 'No Spaces yet.';
+
+    const line = document.createElement('p');
+    line.className = 'spaces-empty-hint-line';
+    line.textContent = 'Spaces are where you and your agents keep work together.';
+    hint.appendChild(line);
+
+    const cta = document.createElement('button');
+    cta.type = 'button';
+    cta.className = 'spaces-empty-hint-cta';
+    cta.textContent = 'Create your first Space';
+    cta.addEventListener('click', () => openNewSpaceDialog());
+    hint.appendChild(cta);
+
     list.appendChild(hint);
     return;
   }
@@ -1750,6 +1828,16 @@ function renderItemList(opts: RenderItemListOpts): void {
   if (main === null) return;
   const wrap = ensureItemsRegion(main);
   wrap.replaceChildren();
+  // Record what this paint represents so a later unchanged refresh can
+  // skip the teardown (see itemListSignature). Loading / error paints
+  // and search results clear it, because the grid then does not
+  // represent the plain item list.
+  const paintingPlainList =
+    opts.loading !== true &&
+    opts.error === undefined &&
+    state.itemsSearchResults === null;
+  renderedItemsSignature = paintingPlainList ? itemListSignature(state.items) : null;
+  renderedItemsScopeId = paintingPlainList ? state.activeScopeId : null;
 
   // Phase 4 v2: shared-space dashboard layout dispatch. When the active
   // scope is a shared space, render the playbook + tickets dashboard
@@ -5080,8 +5168,21 @@ function buildEmptyItemsState(scopeId: string): HTMLElement {
   body.textContent =
     scopeId === UNCATEGORIZED_SPACE_ID
       ? 'Items that arrive without being filed land here. When an agent drops new output into the graph, you will see it appear in this list.'
-      : 'Items added to this Space will show up here.';
+      : 'Add a file, paste a note or a link, or point an agent at it.';
   wrap.appendChild(body);
+
+  // The uncategorized lane is genuinely passive — things ARRIVE there,
+  // you don't add to it — so it keeps the descriptive copy and gets no
+  // button. A real Space is the opposite: this is the moment to offer
+  // the action rather than describe a future in which it happened.
+  if (scopeId !== UNCATEGORIZED_SPACE_ID) {
+    const cta = document.createElement('button');
+    cta.type = 'button';
+    cta.className = 'spaces-empty-items-cta';
+    cta.textContent = 'Add the first item';
+    cta.addEventListener('click', () => openNewAssetDialog());
+    wrap.appendChild(cta);
+  }
   return wrap;
 }
 

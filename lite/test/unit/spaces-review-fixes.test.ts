@@ -263,6 +263,36 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src).not.toMatch(/state\.spaces\.find\(\(sp\) => sp\.id === s\.spaceId\)/);
   });
 
+  it('an unchanged background refresh does not repaint the grid', () => {
+    // "why is spaces keep refreshing or flashing?" (2026-08-07):
+    // renderItemList tears the whole grid down with replaceChildren(),
+    // so polling (15s) + the main-process cache broadcast (60s) rebuilt
+    // every tile on a timer — re-instantiating PDF embeds and
+    // re-decoding frame grabs and thumbnails. Unchanged data must be a
+    // no-op now.
+    const src = source();
+    expect(src).toMatch(/function itemListSignature\(/);
+    expect(src).toMatch(/let renderedItemsSignature/);
+    const body = bodyOf('async function loadItems', 3500);
+    expect(body).toMatch(/const unchanged =/);
+    expect(body, 'an unchanged refresh must return before renderItemList').toMatch(
+      /if \(unchanged\) return;/
+    );
+    // The loading paint must not tear down a populated grid either.
+    expect(body).toMatch(/if \(state\.items\.length === 0\) \{\s*\n\s*renderItemList\(\{ loading: true \}\);/);
+  });
+
+  it('the scoped-events refetch only repaints when events changed', () => {
+    const body = bodyOf('async function loadSpaceEvents', 2600);
+    expect(body).toMatch(/eventsSignature\(/);
+    expect(body).toMatch(/renderedEventsSignature/);
+  });
+
+  it('a scope switch always invalidates the paint fingerprint', () => {
+    const body = bodyOf('function setActiveScope', 1600);
+    expect(body).toMatch(/renderedItemsSignature = null/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);
