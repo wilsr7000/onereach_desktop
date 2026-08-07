@@ -109,6 +109,10 @@ export const SPACES_IPC = {
   ITEMS_ADD_TO_SPACE: 'lite:spaces:items:addToSpace',
   ITEMS_REMOVE_FROM_SPACE: 'lite:spaces:items:removeFromSpace',
   ITEMS_SEARCH: 'lite:spaces:items:search',
+  /** Learning Center (replaces Home, 2026-08-07). */
+  LEARN_SIGNALS: 'lite:spaces:learn:signals',
+  LEARN_PROGRESS_GET: 'lite:spaces:learn:progressGet',
+  LEARN_PROGRESS_SAVE: 'lite:spaces:learn:progressSave',
   /** Metadata sprint. */
   ITEMS_SET_METADATA: 'lite:spaces:items:setMetadata',
   ITEMS_PATCH_METADATA: 'lite:spaces:items:patchMetadata',
@@ -210,6 +214,48 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<Space[]>> => {
       try {
         const value = await getSpacesApi().listSpaces();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.LEARN_SIGNALS,
+    async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<unknown>> => {
+      try {
+        const value = await getSpacesApi().learnSignals();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.LEARN_PROGRESS_GET,
+    async (_event: IpcMainInvokeEvent): Promise<SpacesIpcResult<unknown>> => {
+      try {
+        const value = await getSpacesApi().learnProgressGet();
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.LEARN_PROGRESS_SAVE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload: unknown
+    ): Promise<SpacesIpcResult<unknown>> => {
+      try {
+        // Whole-object save; normalization happens store-side, so a
+        // malformed payload degrades to a fresh start, never a throw
+        // that loses the previous file.
+        const value = await getSpacesApi().learnProgressSave(payload);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

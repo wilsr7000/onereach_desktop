@@ -37,6 +37,10 @@ export const SPACES_EVENTS = {
   UNCATEGORIZED_COUNT_START: 'spaces.uncategorizedCount.start',
   UNCATEGORIZED_COUNT_FINISH: 'spaces.uncategorizedCount.finish',
   UNCATEGORIZED_COUNT_FAIL: 'spaces.uncategorizedCount.fail',
+  // ─── learn signals (Learning Center, 2026-08-07) ─────────────────────
+  LEARN_SIGNALS_START: 'spaces.learn.signals.start',
+  LEARN_SIGNALS_FINISH: 'spaces.learn.signals.finish',
+  LEARN_SIGNALS_FAIL: 'spaces.learn.signals.fail',
   // ─── create (Phase 3a) ───────────────────────────────────────────────
   CREATE_START: 'spaces.create.start',
   CREATE_FINISH: 'spaces.create.finish',

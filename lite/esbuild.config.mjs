@@ -50,6 +50,8 @@ const ASSETS_TO_COPY = [
   { from: 'lite/help/help.html', to: 'help.html' },
   { from: 'lite/help/help.css', to: 'help.css' },
   { from: 'lite/spaces/spaces.html', to: 'spaces.html' },
+  { from: 'lite/learn/learn.html', to: 'learn.html' },
+  { from: 'lite/learn/learn.css', to: 'learn.css' },
   { from: 'lite/spaces/spaces.css', to: 'spaces.css' },
   // boot-chat.html / boot-chat.css were retired when the chat surface
   // moved inline into chrome.html — the module source lives at
@@ -269,6 +271,17 @@ const spacesOptions = {
 };
 
 /** @type {esbuild.BuildOptions} */
+const learnPageOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'learn/learn.ts')],
+  outfile: resolve(outDir, 'learn-page.js'),
+  platform: 'browser',
+  target: 'chrome130',
+  format: 'iife',
+  globalName: 'OnereachLiteLearn',
+};
+
+/** @type {esbuild.BuildOptions} */
 const downloadPickerOptions = {
   ...commonOptions,
   entryPoints: [resolve(__dirname, 'downloads/picker.ts')],
@@ -299,6 +312,7 @@ const allConfigs = [
   aiRunTimesOptions,
   helpOptions,
   spacesOptions,
+  learnPageOptions,
   downloadPickerOptions,
 ];
 

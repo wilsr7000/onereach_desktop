@@ -131,6 +131,21 @@ function buildStubConsumer(): {
     refresh: async () => {
       /* stub: the contract only needs the method to exist */
     },
+    learnSignals: async () => ({ spaces: 0, otherMembers: 0, kinds: {} }),
+    learnProgressGet: async () => ({
+      version: 1 as const,
+      role: null,
+      done: {},
+      lastLessonId: null,
+      updatedAt: new Date().toISOString(),
+    }),
+    learnProgressSave: async () => ({
+      version: 1 as const,
+      role: null,
+      done: {},
+      lastLessonId: null,
+      updatedAt: new Date().toISOString(),
+    }),
     listSpaces: async () => {
       calls.listSpaces++;
       return maybeFail(spaces);

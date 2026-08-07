@@ -29,8 +29,10 @@ import {
   WebContentsView,
   session as electronSession,
   Notification,
+  shell,
 } from 'electron';
 import type { Rectangle } from 'electron';
+import { dirname, join } from 'node:path';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
@@ -103,10 +105,24 @@ const BACKGROUND = '#0e0e10';
  * Set env `LITE_HOME=chrome` to disable the feed entirely and use the
  * original boot-chat home view as the Home-tab content.
  */
-const IDW_HOME_URL: string | null =
+/**
+ * Home-tab mode (2026-08-07): the default Home surface is now the
+ * LOCAL Learning Center page (lite/learn) — tutorials + individualized
+ * progress for the WISER Method, this app, and the Invisible Machines
+ * ecosystem. `LITE_HOME=feed` restores the previous remote IDW feed;
+ * `LITE_HOME=chrome` disables both and shows the boot-chat home view.
+ */
+const HOME_TAB_MODE: 'learn' | 'feed' | 'chrome' =
   process.env.LITE_HOME === 'chrome'
-    ? null
-    : 'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/idw-feed/index.html';
+    ? 'chrome'
+    : process.env.LITE_HOME === 'feed'
+      ? 'feed'
+      : 'learn';
+
+const IDW_HOME_URL: string | null =
+  HOME_TAB_MODE === 'feed'
+    ? 'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/idw-feed/index.html'
+    : null;
 
 /** Partition for the home feed — shares the IDW browser's signed-in session. */
 const HOME_FEED_PARTITION = 'persist:lite-idw-browser';
@@ -143,7 +159,10 @@ let homeFeedView: WebContentsView | null = null;
  * tabs (per-tab partition strings make the agents log back in
  * automatically). After that, subscriptions drive the view set.
  */
+let mainWindowConfig: CreateMainWindowConfig | null = null;
+
 export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow {
+  mainWindowConfig = config;
   if (mainWindow !== null && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.focus();
@@ -182,7 +201,9 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     // Mount the IDW home feed (default) as the Home-tab content, then
     // reconcile + rehydrate any persisted tabs. The feed sits below the
     // tab bar and reconcileViews shows it only while Home is active.
-    if (IDW_HOME_URL !== null) {
+    if (HOME_TAB_MODE === 'learn') {
+      attachLearnHome(win);
+    } else if (IDW_HOME_URL !== null) {
       attachHomeFeed(win);
     }
     void rehydrateFromStore(win);
@@ -1128,6 +1149,62 @@ function clearTabPartitionStorage(partition: string, tabId: string): void {
  * bundled boot-chat home view shows through underneath — the Home tab is
  * never blank.
  */
+function attachLearnHome(win: BrowserWindow): void {
+  if (homeFeedView !== null) return;
+  if (mainWindowConfig === null) {
+    getLoggingApi().warn('main-window', 'learn home: no config; skipping mount');
+    return;
+  }
+  const view = new WebContentsView({
+    webPreferences: {
+      // LOCAL bundled page — gets the kernel preload so the Learning
+      // Center can reach window.lite.spaces.learn (progress + signals).
+      // This is first-party UI, not remote content, so ADR-038's
+      // no-preload rule for tab views does not apply.
+      preload: mainWindowConfig.preloadPath,
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+    },
+  });
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    // Lesson links (podcast, articles, wisermethod.com) open in the OS
+    // browser — the Home tab itself never navigates away.
+    try {
+      const scheme = new URL(url).protocol;
+      if (scheme === 'https:' || scheme === 'http:') {
+        void shell.openExternal(url);
+      }
+    } catch {
+      /* malformed URL — drop */
+    }
+    return { action: 'deny' };
+  });
+  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+    if (errorCode === -3) return; // ABORTED
+    getLoggingApi().warn('main-window', 'learn home failed to load; revealing boot-chat home', {
+      errorCode,
+      errorDescription,
+    });
+    try {
+      view.setVisible(false);
+    } catch {
+      /* best-effort */
+    }
+  });
+  homeFeedView = view;
+  win.contentView.addChildView(view);
+  view.setBounds(computeContentBounds(win));
+  view.setVisible(true);
+  const learnHtml = join(dirname(mainWindowConfig.chromeHtmlPath), 'learn.html');
+  void view.webContents.loadFile(learnHtml).catch((err: unknown) => {
+    getLoggingApi().warn('main-window', 'learn home initial load rejected', {
+      error: (err as Error).message,
+    });
+  });
+}
+
 function attachHomeFeed(win: BrowserWindow): void {
   if (IDW_HOME_URL === null || homeFeedView !== null) return;
 

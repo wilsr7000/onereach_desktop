@@ -51,6 +51,16 @@ import {
  * `UNCATEGORIZED_SPACE_ID` so the scope discriminator can branch
  * cleanly. Used as `data-scope-id` on the sidebar Home row.
  */
+import {
+  renderInlineMarkdown,
+  renderMarkdown,
+  buildHexMazeLogo,
+} from './render-shared.js';
+
+// Moved to render-shared.ts (2026-08-07) so the main window's Learning
+// Center shares them; re-exported so existing imports/tests hold.
+export { renderInlineMarkdown, renderMarkdown, buildHexMazeLogo };
+
 const HOME_SCOPE_ID = '__home__';
 
 /** Cache window for Home SDK responses. Per Q-Home-3 default (60s). */
@@ -308,7 +318,7 @@ function markWelcomeSeen(): void {
   }
 }
 
-function markVisitNow(): void {
+export function markVisitNow(): void {
   try {
     localStorage.setItem(STORAGE_LAST_VISIT_KEY, String(Date.now()));
   } catch {
@@ -4944,7 +4954,6 @@ export function tileExcerptText(excerpt: string | undefined): string | null {
   return text;
 }
 
-const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /**
  * The OneReach hexagon-maze mark, recreated as inline SVG: concentric
@@ -4953,57 +4962,6 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
  * `currentColor`. Swap point for the real raster asset: replace this
  * builder's output with an <img> once the PNG lands in the repo.
  */
-export function buildHexMazeLogo(): SVGSVGElement {
-  const svg = document.createElementNS(SVG_NS, 'svg');
-  svg.setAttribute('viewBox', '-100 -100 200 200');
-  svg.setAttribute('class', 'spaces-hex-logo');
-  svg.setAttribute('aria-hidden', 'true');
-
-  const hexPoints = (r: number): string => {
-    const pts: string[] = [];
-    for (let i = 0; i < 6; i++) {
-      const angle = (Math.PI / 3) * i - Math.PI / 2;
-      pts.push(`${(r * Math.cos(angle)).toFixed(1)},${(r * Math.sin(angle)).toFixed(1)}`);
-    }
-    return pts.join(' ');
-  };
-
-  // Concentric rings; per-ring dash pattern + rotation gives the
-  // maze-with-gaps read of the original mark.
-  for (let ring = 0; ring < 8; ring++) {
-    const r = 30 + ring * 9;
-    const hex = document.createElementNS(SVG_NS, 'polygon');
-    hex.setAttribute('points', hexPoints(r));
-    hex.setAttribute('fill', 'none');
-    hex.setAttribute('stroke', 'currentColor');
-    hex.setAttribute('stroke-width', '2.4');
-    const seg = 14 + ring * 5;
-    hex.setAttribute('stroke-dasharray', `${seg} ${4 + (ring % 3) * 3}`);
-    hex.setAttribute('stroke-dashoffset', String(ring * 11));
-    hex.setAttribute('transform', `rotate(${(ring % 2) * 6})`);
-    hex.setAttribute('opacity', String(0.35 + ring * 0.07));
-    svg.appendChild(hex);
-  }
-
-  // Central dotted cube (isometric): top diamond + two side faces.
-  const cube = document.createElementNS(SVG_NS, 'g');
-  cube.setAttribute('stroke', 'currentColor');
-  cube.setAttribute('fill', 'none');
-  cube.setAttribute('stroke-width', '2');
-  cube.setAttribute('stroke-dasharray', '3.5 3');
-  const faces = [
-    '0,-16 14,-8 0,0 -14,-8',   // top
-    '-14,-8 0,0 0,16 -14,8',    // left
-    '14,-8 0,0 0,16 14,8',      // right
-  ];
-  for (const pts of faces) {
-    const face = document.createElementNS(SVG_NS, 'polygon');
-    face.setAttribute('points', pts);
-    cube.appendChild(face);
-  }
-  svg.appendChild(cube);
-  return svg;
-}
 
 /**
  * Agent tile v2 — the hexagon mark as the visual anchor, an AGENT chip
@@ -7866,17 +7824,7 @@ function buildDetailTypeBlock(item: RendererItem): HTMLElement | null {
 // Returning an HTMLElement (not innerHTML) means renderer consumers
 // don't see a `dangerouslySetInnerHTML`-shaped API.
 
-const MARKDOWN_ESCAPE: Readonly<Record<string, string>> = {
-  '&': '&amp;',
-  '<': '&lt;',
-  '>': '&gt;',
-  '"': '&quot;',
-  "'": '&#39;',
-};
 
-function escapeHtml(s: string): string {
-  return s.replace(/[&<>"']/g, (ch) => MARKDOWN_ESCAPE[ch] ?? ch);
-}
 
 /**
  * Apply inline Markdown to an already HTML-escaped string.
@@ -7887,26 +7835,6 @@ function escapeHtml(s: string): string {
  * can't collide with user content (NUL is forbidden in source) — they
  * survive the other passes intact and we restore them at the end.
  */
-export function renderInlineMarkdown(escapedSource: string): string {
-  const codeSpans: string[] = [];
-  // 1. Extract code spans into placeholders.
-  let out = escapedSource.replace(/`([^`]+)`/g, (_m, code) => {
-    const idx = codeSpans.length;
-    codeSpans.push(`<code>${code}</code>`);
-    return ` CS${idx} `;
-  });
-  // 2. Bold then italic so **x** parses before *x*.
-  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  out = out.replace(/(^|[^*])\*([^*\s][^*]*[^*\s]|[^*\s])\*/g, '$1<em>$2</em>');
-  // 3. Links: [text](url). URL must be http(s) for safety; mailto OK.
-  out = out.replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+|mailto:[^\s)]+)\)/g,
-    (_m, text, url) => `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`
-  );
-  // 4. Restore code-span placeholders.
-  out = out.replace(/ CS(\d+) /g, (_m, n) => codeSpans[Number(n)] ?? '');
-  return out;
-}
 
 /**
  * Render a Markdown source string into a DOM element. Pure; the
@@ -7916,123 +7844,6 @@ export function renderInlineMarkdown(escapedSource: string): string {
  * minimal: it covers what users typically write in inline notes
  * without pulling in a 30KB library.
  */
-export function renderMarkdown(source: string): HTMLElement {
-  const wrap = document.createElement('div');
-  wrap.className = 'spaces-markdown';
-  if (typeof source !== 'string' || source.length === 0) return wrap;
-
-  const lines = source.split(/\r?\n/);
-  let i = 0;
-  let buf: string[] = []; // accumulating paragraph lines
-
-  const flushParagraph = (): void => {
-    if (buf.length === 0) return;
-    const text = buf.join(' ').trim();
-    buf = [];
-    if (text.length === 0) return;
-    const p = document.createElement('p');
-    p.innerHTML = renderInlineMarkdown(escapeHtml(text));
-    wrap.appendChild(p);
-  };
-
-  while (i < lines.length) {
-    const line = lines[i] ?? '';
-    // Fenced code block: ``` start … ``` end.
-    if (line.trim().startsWith('```')) {
-      flushParagraph();
-      const fenceLang = line.trim().slice(3);
-      i++;
-      const codeLines: string[] = [];
-      while (i < lines.length && !((lines[i] ?? '').trim().startsWith('```'))) {
-        codeLines.push(lines[i] ?? '');
-        i++;
-      }
-      if (i < lines.length) i++; // consume closing fence
-      const pre = document.createElement('pre');
-      pre.className = 'spaces-markdown-code';
-      if (fenceLang.length > 0) pre.setAttribute('data-lang', fenceLang);
-      const code = document.createElement('code');
-      code.textContent = codeLines.join('\n');
-      pre.appendChild(code);
-      wrap.appendChild(pre);
-      continue;
-    }
-    // ATX headers.
-    const headerMatch = /^(#{1,3})\s+(.+)$/.exec(line);
-    if (headerMatch !== null) {
-      flushParagraph();
-      const level = (headerMatch[1] ?? '#').length;
-      const text = (headerMatch[2] ?? '').trim();
-      const h = document.createElement(`h${level}` as 'h1' | 'h2' | 'h3');
-      h.innerHTML = renderInlineMarkdown(escapeHtml(text));
-      wrap.appendChild(h);
-      i++;
-      continue;
-    }
-    // Blockquote: contiguous `>`-prefixed lines become one <blockquote>.
-    // Blank `>` lines split paragraphs inside the quote; nested block
-    // elements are out of scope for this minimal renderer.
-    if (/^\s*>/.test(line)) {
-      flushParagraph();
-      const quote = document.createElement('blockquote');
-      quote.className = 'spaces-markdown-quote';
-      let qbuf: string[] = [];
-      const flushQuotePara = (): void => {
-        const text = qbuf.join(' ').trim();
-        qbuf = [];
-        if (text.length === 0) return;
-        const p = document.createElement('p');
-        p.innerHTML = renderInlineMarkdown(escapeHtml(text));
-        quote.appendChild(p);
-      };
-      while (i < lines.length && /^\s*>/.test(lines[i] ?? '')) {
-        const inner = (lines[i] ?? '').replace(/^\s*>\s?/, '');
-        if (inner.trim().length === 0) flushQuotePara();
-        else qbuf.push(inner);
-        i++;
-      }
-      flushQuotePara();
-      if (quote.childElementCount > 0) wrap.appendChild(quote);
-      continue;
-    }
-    // List (one level): collect contiguous list lines.
-    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
-      flushParagraph();
-      const isOrdered = /^\s*\d+\./.test(line);
-      const list = document.createElement(isOrdered ? 'ol' : 'ul');
-      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i] ?? '')) {
-        const li = document.createElement('li');
-        const stripped = (lines[i] ?? '').replace(/^\s*([-*]|\d+\.)\s+/, '');
-        // Task-list item: `[ ]` / `[x]` renders as a checkbox glyph, not
-        // raw brackets. Read-only — checking happens in the editor.
-        const task = /^\[( |x|X)\]\s+(.*)$/.exec(stripped);
-        if (task !== null) {
-          const checked = (task[1] ?? '').toLowerCase() === 'x';
-          li.className = 'spaces-markdown-task';
-          li.innerHTML =
-            `<span class="spaces-markdown-checkbox" aria-hidden="true">${checked ? '☑' : '☐'}</span> ` +
-            renderInlineMarkdown(escapeHtml(task[2] ?? ''));
-        } else {
-          li.innerHTML = renderInlineMarkdown(escapeHtml(stripped));
-        }
-        list.appendChild(li);
-        i++;
-      }
-      wrap.appendChild(list);
-      continue;
-    }
-    // Blank line ends a paragraph.
-    if (line.trim().length === 0) {
-      flushParagraph();
-      i++;
-      continue;
-    }
-    buf.push(line);
-    i++;
-  }
-  flushParagraph();
-  return wrap;
-}
 
 /**
  * Compact byte formatter (1.2 KB, 3.4 MB). Pure; exported for tests.
@@ -8096,7 +7907,9 @@ async function loadHome(): Promise<void> {
   markVisitNow();
 }
 
-async function refreshCounts(): Promise<void> {
+
+
+export async function refreshCounts(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
   if (bridge === undefined) return;
   state.home.counts.loading = true;
@@ -8118,7 +7931,7 @@ async function refreshCounts(): Promise<void> {
   }
 }
 
-async function refreshContributors(): Promise<void> {
+export async function refreshContributors(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
   if (bridge === undefined) return;
   state.home.contributors.loading = true;
@@ -8140,7 +7953,7 @@ async function refreshContributors(): Promise<void> {
   }
 }
 
-async function refreshAgents(): Promise<void> {
+export async function refreshAgents(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
   if (bridge === undefined) return;
   state.home.agents.loading = true;
@@ -8162,7 +7975,7 @@ async function refreshAgents(): Promise<void> {
   }
 }
 
-async function refreshPermission(): Promise<void> {
+export async function refreshPermission(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
   if (bridge === undefined) return;
   state.home.permission.loading = true;
@@ -8184,7 +7997,7 @@ async function refreshPermission(): Promise<void> {
   }
 }
 
-async function refreshRecentItems(): Promise<void> {
+export async function refreshRecentItems(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
   if (bridge === undefined) return;
   state.home.recentItems.loading = true;
@@ -8209,7 +8022,7 @@ async function refreshRecentItems(): Promise<void> {
   }
 }
 
-async function refreshEvents(): Promise<void> {
+export async function refreshEvents(): Promise<void> {
   const bridge = window.lite?.spaces?.home;
   if (bridge === undefined) return;
   state.home.events.loading = true;
@@ -8372,7 +8185,7 @@ export function countTimelineSince(
   return n;
 }
 
-function buildSinceLastVisit(): HTMLElement | null {
+export function buildSinceLastVisit(): HTMLElement | null {
   const friendly = formatSinceLastVisit(state.lastVisitMs, state.currentVisitMs);
   if (friendly === null) return null;
 
@@ -8941,7 +8754,7 @@ export function filterTimeline(
  * error), end-of-feed cue. Wires click on each row to navigate to the
  * relevant Space (and item, for item-kind rows).
  */
-function buildHomeTimeline(): HTMLElement {
+export function buildHomeTimeline(): HTMLElement {
   const region = document.createElement('section');
   region.className = 'home-timeline';
   region.setAttribute('aria-label', 'Activity timeline');
@@ -9183,7 +8996,7 @@ export function buildTimelineRow(row: TimelineRow): HTMLElement {
  * how the user's view is scoped, and a peek at available agents.
  * Each block is independent — none blocks the timeline.
  */
-function buildHomeContext(): HTMLElement {
+export function buildHomeContext(): HTMLElement {
   const aside = document.createElement('aside');
   aside.className = 'home-context';
   aside.setAttribute('aria-label', 'Spaces context');

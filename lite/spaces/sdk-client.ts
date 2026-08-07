@@ -28,6 +28,7 @@
  */
 
 import { SpacesError } from './errors.js';
+import type { LearnSignals } from './learn-content.js';
 import type { Span } from '../logging/events.js';
 import type {
   Space,
@@ -877,6 +878,33 @@ export const CYPHER = {
    * connected via `:BELONGS_TO`. Returns 0 for empty Spaces and for
    * non-existent ids (caller handles non-existence separately).
    */
+  /**
+   * Learning Center signals (2026-08-07): the counts that auto-detect
+   * hands-on missions. Same visibility rules as every other read —
+   * detection must never reveal more than the viewer can see.
+   */
+  LEARN_KIND_COUNTS: `
+    MATCH (a:Asset)
+    WHERE a.deletedAt IS NULL
+      AND ${ASSET_VISIBLE}
+    RETURN coalesce(a.type, 'other') AS learnKind, count(a) AS learnCount
+  `,
+
+  LEARN_SPACE_COUNT: `
+    MATCH (s:Space)
+    WHERE s.deletedAt IS NULL
+      AND ${SPACE_VISIBLE}
+    RETURN count(s) AS learnSpaces
+  `,
+
+  LEARN_OTHER_MEMBERS: `
+    MATCH (member)-[r:HAS_ACCESS]->(s:Space)
+    WHERE s.deletedAt IS NULL
+      AND member.id <> $viewerId
+      AND (r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs)
+    RETURN count(DISTINCT member) AS learnOtherMembers
+  `,
+
   SPACE_ITEM_COUNT: `
     MATCH (s:Space {id: $id})
     OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
@@ -1676,6 +1704,30 @@ export class SdkSpacesClient {
       now: new Date().toISOString(),
     });
     return rows.length > 0;
+  }
+
+  async learnSignals(): Promise<LearnSignals> {
+    return this.withSpan('spaces.learn.signals', async () => {
+      const viewerId = this.viewerParam();
+      const [kindRows, spaceRows, memberRows] = await Promise.all([
+        this.run(CYPHER.LEARN_KIND_COUNTS, { viewerId }),
+        this.run(CYPHER.LEARN_SPACE_COUNT, { viewerId }),
+        this.run(CYPHER.LEARN_OTHER_MEMBERS, { viewerId }),
+      ]);
+      const kinds: Record<string, number> = {};
+      for (const row of kindRows) {
+        const kind = typeof row.learnKind === 'string' ? row.learnKind : 'other';
+        const n = Number(row.learnCount);
+        if (Number.isFinite(n) && n > 0) kinds[kind] = (kinds[kind] ?? 0) + n;
+      }
+      const spaces = Number(spaceRows[0]?.learnSpaces);
+      const otherMembers = Number(memberRows[0]?.learnOtherMembers);
+      return {
+        spaces: Number.isFinite(spaces) ? spaces : 0,
+        otherMembers: Number.isFinite(otherMembers) ? otherMembers : 0,
+        kinds,
+      };
+    });
   }
 
   async getUncategorizedCount(): Promise<number> {

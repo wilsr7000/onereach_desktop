@@ -548,6 +548,17 @@ export interface SpacesApi {
    */
   getUncategorizedCount(): Promise<number>;
 
+  /** Learning Center: workspace signals for mission auto-detection. */
+  learnSignals(): Promise<import('./learn-content.js').LearnSignals>;
+
+  /** Learning Center: read the persisted per-user progress. */
+  learnProgressGet(): Promise<import('./learn-content.js').LearnProgress>;
+
+  /** Learning Center: persist progress (normalized + atomic). */
+  learnProgressSave(
+    raw: unknown
+  ): Promise<import('./learn-content.js').LearnProgress>;
+
   /** Items sub-surface. */
   readonly items: SpacesItemsApi;
 
@@ -853,6 +864,18 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async refresh(): Promise<void> {
     throw notInitialized('refresh');
+  }
+
+  async learnSignals(): Promise<import('./learn-content.js').LearnSignals> {
+    throw notInitialized('learnSignals');
+  }
+
+  async learnProgressGet(): Promise<import('./learn-content.js').LearnProgress> {
+    throw notInitialized('learnProgressGet');
+  }
+
+  async learnProgressSave(): Promise<import('./learn-content.js').LearnProgress> {
+    throw notInitialized('learnProgressSave');
   }
 
   async getUncategorizedCount(): Promise<number> {

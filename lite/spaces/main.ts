@@ -140,6 +140,7 @@ import type {
 import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
 import { runGsxMigration } from './gsx-migration.js';
+import { readLearnProgress, writeLearnProgress } from './learn-store.js';
 
 // ─── Menu wiring ────────────────────────────────────────────────────────
 
@@ -706,6 +707,18 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       });
       await cache.getOrFetch(SPACES_CACHE_KEYS.LIST_SPACES, () => client.listSpaces());
     },
+    learnSignals() {
+      return client.learnSignals();
+    },
+
+    learnProgressGet() {
+      return readLearnProgress();
+    },
+
+    learnProgressSave(raw: unknown) {
+      return writeLearnProgress(raw);
+    },
+
     getUncategorizedCount(): Promise<number> {
       return cache.getOrFetch(SPACES_CACHE_KEYS.UNCATEGORIZED_COUNT, () =>
         client.getUncategorizedCount()
