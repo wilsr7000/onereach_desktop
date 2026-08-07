@@ -6902,3 +6902,61 @@ body {
 .spaces-card-preview-playbook {
   justify-content: center;
 }
+
+/* ── Empty states that offer a way out ──────────────────────────────
+ *
+ * An empty state is the moment a user has the least information and
+ * the most need for direction. Describing the future ("items will
+ * show up here") leaves them where they started; offering the action
+ * resolves it. Both of these are first-run screens for every new
+ * account, so they carry more weight than their size suggests.
+ * ------------------------------------------------------------------ */
+
+.spaces-empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px 10px 8px;
+  font-style: normal;
+}
+
+.spaces-empty-hint-line {
+  margin: 0;
+  color: #9a9aa3;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.spaces-empty-hint-cta,
+.spaces-empty-items-cta {
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(79, 140, 255, 0.45);
+  background: rgba(79, 140, 255, 0.12);
+  color: #6aa9ff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+
+.spaces-empty-hint-cta:hover,
+.spaces-empty-items-cta:hover {
+  background: rgba(79, 140, 255, 0.2);
+  border-color: rgba(79, 140, 255, 0.7);
+}
+
+.spaces-empty-hint-cta:focus-visible,
+.spaces-empty-items-cta:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.8);
+  outline-offset: 2px;
+}
+
+/* The empty-Space card centres its content, so its button centres too. */
+.spaces-empty-items-cta {
+  align-self: center;
+  margin-top: 14px;
+}
