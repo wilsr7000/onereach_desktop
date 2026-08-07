@@ -114,8 +114,10 @@ describe('CYPHER source strings', () => {
 
   it('uncategorized count filters soft-deleted assets and excludes BELONGS_TO', () => {
     expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(/a\.deletedAt IS NULL/);
+    // Semantics changed 2026-08-06: "uncategorized" is "in no LIVE
+    // Space", so assets whose Space was deleted stay findable.
     expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(
-      /NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
+      /MATCH \(a\)-\[:BELONGS_TO\]->\(live:Space\)/
     );
     expect(CYPHER.UNCATEGORIZED_COUNT).toMatch(/count\(a\) AS count/);
   });
@@ -124,7 +126,7 @@ describe('CYPHER source strings', () => {
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/MATCH \(a:Asset\)/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/a\.deletedAt IS NULL/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(
-      /NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/
+      /MATCH \(a\)-\[:BELONGS_TO\]->\(live:Space\)/
     );
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/\[\] AS otherSpaces/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/SKIP toInteger\(\$offset\)/);
@@ -247,6 +249,50 @@ describe('CYPHER source strings', () => {
 
 // ─── listSpaces() ────────────────────────────────────────────────────────
 
+describe('deleting a Space must not strand its assets', () => {
+  // Verified live 2026-08-06: soft-deleting a Space left its assets
+  // alive in the graph but reachable from NOWHERE — not the Space
+  // (hidden), not Uncategorized (they still had a BELONGS_TO edge),
+  // not search, not direct get. "Uncategorized" now means "in no LIVE
+  // Space", which is the only reading that keeps them findable.
+  it('uncategorized means "no LIVE space", not "no space at all"', () => {
+    for (const q of [CYPHER.UNCATEGORIZED_COUNT, CYPHER.LIST_ITEMS_UNCATEGORIZED]) {
+      expect(q).toMatch(/NOT EXISTS \{/);
+      expect(q).toMatch(/MATCH \(a\)-\[:BELONGS_TO\]->\(live:Space\)/);
+      expect(q).toMatch(/WHERE live\.deletedAt IS NULL/);
+      // The old predicate stranded them — it must be gone.
+      expect(q).not.toMatch(/NOT \(a\)-\[:BELONGS_TO\]->\(:Space\)/);
+    }
+  });
+
+  it('asset visibility survives when every owning Space is deleted', () => {
+    // ASSET_VISIBLE is inlined into the read queries; check one that
+    // carries it plus the direct-get path.
+    for (const q of [CYPHER.GET_ITEM, CYPHER.SEARCH_ITEMS]) {
+      expect(q).toMatch(/MATCH \(a\)-\[:BELONGS_TO\]->\(anyLive:Space\)/);
+      expect(q).toMatch(/WHERE anyLive\.deletedAt IS NULL/);
+    }
+  });
+
+  it('the non-empty hard-delete refusal no longer claims the wrong recovery path', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', [{ count: 3 }]);
+    const client = new SdkSpacesClient({ query: stub.fn });
+    await expect(client.deleteSpace('space-1', { soft: false })).rejects.toThrow(
+      /still contains 3 item/
+    );
+    try {
+      await client.deleteSpace('space-1', { soft: false });
+    } catch (err) {
+      const remediation = (err as { remediation?: string }).remediation ?? '';
+      expect(remediation).toContain('Uncategorized');
+      // It used to promise soft delete "keeps items reachable via
+      // Uncategorized" as an inherent property — it wasn't true then.
+      expect(remediation).not.toMatch(/keeps items reachable via Uncategorized/);
+    }
+  });
+});
+
 describe('SdkSpacesClient directory searches', () => {
   it('member library maps rows, defaults kind to Person, and skips id-less junk', async () => {
     // Review finding (2026-08-06): the mapper used requireString on
@@ -366,28 +412,28 @@ describe('SdkSpacesClient.listSpaces', () => {
 describe('SdkSpacesClient.getUncategorizedCount', () => {
   it('returns the count value as a number', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 17 }]);
+    stub.setResponse('RETURN count(a) AS count', [{ count: 17 }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(17);
   });
 
   it('returns 0 when no rows come back', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', []);
+    stub.setResponse('RETURN count(a) AS count', []);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
 
   it('clamps negative or fractional counts to a non-negative integer', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: -5 }]);
+    stub.setResponse('RETURN count(a) AS count', [{ count: -5 }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
 
   it('returns 0 when count field is missing or non-numeric', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)', [{ count: 'nope' }]);
+    stub.setResponse('RETURN count(a) AS count', [{ count: 'nope' }]);
     const client = makeClient(stub);
     expect(await client.getUncategorizedCount()).toBe(0);
   });
@@ -398,7 +444,7 @@ describe('SdkSpacesClient.getUncategorizedCount', () => {
 describe('SdkSpacesClient.listItems (uncategorized)', () => {
   it('emits LIST_ITEMS_UNCATEGORIZED with default offset/limit', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' });
     const call = stub.calls[stub.calls.length - 1];
@@ -408,7 +454,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('always returns otherSpaces=[] for uncategorized scope', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', [
       {
         id: 'i-1',
         title: 'Inbox file',
@@ -426,7 +472,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('normalizes unknown kinds to "other"', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', [
       {
         id: 'i-2',
         title: 'Weird',
@@ -444,7 +490,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('parses producedBy when the producer projection is populated', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', [
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', [
       {
         id: 'i-3',
         title: 'Agent output',
@@ -466,7 +512,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('respects limit/offset opts (clamped to MAX_LIMIT=500)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('NOT (a)-[:BELONGS_TO]->(:Space)\n    OPTIONAL MATCH', []);
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' }, { limit: 999_999, offset: 50 });
     const call = stub.calls[stub.calls.length - 1];

@@ -80,8 +80,11 @@ describe('visibility predicates in the Cypher surface', () => {
     expect(q).toContain('$viewerId');
     expect(q).toContain('[r:HAS_ACCESS]->(vs)');
     expect(q).toContain('r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs');
-    // Uncategorized assets stay visible.
-    expect(q).toContain('NOT EXISTS { MATCH (a)-[:BELONGS_TO]->(:Space) }');
+    // Uncategorized assets stay visible — and since 2026-08-06 that
+    // means "in no LIVE Space", so an asset whose every Space was
+    // deleted stays reachable instead of vanishing from every surface.
+    expect(q).toContain('MATCH (a)-[:BELONGS_TO]->(anyLive:Space)');
+    expect(q).toContain('WHERE anyLive.deletedAt IS NULL');
   });
 
   it('LIST_SPACES projects visibility so the renderer can badge + toggle', () => {

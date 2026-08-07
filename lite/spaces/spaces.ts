@@ -10620,6 +10620,20 @@ async function performSoftDelete(spaceId: string): Promise<void> {
     showToast('Bridge unavailable.');
     return;
   }
+  // Deleting used to be a single unconfirmed menu click, and it takes
+  // the Space's assets out of view with it. Say exactly what happens
+  // to them (nothing is destroyed; they move to Uncategorized) and
+  // make the user confirm.
+  const count = space?.itemCount ?? 0;
+  const ok = await askToConfirm(
+    `Delete "${displayName}"?`,
+    count > 0
+      ? `${count} ${count === 1 ? 'asset' : 'assets'} will move to Uncategorized — ` +
+        `nothing is deleted, and files stay in storage. Undo restores the Space with its assets.`
+      : 'The Space is empty. Undo restores it.',
+    'Delete'
+  );
+  if (!ok) return;
   try {
     const envelope = await bridge.deleteSpace(spaceId, { soft: true });
     if (envelope.ok === false) {
@@ -10632,7 +10646,9 @@ async function performSoftDelete(spaceId: string): Promise<void> {
       setActiveScope(HOME_SCOPE_ID);
     }
     await loadSpaces();
-    showToast(`Deleted "${displayName}"`, {
+    const movedNote =
+      (space?.itemCount ?? 0) > 0 ? ' · assets moved to Uncategorized' : '';
+    showToast(`Deleted "${displayName}"${movedNote}`, {
       undoLabel: 'Undo',
       onUndo: () => void performUndoDelete(spaceId, displayName),
     });

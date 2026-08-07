@@ -190,7 +190,10 @@ const SPACE_VISIBLE = `(
  * open one is visible — it genuinely lives in the open space.
  */
 const ASSET_VISIBLE = `(
-        NOT EXISTS { MATCH (a)-[:BELONGS_TO]->(:Space) }
+        NOT EXISTS {
+          MATCH (a)-[:BELONGS_TO]->(anyLive:Space)
+          WHERE anyLive.deletedAt IS NULL
+        }
         OR EXISTS {
           MATCH (a)-[:BELONGS_TO]->(vs:Space)
           WHERE vs.deletedAt IS NULL
@@ -224,13 +227,19 @@ export const CYPHER = {
   UNCATEGORIZED_COUNT: `
     MATCH (a:Asset)
     WHERE a.deletedAt IS NULL
-      AND NOT (a)-[:BELONGS_TO]->(:Space)
+      AND NOT EXISTS {
+        MATCH (a)-[:BELONGS_TO]->(live:Space)
+        WHERE live.deletedAt IS NULL
+      }
     RETURN count(a) AS count
   `,
   LIST_ITEMS_UNCATEGORIZED: `
     MATCH (a:Asset)
     WHERE a.deletedAt IS NULL
-      AND NOT (a)-[:BELONGS_TO]->(:Space)
+      AND NOT EXISTS {
+        MATCH (a)-[:BELONGS_TO]->(live:Space)
+        WHERE live.deletedAt IS NULL
+      }
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     WITH a, head(collect(creator)) AS producer
     RETURN a.id AS id,
@@ -876,8 +885,13 @@ export const CYPHER = {
 
   /**
    * SOFT_DELETE_SPACE -- sets `deletedAt` so the Space stops appearing
-   * in listSpaces() but its items keep their `[:BELONGS_TO]` edges.
-   * Reversible via UNDELETE_SPACE.
+   * in listSpaces(). Items keep their `[:BELONGS_TO]` edges and their
+   * GSX bytes; nothing is destroyed. Because "uncategorized" means
+   * "in no LIVE Space", an item whose every Space is deleted surfaces
+   * under Uncategorized rather than becoming unreachable (it used to
+   * vanish from listings, search AND direct get — verified 2026-08-06).
+   * Fully reversible via UNDELETE_SPACE, which pulls the items back
+   * into the restored Space automatically.
    */
   SOFT_DELETE_SPACE: `
     MATCH (s:Space {id: $id})
@@ -2134,7 +2148,7 @@ export class SdkSpacesClient {
           code: 'SPACES_DELETE_NON_EMPTY',
           message: `Cannot hard-delete a Space that still contains ${itemCount} item(s)`,
           remediation:
-            'Move the items out first (or use soft delete -- the default -- which keeps items reachable via Uncategorized).',
+            'Move the items out first, or use soft delete (the default): it hides the Space and its items surface under Uncategorized until you restore it.',
           context: { id: validId, itemCount },
         });
       }
