@@ -21,7 +21,7 @@ afterEach(async () => {
 
 function makeDeps(opts: {
   currentVersion: string;
-  dialogResponse?: 0 | 1 | 2;
+  dialogResponse?: 0 | 1 | 2 | 3;
 }): Parameters<typeof verifyUpdateOnStartup>[0] {
   return {
     userDataPath: userDataDir,
@@ -29,7 +29,7 @@ function makeDeps(opts: {
     openReleasesPage: vi.fn(),
     triggerCheck: vi.fn(),
     dialogs: {
-      showFailureDialog: vi.fn().mockResolvedValue(opts.dialogResponse ?? 2),
+      showFailureDialog: vi.fn().mockResolvedValue(opts.dialogResponse ?? 3),
     },
   };
 }
@@ -69,14 +69,14 @@ describe('verifyUpdateOnStartup', () => {
       lastAttemptTime: 'whenever',
       lastFailedVersions: [],
     });
-    const deps = makeDeps({ currentVersion: '1.0.0', dialogResponse: 2 });
+    const deps = makeDeps({ currentVersion: '1.0.0', dialogResponse: 3 });
     const result = await verifyUpdateOnStartup(deps);
     expect(result.outcome).toBe('install-failed');
     expect(deps.dialogs.showFailureDialog).toHaveBeenCalledOnce();
     const call = (deps.dialogs.showFailureDialog as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(call.title).toBe("Update Didn't Install");
     expect(call.message).toContain('2.0.0');
-    expect(call.buttons).toEqual(['Download Manually', 'Try Auto-Update Again', 'Skip']);
+    expect(call.buttons).toEqual(['Download Manually', 'Try Auto-Update Again', 'Report a Bug…', 'Skip']);
     expect(call.defaultId).toBe(0);
   });
 
@@ -87,11 +87,30 @@ describe('verifyUpdateOnStartup', () => {
       lastAttemptTime: 'whenever',
       lastFailedVersions: [],
     });
-    const deps = makeDeps({ currentVersion: '1.0.0', dialogResponse: 2 });
+    const deps = makeDeps({ currentVersion: '1.0.0', dialogResponse: 3 });
     await verifyUpdateOnStartup(deps);
     const call = (deps.dialogs.showFailureDialog as ReturnType<typeof vi.fn>).mock.calls[0]![0];
     expect(call.title).toBe('Update Could Not Be Applied');
     expect(call.message).toContain('failed 2 times');
+  });
+
+  it('Report a Bug… (response=2) hands the structured trail over and leaves state', async () => {
+    writeUpdateState(userDataDir, {
+      failedAttempts: 1,
+      lastAttemptVersion: '2.0.0',
+      lastAttemptTime: '2026-08-07T00:00:00Z',
+      lastFailedVersions: [],
+    });
+    const openBugReport = vi.fn();
+    const deps = { ...makeDeps({ currentVersion: '1.0.0', dialogResponse: 2 }), openBugReport };
+    const result = await verifyUpdateOnStartup(deps);
+    expect(result.outcome).toBe('install-failed');
+    expect(openBugReport).toHaveBeenCalledTimes(1);
+    const trail = openBugReport.mock.calls[0]?.[0] as string;
+    expect(trail).toContain('Target version: 2.0.0');
+    expect(trail).toContain('Still running: 1.0.0');
+    // Reporting is not resolving: state stays so the next boot re-prompts.
+    expect(readUpdateState(userDataDir).lastAttemptVersion).toBe('2.0.0');
   });
 
   it('Download Manually (response=0) clears state and opens releases', async () => {
@@ -127,7 +146,7 @@ describe('verifyUpdateOnStartup', () => {
       lastAttemptTime: 'whenever',
       lastFailedVersions: [],
     });
-    const deps = makeDeps({ currentVersion: '1.0.0', dialogResponse: 2 });
+    const deps = makeDeps({ currentVersion: '1.0.0', dialogResponse: 3 });
     await verifyUpdateOnStartup(deps);
     expect(deps.triggerCheck).not.toHaveBeenCalled();
     expect(deps.openReleasesPage).not.toHaveBeenCalled();
