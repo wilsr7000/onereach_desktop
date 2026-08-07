@@ -208,6 +208,25 @@ LITE_YAML_PATH="dist-lite/${LITE_YAML}"
 
 declare -a FILES=("${LITE_DMG}" "${LITE_DMG_BMAP}" "${LITE_ZIP}" "${LITE_ZIP_BMAP}" "${LITE_YAML_PATH}")
 
+# ---------------------------------------------------------------------------
+# Manifest sanity (2026-08-07): the yml is uploaded as-is, so a stale
+# dist artifact ships a manifest whose version disagrees with the tag —
+# which BRICKS auto-update for every install (observed live: v0.0.38's
+# feed briefly claimed version 0.0.9 pointing at a nonexistent zip).
+# The manifest's version must match the release before anything uploads.
+# ---------------------------------------------------------------------------
+YML_VERSION=$(grep -m1 '^version:' "${LITE_YAML_PATH}" | awk '{print $2}')
+if [ "$YML_VERSION" != "$NEW_VERSION" ]; then
+    echo -e "${RED}✗ ${LITE_YAML}'s version (${YML_VERSION}) != release version (${NEW_VERSION}).${NC}"
+    echo -e "${RED}  Stale dist artifact — rebuild before publishing. Aborting.${NC}"
+    exit 1
+fi
+if ! grep -q "Onereach.ai.Lite-${NEW_VERSION}-" "${LITE_YAML_PATH}"; then
+    echo -e "${RED}✗ ${LITE_YAML} does not reference the ${NEW_VERSION} artifacts. Aborting.${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Manifest sanity: ${LITE_YAML} = ${YML_VERSION}, artifacts match.${NC}"
+
 ALL_FILES_EXIST=true
 for FILE in "${FILES[@]}"; do
     if [ ! -f "$FILE" ]; then
