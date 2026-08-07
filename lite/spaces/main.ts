@@ -472,6 +472,26 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         return null;
       }
     },
+    async getFileExpiry(
+      key: string
+    ): Promise<{ expiresAt: string | null; source: 'bucket' } | null> {
+      if (typeof key !== 'string' || key.length === 0) return null;
+      try {
+        const info = await getFilesApi().get(key);
+        if (info === null) return null;
+        const ttl = typeof info.ttl === 'string' && info.ttl.length > 0 ? info.ttl : null;
+        if (ttl !== null) {
+          // Logged deliberately. A scheduled deletion that Lite did not
+          // set is the leading candidate for "the bytes vanished but
+          // the graph node survived" -- and we had been discarding this
+          // field on every read, so the evidence never reached anyone.
+          getLoggingApi().info('spaces', 'file has a scheduled deletion', { key, ttl });
+        }
+        return { expiresAt: ttl, source: 'bucket' };
+      } catch {
+        return null;
+      }
+    },
     async readFileData(key: string): Promise<{ dataUrl: string } | null> {
       // Soft API, same contract as resolveFileUrl: any failure returns
       // null and the pane shows an explicit message. NOT cached -- the

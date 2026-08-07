@@ -5134,7 +5134,13 @@ function renderDetail(opts: RenderDetailOpts): void {
     aside.appendChild(buildMoveToSpaceAffordance(item, currentSpaceId));
     aside.appendChild(buildSpaceMembershipPanel(item));
     const sharing = buildSharingStatus(item);
-    if (sharing !== null) aside.appendChild(sharing);
+    if (sharing !== null) {
+      aside.appendChild(sharing);
+      // Correct the badge against the bucket's real schedule. Async and
+      // best-effort: the stamped value renders immediately so the pane
+      // never waits on a network call to show what it already knows.
+      void refreshExpiryFromBucket(item, sharing);
+    }
   }
 
   // Sprint 1: Delete affordance at the bottom of the detail pane.
@@ -11017,6 +11023,84 @@ export function buildSharingBadges(item: {
     frag.appendChild(pill);
   }
   return frag;
+}
+
+/**
+ * Reconcile our stamp against the bucket's authoritative TTL.
+ *
+ * `metadata.fileExpiresAt` records only what LITE asked for at upload.
+ * The bucket is the thing that actually deletes, and it reports its
+ * schedule on every read — so where the two disagree, the bucket wins
+ * and the difference is worth saying out loud rather than papering
+ * over. An expiry we never stamped means something outside this app
+ * scheduled the file for deletion, which is precisely the shape of a
+ * file disappearing with no explanation.
+ */
+export function reconcileExpiry(
+  stamped: string | null,
+  bucket: string | null
+): { effective: string | null; note: string | null } {
+  if (bucket === null && stamped === null) return { effective: null, note: null };
+  if (bucket === null) {
+    // We believe there is a TTL; the bucket says there isn't. The file
+    // will outlive what the UI promised.
+    return {
+      effective: null,
+      note: 'No expiry is actually set on the file — it will not auto-delete.',
+    };
+  }
+  if (stamped === null) {
+    return {
+      effective: bucket,
+      note: 'This expiry was set outside Onereach.ai Lite.',
+    };
+  }
+  const same = Math.abs(Date.parse(bucket) - Date.parse(stamped)) < 60_000;
+  return {
+    effective: bucket,
+    note: same ? null : 'The file’s actual expiry differs from what was requested.',
+  };
+}
+
+/**
+ * Ask the bucket for the real schedule and correct the badge in place.
+ * Soft: on any failure the stamped value stands.
+ */
+async function refreshExpiryFromBucket(
+  item: RendererItem,
+  host: HTMLElement
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  const key = typeof item.fileKey === 'string' ? item.fileKey : '';
+  if (bridge === undefined || key.length === 0) return;
+  if (typeof bridge.items.getFileExpiry !== 'function') return;
+  try {
+    const envelope = await bridge.items.getFileExpiry(key);
+    if (envelope.ok === false || envelope.value === null) return;
+    const { effective, note } = reconcileExpiry(
+      itemExpiresAt(item as { metadata?: Record<string, unknown> }),
+      envelope.value.expiresAt
+    );
+    const badge = host.querySelector('.spaces-expiry-badge');
+    if (effective === null) {
+      badge?.remove();
+    } else if (badge !== null) {
+      badge.textContent = formatExpiry(effective);
+      badge.classList.toggle('is-soon', expiresSoon(effective));
+      (badge as HTMLElement).title = `Automatically deleted at ${effective}`;
+    }
+    if (note !== null) {
+      const existing = host.querySelector('.spaces-share-note');
+      if (existing === null) {
+        const el = document.createElement('span');
+        el.className = 'spaces-share-sub spaces-share-note';
+        el.textContent = note;
+        host.appendChild(el);
+      }
+    }
+  } catch {
+    // The stamped value stands — this only ever enriches the badge.
+  }
 }
 
 /** Detail-pane sharing summary. Null when there is nothing to say. */

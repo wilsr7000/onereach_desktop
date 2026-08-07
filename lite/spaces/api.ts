@@ -226,6 +226,27 @@ export interface SpacesItemsApi {
   readFileData(key: string): Promise<{ dataUrl: string } | null>;
 
   /**
+   * Read the file's AUTHORITATIVE scheduled deletion from the bucket.
+   *
+   * The asset carries `metadata.fileExpiresAt` when Lite set a TTL at
+   * upload, but that is only a mirror of our own intent. The bucket
+   * reports the real thing on every `get`, and until now nothing read
+   * it -- so a TTL set by an account policy, the platform, or another
+   * app was invisible here even though we were being told about it on
+   * every request.
+   *
+   * `source` distinguishes the two, which is the point: a `'bucket'`
+   * expiry that Lite never stamped is exactly the shape of "a file
+   * disappeared and nobody knows why".
+   *
+   * Soft API: any failure resolves to null rather than throwing, since
+   * this only enriches a badge.
+   */
+  getFileExpiry(
+    key: string
+  ): Promise<{ expiresAt: string | null; source: 'bucket' } | null>;
+
+  /**
    * Update mutable fields on an Item (Phase 3b). Returns the freshly
    * re-fetched Item so callers can update their state with the new
    * `updatedAt`, `lastEditedBy`, etc. in one shape.
@@ -700,6 +721,12 @@ class UninitializedSpacesApi implements SpacesApi {
       // Soft contract: the resolver never throws even in the uninit
       // state -- it just returns null so the detail pane degrades to
       // "no preview" instead of an error banner.
+      return null;
+    },
+    async getFileExpiry(
+      _key: string
+    ): Promise<{ expiresAt: string | null; source: 'bucket' } | null> {
+      // Soft API — null, not a throw, matching the initialized impl.
       return null;
     },
     async readFileData(_key: string): Promise<{ dataUrl: string } | null> {

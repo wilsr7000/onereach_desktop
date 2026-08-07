@@ -693,6 +693,15 @@ interface LiteSpacesItemsBridge {
    * binary download links.
    */
   resolveFileUrl(key: string): Promise<LiteSpacesIpcResult<string | null>>;
+  /**
+   * The bucket's AUTHORITATIVE scheduled deletion — distinct from
+   * `metadata.fileExpiresAt`, which only mirrors a TTL Lite itself
+   * set. A bucket expiry with no matching stamp means something
+   * outside Lite scheduled this file for deletion.
+   */
+  getFileExpiry(
+    key: string
+  ): Promise<LiteSpacesIpcResult<{ expiresAt: string | null; source: 'bucket' } | null>>;
   /** Read stored bytes as a data: URL for inline preview (null on failure). */
   readFileData(key: string): Promise<LiteSpacesIpcResult<{ dataUrl: string } | null>>;
   /**

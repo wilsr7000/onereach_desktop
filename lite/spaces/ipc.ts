@@ -60,6 +60,8 @@ export const SPACES_IPC = {
   ITEMS_LIST: 'lite:spaces:items:list',
   ITEMS_GET: 'lite:spaces:items:get',
   ITEMS_RESOLVE_FILE_URL: 'lite:spaces:items:resolveFileUrl',
+  /** ADR-052 — the bucket's authoritative scheduled deletion. */
+  ITEMS_GET_FILE_EXPIRY: 'lite:spaces:items:getFileExpiry',
   /** Item mutations (Phase 3b). Distinct from Phase 3a Space mutations. */
   ITEMS_UPDATE: 'lite:spaces:items:update',
   ITEMS_ADD_TAG: 'lite:spaces:items:addTag',
@@ -279,6 +281,23 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? payload.key
             : '';
         const value = await getSpacesApi().items.resolveFileUrl(key);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_GET_FILE_EXPIRY,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { key?: unknown }
+    ): Promise<SpacesIpcResult<{ expiresAt: string | null; source: 'bucket' } | null>> => {
+      try {
+        const key =
+          payload !== undefined && typeof payload.key === 'string' ? payload.key : '';
+        const value = await getSpacesApi().items.getFileExpiry(key);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

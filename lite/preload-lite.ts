@@ -86,6 +86,7 @@ const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 
+const SPACES_ITEMS_GET_FILE_EXPIRY = 'lite:spaces:items:getFileExpiry';
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
 const SPACES_ITEMS_CREATE_BINARY = 'lite:spaces:items:createBinary';
 const SPACES_ITEMS_CREATE_AGENT = 'lite:spaces:items:createAgent';
@@ -548,6 +549,10 @@ interface SpacesItemsBridge {
   ): Promise<SpacesIpcResultView<unknown[]>>;
   get(id: string): Promise<SpacesIpcResultView<unknown | null>>;
   resolveFileUrl(key: string): Promise<SpacesIpcResultView<string | null>>;
+  /** The bucket's authoritative scheduled deletion for this key. */
+  getFileExpiry(
+    key: string
+  ): Promise<SpacesIpcResultView<{ expiresAt: string | null; source: 'bucket' } | null>>;
   /** Read stored bytes as a data: URL for inline preview (null on failure). */
   readFileData(key: string): Promise<SpacesIpcResultView<{ dataUrl: string } | null>>;
   createBinary(input: {
@@ -1494,6 +1499,10 @@ const spaces: SpacesBridge = {
     resolveFileUrl: (key) =>
       ipcRenderer.invoke(SPACES_ITEMS_RESOLVE_FILE_URL, { key }) as Promise<
         SpacesIpcResultView<string | null>
+      >,
+    getFileExpiry: (key) =>
+      ipcRenderer.invoke(SPACES_ITEMS_GET_FILE_EXPIRY, { key }) as Promise<
+        SpacesIpcResultView<{ expiresAt: string | null; source: 'bucket' } | null>
       >,
     readFileData: (key) =>
       ipcRenderer.invoke(SPACES_ITEMS_READ_FILE_DATA, { key }) as Promise<
