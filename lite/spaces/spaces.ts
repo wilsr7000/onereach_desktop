@@ -3428,6 +3428,31 @@ async function performBulkMove(
     return;
   }
   const ids = Array.from(state.selectedItemIds);
+  // Union-rule guardrail: bulk move can expose MANY restricted assets
+  // in one change event, so confirm before any write happens.
+  const exposed = ids.filter((id) => {
+    const space = state.spaces.find((s) => s.id === toSpaceId);
+    return (
+      space !== undefined &&
+      wouldExposeRestrictedItem(currentSpaceIdsFor(id), space, state.spaces)
+    );
+  });
+  if (exposed.length > 0) {
+    const target = state.spaces.find((s) => s.id === toSpaceId);
+    const ok = await askToConfirm(
+      'Make these visible to everyone?',
+      `${exposed.length} of ${ids.length} selected ${exposed.length === 1 ? 'item is' : 'items are'} ` +
+        `in members-only Spaces. Moving ${exposed.length === 1 ? 'it' : 'them'} to ` +
+        `"${target?.name ?? toSpaceId}" makes ${exposed.length === 1 ? 'it' : 'them'} ` +
+        `visible to everyone in the account.`,
+      'Move anyway'
+    );
+    if (!ok) {
+      selectEl.value = '';
+      selectEl.disabled = false;
+      return;
+    }
+  }
   let succeeded = 0;
   const failures: string[] = [];
   // Run in parallel — the per-item Cypher writes are independent.
@@ -5472,7 +5497,11 @@ async function loadSpaceSuggestions(
     host.appendChild(heading);
 
     for (const s of list) {
-      const space = state.spaces.find((sp) => sp.id === s.spaceId);
+      // Validate against the CANDIDATES we sent, not all visible
+      // Spaces: a hallucinated / echoed id that happens to name a real
+      // open Space would otherwise render an Add button that exposes a
+      // restricted asset (2026-08-07 review).
+      const space = candidates.find((sp) => sp.id === s.spaceId);
       if (space === undefined) continue; // defensive: never render a phantom
       host.appendChild(buildSuggestionRow(item, space, s.reason));
     }
@@ -5516,6 +5545,13 @@ function buildSuggestionRow(
     void (async () => {
       const bridge = window.lite?.spaces;
       if (bridge === undefined) return;
+      // A model-suggested destination is still a destination: run the
+      // union-rule guardrail before filing a restricted-only asset
+      // into an open Space (2026-08-07 review — this path skipped it).
+      if (!(await confirmExposureIfNeeded(item.id, space.id))) {
+        add.disabled = false;
+        return;
+      }
       try {
         const envelope = await bridge.items.addToSpace(item.id, space.id);
         if (envelope.ok === false) {
@@ -5584,6 +5620,34 @@ function buildMoveToSpaceAffordance(
   return wrap;
 }
 
+/**
+ * Union-rule guardrail, shared by EVERY path that can put a
+ * restricted-only asset into an open Space. The membership checkbox
+ * had this; "Move to…", bulk move, and the AI-suggestion Add did not
+ * — so the adjacent checkbox warned while the select next to it
+ * exposed the asset silently (2026-08-07 review). Returns true when
+ * the caller may proceed.
+ */
+async function confirmExposureIfNeeded(
+  itemId: string,
+  toSpaceId: string,
+  currentIds?: ReadonlySet<string>
+): Promise<boolean> {
+  const space = state.spaces.find((s) => s.id === toSpaceId);
+  if (space === undefined) return true;
+  const ids = currentIds ?? currentSpaceIdsFor(itemId);
+  if (!wouldExposeRestrictedItem(ids, space, state.spaces)) return true;
+  const restrictedNames = [...ids]
+    .map((id) => state.spaces.find((s) => s.id === id))
+    .filter((s): s is RendererSpace => s !== undefined)
+    .map((s) => (s.name.length > 0 ? s.name : '(unnamed)'));
+  return askToConfirm(
+    'Make this visible to everyone?',
+    exposureWarningText(itemTitleFor(itemId), space.name, restrictedNames),
+    'Move anyway'
+  );
+}
+
 async function performMoveAsset(
   itemId: string,
   fromSpaceId: string | null,
@@ -5593,6 +5657,11 @@ async function performMoveAsset(
   const bridge = window.lite?.spaces;
   if (bridge === undefined) {
     showToast('Bridge unavailable.');
+    select.disabled = false;
+    return;
+  }
+  if (!(await confirmExposureIfNeeded(itemId, toSpaceId))) {
+    select.value = '';
     select.disabled = false;
     return;
   }

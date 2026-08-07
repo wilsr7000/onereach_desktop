@@ -232,6 +232,37 @@ describe('review-fix wiring invariants (source-level)', () => {
     ).toBe(0);
   });
 
+  it('EVERY exposure path runs the union-rule guardrail', () => {
+    // 2026-08-07 review: the membership checkbox warned before making
+    // a restricted-only asset account-visible, but "Move to…", bulk
+    // move, and the AI-suggestion Add — rendered right next to it —
+    // wrote silently. One shared helper now covers all of them.
+    const src = source();
+    expect(src).toMatch(/async function confirmExposureIfNeeded\(/);
+    for (const fn of [
+      'async function performMoveAsset',
+      'async function performBulkMove',
+    ]) {
+      const body = bodyOf(fn, 3000);
+      expect(
+        /confirmExposureIfNeeded|wouldExposeRestrictedItem/.test(body),
+        `${fn} must run the exposure guardrail before writing`
+      ).toBe(true);
+    }
+    // The AI-suggestion Add button sits inside buildSuggestionRow.
+    expect(bodyOf('function buildSuggestionRow', 3000)).toMatch(
+      /confirmExposureIfNeeded/
+    );
+  });
+
+  it('AI suggestions are validated against the candidates actually offered', () => {
+    // Validating against every visible Space let a hallucinated/echoed
+    // id resolve to a real OPEN Space and render an Add button.
+    const src = source();
+    expect(src).toMatch(/candidates\.find\(\(sp\) => sp\.id === s\.spaceId\)/);
+    expect(src).not.toMatch(/state\.spaces\.find\(\(sp\) => sp\.id === s\.spaceId\)/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

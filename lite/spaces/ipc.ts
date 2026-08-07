@@ -795,10 +795,23 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         // intents (leave / permanent / expire), so only forward the
         // key when the renderer actually sent it.
         const hasExpiry = payload !== undefined && 'expiresAt' in payload;
-        const expiresAt =
-          payload?.expiresAt === null || typeof payload?.expiresAt === 'string'
-            ? (payload.expiresAt as string | null)
-            : null;
+        // ADR-052 says REJECT a malformed expiry, never drop it. This
+        // used to coerce anything non-string to `null` — which the SDK
+        // reads as PERMANENT, so an epoch-ms number or a Date (both
+        // survive structured clone) silently produced a grant the
+        // admin believed expires Friday (2026-08-07 review). Pass the
+        // raw value through and let parseGrantExpiry throw.
+        const rawExpiry = payload?.expiresAt;
+        if (
+          hasExpiry &&
+          rawExpiry !== null &&
+          typeof rawExpiry !== 'string'
+        ) {
+          throw new Error(
+            `expiresAt must be an ISO string or null (got ${typeof rawExpiry})`
+          );
+        }
+        const expiresAt = (rawExpiry ?? null) as string | null;
         const value = await getSpacesApi().members.add(
           spaceId,
           memberId,

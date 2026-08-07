@@ -208,3 +208,24 @@ describe('IPC patch coercion (the layer that silently ate visibility)', () => {
     expect(_coerceUpdateSpaceInputForTesting({ visibility: 7 })).toEqual({});
   });
 });
+
+describe('ADR-052 — a malformed expiry must be rejected, never made permanent', () => {
+  it('the members.add handler refuses a non-string, non-null expiresAt', async () => {
+    // 2026-08-07 review: the handler coerced anything non-string to
+    // `null`, which the SDK reads as PERMANENT — so an epoch-ms number
+    // or a Date (both survive structured clone) silently produced a
+    // permanent grant the admin believed expires Friday.
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const candidates = [path.resolve('spaces/ipc.ts'), path.resolve('lite/spaces/ipc.ts')];
+    const found = candidates.find((p) => fs.existsSync(p));
+    expect(found, 'ipc.ts not found').toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    const start = src.indexOf('MEMBERS_ADD,');
+    expect(start).toBeGreaterThan(-1);
+    const handler = src.slice(start, start + 2200);
+    expect(handler).toMatch(/must be an ISO string or null/);
+    // The silent-coercion form must be gone.
+    expect(handler).not.toMatch(/typeof payload\?\.expiresAt === 'string'\s*\n?\s*\? \(payload\.expiresAt as string \| null\)\s*\n?\s*: null/);
+  });
+});
