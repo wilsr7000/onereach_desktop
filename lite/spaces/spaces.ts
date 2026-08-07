@@ -7311,21 +7311,48 @@ export function buildDetailEmptyContentHint(item: {
  * meta strip, but in a denser, more prominent style — surfacing the
  * "who" front-and-center for the collaborative use case.
  */
+/**
+ * A display name that is safe to print, or the established  placeholder.
+ *
+ * Upstream producers have historically written a missing `name` as the
+ * entity's own id (documented in LITE-PUNCH-LIST — it is how a Space
+ * shipped to production named `402abae35ea49651576e3a8d61f3ee3a`). The
+ * detail pane's identity line is the most prominent text on the pane,
+ * so a raw GUID there is the single least-clean thing in the UI.
+ *
+ * Anything that looks like an identifier rather than a name — a UUID, a
+ * long hex blob, or a string with no letters at all — is treated as
+ * absent. Deliberately conservative: real names with digits or hyphens
+ * ("Anne-Marie", "R2") must survive.
+ */
+export function displayPersonName(raw: string | null | undefined): string {
+  const name = typeof raw === 'string' ? raw.trim() : '';
+  if (name.length === 0) return '(unknown)';
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const hexBlob = /^[0-9a-f]{24,}$/i;
+  const hasLetter = /\p{L}/u.test(name);
+  if (uuid.test(name) || hexBlob.test(name) || !hasLetter) return '(unknown)';
+  return name;
+}
+
 export function buildAttributionChip(item: RendererItem): HTMLElement | null {
   const editor = item.lastEditedBy ?? null;
   const producer = item.producedBy;
   const editorDistinct = editor !== null && editor.id !== producer?.id;
+  // Names arrive from the graph, where upstream producers historically
+  // defaulted a missing `name` to the entity's own id — see
+  // LITE-PUNCH-LIST. The renderer must not print that back at the user.
 
   let label: string;
   let name: string;
   let timeIso: string;
   if (editorDistinct) {
     label = 'Last edited by';
-    name = editor.name.length > 0 ? editor.name : '(unknown)';
+    name = displayPersonName(editor.name);
     timeIso = item.updatedAt;
   } else if (producer !== null) {
     label = 'Created by';
-    name = producer.name.length > 0 ? producer.name : '(unknown)';
+    name = displayPersonName(producer.name);
     timeIso = item.createdAt;
   } else {
     return null;
