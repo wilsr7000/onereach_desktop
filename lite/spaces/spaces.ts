@@ -2881,7 +2881,9 @@ function buildSpaceVisibilityRow(space: RendererSpace): HTMLElement {
   toggle.className = restricted
     ? 'spaces-visibility-toggle is-restricted'
     : 'spaces-visibility-toggle';
-  toggle.textContent = restricted ? '🔒 Members only' : '🔓 Open to account';
+  // State is carried by the ::before dot (amber = restricted) plus
+  // these words. The old 🔓/🔒 pair was indistinguishable at 11px.
+  toggle.textContent = restricted ? 'Members only' : 'Open to account';
   toggle.title = restricted
     ? 'Only members see this Space. Click to open it to everyone in the account.'
     : 'Everyone in the account sees this Space. Click to restrict it to members.';
@@ -6079,7 +6081,9 @@ export function buildDetailPane(
   if (typeof item.mimeType === 'string' && item.mimeType.length > 0) {
     const mime = document.createElement('span');
     mime.className = 'spaces-detail-mime';
-    mime.textContent = item.mimeType;
+    mime.textContent = friendlyMime(item.mimeType);
+    // The raw type is still available on hover for anyone debugging.
+    mime.title = item.mimeType;
     header.appendChild(mime);
   }
 
@@ -7311,6 +7315,44 @@ export function buildDetailEmptyContentHint(item: {
  * meta strip, but in a denser, more prominent style — surfacing the
  * "who" front-and-center for the collaborative use case.
  */
+/**
+ * A MIME type as a person would say it.
+ *
+ * The detail header showed `application/pdf` next to the kind badge —
+ * accurate, and the wrong register for a header a non-engineer reads.
+ * The raw value stays on the element's `title`, so nothing is lost for
+ * anyone debugging a mis-typed asset.
+ *
+ * Falls back to the subtype in caps (`image/webp` -> `WEBP`), so an
+ * unmapped format still reads as a format rather than a slash-pair.
+ */
+export function friendlyMime(raw: string | null | undefined): string {
+  const mime = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (mime.length === 0) return '';
+  const KNOWN: Record<string, string> = {
+    'application/pdf': 'PDF',
+    'text/markdown': 'Markdown',
+    'text/plain': 'Text',
+    'text/csv': 'CSV',
+    'text/html': 'HTML',
+    'application/json': 'JSON',
+    'application/zip': 'ZIP',
+    'application/msword': 'Word',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'Word',
+    'application/vnd.ms-excel': 'Excel',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'Excel',
+    'application/vnd.ms-powerpoint': 'PowerPoint',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PowerPoint',
+  };
+  const known = KNOWN[mime];
+  if (known !== undefined) return known;
+  const subtype = mime.split('/')[1] ?? '';
+  if (subtype.length === 0) return mime.toUpperCase();
+  // Strip vendor/suffix noise: `svg+xml` -> `SVG`, `x-wav` -> `WAV`.
+  const cleaned = subtype.split('+')[0]?.replace(/^x-/, '') ?? subtype;
+  return cleaned.toUpperCase();
+}
+
 /**
  * A display name that is safe to print, or the established  placeholder.
  *

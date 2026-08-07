@@ -421,12 +421,18 @@ describe('buildDetailPane', () => {
     expect(el.querySelector<HTMLButtonElement>('.spaces-detail-close')).not.toBeNull();
   });
 
-  it('shows MIME hint next to the kind badge when present', () => {
+  it('shows a READABLE format hint next to the kind badge, not the raw MIME', () => {
     const el = renderer.buildDetailPane(
       baseItem({ kind: 'other', mimeType: 'application/pdf' }),
       () => undefined
     );
-    expect(el.querySelector('.spaces-detail-mime')?.textContent).toBe('application/pdf');
+    const hint = el.querySelector<HTMLElement>('.spaces-detail-mime');
+    // The header is the most-read line in the pane and is read by
+    // non-engineers; `application/pdf` is the wrong register there.
+    expect(hint?.textContent).toBe('PDF');
+    // ...but the wire value must stay reachable for anyone debugging a
+    // mis-typed asset, so it lives on the tooltip.
+    expect(hint?.title).toBe('application/pdf');
   });
 
   it('renders the tag chip row when item has tags', () => {

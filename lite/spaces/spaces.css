@@ -2984,9 +2984,35 @@ body {
 
 .home-filter-chips {
   display: flex;
-  flex-wrap: wrap;
+  /* Wrapping stranded "Last 7 days" alone on a second line whenever the
+     column narrowed (e.g. with the detail pane open), which read as a
+     layout bug rather than a filter set. A single scrolling row keeps
+     the control coherent at any width. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
   gap: 6px;
   margin-bottom: 4px;
+  padding-bottom: 2px;
+  /* Dark scrollbar — never a default white slab on a dark surface. */
+  scrollbar-width: thin;
+  scrollbar-color: #3a3f4b transparent;
+}
+
+.home-filter-chips::-webkit-scrollbar {
+  height: 6px;
+}
+
+.home-filter-chips::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.home-filter-chips::-webkit-scrollbar-thumb {
+  background: #3a3f4b;
+  border-radius: 3px;
+}
+
+.home-filter-chip {
+  flex: 0 0 auto;
 }
 
 .home-filter-chip {
@@ -6500,6 +6526,27 @@ body {
   margin-top: 6px;
 }
 
+/* The state used to be carried by 🔓 vs 🔒, which at 11px are the same
+   shape and the same colour — unreadable at a glance, leaving the words
+   to do all the work. A filled dot encodes it in colour and position
+   instead, which survives being glanced at. */
+.spaces-visibility-toggle::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #6f6f78;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+
+.spaces-visibility-toggle.is-restricted::before {
+  background: #ffc15e;
+}
+
 .spaces-visibility-toggle {
   font-size: 11.5px;
   padding: 3px 10px;
@@ -6840,4 +6887,18 @@ body {
   font-size: 10px;
   opacity: 0.72;
   line-height: 1;
+}
+
+/* Content-light tiles (knowledge, journey, agent, playbook) hold a
+   short block of text inside a fixed 4:3 preview, which left ~40% of
+   the tile as dead space pinned to the bottom — reading as "this
+   didn't finish loading" rather than "this is all there is". Centring
+   the block splits the slack evenly above and below, so the emptiness
+   looks composed instead of truncated. The decorative hex motif stays
+   absolutely positioned, so it is unaffected. */
+.spaces-card-preview-knowledge,
+.spaces-card-preview-journey,
+.spaces-card-preview-agent,
+.spaces-card-preview-playbook {
+  justify-content: center;
 }
