@@ -1190,14 +1190,30 @@ function attachRemoteHome(win: BrowserWindow): void {
     }
     return { action: 'deny' };
   });
-  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
-    if (errorCode === -3) return; // ABORTED
-    getLoggingApi().warn('main-window', 'remote home failed to load; revealing boot-chat home', {
-      errorCode,
-      errorDescription,
-    });
+  view.webContents.on(
+    'did-fail-load',
+    (_e, errorCode, errorDescription, _validatedURL, isMainFrame) => {
+      if (errorCode === -3) return; // ABORTED
+      // A failing SUBFRAME inside a healthy page must not blank the
+      // whole Home tab (2026-08-07 review) — only main-frame failures
+      // reveal the boot-chat fallback.
+      if (!isMainFrame) return;
+      getLoggingApi().warn('main-window', 'remote home failed to load; revealing boot-chat home', {
+        errorCode,
+        errorDescription,
+      });
+      try {
+        view.setVisible(false);
+      } catch {
+        /* best-effort */
+      }
+    }
+  );
+  // Symmetry: a later successful load (retry, navigation, network back)
+  // re-shows the view so a transient failure isn't sticky-blank.
+  view.webContents.on('did-finish-load', () => {
     try {
-      view.setVisible(false);
+      view.setVisible(true);
     } catch {
       /* best-effort */
     }
@@ -1211,33 +1227,52 @@ function attachRemoteHome(win: BrowserWindow): void {
     const accountId = getAuthApi().getSession('edison')?.accountId ?? null;
     const resolved = resolveHomeUrl(configured, accountId);
     // Some Home pages (e.g. the WISER capture join room) need
-    // mic/camera. Grant media ONLY to the configured page's own
-    // origin — every other permission and origin still denies.
+    // mic/camera. The handler is installed UNCONDITIONALLY: Electron's
+    // default with no handler is GRANT-all, so a parse failure must
+    // resolve to a handler that denies everything, not to no handler
+    // (2026-08-07 review). Media is granted only when the REQUESTING
+    // frame itself is the configured origin — a cross-origin iframe
+    // inside the page gets denied even with permission delegation.
+    let allowedOrigin: string | null = null;
     try {
-      const origin = new URL(resolved).origin;
-      view.webContents.session.setPermissionRequestHandler(
-        (contents, permission, callback) => {
-          const requesterOrigin = (() => {
-            try {
-              return new URL(contents.getURL()).origin;
-            } catch {
-              return null;
-            }
-          })();
-          callback(permission === 'media' && requesterOrigin === origin);
-        }
-      );
+      allowedOrigin = new URL(resolved).origin;
     } catch {
-      /* origin parse failure — leave default (deny) behavior */
+      allowedOrigin = null;
     }
-    // NOTE: do not log the URL — the join link's fragment carries the
-    // room key.
+    view.webContents.session.setPermissionRequestHandler(
+      (_contents, permission, callback, details) => {
+        if (permission !== 'media' || allowedOrigin === null) {
+          callback(false);
+          return;
+        }
+        const requestingUrl =
+          typeof details.requestingUrl === 'string' ? details.requestingUrl : '';
+        let requesterOrigin: string | null = null;
+        try {
+          requesterOrigin = new URL(requestingUrl).origin;
+        } catch {
+          requesterOrigin = null;
+        }
+        callback(requesterOrigin === allowedOrigin);
+      }
+    );
+    // NOTE: never log the URL or the raw load error — the join link's
+    // fragment carries the room key, and Electron's loadURL rejection
+    // MESSAGE embeds the full URL (verified against Electron 41), so
+    // logging err.message re-leaks it. Log only structured fields.
     void view.webContents.loadURL(resolved).catch((err: unknown) => {
+      const e = err as { errno?: unknown; code?: unknown };
       getLoggingApi().warn('main-window', 'remote home initial load rejected', {
-        error: (err as Error).message,
+        errno: typeof e.errno === 'number' ? e.errno : null,
+        code: typeof e.code === 'string' ? e.code : null,
       });
     });
-  })();
+  })().catch((err: unknown) => {
+    // A destroyed view mid-await must not become an unhandled rejection.
+    getLoggingApi().warn('main-window', 'remote home mount failed', {
+      error: err instanceof Error ? err.name : 'unknown',
+    });
+  });
 }
 
 function attachLearnHome(win: BrowserWindow): void {

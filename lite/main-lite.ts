@@ -69,6 +69,9 @@ import { installReSignInPrompter } from './auth/re-signin-prompt.js';
 import { getDiscoveryApi } from './discovery/api.js';
 import { rescueAllWindows } from './window-rescue.js';
 
+/** Updater install-failure trail awaiting the bug modal (post-boot). */
+let pendingUpdaterBugReport: string | null = null;
+
 const LITE_LOG_PORT = 47392;
 const LITE_PRODUCT_NAME = 'Onereach.ai Lite';
 
@@ -426,6 +429,11 @@ app
         logger: {
           info: (msg, data) => getLoggingApi().info('updater', msg, data),
           warn: (msg, data) => getLoggingApi().warn('updater', msg, data),
+        },
+        // The bug modal cannot exist this early (initBugReport runs
+        // later in boot) — stash the trail and open once boot settles.
+        openBugReport: (prefill) => {
+          pendingUpdaterBugReport = prefill;
         },
       });
     } catch (err) {
@@ -1077,6 +1085,24 @@ app
       // degraded path.
       mainWindow = createMainWindow(preloadPath);
       reSignInHandle.setSuspended(false);
+    }
+
+    // Updater install failure detected at boot → open the bug modal
+    // pre-filled with the structured trail, now that initBugReport has
+    // run and a parent window exists. Short delay so the modal doesn't
+    // fight the main window's own first paint for focus.
+    if (pendingUpdaterBugReport !== null) {
+      const trail = pendingUpdaterBugReport;
+      pendingUpdaterBugReport = null;
+      setTimeout(() => {
+        try {
+          openBugReportModal(trail);
+        } catch (err) {
+          getLoggingApi().warn('updater', 'deferred bug-report open failed', {
+            error: (err as Error).message,
+          });
+        }
+      }, 1500);
     }
 
     // Initialize downloads capture (Save to Space). Wired AFTER the

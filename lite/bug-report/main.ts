@@ -20,6 +20,7 @@ import { getHealthApi, type AppHealthSnapshot } from '../health/api.js';
 import { getFilesApi, FilesError } from '../files/api.js';
 
 const IPC_CAPTURE = 'lite:bug-report:capture';
+const IPC_GET_PREFILL = 'lite:bug-report:get-prefill';
 const IPC_SAVE = 'lite:bug-report:save';
 const IPC_CLOSE = 'lite:bug-report:close';
 const IPC_LIST = 'lite:bug-report:list';
@@ -64,6 +65,15 @@ export function initBugReport(opts: InitOptions): void {
   // ADR-026: every IPC handler emits an instant `bug-report.ipc.<verb>`
   // event on entry so renderer-driven activity is observable in /logs.
   // The downstream operation emits its own bug-report.<op> span.
+
+  // One-shot prefill: the modal renderer collects it on boot. Cleared
+  // on read so a later manual open starts blank (2026-08-07 — updater
+  // install failures hand a structured trail through this).
+  ipcMain.handle(IPC_GET_PREFILL, () => {
+    const value = pendingPrefill;
+    pendingPrefill = null;
+    return { prefill: value };
+  });
 
   ipcMain.handle(IPC_CAPTURE, async (_event, userDescription: string) => {
     getLoggingApi().event('bug-report.ipc.capture');
@@ -236,9 +246,14 @@ export function initBugReport(opts: InitOptions): void {
  * Open (or focus) the bug-report modal window.
  * Triggered by the help:report-bug menu entry / Cmd+Shift+/.
  */
-export function openBugReportModal(): void {
+let pendingPrefill: string | null = null;
+
+export function openBugReportModal(prefill?: string): void {
   if (options === null) {
     throw new Error('initBugReport must be called before openBugReportModal');
+  }
+  if (typeof prefill === 'string' && prefill.length > 0) {
+    pendingPrefill = prefill.slice(0, 4000);
   }
   if (modalWindow !== null && !modalWindow.isDestroyed()) {
     modalWindow.focus();

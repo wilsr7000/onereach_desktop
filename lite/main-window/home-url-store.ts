@@ -99,5 +99,9 @@ export async function writeHomeUrl(
 /** Substitute the account-id placeholder (no-op when absent). */
 export function resolveHomeUrl(configured: string, accountId: string | null): string {
   if (!configured.includes('{accountId}')) return configured;
-  return configured.replace('{accountId}', accountId ?? '');
+  // split/join: replaces EVERY occurrence (the Settings copy promises
+  // "anywhere in the URL") and is immune to String.replace's
+  // $-pattern expansion; encodeURIComponent keeps a hostile or odd
+  // account id from restructuring the URL (2026-08-07 review).
+  return configured.split('{accountId}').join(encodeURIComponent(accountId ?? ''));
 }

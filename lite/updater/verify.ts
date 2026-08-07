@@ -21,7 +21,7 @@ import {
   type UpdateState,
 } from './types.js';
 
-export type DialogResponse = 0 | 1 | 2;
+export type DialogResponse = 0 | 1 | 2 | 3;
 
 /** Surface for showing the dialog -- abstracted so tests can spy. */
 export interface VerifyDialogs {
@@ -29,7 +29,7 @@ export interface VerifyDialogs {
     title: string;
     message: string;
     detail: string;
-    buttons: ['Download Manually', 'Try Auto-Update Again', 'Skip'];
+    buttons: ['Download Manually', 'Try Auto-Update Again', 'Report a Bug…', 'Skip'];
     defaultId: 0;
   }) => Promise<DialogResponse>;
 }
@@ -41,6 +41,13 @@ export interface VerifyDeps {
   currentVersion: string;
   /** Open the public release page (Download Manually button). */
   openReleasesPage: () => void | Promise<void>;
+  /**
+   * Open the bug-report modal pre-filled with the structured install
+   * trail. Optional: absent in tests / early-boot contexts where the
+   * modal cannot exist yet (the wrapper defers the open until boot
+   * completes).
+   */
+  openBugReport?: (prefill: string) => void;
   /** Trigger another auto-update check (Try Again button). */
   triggerCheck: () => void | Promise<void>;
   /** Dialog surface. */
@@ -143,14 +150,14 @@ export async function verifyUpdateOnStartup(deps: VerifyDeps): Promise<VerifyRes
       title,
       message,
       detail,
-      buttons: ['Download Manually', 'Try Auto-Update Again', 'Skip'],
+      buttons: ['Download Manually', 'Try Auto-Update Again', 'Report a Bug…', 'Skip'],
       defaultId: 0,
     });
   } catch (err) {
     log.warn('updater: failure dialog threw -- defaulting to Skip', {
       error: (err as Error).message,
     });
-    dialogResponse = 2;
+    dialogResponse = 3;
   }
 
   if (dialogResponse === 0) {
@@ -167,8 +174,29 @@ export async function verifyUpdateOnStartup(deps: VerifyDeps): Promise<VerifyRes
       clearUpdateState(userDataPath);
       await deps.triggerCheck();
     }
+  } else if (dialogResponse === 2) {
+    // "Report a Bug…" — hand a STRUCTURED trail to the bug reporter so
+    // install failures stop vanishing into a dismissed dialog
+    // (2026-08-07 reporting review). State is left in place, same as
+    // Skip: reporting is not resolving.
+    const trail = [
+      'Auto-update install failure (pre-filled by the updater):',
+      `- Target version: ${before.lastAttemptVersion ?? 'unknown'}`,
+      `- Still running: ${currentVersion}`,
+      `- Consecutive failures for this target: ${failedAttempts}`,
+      `- Last attempt at: ${before.lastAttemptTime ?? 'unknown'}`,
+      `- Version marked broken (auto-update suppressed): ${isBroken || shouldMarkBroken ? 'yes' : 'no'}`,
+      '',
+      'What I was doing when I noticed:',
+      '',
+    ].join('\n');
+    try {
+      deps.openBugReport?.(trail);
+    } catch (err) {
+      log.warn('updater: openBugReport dep threw', { error: (err as Error).message });
+    }
   }
-  // dialogResponse === 2 (Skip): leave state -- prompt again next restart.
+  // dialogResponse === 3 (Skip): leave state -- prompt again next restart.
 
   const finalState = readUpdateState(userDataPath);
   return {

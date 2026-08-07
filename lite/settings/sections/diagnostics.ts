@@ -488,6 +488,34 @@ function escapeAttr(s: string): string {
 // this too (the disclosure itself lives in lite/telemetry/consent.ts
 // and is enforced against the payload at send time).
 
+/**
+ * Honest rollup visibility (2026-08-07 reporting review): a soft-fail
+ * telemetry pipeline must not let "consent on, Neon down for a week"
+ * look identical to working. Pure; exported for tests.
+ */
+export function describeRollupState(
+  st: LiteTelemetryStatusView,
+  consentOn: boolean
+): string {
+  if (!consentOn) return 'No summaries leave this Mac while sharing is off.';
+  if (st.lastSentDay === null) {
+    return st.lastRollupOutcome === 'failed'
+      ? 'No summary has ever been sent — the last attempt failed (sign-in or graph unavailable).'
+      : 'No summary sent yet — the first full day seals at midnight UTC.';
+  }
+  const days = daysSinceUtcDay(st.lastSentDay, Date.now());
+  const ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+  const stale = days >= 2 ? ' — recent days are missing (sign-in or graph unavailable?)' : '';
+  return `Last summary sent: ${st.lastSentDay} (${ago})${stale}`;
+}
+
+/** Whole days between a YYYY-MM-DD UTC day and now. Pure. */
+export function daysSinceUtcDay(day: string, nowMs: number): number {
+  const parsed = Date.parse(`${day}T00:00:00Z`);
+  if (Number.isNaN(parsed)) return 0;
+  return Math.floor((nowMs - parsed) / 86_400_000);
+}
+
 async function renderUsageSharing(target: HTMLElement): Promise<void> {
   const bridge = window.lite?.telemetry;
   if (bridge === undefined) {
@@ -524,6 +552,7 @@ async function renderUsageSharing(target: HTMLElement): Promise<void> {
           <span class="diag-usage-state">${on ? 'Sharing daily summaries' : 'Not sharing'}</span>
         </div>
         <p class="diag-usage-meta">Install id: <code>${st.installId}</code></p>
+        <p class="diag-usage-meta" id="diag-usage-rollup">${describeRollupState(st, on)}</p>
       </section>`;
     const toggle = target.querySelector<HTMLButtonElement>('.diag-usage-toggle');
     toggle?.addEventListener('click', () => {

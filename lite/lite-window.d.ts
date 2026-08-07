@@ -353,6 +353,12 @@ interface LiteAppHealthSnapshotView {
 
 /** Renderer view of telemetry status (ADR-052-adjacent; no secrets). */
 interface LiteTelemetryStatusView {
+  /** UTC day of the last rollup that actually sent, or null if never. */
+  lastSentDay: string | null;
+  /** Outcome of the most recent seal attempt. */
+  lastRollupOutcome: 'sent' | 'skipped-consent' | 'failed' | null;
+  /** ISO timestamp of that attempt. */
+  lastRollupAttemptAt: string | null;
   installId: string;
   consent: {
     state: 'unset' | 'granted' | 'denied';

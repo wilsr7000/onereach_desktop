@@ -37,6 +37,7 @@ import {
   type TelemetryDayState,
 } from './store.js';
 import { buildDailyRollup, rollupTitle } from './rollup.js';
+import { readSentMarker, recordRollupOutcome, type SentMarker } from './sent-marker.js';
 import {
   maySend,
   shouldPrompt,
@@ -165,6 +166,8 @@ export function initTelemetry(opts: InitTelemetryOptions): TelemetryHandle {
     // opt-in, checked at the moment of sending, strictly.
     if (!maySend(consent)) {
       log.info('rollup sealed locally, consent not granted — not sent', { day: finished.day });
+      sentMarker = recordRollupOutcome(
+        opts.userDataPath, 'skipped-consent', finished.day, new Date().toISOString());
       return;
     }
     try {
@@ -194,6 +197,8 @@ export function initTelemetry(opts: InitTelemetryOptions): TelemetryHandle {
       const spaceId = await ensureInstallSpace();
       if (spaceId === null) {
         log.warn('install Space unavailable — rollup not sent', { day: rollup.day });
+        sentMarker = recordRollupOutcome(
+          opts.userDataPath, 'failed', rollup.day, new Date().toISOString());
         return;
       }
       await getSpacesApi().items.create({
@@ -209,10 +214,15 @@ export function initTelemetry(opts: InitTelemetryOptions): TelemetryHandle {
         },
       });
       log.info('daily rollup sent', { day: rollup.day, spaceId });
+      sentMarker = recordRollupOutcome(
+        opts.userDataPath, 'sent', rollup.day, new Date().toISOString());
     } catch (err) {
       // Soft by contract: telemetry must never surface an error to the
-      // user or retry aggressively. Missing a day is fine.
+      // user or retry aggressively. Missing a day is fine — but it must
+      // be VISIBLE in Settings, not silently swallowed (2026-08-07).
       log.warn('rollup send failed', { day: finished.day, error: (err as Error).message });
+      sentMarker = recordRollupOutcome(
+        opts.userDataPath, 'failed', finished.day, new Date().toISOString());
     }
   }
 
@@ -262,11 +272,16 @@ export function initTelemetry(opts: InitTelemetryOptions): TelemetryHandle {
   }
 
   // ── IPC for the Settings toggle ────────────────────────────────────
+  let sentMarker: SentMarker = readSentMarker(opts.userDataPath);
+
   const getStatus = (): TelemetryStatus => ({
     installId: identity.installId,
     consent,
     day: state.day,
     spaceId: installSpaceId,
+    lastSentDay: sentMarker.lastSentDay,
+    lastRollupOutcome: sentMarker.lastOutcome,
+    lastRollupAttemptAt: sentMarker.lastAttemptAt,
   });
 
   const setConsent = (decision: 'granted' | 'denied'): TelemetryStatus => {

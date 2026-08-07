@@ -17,7 +17,8 @@ export function mountHome(container: HTMLElement): (() => void) | undefined {
   const intro = document.createElement('p');
   intro.className = 'pane-intro';
   intro.textContent =
-    'The Home tab loads this page. Use {accountId} anywhere in the URL to inject the signed-in GSX account id. Changes apply on the next app launch.';
+    'The Home tab loads this page. Use {accountId} anywhere in the URL to inject the signed-in GSX account id. Changes apply on the next app launch. ' +
+    'Only paste URLs you trust: the page can request your mic/camera, and {accountId} sends your account id to that site.';
   wrap.appendChild(intro);
 
   const label = document.createElement('label');

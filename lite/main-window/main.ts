@@ -255,6 +255,8 @@ function teardownInternal(): void {
     ipcMain.removeHandler(MAIN_WINDOW_IPC.CLOSE_TAB);
     ipcMain.removeHandler(MAIN_WINDOW_IPC.ACTIVATE_TAB);
     ipcMain.removeHandler(MAIN_WINDOW_IPC.GO_HOME);
+    ipcMain.removeHandler(MAIN_WINDOW_IPC.HOME_URL_GET);
+    ipcMain.removeHandler(MAIN_WINDOW_IPC.HOME_URL_SET);
     ipcMain.removeHandler(MAIN_WINDOW_IPC.RELOAD_ACTIVE);
   } catch {
     // best-effort

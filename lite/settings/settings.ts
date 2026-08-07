@@ -20,6 +20,7 @@ export {};
 
 import { mountAccount } from './sections/account.js';
 import { mountHome } from './sections/home.js';
+import { mountUpdates } from './sections/updates.js';
 import { mountTwoFactor } from './sections/two-factor.js';
 import { mountNeon } from './sections/neon.js';
 import { mountIdws } from './sections/idws.js';
@@ -110,9 +111,7 @@ const SECTIONS: SectionDescriptor[] = [
     id: 'updates',
     title: 'Updates',
     icon: ICON_UPDATES,
-    mount: placeholderMount(
-      'Update settings will appear here. Today, lite checks for updates automatically every 6 hours; use Help -> Check for Updates to trigger a check manually.'
-    ),
+    mount: mountUpdates,
   },
   {
     id: 'diagnostics',

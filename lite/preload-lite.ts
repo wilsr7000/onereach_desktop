@@ -18,6 +18,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const BUG_REPORT_CAPTURE = 'lite:bug-report:capture';
+const BUG_REPORT_GET_PREFILL = 'lite:bug-report:get-prefill';
 const BUG_REPORT_SAVE = 'lite:bug-report:save';
 const BUG_REPORT_CLOSE = 'lite:bug-report:close';
 const BUG_REPORT_LIST = 'lite:bug-report:list';
@@ -1318,6 +1319,8 @@ interface BugReportBridge {
     redactionStatus: 'none' | 'low' | 'medium' | 'high';
     redactionTotalCount: number;
   }>;
+  /** One-shot pre-filled description (updater install trail). */
+  getPrefill(): Promise<{ prefill: string | null }>;
   /**
    * Save the report. Optional `attachments` are file references already
    * uploaded via `attach()`; the main process forwards them onto the
@@ -1391,6 +1394,8 @@ const logging: LoggingBridge = {
 
 const bugReport: BugReportBridge = {
   capture: (userDescription: string) => ipcRenderer.invoke(BUG_REPORT_CAPTURE, userDescription),
+  getPrefill: () =>
+    ipcRenderer.invoke(BUG_REPORT_GET_PREFILL) as Promise<{ prefill: string | null }>,
   save: (userDescription: string, attachments?: BugReportAttachmentView[]) =>
     ipcRenderer.invoke(BUG_REPORT_SAVE, userDescription, attachments) as Promise<BugReportSaveResult>,
   close: () => ipcRenderer.send(BUG_REPORT_CLOSE),

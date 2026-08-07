@@ -67,6 +67,7 @@ interface BugReportSaveResult {
 }
 
 interface BugReportBridge {
+  getPrefill(): Promise<{ prefill: string | null }>;
   capture(userDescription: string): Promise<{
     payload: unknown;
     payloadJson: string;
@@ -109,6 +110,21 @@ const $ = <T extends HTMLElement>(id: string): T => {
 };
 
 const descriptionInput = $<HTMLTextAreaElement>('description');
+
+// One-shot prefill (updater install-failure trail). Only fills an
+// EMPTY textarea — never clobbers something the user already typed.
+void (async () => {
+  try {
+    const res = await window.bugReport.getPrefill();
+    const prefill = res.prefill;
+    if (prefill !== null && descriptionInput.value.trim().length === 0) {
+      descriptionInput.value = prefill;
+      descriptionInput.dispatchEvent(new Event('input'));
+    }
+  } catch {
+    /* prefill is a nice-to-have */
+  }
+})();
 const payloadPreview = $<HTMLPreElement>('payload-preview');
 const redactionStatus = $<HTMLSpanElement>('redaction-status');
 const sendBtn = $<HTMLButtonElement>('send');

@@ -405,6 +405,8 @@ export async function verifyUpdateOnStartup(opts: {
   logger: { info: (msg: string, data?: unknown) => void; warn: (msg: string, data?: unknown) => void };
   /** Optional override for tests. */
   triggerCheckImpl?: () => void | Promise<void>;
+  /** Open the bug-report modal pre-filled with the install trail. */
+  openBugReport?: (prefill: string) => void;
 }): Promise<ReturnType<typeof verifyImpl>> {
   return verifyImpl({
     userDataPath: app.getPath('userData'),
@@ -415,6 +417,7 @@ export async function verifyUpdateOnStartup(opts: {
     triggerCheck: opts.triggerCheckImpl ?? ((): void => {
       /* updater not yet initialized -- user can re-trigger via menu */
     }),
+    ...(opts.openBugReport !== undefined ? { openBugReport: opts.openBugReport } : {}),
     dialogs: {
       showFailureDialog: async (params) => {
         const result = await dialog.showMessageBox({
@@ -426,8 +429,8 @@ export async function verifyUpdateOnStartup(opts: {
           defaultId: params.defaultId,
         });
         const r = result.response;
-        if (r === 0 || r === 1 || r === 2) return r;
-        return 2;
+        if (r === 0 || r === 1 || r === 2 || r === 3) return r;
+        return 3;
       },
     },
     logger: opts.logger,

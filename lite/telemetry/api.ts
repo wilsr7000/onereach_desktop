@@ -26,6 +26,12 @@ export interface TelemetryStatus {
   day: string;
   /** The per-install Space id once ensured, else null. */
   spaceId: string | null;
+  /** UTC day of the last rollup that actually SENT, or null if never. */
+  lastSentDay: string | null;
+  /** Outcome of the most recent seal attempt. */
+  lastRollupOutcome: 'sent' | 'skipped-consent' | 'failed' | null;
+  /** ISO timestamp of that attempt. */
+  lastRollupAttemptAt: string | null;
 }
 
 /**
@@ -66,7 +72,15 @@ export interface TelemetryApi {
  */
 class UninitializedTelemetryApi implements TelemetryApi {
   getStatus(): TelemetryStatus {
-    return { installId: '', consent: { state: 'unset' }, day: '', spaceId: null };
+    return {
+      installId: '',
+      consent: { state: 'unset' },
+      day: '',
+      spaceId: null,
+      lastSentDay: null,
+      lastRollupOutcome: null,
+      lastRollupAttemptAt: null,
+    };
   }
 
   setConsent(): TelemetryStatus {
