@@ -209,6 +209,31 @@ LITE_YAML_PATH="dist-lite/${LITE_YAML}"
 declare -a FILES=("${LITE_DMG}" "${LITE_DMG_BMAP}" "${LITE_ZIP}" "${LITE_ZIP_BMAP}" "${LITE_YAML_PATH}")
 
 # ---------------------------------------------------------------------------
+# Packaged-boot sanity (2026-08-07): v0.0.40 shipped an asar missing
+# @anthropic-ai/sdk's runtime dep 'standardwebhooks' — the installed
+# app crashed at boot (module-not-found), which also bricks auto-update
+# since a crashing app never reaches the updater. Verify the asar can
+# satisfy the known boot-critical requires before anything uploads.
+# ---------------------------------------------------------------------------
+ASAR_PATH=$(find "${MAC_OUT_DIR:-dist-lite/mac-arm64}" -name "app.asar" -maxdepth 4 2>/dev/null | head -1)
+if [ -z "$ASAR_PATH" ]; then
+    ASAR_PATH=$(find dist-lite -name "app.asar" -not -path "*build*" 2>/dev/null | head -1)
+fi
+if [ -z "$ASAR_PATH" ]; then
+    echo -e "${RED}✗ app.asar not found under dist-lite — cannot sanity-check the package.${NC}"
+    exit 1
+fi
+ASAR_LIST=$(npx @electron/asar list "$ASAR_PATH")
+for CRITICAL in "dist-lite/build/main-lite.js" "node_modules/@anthropic-ai/sdk/package.json" "node_modules/standardwebhooks/package.json"; do
+    if ! echo "$ASAR_LIST" | grep -q "$CRITICAL"; then
+        echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot.${NC}"
+        echo -e "${RED}  Run npm install and rebuild before publishing. Aborting.${NC}"
+        exit 1
+    fi
+done
+echo -e "${GREEN}✓ Packaged-boot sanity: asar contains the boot-critical modules.${NC}"
+
+# ---------------------------------------------------------------------------
 # Manifest sanity (2026-08-07): the yml is uploaded as-is, so a stale
 # dist artifact ships a manifest whose version disagrees with the tag —
 # which BRICKS auto-update for every install (observed live: v0.0.38's
