@@ -32,6 +32,7 @@ import { initMenuBuilder, teardownMenuBuilder } from './menu-builder.js';
 import { openAgentInBrowser, closeAgentBrowser } from './browser-window.js';
 import { openCatalogWindow, closeCatalogWindow } from './catalog-window.js';
 import { getLoggingApi } from '../logging/api.js';
+import { registerNamedQuery } from '../neon/api.js';
 import { getSettingsApi } from '../settings/api.js';
 import { getMainWindowApi } from '../main-window/api.js';
 
@@ -85,6 +86,16 @@ let unsubscribeChange: (() => void) | null = null;
  * multiple times -- subsequent calls are no-ops.
  */
 export function initIdw(opts: InitIdwOptions): IdwHandle {
+  // The OAGI catalog query, registered so the catalog renderer can run
+  // it BY NAME (N4: renderers carry no Cypher). Shape notes preserved
+  // from the renderer: active-or-unset filter; no ORDER BY (server
+  // materialization) — the renderer sorts client-side; LIMIT 500 as a
+  // runaway cap until Edison exposes pagination.
+  registerNamedQuery(
+    'idw.oagi-catalog',
+    'MATCH (n:IDW|Agent) WHERE n.active = true OR n.active IS NULL RETURN n, labels(n) AS nodeLabels LIMIT 500'
+  );
+
   const log = opts.logger ?? {
     info: () => undefined,
     warn: () => undefined,

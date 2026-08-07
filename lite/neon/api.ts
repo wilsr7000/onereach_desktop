@@ -273,3 +273,14 @@ function configFieldNames(config: NeonConfig): string[] {
   if (config.database !== undefined) fields.push('database');
   return fields;
 }
+
+// ── Named queries (N4) ───────────────────────────────────────────────
+// The only Cypher renderers can cause to run. Modules register fixed
+// queries at init; renderers invoke by name via window.lite.neon
+// .queryNamed(). Pure module — no api→main cycle.
+export {
+  registerNamedQuery,
+  getNamedQuery,
+  listNamedQueries,
+  _resetNamedQueriesForTesting,
+} from './named-queries.js';

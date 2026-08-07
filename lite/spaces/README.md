@@ -87,12 +87,13 @@ ADR-051 visibility ("restricted" Spaces), ADR-052 expiring grants, and
 the per-query gates in `sdk-client.ts` are **client-side honesty, not a
 security boundary**. Two facts make that unavoidable today:
 
-1. `window.lite.neon.query()` accepts arbitrary Cypher from any Lite
-   renderer (`validateCypher` checks only "non-empty string"), so any
-   surface with the preload can read or mutate anything the account's
-   Neon credentials can. Third-party tab content cannot reach it
-   (ADR-038: no preload on remote tabs) — the exposure is Lite's own
-   windows, not the open web.
+1. ~~`window.lite.neon.query()` accepts arbitrary Cypher~~ **Closed
+   2026-08-07 (N4):** the raw query bridge is gone. Renderers can only
+   invoke Cypher REGISTERED BY NAME at init (`lite/neon/named-queries.ts`);
+   the query text never crosses IPC, and unknown names are rejected in
+   main. Locked by `neon-named-queries.test.ts`. The residual exposure
+   is main-process code and anyone holding the account's graph
+   credentials outside Lite — which is why point 2 still stands.
 2. The graph endpoint enforces account-level auth only. Nothing
    server-side knows about `HAS_ACCESS`, visibility, or expiry.
 

@@ -2,7 +2,7 @@
  * OAGI Store catalog renderer.
  *
  * Loaded into the catalog window (`idw-store.html`). Calls
- * `window.lite.neon.query(...)` to fetch the catalog from the OAGI
+ * `window.lite.neon.queryNamed('idw.oagi-catalog')` to fetch the OAGI
  * graph, `window.lite.idw.list()` to know what's already installed,
  * and `window.lite.idw.add(...)` to install a card.
  *
@@ -188,10 +188,9 @@ async function initialLoad(): Promise<void> {
   //     timeout. 500 fits a comfortable catalog page; raise once the
   //     Edison flow exposes pagination.
   try {
-    const result = await neon.query(
-      'MATCH (n:IDW|Agent) WHERE n.active = true OR n.active IS NULL RETURN n, labels(n) AS nodeLabels LIMIT 500',
-      {}
-    );
+    // N4: renderers carry no Cypher. The query text lives in
+    // lite/idw/main.ts, registered as this name at init.
+    const result = await neon.queryNamed('idw.oagi-catalog', {});
     const records: NeonRecordLike[] = (result.records ?? []) as NeonRecordLike[];
     lastRawRecordCount = records.length;
     catalog = records.map(mapRecordToEntry).filter((e): e is CatalogEntry => e !== null);

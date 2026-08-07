@@ -22,13 +22,14 @@ import { getNeonApi, NeonError, _resetNeonApiForTesting } from './api.js';
 import { NEON_EVENTS } from './events.js';
 import type { NeonConfig, NeonRecord, NeonStatus } from './types.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getNamedQuery } from './named-queries.js';
 
 // ---------------------------------------------------------------------------
 // IPC channel names. All prefixed `lite:neon:` per Rule 3.
 // ---------------------------------------------------------------------------
 
 export const NEON_IPC = {
-  QUERY: 'lite:neon:query',
+  QUERY_NAMED: 'lite:neon:query-named',
   STATUS: 'lite:neon:status',
   TEST_CONNECTION: 'lite:neon:test-connection',
   CONFIGURE: 'lite:neon:configure',
@@ -69,31 +70,48 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
     return { teardown: teardownInternal };
   }
 
+  // N4 (2026-08-07 graph review): the raw `lite:neon:query` channel is
+  // GONE. It accepted arbitrary Cypher from any Lite renderer with a
+  // "non-empty string" check. Renderers now invoke fixed queries BY
+  // NAME from the registry modules populate at init — the Cypher text
+  // never crosses IPC, so a compromised renderer can pick from the
+  // menu but never write it. Main-process modules are unaffected: they
+  // keep calling getNeonApi().query() directly.
   ipcMain.handle(
-    NEON_IPC.QUERY,
+    NEON_IPC.QUERY_NAMED,
     async (
       _event: IpcMainInvokeEvent,
-      payload: { cypher?: unknown; parameters?: unknown }
+      payload: { name?: unknown; parameters?: unknown }
     ): Promise<{ records: NeonRecord[] }> => {
       getLoggingApi().event(NEON_EVENTS.IPC_QUERY);
-      const cypher = validateCypher(payload?.cypher);
+      const name = typeof payload?.name === 'string' ? payload.name : '';
+      const cypher = getNamedQuery(name);
+      if (cypher === null) {
+        log.warn('named query rejected: unknown name', { name: name.slice(0, 80) });
+        throw new Error(
+          JSON.stringify({
+            __neonError: {
+              name: 'NeonError',
+              code: 'NEON_INVALID_INPUT',
+              message: `Unknown named query: ${name.slice(0, 80)}`,
+              context: {},
+              remediation:
+                'Renderers may only run queries registered at init. Register it in the owning module.',
+            },
+          })
+        );
+      }
       const parameters = validateParameters(payload?.parameters);
       try {
         const records = await getNeonApi().query(cypher, parameters);
-        log.info('query ok', { recordCount: records.length });
+        log.info('named query ok', { name, recordCount: records.length });
         return { records };
       } catch (err) {
         if (err instanceof NeonError) {
-          log.warn('query rejected', { code: err.code, message: err.message });
-          // Surface a JSON-serializable error so the renderer can
-          // reconstruct the structure without losing the code.
-          // Electron prefixes the rejection's `.message` in the
-          // renderer with "Error invoking remote method '<channel>':
-          // Error: " before our JSON. The preload's `parseError`
-          // strips that prefix by skipping to the first `{`.
+          log.warn('named query rejected', { name, code: err.code });
           throw new Error(JSON.stringify({ __neonError: err.toJSON() }));
         }
-        log.error('query unexpected error', { error: (err as Error).message });
+        log.error('named query unexpected error', { name, error: (err as Error).message });
         throw err;
       }
     }
@@ -165,7 +183,7 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
 function teardownInternal(): void {
   if (!registered) return;
   try {
-    ipcMain.removeHandler(NEON_IPC.QUERY);
+    ipcMain.removeHandler(NEON_IPC.QUERY_NAMED);
     ipcMain.removeHandler(NEON_IPC.STATUS);
     ipcMain.removeHandler(NEON_IPC.TEST_CONNECTION);
     ipcMain.removeHandler(NEON_IPC.CONFIGURE);
@@ -190,15 +208,6 @@ export function _resetNeonRegistrationForTesting(): void {
 // Payload validation
 // ---------------------------------------------------------------------------
 
-function validateCypher(value: unknown): string {
-  if (typeof value !== 'string') {
-    throw new Error('cypher must be a string');
-  }
-  if (value.length === 0) {
-    throw new Error('cypher must be non-empty');
-  }
-  return value;
-}
 
 function validateParameters(value: unknown): Record<string, unknown> {
   if (value === undefined || value === null) return {};

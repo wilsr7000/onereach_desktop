@@ -768,7 +768,7 @@ app
     // the top:idw menu placeholder + dynamic entries, the shared
     // placeholder browser window factory, and the OAGI Store
     // catalog window factory. Pulls IDW + Agent nodes from OAGI via
-    // window.lite.neon.query in the catalog renderer.
+    // window.lite.neon.queryNamed('idw.oagi-catalog') in the catalog renderer.
     try {
       idwHandle = initIdw({
         preloadPath,

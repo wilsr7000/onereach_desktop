@@ -232,7 +232,14 @@ interface LiteNeonBridge {
    * `{__neonError: LiteNeonErrorJSON}` -- use `parseError(err)` to
    * recover the structure.
    */
-  query(cypher: string, parameters?: Record<string, unknown>): Promise<{ records: LiteNeonRecord[] }>;
+  /**
+   * Run a query REGISTERED AT INIT by its owning module (N4, 2026-08-07
+   * graph review). The raw arbitrary-Cypher `query()` is gone from the
+   * renderer surface: the Cypher text lives in reviewed main-process
+   * source and never crosses IPC. Unknown names are rejected in main.
+   * Main-process modules still use getNeonApi().query() directly.
+   */
+  queryNamed(name: string, parameters?: Record<string, unknown>): Promise<{ records: LiteNeonRecord[] }>;
   /** Read the current Neon configuration status (no secrets). */
   status(): Promise<LiteNeonStatus>;
   /** Cheap connectivity probe -- runs `RETURN 1 AS ok`. */
@@ -1075,6 +1082,9 @@ interface LiteSpacesCacheUpdateView {
 }
 
 interface LiteSpacesIdentityBridge {
+  /** Attribution email fallback (used when the session lacks one). */
+  attributionEmailGet(): Promise<LiteSpacesIpcResult<string | null>>;
+  attributionEmailSet(email: string | null): Promise<LiteSpacesIpcResult<string | null>>;
   /** Upsert a Person by id. Idempotent. */
   getOrCreatePerson(input: {
     id: string;

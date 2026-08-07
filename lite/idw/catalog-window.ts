@@ -3,7 +3,7 @@
  *
  * Single-instance BrowserWindow loading `idw-store.html` with the
  * lite preload so the renderer can call `window.lite.idw.add(...)`
- * + `window.lite.neon.query(...)` to fetch the OAGI catalog.
+ * + `window.lite.neon.queryNamed('idw.oagi-catalog')` for the catalog.
  *
  * Modeled on `lite/api-docs/window.ts` and `lite/settings/window.ts`.
  *

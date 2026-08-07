@@ -88,6 +88,8 @@ const SPACES_TICKETS_LIST = 'lite:spaces:tickets:list';
 const SPACES_TICKETS_CREATE = 'lite:spaces:tickets:create';
 const SPACES_TICKETS_UPDATE = 'lite:spaces:tickets:update';
 const SPACES_IDENTITY_GET_OR_CREATE_PERSON = 'lite:spaces:identity:getOrCreatePerson';
+const SPACES_IDENTITY_ATTR_EMAIL_GET = 'lite:spaces:identity:attributionEmail:get';
+const SPACES_IDENTITY_ATTR_EMAIL_SET = 'lite:spaces:identity:attributionEmail:set';
 const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
 const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
@@ -129,7 +131,7 @@ const SPACES_UNDELETE_SPACE = 'lite:spaces:undelete';
 // re-fetch; the next bridge call returns the already-refreshed value.
 const SPACES_CACHE_UPDATED = 'lite:spaces:cache-updated';
 
-const NEON_QUERY = 'lite:neon:query';
+const NEON_QUERY_NAMED = 'lite:neon:query-named';
 const NEON_STATUS = 'lite:neon:status';
 const NEON_TEST_CONNECTION = 'lite:neon:test-connection';
 const NEON_CONFIGURE = 'lite:neon:configure';
@@ -809,6 +811,8 @@ interface SpacesPlaybooksBridge {
 }
 
 interface SpacesIdentityBridge {
+  attributionEmailGet(): Promise<SpacesIpcResultView<string | null>>;
+  attributionEmailSet(email: string | null): Promise<SpacesIpcResultView<string | null>>;
   getOrCreatePerson(input: {
     id: string;
     name?: string;
@@ -988,8 +992,9 @@ interface NeonErrorJSON {
 }
 
 interface NeonBridge {
-  query(
-    cypher: string,
+  /** N4: fixed queries only, invoked by registered name — see d.ts. */
+  queryNamed(
+    name: string,
     parameters?: Record<string, unknown>
   ): Promise<{ records: NeonRecord[] }>;
   status(): Promise<NeonStatusView>;
@@ -1735,6 +1740,14 @@ const spaces: SpacesBridge = {
       >,
   },
   identity: {
+    attributionEmailGet: () =>
+      ipcRenderer.invoke(SPACES_IDENTITY_ATTR_EMAIL_GET) as Promise<
+        SpacesIpcResultView<string | null>
+      >,
+    attributionEmailSet: (email: string | null) =>
+      ipcRenderer.invoke(SPACES_IDENTITY_ATTR_EMAIL_SET, { email }) as Promise<
+        SpacesIpcResultView<string | null>
+      >,
     getOrCreatePerson: (input) =>
       ipcRenderer.invoke(SPACES_IDENTITY_GET_OR_CREATE_PERSON, { input }) as Promise<
         SpacesIpcResultView<{ id: string; name: string; email?: string }>
@@ -1807,8 +1820,8 @@ const telemetry: TelemetryBridge = {
 };
 
 const neon: NeonBridge = {
-  query: (cypher, parameters) =>
-    ipcRenderer.invoke(NEON_QUERY, { cypher, parameters }) as Promise<{ records: NeonRecord[] }>,
+  queryNamed: (name, parameters) =>
+    ipcRenderer.invoke(NEON_QUERY_NAMED, { name, parameters }) as Promise<{ records: NeonRecord[] }>,
   status: () => ipcRenderer.invoke(NEON_STATUS) as Promise<NeonStatusView>,
   testConnection: () => ipcRenderer.invoke(NEON_TEST_CONNECTION) as Promise<NeonTestResult>,
   configure: (config) =>
