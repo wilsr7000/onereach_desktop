@@ -149,7 +149,8 @@ import { readLearnProgress, writeLearnProgress } from './learn-store.js';
  * literal rather than importing the constant so this module stays
  * importer-free per Rule 11 (no cross-module internal imports).
  */
-const TOOLS_TOP_LEVEL_ID = 'top:tools';
+/** Spaces' own top-level (2026-08-07 — promoted out of Tools). */
+const SPACES_TOP_LEVEL_ID = 'top:spaces';
 
 /** Stable id for the Tools -> Spaces... menu entry. */
 const SPACES_MENU_ITEM_ID = 'tools:spaces';
@@ -294,12 +295,21 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
     });
   }
 
-  // Menu entry: Tools -> Spaces...
+  // Menu placement (2026-08-07 decision, from the menu review):
+  // Spaces is the platform primitive — a Space per initiative, assets,
+  // agents, sharing — so it gets its own top-level between Tools (70)
+  // and University (80) instead of hiding as one row inside Tools.
+  registry.upsert({
+    id: SPACES_TOP_LEVEL_ID,
+    type: 'top-level',
+    label: 'Spaces',
+    order: 75,
+  });
   registry.upsert({
     id: SPACES_MENU_ITEM_ID,
     type: 'item',
-    parentId: TOOLS_TOP_LEVEL_ID,
-    label: 'Spaces...',
+    parentId: SPACES_TOP_LEVEL_ID,
+    label: 'Open Spaces',
     order: SPACES_MENU_ORDER,
     click: handle.open,
   });

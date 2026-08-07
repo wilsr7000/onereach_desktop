@@ -974,6 +974,20 @@ app
       onOpenActiveTabDevTools: () => openActiveTabDevTools(),
       onOpenAllDevTools: () => openAllWindowDevTools(),
       onOpenWiserPlaybooks: () => openWiserPlaybooksWindow(),
+      onSignInOrAccount: () => {
+        const session = getAuthApi().getSession('edison');
+        if (session !== null) {
+          settingsHandle?.open();
+          return;
+        }
+        void getAuthApi()
+          .signIn('edison')
+          .catch((err: unknown) => {
+            logQueue.warn('app', 'menu sign-in failed or was cancelled', {
+              error: (err as Error).message,
+            });
+          });
+      },
       onRescueWindows: () => {
         const result = rescueAllWindows((message, data) =>
           logQueue.info('app', message, data)

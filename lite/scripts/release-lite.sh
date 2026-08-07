@@ -49,6 +49,28 @@ echo ""
 # ---------------------------------------------------------------------------
 NEW_VERSION="${1:-}"
 
+# ---------------------------------------------------------------------------
+# Release gate (2026-08-07): the script previously ran NO tests, so a
+# release could ship from a red tree (v0.0.33 shipped broken prompt
+# flows exactly this way). Typecheck + unit + integration must pass
+# before we build. Emergencies can bypass with SKIP_GATE=1 — loudly.
+# ---------------------------------------------------------------------------
+if [ "${SKIP_GATE:-0}" = "1" ]; then
+    echo -e "${YELLOW}⚠ SKIP_GATE=1 — releasing WITHOUT the test gate. Every defect${NC}"
+    echo -e "${YELLOW}  in this build ships to the update feed. Document why.${NC}"
+else
+    echo -e "${BLUE}Release gate: typecheck + unit + integration…${NC}"
+    if ! npm run lite:typecheck; then
+        echo -e "${RED}✗ Typecheck failed — fix before releasing (or SKIP_GATE=1).${NC}"
+        exit 1
+    fi
+    if ! npm run lite:test; then
+        echo -e "${RED}✗ Tests failed — fix before releasing (or SKIP_GATE=1).${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Gate green.${NC}"
+fi
+
 if [ -z "$NEW_VERSION" ]; then
     echo -e "${BLUE}No version arg supplied. Choose:${NC}"
     echo "  Usage: bash lite/scripts/release-lite.sh <version>"

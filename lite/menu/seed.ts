@@ -49,6 +49,13 @@ export interface SeedHandlers {
   /** Called when the user clicks Open WISER Playbooks (opens the web app in a dedicated Lite window). */
   onOpenWiserPlaybooks?: () => void;
   /**
+   * Called when the user clicks "Sign In / Account…". Signed out →
+   * starts the sign-in flow; signed in → opens Settings (account).
+   * Discoverability matters doubly since 2026-08-07: creator
+   * attribution self-heals only on an email-bearing sign-in.
+   */
+  onSignInOrAccount?: () => void;
+  /**
    * Called when the user clicks "Bring Windows Into View" — the
    * one-click remedy for a window whose title bar ended up behind the
    * menu bar or off-screen, where there is no close button to click
@@ -218,6 +225,18 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
       label: 'Settings...',
       order: 50,
       click: settingsClick,
+    });
+  }
+
+  if (handlers.onSignInOrAccount !== undefined) {
+    const signInClick = handlers.onSignInOrAccount;
+    registry.upsert({
+      id: 'app:sign-in-account',
+      type: 'item',
+      parentId: 'top:app',
+      label: 'Sign In / Account…',
+      order: 55,
+      click: signInClick,
     });
   }
 

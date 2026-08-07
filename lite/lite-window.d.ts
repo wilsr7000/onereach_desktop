@@ -528,6 +528,8 @@ interface LiteIdwBridge {
   remove(id: string): Promise<{ ok: true }>;
   /** Open the OAGI Store catalog window. */
   openStore(): Promise<{ ok: true }>;
+  /** Open an agent entry as a main-window tab (2026-08-07). */
+  open(id: string): Promise<{ ok: true }>;
   /**
    * Subscribe to mutations broadcast from the main process. Returns
    * an unsubscribe function. Receives the latest entries on each

@@ -6,10 +6,16 @@
  * asserts:
  *
  *   1. Single window opens with placeholder content
- *   2. App menu shows About + Quit (and only those two items)
- *   3. Help menu shows Report a Bug (and only that one item)
- *   4. No other top-level menus are visible
+ *   2. App menu contains About + Quit (modules add entries between)
+ *   3. Help menu contains Report a Bug
+ *   4. Every visible top-level has at least one item (registry hides
+ *      empty placeholders); no accelerators/roles outside Edit
  *   5. About is reachable via the menu role
+ *
+ * 2026-08-07: rewritten from an exact 2-menu census to INVARIANTS.
+ * The kernel-era census rotted the moment modules started registering
+ * top-levels (IDW/Tools/Spaces/University/Planning/Help ≈ 8 today) —
+ * asserting a count repeats that mistake on every module launch.
  *   6. Bug-report flow writes a JSON file to userData/lite-bugs/
  *   7. The seeded sk-... key in the description is REDACTED in the file
  *   8. macOS: codesign --verify --deep --strict passes on the .app
@@ -78,28 +84,37 @@ test('kernel: launches with single window and exact menu structure', async ({}, 
   // Window count -- kernel is single window
   expect(handle.app.windows().length).toBe(1);
 
-  // Menu structure (per ADR-016): two top-levels -- Onereach.ai Lite (app
-  // menu) and Help. Per ADR-017, Help does NOT use role:'help' (which
-  // would cause macOS to inject "Send Feedback to Apple..." for
-  // beta/developer users). It's a plain labeled top-level instead.
+  // Menu invariants (ADR-016/-017), NOT a census — modules register
+  // their own top-levels, so a hardcoded count rots on every launch.
   const structure = await getMenuStructure(handle.app);
-  expect(structure.length).toBe(2);
-  expect(structure[1]?.label).toBe('Help');
-  expect(structure[1]?.role).toBeNull();
+  expect(structure.length).toBeGreaterThanOrEqual(2);
 
-  // App menu: exactly About, Quit (in that order).
+  // App menu is first and carries About (first) + Quit (last).
   const appLabels = (structure[0]?.items ?? []).map((it) => it.label);
-  expect(appLabels).toEqual(['About Onereach.ai Lite', 'Quit Onereach.ai Lite']);
+  expect(appLabels[0]).toBe('About Onereach.ai Lite');
+  expect(appLabels[appLabels.length - 1]).toBe('Quit Onereach.ai Lite');
 
-  // Help menu: exactly Report a Bug...
-  const helpLabels = (structure[1]?.items ?? []).map((it) => it.label);
-  expect(helpLabels).toEqual(['Report a Bug...']);
+  // Help is present, is a plain labeled top-level (ADR-017: never
+  // role:'help', which injects "Send Feedback to Apple…"), and carries
+  // the bug reporter.
+  const help = structure.find((t) => t.label === 'Help');
+  expect(help).toBeDefined();
+  expect(help?.role).toBeNull();
+  expect(help?.items.map((it) => it.label)).toContain('Report a Bug...');
 
-  // Per ADR-015, no accelerator or item-level role on any kernel item.
-  const allItems = [...(structure[0]?.items ?? []), ...(structure[1]?.items ?? [])];
-  for (const item of allItems) {
-    expect(item.accelerator).toBeNull();
-    expect(item.role).toBeNull();
+  // Registry contract: an empty top-level must never render.
+  for (const top of structure) {
+    expect(top.items.length, `top-level "${top.label}" rendered empty`).toBeGreaterThan(0);
+  }
+
+  // ADR-015: no accelerators or item roles anywhere EXCEPT the Edit
+  // menu, whose items are role-based by design (copy/paste/undo).
+  for (const top of structure) {
+    if (top.label === 'Edit') continue;
+    for (const item of top.items) {
+      expect(item.accelerator, `${top.label} → ${item.label}`).toBeNull();
+      expect(item.role, `${top.label} → ${item.label}`).toBeNull();
+    }
   }
 });
 

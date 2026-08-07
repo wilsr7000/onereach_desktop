@@ -56,6 +56,7 @@ function installBridge(
     update,
     remove,
     openStore,
+    open: vi.fn(async () => ({ ok: true as const })),
     onChange: (h) => {
       handlers.push(h);
       return () => {

@@ -129,7 +129,8 @@ registry.register({
   type: 'item',
   parentId: 'top:tools',
   label: 'Spaces...',
-  accelerator: 'CmdOrCtrl+Shift+V',
+  // No accelerator: ADR-015 forbids shortcuts unless explicitly
+  // requested by name.
   click: () => createSpacesWindow(),
   order: 0,
 });
@@ -148,10 +149,18 @@ Top-level menu order across the eventual lite menu:
 | 20 | Edit | Standard Electron edit ops |
 | 30 | View | Reload, devtools, zoom |
 | 40 | Window | Minimize, close, etc. |
-| 50 | Tools | Tools Manager + per-tool submenu items |
-| 60 | IDW | Configured IDWs (Cmd+1..9 hotkeys) |
-| 70 | GSX | GSX-related menu items |
-| 100 | Help | About, Report a Bug, Documentation |
+| 60 | IDW | Configured IDWs (no hotkeys — ADR-015) |
+| 70 | Tools | Bookmarks-as-menu + Manage Tools (NOT agent registration; Settings → IDWs is the Agent Manager) |
+| 75 | Spaces | The platform primitive — own top-level as of 2026-08-07 |
+| 80 | Agentic University | LMS / Quick Starts / AI Run Times / Wiser Method |
+| 85 | Planning | WISER Playbooks |
+| 90 | Dev Tools | Dev-mode only |
+| 100 | Help | Report a Bug, Documentation |
+
+(Historical note: the original plan said Tools 50 / GSX 70 with
+Cmd+1..9 IDW hotkeys. GSX and File Sync never shipped a menu and stay
+deferred until product asks; hotkeys are forbidden by ADR-015 unless
+explicitly requested.)
 
 ## Phase 0a Kernel Manual Checklist
 

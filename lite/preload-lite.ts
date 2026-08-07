@@ -157,6 +157,7 @@ const IDW_REMOVE = 'lite:idw:remove';
 // here -- agents are opened by the IDW menu's click handlers, which
 // run in main process.
 const IDW_OPEN_STORE = 'lite:idw:open-store';
+const IDW_OPEN = 'lite:idw:open';
 const IDW_CHANGED = 'lite:idw:changed';
 
 const TOOLS_LIST = 'lite:tools:list';
@@ -1073,6 +1074,8 @@ interface IdwBridge {
   update(id: string, patch: Partial<IdwEntryView>): Promise<IdwEntryView>;
   remove(id: string): Promise<{ ok: true }>;
   openStore(): Promise<{ ok: true }>;
+  /** Open an agent entry as a main-window tab (2026-08-07). */
+  open(id: string): Promise<{ ok: true }>;
   /**
    * Subscribe to `lite:idw:changed` broadcasts. Returns an
    * unsubscribe function. Receives the latest entries on each
@@ -1833,6 +1836,7 @@ const idw: IdwBridge = {
     ipcRenderer.invoke(IDW_UPDATE, { id, patch }) as Promise<IdwEntryView>,
   remove: (id) => ipcRenderer.invoke(IDW_REMOVE, { id }) as Promise<{ ok: true }>,
   openStore: () => ipcRenderer.invoke(IDW_OPEN_STORE) as Promise<{ ok: true }>,
+  open: (id: string) => ipcRenderer.invoke(IDW_OPEN, { id }) as Promise<{ ok: true }>,
   onChange: (handler) => {
     const listener = (
       _event: Electron.IpcRendererEvent,
