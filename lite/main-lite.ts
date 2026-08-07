@@ -66,6 +66,7 @@ import { setKVAuthBindings } from './kv/api.js';
 import { setFilesAuthBindings } from './files/api.js';
 import { installReSignInPrompter } from './auth/re-signin-prompt.js';
 import { getDiscoveryApi } from './discovery/api.js';
+import { rescueAllWindows } from './window-rescue.js';
 
 const LITE_LOG_PORT = 47392;
 const LITE_PRODUCT_NAME = 'Onereach.ai Lite';
@@ -392,6 +393,27 @@ app
       logPort: LITE_LOG_PORT,
       platform: process.platform,
       appTag: 'lite',
+    });
+
+    // Durable guard for the window-position class of bug: whatever any
+    // individual window's restore logic does, a window that ends up
+    // unreachable (title bar behind the macOS menu bar, or off-screen
+    // entirely) is corrected the moment it is shown. Three such bugs
+    // shipped on 2026-08-06/07; per-window clamps fix each site, this
+    // catches the ones nobody has found yet. The manual remedy is the
+    // app menu's "Bring Windows Into View".
+    app.on('browser-window-created', (_event, win) => {
+      const sweep = (): void => {
+        if (win.isDestroyed()) return;
+        const result = rescueAllWindows((message, data) =>
+          getLoggingApi().info('app', message, data)
+        );
+        if (result.moved > 0) {
+          getLoggingApi().warn('app', 'window-rescue: auto-corrected on show', result);
+        }
+      };
+      win.once('ready-to-show', () => setTimeout(sweep, 250));
+      win.once('show', () => setTimeout(sweep, 250));
     });
 
     // Cross-restart install verification BEFORE creating any windows.
@@ -930,6 +952,12 @@ app
       onOpenActiveTabDevTools: () => openActiveTabDevTools(),
       onOpenAllDevTools: () => openAllWindowDevTools(),
       onOpenWiserPlaybooks: () => openWiserPlaybooksWindow(),
+      onRescueWindows: () => {
+        const result = rescueAllWindows((message, data) =>
+          logQueue.info('app', message, data)
+        );
+        logQueue.info('app', 'window-rescue: manual sweep', result);
+      },
     });
     initMenu();
 

@@ -48,6 +48,13 @@ export interface SeedHandlers {
   onOpenAllDevTools?: () => void;
   /** Called when the user clicks Open WISER Playbooks (opens the web app in a dedicated Lite window). */
   onOpenWiserPlaybooks?: () => void;
+  /**
+   * Called when the user clicks "Bring Windows Into View" — the
+   * one-click remedy for a window whose title bar ended up behind the
+   * menu bar or off-screen, where there is no close button to click
+   * and nothing to drag.
+   */
+  onRescueWindows?: () => void;
 }
 
 let seeded = false;
@@ -211,6 +218,23 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
       label: 'Settings...',
       order: 50,
       click: settingsClick,
+    });
+  }
+
+  // Recovery entry: a window restored to bad coordinates can have its
+  // title bar behind the macOS menu bar (observed at y=3) or fully
+  // off-screen (y=-21) — visible but with no grab handle and no
+  // reachable close button. The app menu is always reachable, so the
+  // remedy lives here.
+  if (handlers.onRescueWindows !== undefined) {
+    const rescueClick = handlers.onRescueWindows;
+    registry.upsert({
+      id: 'app:rescue-windows',
+      type: 'item',
+      parentId: 'top:app',
+      label: 'Bring Windows Into View',
+      order: 60,
+      click: rescueClick,
     });
   }
 
