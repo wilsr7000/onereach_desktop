@@ -248,6 +248,14 @@ function buildStubConsumer(): {
       getOrCreatePerson: async (input) =>
         maybeFail({ id: input.id, name: input.name ?? '' }),
     },
+    checklists: {
+      create: async (): Promise<never> => { throw new Error('stub'); },
+      list: async (): Promise<[]> => [],
+      attach: async (): Promise<void> => {},
+      forTicket: async (): Promise<[]> => [],
+      setItem: async (): Promise<{ checkedIndexes: number[]; complete: boolean }> => ({ checkedIndexes: [], complete: false }),
+      detach: async (): Promise<void> => {},
+    },
     members: {
       list: async (_spaceId) => maybeFail([]),
       add: async (_spaceId, memberId) =>

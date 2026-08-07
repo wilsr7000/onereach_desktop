@@ -64,6 +64,12 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   AddSpaceMemberOptions,
+  Checklist,
+  ChecklistItemSpec,
+  TicketChecklist,
+  CreateChecklistInput,
+  AttachChecklistInput,
+  SetChecklistItemInput,
   CreateAssetInput,
   CreateAgentInput,
   CreateAgentFromLibraryInput,
@@ -86,6 +92,7 @@ import {
   MAX_ITEM_TAG_LENGTH,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
+import { CHECKLIST_MODES, CHECKLIST_OBLIGATIONS, MAX_CHECKLIST_ITEMS } from './types.js';
 
 /**
  * Narrow callback shape matching `getNeonApi().query` so the SDK
@@ -1667,6 +1674,215 @@ export const CYPHER = {
     ORDER BY coalesce(toString(a.updatedAt), toString(a.updated_at), '') DESC
     LIMIT toInteger($limit)
   `,
+  // ─── Checklists (ADR-055) ──────────────────────────────────────────────
+
+  CREATE_CHECKLIST: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    CREATE (c:Checklist {
+      id: $id,
+      name: $name,
+      mode: $mode,
+      pausePoint: $pausePoint,
+      items: $itemsJson,
+      itemCount: $itemCount,
+      version: 1,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    MERGE (c)-[:BELONGS_TO]->(s)
+    RETURN c.id AS id
+  `,
+
+  LIST_CHECKLISTS_IN_SPACE: `
+    MATCH (c:Checklist)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    RETURN c.id AS id,
+           c.name AS name,
+           c.mode AS mode,
+           c.pausePoint AS pausePoint,
+           c.items AS itemsJson,
+           coalesce(c.version, 1) AS version,
+           toString(c.revisedAt) AS revisedAt,
+           toString(c.createdAt) AS createdAt,
+           toString(c.updatedAt) AS updatedAt
+    ORDER BY toLower(c.name) ASC
+  `,
+
+  // Attach = MERGE so re-attaching is idempotent (obligation updates in
+  // place; run state is preserved). Phase selects the edge type — two
+  // distinct relationship types per the schema, not a property flag, so
+  // graph queries can traverse "what gates done?" without filtering.
+  ATTACH_CHECKLIST_PREFLIGHT: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE coalesce(a.type, a.assetType) = 'ticket'
+        AND a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
+      WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
+             OR ($viewerId <> '' AND EXISTS {
+               MATCH (:Person {id: $viewerId})-[rv:HAS_ACCESS]->(cs)
+               WHERE (rv.expiresUnixMs IS NULL OR rv.expiresUnixMs > $nowMs)
+             }))
+    MERGE (a)-[r:PREFLIGHT_CHECKLIST]->(c)
+    SET r.obligation = $obligation
+    FOREACH (_ IN CASE WHEN r.checkedIdx IS NULL THEN [1] ELSE [] END |
+      SET r.checkedIdx = []
+    )
+    RETURN c.id AS id
+  `,
+
+  ATTACH_CHECKLIST_POSTFLIGHT: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE coalesce(a.type, a.assetType) = 'ticket'
+        AND a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
+      WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
+             OR ($viewerId <> '' AND EXISTS {
+               MATCH (:Person {id: $viewerId})-[rv:HAS_ACCESS]->(cs)
+               WHERE (rv.expiresUnixMs IS NULL OR rv.expiresUnixMs > $nowMs)
+             }))
+    MERGE (a)-[r:POSTFLIGHT_CHECKLIST]->(c)
+    SET r.obligation = $obligation
+    FOREACH (_ IN CASE WHEN r.checkedIdx IS NULL THEN [1] ELSE [] END |
+      SET r.checkedIdx = []
+    )
+    RETURN c.id AS id
+  `,
+
+  GET_TICKET_CHECKLISTS: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    OPTIONAL MATCH (a)-[pre:PREFLIGHT_CHECKLIST]->(cpre:Checklist)
+    OPTIONAL MATCH (a)-[post:POSTFLIGHT_CHECKLIST]->(cpost:Checklist)
+    WITH
+      collect(DISTINCT CASE WHEN cpre IS NULL THEN NULL ELSE {
+        phase: 'preflight',
+        obligation: coalesce(pre.obligation, 'recommended'),
+        checkedIdx: coalesce(pre.checkedIdx, []),
+        completedAt: toString(pre.completedAt),
+        lastCheckedBy: pre.lastCheckedBy,
+        lastCheckedAt: toString(pre.lastCheckedAt),
+        id: cpre.id, name: cpre.name, mode: cpre.mode,
+        pausePoint: cpre.pausePoint, itemsJson: cpre.items,
+        itemCount: coalesce(cpre.itemCount, 0),
+        version: coalesce(cpre.version, 1)
+      } END) AS pres,
+      collect(DISTINCT CASE WHEN cpost IS NULL THEN NULL ELSE {
+        phase: 'postflight',
+        obligation: coalesce(post.obligation, 'recommended'),
+        checkedIdx: coalesce(post.checkedIdx, []),
+        completedAt: toString(post.completedAt),
+        lastCheckedBy: post.lastCheckedBy,
+        lastCheckedAt: toString(post.lastCheckedAt),
+        id: cpost.id, name: cpost.name, mode: cpost.mode,
+        pausePoint: cpost.pausePoint, itemsJson: cpost.items,
+        itemCount: coalesce(cpost.itemCount, 0),
+        version: coalesce(cpost.version, 1)
+      } END) AS posts
+    RETURN [x IN pres WHERE x IS NOT NULL] + [x IN posts WHERE x IS NOT NULL] AS links
+  `,
+
+  // One atomic toggle: remove-then-conditionally-add the index as a
+  // native list op, and derive completion from the checklist's own
+  // itemCount in the same statement. Two agents checking DIFFERENT
+  // items concurrently both land; a JSON-blob read-modify-write would
+  // lose one of them.
+  SET_CHECKLIST_ITEM_PREFLIGHT: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (a)-[r:PREFLIGHT_CHECKLIST]->(c:Checklist {id: $checklistId})
+    SET r.checkedIdx =
+      CASE WHEN $checked
+           THEN [x IN coalesce(r.checkedIdx, []) WHERE x <> $itemIndex] + $itemIndex
+           ELSE [x IN coalesce(r.checkedIdx, []) WHERE x <> $itemIndex]
+      END,
+        r.lastCheckedBy = $actorId,
+        r.lastCheckedAt = $now
+    WITH r, c,
+         size(r.checkedIdx) = coalesce(c.itemCount, -1) AS nowComplete
+    SET r.completedAt = CASE WHEN nowComplete AND r.completedAt IS NULL THEN $now
+                             WHEN NOT nowComplete THEN NULL
+                             ELSE r.completedAt END
+    RETURN r.checkedIdx AS checkedIdx, nowComplete AS complete
+  `,
+
+  SET_CHECKLIST_ITEM_POSTFLIGHT: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (a)-[r:POSTFLIGHT_CHECKLIST]->(c:Checklist {id: $checklistId})
+    SET r.checkedIdx =
+      CASE WHEN $checked
+           THEN [x IN coalesce(r.checkedIdx, []) WHERE x <> $itemIndex] + $itemIndex
+           ELSE [x IN coalesce(r.checkedIdx, []) WHERE x <> $itemIndex]
+      END,
+        r.lastCheckedBy = $actorId,
+        r.lastCheckedAt = $now
+    WITH r, c,
+         size(r.checkedIdx) = coalesce(c.itemCount, -1) AS nowComplete
+    SET r.completedAt = CASE WHEN nowComplete AND r.completedAt IS NULL THEN $now
+                             WHEN NOT nowComplete THEN NULL
+                             ELSE r.completedAt END
+    RETURN r.checkedIdx AS checkedIdx, nowComplete AS complete
+  `,
+
+  // The gate's read: current status + every REQUIRED link's run state.
+  TICKET_GATE_STATE: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    OPTIONAL MATCH (a)-[pre:PREFLIGHT_CHECKLIST {obligation: 'required'}]->(cpre:Checklist)
+    OPTIONAL MATCH (a)-[post:POSTFLIGHT_CHECKLIST {obligation: 'required'}]->(cpost:Checklist)
+    RETURN coalesce(a.status, 'open') AS currentStatus,
+           [x IN collect(DISTINCT CASE WHEN cpre IS NULL THEN NULL ELSE {
+              name: cpre.name,
+              complete: size(coalesce(pre.checkedIdx, [])) = coalesce(cpre.itemCount, -1)
+           } END) WHERE x IS NOT NULL] AS requiredPre,
+           [x IN collect(DISTINCT CASE WHEN cpost IS NULL THEN NULL ELSE {
+              name: cpost.name,
+              complete: size(coalesce(post.checkedIdx, [])) = coalesce(cpost.itemCount, -1)
+           } END) WHERE x IS NOT NULL] AS requiredPost
+  `,
+
+  DETACH_CHECKLIST_PREFLIGHT: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (a)-[r:PREFLIGHT_CHECKLIST]->(:Checklist {id: $checklistId})
+    DELETE r
+    RETURN $checklistId AS id
+  `,
+
+  DETACH_CHECKLIST_POSTFLIGHT: `
+    MATCH (a:Asset {id: $ticketId})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (a)-[r:POSTFLIGHT_CHECKLIST]->(:Checklist {id: $checklistId})
+    DELETE r
+    RETURN $checklistId AS id
+  `,
+
+  // ADR-055 — self-registration into the graph's schema registry.
+  // Idempotent MERGEs keyed on `entity`; SET is additive so whatever
+  // else lives on `_RelationshipTypes` is never clobbered.
+  ENSURE_CHECKLIST_SCHEMA: `
+    MERGE (cs:Schema {entity: 'Checklist'})
+    SET cs.description = $checklistDoc,
+        cs.properties = $checklistProps,
+        cs.updatedAt = $now
+    MERGE (rt:Schema {entity: '_RelationshipTypes'})
+    SET rt.preflightChecklist = $preflightDoc,
+        rt.postflightChecklist = $postflightDoc,
+        rt.updatedAt = $now
+    RETURN cs.entity AS entity
+  `,
+
 } as const;
 
 /**
@@ -2523,6 +2739,8 @@ export class SdkSpacesClient {
           context: { status: patch.status },
         });
       }
+      // ADR-055 — required checklists gate transitions BEFORE the write.
+      await this.assertTicketStatusAllowed(id, patch.status);
       params['status'] = patch.status;
     }
     if (patch.priority !== undefined) {
@@ -3411,6 +3629,259 @@ export class SdkSpacesClient {
   private viewerParam(): string {
     const raw = this.getViewerId !== null ? this.getViewerId() : null;
     return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  }
+
+
+  // ─── Checklists (ADR-055) ────────────────────────────────────────────
+
+  /**
+   * Create a checklist in a Space. Validation enforces the doctrine the
+   * schema encodes: a real mode, a stated pause point, and a list short
+   * enough to actually run — reject, don't truncate.
+   */
+  async createChecklist(input: CreateChecklistInput): Promise<Checklist> {
+    return this.withSpan('spaces.checklists.create', async () => {
+      const spaceId = validateSpaceId(input.spaceId);
+      const name = typeof input.name === 'string' ? input.name.trim() : '';
+      if (name.length === 0 || name.length > 120) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'Checklist name must be 1–120 characters',
+          context: { op: 'checklists.create' },
+        });
+      }
+      if (!(CHECKLIST_MODES as readonly string[]).includes(input.mode)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Checklist mode must be DO-CONFIRM or READ-DO (got ${String(input.mode)})`,
+          remediation:
+            'DO-CONFIRM: work from memory, then pause and confirm. READ-DO: read each item and do it.',
+          context: { op: 'checklists.create' },
+        });
+      }
+      const pausePoint = typeof input.pausePoint === 'string' ? input.pausePoint.trim() : '';
+      if (pausePoint.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'A checklist needs a pause point — WHEN it runs ("before merge").',
+          remediation: 'Checklists run at defined pause points; without one it is just a list.',
+          context: { op: 'checklists.create' },
+        });
+      }
+      const items = sanitizeChecklistItems(input.items);
+      const id = generateChecklistId();
+      await this.run(CYPHER.CREATE_CHECKLIST, {
+        spaceId,
+        id,
+        name,
+        mode: input.mode,
+        pausePoint,
+        itemsJson: JSON.stringify(items),
+        itemCount: items.length,
+        now: this.now(),
+        viewerId: this.viewerParam(),
+      });
+      return { id, name, mode: input.mode, pausePoint, items, version: 1 };
+    });
+  }
+
+  async listChecklists(spaceId: string): Promise<Checklist[]> {
+    return this.withSpan('spaces.checklists.list', async () => {
+      const validId = validateSpaceId(spaceId);
+      const rows = await this.run(CYPHER.LIST_CHECKLISTS_IN_SPACE, {
+        spaceId: validId,
+        viewerId: this.viewerParam(),
+      });
+      return rows
+        .map((raw) => rowToChecklist(raw as Record<string, unknown>))
+        .filter((c): c is Checklist => c !== null);
+    });
+  }
+
+  async attachChecklist(input: AttachChecklistInput): Promise<void> {
+    return this.withSpan('spaces.checklists.attach', async () => {
+      if (!(CHECKLIST_OBLIGATIONS as readonly string[]).includes(input.obligation)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Obligation must be required | recommended | optional (got ${String(input.obligation)})`,
+          context: { op: 'checklists.attach' },
+        });
+      }
+      const cypher =
+        input.phase === 'preflight'
+          ? CYPHER.ATTACH_CHECKLIST_PREFLIGHT
+          : CYPHER.ATTACH_CHECKLIST_POSTFLIGHT;
+      const rows = await this.run(cypher, {
+        ticketId: input.ticketId,
+        checklistId: input.checklistId,
+        obligation: input.obligation,
+        viewerId: this.viewerParam(),
+      });
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'Ticket or checklist not found (or not visible to you).',
+          context: { op: 'checklists.attach', ticketId: input.ticketId },
+        });
+      }
+    });
+  }
+
+  async getTicketChecklists(ticketId: string): Promise<TicketChecklist[]> {
+    const rows = await this.run(CYPHER.GET_TICKET_CHECKLISTS, {
+      ticketId,
+      viewerId: this.viewerParam(),
+    });
+    const row = rows[0] as Record<string, unknown> | undefined;
+    const links = Array.isArray(row?.['links']) ? (row['links'] as unknown[]) : [];
+    const out: TicketChecklist[] = [];
+    for (const raw of links) {
+      const link = rowToTicketChecklist(raw as Record<string, unknown>);
+      if (link !== null) out.push(link);
+    }
+    return out;
+  }
+
+  async setChecklistItem(input: SetChecklistItemInput): Promise<{ checkedIndexes: number[]; complete: boolean }> {
+    return this.withSpan('spaces.checklists.check', async () => {
+      if (!Number.isInteger(input.itemIndex) || input.itemIndex < 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'itemIndex must be a non-negative integer',
+          context: { op: 'checklists.check' },
+        });
+      }
+      const cypher =
+        input.phase === 'preflight'
+          ? CYPHER.SET_CHECKLIST_ITEM_PREFLIGHT
+          : CYPHER.SET_CHECKLIST_ITEM_POSTFLIGHT;
+      const rows = await this.run(cypher, {
+        ticketId: input.ticketId,
+        checklistId: input.checklistId,
+        itemIndex: input.itemIndex,
+        checked: input.checked === true,
+        actorId: typeof input.actorId === 'string' ? input.actorId : this.viewerParam(),
+        now: this.now(),
+        viewerId: this.viewerParam(),
+      });
+      const row = rows[0] as Record<string, unknown> | undefined;
+      if (row === undefined) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'Ticket, checklist, or attachment not found.',
+          context: { op: 'checklists.check', ticketId: input.ticketId },
+        });
+      }
+      const idx = Array.isArray(row['checkedIdx'])
+        ? (row['checkedIdx'] as unknown[]).filter((n): n is number => typeof n === 'number')
+        : [];
+      return { checkedIndexes: idx, complete: row['complete'] === true };
+    });
+  }
+
+  async detachChecklist(
+    ticketId: string,
+    checklistId: string,
+    phase: 'preflight' | 'postflight'
+  ): Promise<void> {
+    return this.withSpan('spaces.checklists.detach', async () => {
+      const cypher =
+        phase === 'preflight'
+          ? CYPHER.DETACH_CHECKLIST_PREFLIGHT
+          : CYPHER.DETACH_CHECKLIST_POSTFLIGHT;
+      await this.run(cypher, { ticketId, checklistId, viewerId: this.viewerParam() });
+    });
+  }
+
+  /**
+   * ADR-055 — the status gate. A ticket with an incomplete REQUIRED
+   * preflight cannot leave `open`; one with an incomplete REQUIRED
+   * postflight cannot enter `done`. `recommended` never blocks — the
+   * renderer warns instead, because a gate people can't distinguish
+   * from bureaucracy gets worked around, which is worse than no gate.
+   */
+  async assertTicketStatusAllowed(ticketId: string, targetStatus: string): Promise<void> {
+    const leavingOpen = targetStatus === 'in_progress' || targetStatus === 'done';
+    const enteringDone = targetStatus === 'done';
+    if (!leavingOpen && !enteringDone) return;
+    const rows = await this.run(CYPHER.TICKET_GATE_STATE, {
+      ticketId,
+      viewerId: this.viewerParam(),
+    });
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (row === undefined) return; // not found -> the update itself will fail
+    const current = typeof row['currentStatus'] === 'string' ? row['currentStatus'] : 'open';
+    const pre = readGateLinks(row['requiredPre']);
+    const post = readGateLinks(row['requiredPost']);
+    const blockers: string[] = [];
+    if (leavingOpen && current === 'open') {
+      for (const g of pre) if (!g.complete) blockers.push(`preflight “${g.name}”`);
+    }
+    if (enteringDone) {
+      for (const g of post) if (!g.complete) blockers.push(`postflight “${g.name}”`);
+    }
+    if (blockers.length > 0) {
+      throw new SpacesError({
+        code: 'SPACES_CHECKLIST_REQUIRED',
+        message: `Required checklist${blockers.length > 1 ? 's' : ''} incomplete: ${blockers.join(', ')}`,
+        remediation:
+          'Run the checklist from the ticket pane, or downgrade its obligation if it no longer applies.',
+        context: { op: 'tickets.update', ticketId, targetStatus },
+      });
+    }
+  }
+
+  /**
+   * ADR-055 — write the Checklist entity + both relationship types into
+   * the graph's `(:Schema)` registry. Idempotent; runs at init.
+   */
+  async ensureChecklistSchema(): Promise<void> {
+    try {
+      await this.run(CYPHER.ENSURE_CHECKLIST_SCHEMA, {
+        now: this.now(),
+        checklistDoc:
+          'A runnable checklist (The Checklist Manifesto): mode DO-CONFIRM|READ-DO, a stated pause point, 1–12 items (killer items flagged), versioned as a living document. Belongs to a Space via BELONGS_TO.',
+        checklistProps: JSON.stringify({
+          id: 'string (checklist-<ts36>-<rand>)',
+          name: 'string 1..120',
+          mode: "enum 'DO-CONFIRM' | 'READ-DO'",
+          pausePoint: 'string — when the checklist runs',
+          items: 'JSON [{text, killer?}] max 12',
+          itemCount: 'int — denormalized for atomic completion checks',
+          version: 'int, starts 1',
+          revisedAt: 'datetime?',
+        }),
+        preflightDoc: JSON.stringify({
+          type: 'PREFLIGHT_CHECKLIST',
+          from: 'Asset(kind=ticket)',
+          to: 'Checklist',
+          properties: {
+            obligation: "enum 'required' | 'recommended' | 'optional'",
+            checkedIdx: 'int[] — indexes checked for this ticket',
+            completedAt: 'datetime?',
+            lastCheckedBy: 'string?',
+            lastCheckedAt: 'datetime?',
+          },
+          gate: "obligation=required blocks the ticket leaving 'open'",
+        }),
+        postflightDoc: JSON.stringify({
+          type: 'POSTFLIGHT_CHECKLIST',
+          from: 'Asset(kind=ticket)',
+          to: 'Checklist',
+          properties: {
+            obligation: "enum 'required' | 'recommended' | 'optional'",
+            checkedIdx: 'int[]',
+            completedAt: 'datetime?',
+            lastCheckedBy: 'string?',
+            lastCheckedAt: 'datetime?',
+          },
+          gate: "obligation=required blocks the ticket entering 'done'",
+        }),
+      });
+    } catch {
+      // Registry write is best-effort; the feature works without it and
+      // the next boot retries.
+    }
   }
 
   private async run(
@@ -4477,3 +4948,131 @@ export interface InlineBinaryAssetRow {
   title: string;
   mimeType: string;
 }
+
+// ─── Checklist helpers (ADR-055) ─────────────────────────────────────────
+
+function generateChecklistId(): string {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `checklist-${Date.now().toString(36)}-${rand}`;
+}
+
+/**
+ * Sanitize checklist items with the doctrine caps: non-empty text, one
+ * line each, at most MAX_CHECKLIST_ITEMS. Rejects rather than truncates
+ * — silently dropping someone's killer item defeats the whole point.
+ */
+export function sanitizeChecklistItems(raw: ReadonlyArray<ChecklistItemSpec>): ChecklistItemSpec[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: 'A checklist needs at least one item',
+      context: { op: 'checklists.create' },
+    });
+  }
+  if (raw.length > MAX_CHECKLIST_ITEMS) {
+    throw new SpacesError({
+      code: 'SPACES_INVALID_INPUT',
+      message: `Checklist has ${raw.length} items — the cap is ${MAX_CHECKLIST_ITEMS}`,
+      remediation:
+        'Checklists are for the killer items, not the whole procedure (aviation practice: 5–9 items, 60–90 seconds to run). Split it, or cut to what is most dangerous to skip.',
+      context: { op: 'checklists.create' },
+    });
+  }
+  return raw.map((item, i) => {
+    const text = typeof item?.text === 'string' ? item.text.trim().replace(/\s+/g, ' ') : '';
+    if (text.length === 0 || text.length > 200) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `Checklist item ${i + 1} must be 1–200 characters of one-line text`,
+        context: { op: 'checklists.create' },
+      });
+    }
+    return item?.killer === true ? { text, killer: true } : { text };
+  });
+}
+
+function rowToChecklist(r: Record<string, unknown>): Checklist | null {
+  const id = typeof r['id'] === 'string' ? r['id'] : '';
+  if (id.length === 0) return null;
+  return {
+    id,
+    name: typeof r['name'] === 'string' ? r['name'] : '(unnamed)',
+    mode: r['mode'] === 'READ-DO' ? 'READ-DO' : 'DO-CONFIRM',
+    pausePoint: typeof r['pausePoint'] === 'string' ? r['pausePoint'] : '',
+    items: parseChecklistItems(r['itemsJson']),
+    version: typeof r['version'] === 'number' ? r['version'] : 1,
+    ...(typeof r['revisedAt'] === 'string' && r['revisedAt'].length > 0
+      ? { revisedAt: r['revisedAt'] }
+      : {}),
+    ...(typeof r['createdAt'] === 'string' && r['createdAt'].length > 0
+      ? { createdAt: r['createdAt'] }
+      : {}),
+    ...(typeof r['updatedAt'] === 'string' && r['updatedAt'].length > 0
+      ? { updatedAt: r['updatedAt'] }
+      : {}),
+  };
+}
+
+function parseChecklistItems(raw: unknown): ChecklistItemSpec[] {
+  if (typeof raw !== 'string' || raw.length === 0) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const out: ChecklistItemSpec[] = [];
+    for (const x of parsed) {
+      if (x === null || typeof x !== 'object') continue;
+      const text = (x as { text?: unknown }).text;
+      if (typeof text !== 'string' || text.length === 0) continue;
+      const item: ChecklistItemSpec = { text };
+      if ((x as { killer?: unknown }).killer === true) item.killer = true;
+      out.push(item);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+function rowToTicketChecklist(link: Record<string, unknown>): TicketChecklist | null {
+  const base = rowToChecklist(link);
+  if (base === null) return null;
+  const checkedIndexes = Array.isArray(link['checkedIdx'])
+    ? (link['checkedIdx'] as unknown[]).filter((n): n is number => typeof n === 'number')
+    : [];
+  const itemCount = typeof link['itemCount'] === 'number' ? link['itemCount'] : base.items.length;
+  return {
+    checklist: base,
+    phase: link['phase'] === 'postflight' ? 'postflight' : 'preflight',
+    obligation:
+      link['obligation'] === 'required' || link['obligation'] === 'optional'
+        ? link['obligation']
+        : 'recommended',
+    checkedIndexes,
+    complete: itemCount > 0 && checkedIndexes.length === itemCount,
+    ...(typeof link['completedAt'] === 'string' && link['completedAt'].length > 0
+      ? { completedAt: link['completedAt'] }
+      : {}),
+    ...(typeof link['lastCheckedBy'] === 'string' && link['lastCheckedBy'].length > 0
+      ? { lastCheckedBy: link['lastCheckedBy'] }
+      : {}),
+    ...(typeof link['lastCheckedAt'] === 'string' && link['lastCheckedAt'].length > 0
+      ? { lastCheckedAt: link['lastCheckedAt'] }
+      : {}),
+  };
+}
+
+function readGateLinks(raw: unknown): Array<{ name: string; complete: boolean }> {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{ name: string; complete: boolean }> = [];
+  for (const x of raw) {
+    if (x !== null && typeof x === 'object') {
+      const name = (x as { name?: unknown }).name;
+      out.push({
+        name: typeof name === 'string' ? name : '(unnamed)',
+        complete: (x as { complete?: unknown }).complete === true,
+      });
+    }
+  }
+  return out;
+}
+

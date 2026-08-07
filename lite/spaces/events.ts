@@ -21,6 +21,23 @@ import type { EventRecord, SerializedEventError } from '../logging/events.js';
 
 /** Stable event name catalog. Source-of-truth for what spaces/ emits. */
 export const SPACES_EVENTS = {
+  // ─── checklists (ADR-055) ────────────────────────────────────────────
+  CHECKLISTS_CREATE_START: 'spaces.checklists.create.start',
+  CHECKLISTS_CREATE_FINISH: 'spaces.checklists.create.finish',
+  CHECKLISTS_CREATE_FAIL: 'spaces.checklists.create.fail',
+  CHECKLISTS_LIST_START: 'spaces.checklists.list.start',
+  CHECKLISTS_LIST_FINISH: 'spaces.checklists.list.finish',
+  CHECKLISTS_LIST_FAIL: 'spaces.checklists.list.fail',
+  CHECKLISTS_ATTACH_START: 'spaces.checklists.attach.start',
+  CHECKLISTS_ATTACH_FINISH: 'spaces.checklists.attach.finish',
+  CHECKLISTS_ATTACH_FAIL: 'spaces.checklists.attach.fail',
+  CHECKLISTS_CHECK_START: 'spaces.checklists.check.start',
+  CHECKLISTS_CHECK_FINISH: 'spaces.checklists.check.finish',
+  CHECKLISTS_CHECK_FAIL: 'spaces.checklists.check.fail',
+  CHECKLISTS_DETACH_START: 'spaces.checklists.detach.start',
+  CHECKLISTS_DETACH_FINISH: 'spaces.checklists.detach.finish',
+  CHECKLISTS_DETACH_FAIL: 'spaces.checklists.detach.fail',
+
   // ─── listSpaces ───────────────────────────────────────────────────────
   LIST_SPACES_START: 'spaces.listSpaces.start',
   LIST_SPACES_FINISH: 'spaces.listSpaces.finish',

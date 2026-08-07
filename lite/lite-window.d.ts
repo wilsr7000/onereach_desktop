@@ -1068,6 +1068,7 @@ interface LiteSpacesBridge {
   /** Phase 4 v2 — identity + sharing. */
   identity: LiteSpacesIdentityBridge;
   members: LiteSpacesMembersBridge;
+  checklists: LiteSpacesChecklistsBridge;
   /**
    * Subscribe to cache-refresh events from the main process. The
    * Spaces cache pre-warms at app launch and refreshes on a background
@@ -1111,6 +1112,56 @@ interface LiteSpacesMemberView {
    * returned by `list`, so the owner can see why they lost access.
    */
   accessExpiresAt?: string;
+}
+
+/** ADR-055 — a checklist as the renderer sees it. */
+interface LiteChecklistView {
+  id: string;
+  name: string;
+  mode: 'DO-CONFIRM' | 'READ-DO';
+  pausePoint: string;
+  items: Array<{ text: string; killer?: boolean }>;
+  version: number;
+}
+
+/** One checklist attached to a ticket, with this ticket's run state. */
+interface LiteTicketChecklistView {
+  checklist: LiteChecklistView;
+  phase: 'preflight' | 'postflight';
+  obligation: 'required' | 'recommended' | 'optional';
+  checkedIndexes: number[];
+  complete: boolean;
+  completedAt?: string;
+}
+
+interface LiteSpacesChecklistsBridge {
+  create(input: {
+    spaceId: string;
+    name: string;
+    mode: 'DO-CONFIRM' | 'READ-DO';
+    pausePoint: string;
+    items: Array<{ text: string; killer?: boolean }>;
+  }): Promise<LiteSpacesIpcResult<LiteChecklistView>>;
+  list(spaceId: string): Promise<LiteSpacesIpcResult<LiteChecklistView[]>>;
+  attach(input: {
+    ticketId: string;
+    checklistId: string;
+    phase: 'preflight' | 'postflight';
+    obligation: 'required' | 'recommended' | 'optional';
+  }): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  forTicket(ticketId: string): Promise<LiteSpacesIpcResult<LiteTicketChecklistView[]>>;
+  setItem(input: {
+    ticketId: string;
+    checklistId: string;
+    phase: 'preflight' | 'postflight';
+    itemIndex: number;
+    checked: boolean;
+  }): Promise<LiteSpacesIpcResult<{ checkedIndexes: number[]; complete: boolean }>>;
+  detach(
+    ticketId: string,
+    checklistId: string,
+    phase: 'preflight' | 'postflight'
+  ): Promise<LiteSpacesIpcResult<{ ok: true }>>;
 }
 
 interface LiteSpacesMembersBridge {

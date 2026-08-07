@@ -95,6 +95,12 @@ const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
 const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
+const SPACES_CHECKLISTS_CREATE = 'lite:spaces:checklists:create';
+const SPACES_CHECKLISTS_LIST = 'lite:spaces:checklists:list';
+const SPACES_CHECKLISTS_ATTACH = 'lite:spaces:checklists:attach';
+const SPACES_CHECKLISTS_FOR_TICKET = 'lite:spaces:checklists:forTicket';
+const SPACES_CHECKLISTS_SET_ITEM = 'lite:spaces:checklists:setItem';
+const SPACES_CHECKLISTS_DETACH = 'lite:spaces:checklists:detach';
 
 const SPACES_ITEMS_GET_FILE_EXPIRY = 'lite:spaces:items:getFileExpiry';
 const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
@@ -830,6 +836,36 @@ interface SpacesMemberView {
   accessExpiresAt?: string;
 }
 
+interface SpacesChecklistsBridge {
+  create(input: {
+    spaceId: string;
+    name: string;
+    mode: 'DO-CONFIRM' | 'READ-DO';
+    pausePoint: string;
+    items: Array<{ text: string; killer?: boolean }>;
+  }): Promise<SpacesIpcResultView<unknown>>;
+  list(spaceId: string): Promise<SpacesIpcResultView<unknown[]>>;
+  attach(input: {
+    ticketId: string;
+    checklistId: string;
+    phase: 'preflight' | 'postflight';
+    obligation: 'required' | 'recommended' | 'optional';
+  }): Promise<SpacesIpcResultView<{ ok: true }>>;
+  forTicket(ticketId: string): Promise<SpacesIpcResultView<unknown[]>>;
+  setItem(input: {
+    ticketId: string;
+    checklistId: string;
+    phase: 'preflight' | 'postflight';
+    itemIndex: number;
+    checked: boolean;
+  }): Promise<SpacesIpcResultView<{ checkedIndexes: number[]; complete: boolean }>>;
+  detach(
+    ticketId: string,
+    checklistId: string,
+    phase: 'preflight' | 'postflight'
+  ): Promise<SpacesIpcResultView<{ ok: true }>>;
+}
+
 interface SpacesMembersBridge {
   list(spaceId: string): Promise<SpacesIpcResultView<SpacesMemberView[]>>;
   add(
@@ -905,6 +941,7 @@ interface SpacesBridge {
   /** Phase 4 v2 — identity + sharing. */
   identity: SpacesIdentityBridge;
   members: SpacesMembersBridge;
+  checklists: SpacesChecklistsBridge;
   /**
    * Subscribe to cache-refresh events from the main process. Fires
    * whenever a cached read (listSpaces, home view queries,
@@ -1783,6 +1820,24 @@ const spaces: SpacesBridge = {
       >,
     remove: (spaceId, memberId) =>
       ipcRenderer.invoke(SPACES_MEMBERS_REMOVE, { spaceId, memberId }) as Promise<
+        SpacesIpcResultView<{ ok: true }>
+      >,
+  },
+  checklists: {
+    create: (input) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_CREATE, { input }) as Promise<SpacesIpcResultView<unknown>>,
+    list: (spaceId) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_LIST, { spaceId }) as Promise<SpacesIpcResultView<unknown[]>>,
+    attach: (input) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_ATTACH, { input }) as Promise<SpacesIpcResultView<{ ok: true }>>,
+    forTicket: (ticketId) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_FOR_TICKET, { ticketId }) as Promise<SpacesIpcResultView<unknown[]>>,
+    setItem: (input) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_SET_ITEM, { input }) as Promise<
+        SpacesIpcResultView<{ checkedIndexes: number[]; complete: boolean }>
+      >,
+    detach: (ticketId, checklistId, phase) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_DETACH, { ticketId, checklistId, phase }) as Promise<
         SpacesIpcResultView<{ ok: true }>
       >,
   },

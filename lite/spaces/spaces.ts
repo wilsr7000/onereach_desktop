@@ -7641,6 +7641,378 @@ export interface DetailTicketCallbacks {
   onOpenPlaybook?: (playbookId: string) => void;
 }
 
+// ─── Ticket checklists (ADR-055) ─────────────────────────────────────
+//
+// Pre-flight and post-flight checklists on a ticket, run in place.
+// A required preflight gates the ticket out of `open`; a required
+// postflight gates it out of `done` — the gate itself lives in the
+// SDK; this section is where the run happens, at the pause point.
+
+/** Progress label: "3/7". */
+export function checklistProgressLabel(link: {
+  checkedIndexes: number[];
+  checklist: { items: Array<{ text: string }> };
+}): string {
+  return `${link.checkedIndexes.length}/${link.checklist.items.length}`;
+}
+
+/**
+ * Parse the create-panel's items textarea: one item per line, a `!`
+ * prefix marks a killer item. Blank lines dropped.
+ */
+export function parseChecklistDraft(raw: string): Array<{ text: string; killer?: boolean }> {
+  const out: Array<{ text: string; killer?: boolean }> = [];
+  for (const line of raw.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) continue;
+    if (trimmed.startsWith('!')) {
+      const text = trimmed.slice(1).trim();
+      if (text.length > 0) out.push({ text, killer: true });
+    } else {
+      out.push({ text: trimmed });
+    }
+  }
+  return out;
+}
+
+function buildTicketChecklistsSection(item: RendererItem): HTMLElement {
+  const wrap = document.createElement('section');
+  wrap.className = 'spaces-ticket-checklists';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-ticket-checklists-head';
+  const label = document.createElement('span');
+  label.className = 'spaces-detail-label';
+  label.textContent = 'Checklists';
+  head.appendChild(label);
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'spaces-checklist-add-btn';
+  add.textContent = '+ Attach';
+  add.addEventListener('click', () => {
+    void openAttachChecklistPanel(item, () => reload());
+  });
+  head.appendChild(add);
+  wrap.appendChild(head);
+
+  const list = document.createElement('div');
+  list.className = 'spaces-ticket-checklists-list';
+  wrap.appendChild(list);
+
+  const reload = async (): Promise<void> => {
+    const bridge = window.lite?.spaces;
+    if (bridge?.checklists === undefined) return;
+    try {
+      const envelope = await bridge.checklists.forTicket(item.id);
+      if (envelope.ok === false) return;
+      list.replaceChildren();
+      const links = envelope.value;
+      if (links.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = 'spaces-checklist-empty';
+        empty.textContent =
+          'No checklists. Attach a pre-flight (gates starting) or post-flight (gates done).';
+        list.appendChild(empty);
+        return;
+      }
+      for (const link of links) {
+        list.appendChild(buildChecklistRunCard(item, link, reload));
+      }
+    } catch {
+      /* soft — the ticket pane still works without checklists */
+    }
+  };
+  void reload();
+  return wrap;
+}
+
+function buildChecklistRunCard(
+  item: RendererItem,
+  link: LiteTicketChecklistView,
+  reload: () => Promise<void>
+): HTMLElement {
+  const card = document.createElement('div');
+  card.className = `spaces-checklist-card${link.complete ? ' is-complete' : ''}`;
+
+  const head = document.createElement('div');
+  head.className = 'spaces-checklist-card-head';
+
+  const phase = document.createElement('span');
+  phase.className = `spaces-checklist-phase spaces-checklist-phase-${link.phase}`;
+  phase.textContent = link.phase === 'preflight' ? 'PRE-FLIGHT' : 'POST-FLIGHT';
+  head.appendChild(phase);
+
+  const name = document.createElement('span');
+  name.className = 'spaces-checklist-name';
+  name.textContent = link.checklist.name;
+  head.appendChild(name);
+
+  if (link.obligation === 'required') {
+    const req = document.createElement('span');
+    req.className = 'spaces-checklist-required';
+    req.textContent = 'required';
+    req.title =
+      link.phase === 'preflight'
+        ? 'Must be complete before this ticket can start'
+        : 'Must be complete before this ticket can be done';
+    head.appendChild(req);
+  } else if (link.obligation === 'recommended') {
+    const rec = document.createElement('span');
+    rec.className = 'spaces-checklist-recommended';
+    rec.textContent = 'recommended';
+    head.appendChild(rec);
+  }
+
+  const progress = document.createElement('span');
+  progress.className = 'spaces-checklist-progress';
+  progress.textContent = checklistProgressLabel(link);
+  head.appendChild(progress);
+
+  card.appendChild(head);
+
+  // Pause point + mode — the doctrine, visible at the point of use.
+  const meta = document.createElement('div');
+  meta.className = 'spaces-checklist-meta';
+  meta.textContent = `${link.checklist.mode} · ${link.checklist.pausePoint}`;
+  card.appendChild(meta);
+
+  const items = document.createElement('div');
+  items.className = 'spaces-checklist-items';
+  const checked = new Set(link.checkedIndexes);
+  link.checklist.items.forEach((spec, index) => {
+    const row = document.createElement('label');
+    row.className = `spaces-checklist-item${spec.killer === true ? ' is-killer' : ''}`;
+    const box = document.createElement('input');
+    box.type = 'checkbox';
+    box.checked = checked.has(index);
+    box.addEventListener('change', () => {
+      void toggleChecklistItem(item, link, index, box, reload);
+    });
+    row.appendChild(box);
+    const text = document.createElement('span');
+    text.className = 'spaces-checklist-item-text';
+    text.textContent = spec.text;
+    if (spec.killer === true) {
+      text.title = 'Killer item — the step most dangerous to skip';
+    }
+    row.appendChild(text);
+    items.appendChild(row);
+  });
+  card.appendChild(items);
+  return card;
+}
+
+async function toggleChecklistItem(
+  item: RendererItem,
+  link: LiteTicketChecklistView,
+  index: number,
+  box: HTMLInputElement,
+  reload: () => Promise<void>
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge?.checklists === undefined) return;
+  box.disabled = true;
+  try {
+    const envelope = await bridge.checklists.setItem({
+      ticketId: item.id,
+      checklistId: link.checklist.id,
+      phase: link.phase,
+      itemIndex: index,
+      checked: box.checked,
+    });
+    if (envelope.ok === false) {
+      box.checked = !box.checked;
+      showToast(envelope.error.message);
+      return;
+    }
+    if (envelope.value.complete) {
+      showToast(`“${link.checklist.name}” complete`);
+    }
+    await reload();
+  } catch (err) {
+    box.checked = !box.checked;
+    showToast(messageFrom(err));
+  } finally {
+    box.disabled = false;
+  }
+}
+
+/** Attach-or-create panel, in the house inline-panel shell. */
+async function openAttachChecklistPanel(
+  item: RendererItem,
+  onDone: () => Promise<void>
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge?.checklists === undefined) return;
+  const spaceId =
+    state.activeScopeId !== HOME_SCOPE_ID && state.activeScopeId !== UNCATEGORIZED_SPACE_ID
+      ? state.activeScopeId
+      : '';
+  if (spaceId === '') {
+    showToast('Open the ticket from inside its Space to attach checklists.');
+    return;
+  }
+
+  document.querySelector('.spaces-checklist-panel-backdrop')?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-member-picker-backdrop spaces-checklist-panel-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-member-picker spaces-checklist-panel';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-member-picker-head';
+  const heading = document.createElement('span');
+  heading.textContent = 'Attach a checklist';
+  head.appendChild(heading);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'spaces-member-picker-close';
+  close.textContent = '×';
+  close.setAttribute('aria-label', 'Cancel');
+  close.addEventListener('click', () => backdrop.remove());
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  // Phase + obligation selectors — the relationship params, chosen at
+  // the moment of attaching.
+  const controls = document.createElement('div');
+  controls.className = 'spaces-checklist-panel-controls';
+  const phaseSel = document.createElement('select');
+  phaseSel.className = 'spaces-share-select';
+  for (const [v, l] of [
+    ['preflight', 'Pre-flight — before work starts'],
+    ['postflight', 'Post-flight — before done'],
+  ] as const) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    phaseSel.appendChild(o);
+  }
+  const oblSel = document.createElement('select');
+  oblSel.className = 'spaces-share-select';
+  for (const [v, l] of [
+    ['required', 'Required — gates the ticket'],
+    ['recommended', 'Recommended'],
+    ['optional', 'Optional'],
+  ] as const) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    oblSel.appendChild(o);
+  }
+  controls.append(phaseSel, oblSel);
+  panel.appendChild(controls);
+
+  const listHost = document.createElement('div');
+  listHost.className = 'spaces-checklist-panel-list';
+  listHost.textContent = 'Loading…';
+  panel.appendChild(listHost);
+
+  const attach = async (checklistId: string): Promise<void> => {
+    const envelope = await bridge.checklists.attach({
+      ticketId: item.id,
+      checklistId,
+      phase: phaseSel.value === 'postflight' ? 'postflight' : 'preflight',
+      obligation:
+        oblSel.value === 'required' || oblSel.value === 'optional'
+          ? (oblSel.value as 'required' | 'optional')
+          : 'recommended',
+    });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    backdrop.remove();
+    showToast('Checklist attached');
+    await onDone();
+  };
+
+  try {
+    const envelope = await bridge.checklists.list(spaceId);
+    listHost.replaceChildren();
+    const lists = envelope.ok === true ? envelope.value : [];
+    if (lists.length === 0) {
+      const none = document.createElement('p');
+      none.className = 'spaces-checklist-empty';
+      none.textContent = 'No checklists in this Space yet — create the first below.';
+      listHost.appendChild(none);
+    }
+    for (const c of lists) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'spaces-member-picker-row spaces-checklist-pick-row';
+      const nm = document.createElement('span');
+      nm.className = 'spaces-member-picker-name';
+      nm.textContent = `${c.name} · ${c.items.length} items`;
+      row.appendChild(nm);
+      const pp = document.createElement('span');
+      pp.className = 'spaces-checklist-pick-pause';
+      pp.textContent = c.pausePoint;
+      row.appendChild(pp);
+      row.addEventListener('click', () => void attach(c.id));
+      listHost.appendChild(row);
+    }
+  } catch {
+    listHost.textContent = 'Could not load checklists.';
+  }
+
+  // Inline create: name, mode, pause point, one item per line (`!` = killer).
+  const createWrap = document.createElement('div');
+  createWrap.className = 'spaces-checklist-create';
+  const nameIn = document.createElement('input');
+  nameIn.type = 'text';
+  nameIn.className = 'spaces-new-asset-input';
+  nameIn.placeholder = 'New checklist name';
+  const modeSel = document.createElement('select');
+  modeSel.className = 'spaces-share-select';
+  for (const [v, l] of [
+    ['DO-CONFIRM', 'DO-CONFIRM — work, then confirm'],
+    ['READ-DO', 'READ-DO — read each step, do it'],
+  ] as const) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    modeSel.appendChild(o);
+  }
+  const pauseIn = document.createElement('input');
+  pauseIn.type = 'text';
+  pauseIn.className = 'spaces-new-asset-input';
+  pauseIn.placeholder = 'Pause point — when does this run? ("before merge")';
+  const itemsIn = document.createElement('textarea');
+  itemsIn.className = 'spaces-new-asset-textarea spaces-checklist-items-input';
+  itemsIn.rows = 5;
+  itemsIn.placeholder = 'One item per line. Prefix with ! for a killer item.\n!Backups verified\nRelease notes written';
+  const createBtn = document.createElement('button');
+  createBtn.type = 'button';
+  createBtn.className = 'spaces-new-asset-button is-primary';
+  createBtn.textContent = 'Create & attach';
+  createBtn.addEventListener('click', () => {
+    void (async () => {
+      const items = parseChecklistDraft(itemsIn.value);
+      const created = await bridge.checklists.create({
+        spaceId,
+        name: nameIn.value,
+        mode: modeSel.value === 'READ-DO' ? 'READ-DO' : 'DO-CONFIRM',
+        pausePoint: pauseIn.value,
+        items,
+      });
+      if (created.ok === false) {
+        showToast(created.error.message);
+        return;
+      }
+      await attach(created.value.id);
+    })();
+  });
+  createWrap.append(nameIn, modeSel, pauseIn, itemsIn, createBtn);
+  panel.appendChild(createWrap);
+
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) backdrop.remove();
+  });
+}
+
 export function buildDetailTicketBlock(
   item: RendererItem,
   cb?: DetailTicketCallbacks
@@ -7755,6 +8127,9 @@ export function buildDetailTicketBlock(
     wrap.appendChild(pbRow);
   }
 
+
+  // ADR-055 — pre/post-flight checklists run from the ticket pane.
+  wrap.appendChild(buildTicketChecklistsSection(item));
   return wrap;
 }
 

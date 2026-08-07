@@ -29,6 +29,7 @@ import {
   type SpacesPlaybooksApi,
   type SpacesIdentityApi,
   type SpacesMembersApi,
+  type SpacesChecklistsApi,
 } from './api.js';
 import { SpacesError } from './errors.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
@@ -127,6 +128,12 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   AddSpaceMemberOptions,
+  Checklist,
+  ChecklistPhase,
+  TicketChecklist,
+  CreateChecklistInput,
+  AttachChecklistInput,
+  SetChecklistItemInput,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -419,6 +426,9 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
   });
   activeClient = client;
+  // ADR-055 — register the Checklist entity + relationship types in the
+  // graph's (:Schema) registry. Idempotent, best-effort, non-blocking.
+  void client.ensureChecklistSchema();
 
   // In-process cache. Pre-warms the home-view + sidebar reads at boot
   // so the renderer's first paint is instant. Mutations invalidate
@@ -685,6 +695,37 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
   };
 
+  const checklists: SpacesChecklistsApi = {
+    async create(input: CreateChecklistInput): Promise<Checklist> {
+      const result = await client.createChecklist(input);
+      nukeReadCache();
+      return result;
+    },
+    list(spaceId: string): Promise<Checklist[]> {
+      return client.listChecklists(spaceId);
+    },
+    async attach(input: AttachChecklistInput): Promise<void> {
+      await client.attachChecklist(input);
+      nukeReadCache();
+    },
+    forTicket(ticketId: string): Promise<TicketChecklist[]> {
+      return client.getTicketChecklists(ticketId);
+    },
+    setItem(
+      input: SetChecklistItemInput
+    ): Promise<{ checkedIndexes: number[]; complete: boolean }> {
+      return client.setChecklistItem(input);
+    },
+    async detach(
+      ticketId: string,
+      checklistId: string,
+      phase: ChecklistPhase
+    ): Promise<void> {
+      await client.detachChecklist(ticketId, checklistId, phase);
+      nukeReadCache();
+    },
+  };
+
   const members: SpacesMembersApi = {
     list(spaceId: string): Promise<SpaceMember[]> {
       return cache.getOrFetch(`spaces.members.list:${spaceId}`, () =>
@@ -748,6 +789,7 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     playbooks,
     identity,
     members,
+    checklists,
     async setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
       const result = await client.setSpaceKind(id, kind);
       nukeReadCache();

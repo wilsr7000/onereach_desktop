@@ -38,6 +38,11 @@ import type {
   Person,
   PersonUpsertInput,
   SpaceMember,
+  Checklist,
+  TicketChecklist,
+  CreateChecklistInput,
+  AttachChecklistInput,
+  SetChecklistItemInput,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -98,6 +103,13 @@ export const SPACES_IPC = {
   IDENTITY_ATTRIBUTION_EMAIL_GET: 'lite:spaces:identity:attributionEmail:get',
   IDENTITY_ATTRIBUTION_EMAIL_SET: 'lite:spaces:identity:attributionEmail:set',
   MEMBERS_REMOVE: 'lite:spaces:members:remove',
+  /** ADR-055 — checklists. */
+  CHECKLISTS_CREATE: 'lite:spaces:checklists:create',
+  CHECKLISTS_LIST: 'lite:spaces:checklists:list',
+  CHECKLISTS_ATTACH: 'lite:spaces:checklists:attach',
+  CHECKLISTS_FOR_TICKET: 'lite:spaces:checklists:forTicket',
+  CHECKLISTS_SET_ITEM: 'lite:spaces:checklists:setItem',
+  CHECKLISTS_DETACH: 'lite:spaces:checklists:detach',
   /** Sprint 1 — asset CRUD. */
   ITEMS_CREATE: 'lite:spaces:items:create',
   ITEMS_CREATE_BINARY: 'lite:spaces:items:createBinary',
@@ -858,6 +870,107 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
         const value = await getSpacesApi().members.list(spaceId);
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_CREATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<Checklist>> => {
+      try {
+        const value = await getSpacesApi().checklists.create(
+          (payload?.input ?? {}) as CreateChecklistInput
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_LIST,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown }
+    ): Promise<SpacesIpcResult<Checklist[]>> => {
+      try {
+        const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().checklists.list(spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_ATTACH,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        await getSpacesApi().checklists.attach(
+          (payload?.input ?? {}) as AttachChecklistInput
+        );
+        return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_FOR_TICKET,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { ticketId?: unknown }
+    ): Promise<SpacesIpcResult<TicketChecklist[]>> => {
+      try {
+        const ticketId = typeof payload?.ticketId === 'string' ? payload.ticketId : '';
+        const value = await getSpacesApi().checklists.forTicket(ticketId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_SET_ITEM,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<{ checkedIndexes: number[]; complete: boolean }>> => {
+      try {
+        const value = await getSpacesApi().checklists.setItem(
+          (payload?.input ?? {}) as SetChecklistItemInput
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_DETACH,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { ticketId?: unknown; checklistId?: unknown; phase?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const ticketId = typeof payload?.ticketId === 'string' ? payload.ticketId : '';
+        const checklistId = typeof payload?.checklistId === 'string' ? payload.checklistId : '';
+        const phase = payload?.phase === 'postflight' ? 'postflight' : 'preflight';
+        await getSpacesApi().checklists.detach(ticketId, checklistId, phase);
+        return { ok: true, value: { ok: true } };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

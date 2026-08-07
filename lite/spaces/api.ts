@@ -53,6 +53,12 @@ import type {
   PersonUpsertInput,
   SpaceMember,
   AddSpaceMemberOptions,
+  Checklist,
+  ChecklistPhase,
+  TicketChecklist,
+  CreateChecklistInput,
+  AttachChecklistInput,
+  SetChecklistItemInput,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -102,6 +108,15 @@ export type {
   PersonUpsertInput,
   SpaceMember,
   AddSpaceMemberOptions,
+  Checklist,
+  ChecklistMode,
+  ChecklistPhase,
+  ChecklistObligation,
+  ChecklistItemSpec,
+  TicketChecklist,
+  CreateChecklistInput,
+  AttachChecklistInput,
+  SetChecklistItemInput,
   CreateAssetInput,
   CreateBinaryAssetInput,
   CreateAgentInput,
@@ -487,6 +502,31 @@ export interface SpacesIdentityApi {
  * `:Person` (human collaborator) or `:Agent` (AI worker). Tickets are
  * assignable to anyone in this set.
  */
+/**
+ * Checklists sub-surface (ADR-055). A `:Checklist` is a Space-scoped,
+ * runnable list built on The Checklist Manifesto's doctrine (mode,
+ * pause point, killer items, brevity cap, living-document versioning).
+ * Tickets attach checklists via PREFLIGHT_CHECKLIST /
+ * POSTFLIGHT_CHECKLIST edges whose `obligation` gates status
+ * transitions: an incomplete REQUIRED preflight blocks leaving `open`;
+ * an incomplete REQUIRED postflight blocks entering `done`
+ * (`SPACES_CHECKLIST_REQUIRED`).
+ */
+export interface SpacesChecklistsApi {
+  /** Create a checklist in a Space. Doctrine-validated (mode, pause point, ≤12 items). */
+  create(input: CreateChecklistInput): Promise<Checklist>;
+  /** List a Space's checklists. Visibility-gated like every read. */
+  list(spaceId: string): Promise<Checklist[]>;
+  /** Attach to a ticket as pre- or post-flight with an obligation. Idempotent. */
+  attach(input: AttachChecklistInput): Promise<void>;
+  /** Every checklist attached to a ticket, with per-ticket run state. */
+  forTicket(ticketId: string): Promise<TicketChecklist[]>;
+  /** Atomically check/uncheck one item on a ticket's run. */
+  setItem(input: SetChecklistItemInput): Promise<{ checkedIndexes: number[]; complete: boolean }>;
+  /** Remove an attachment (run state on the edge goes with it). */
+  detach(ticketId: string, checklistId: string, phase: ChecklistPhase): Promise<void>;
+}
+
 export interface SpacesMembersApi {
   /** List every Person + Agent with access to a Space. */
   list(spaceId: string): Promise<SpaceMember[]>;
@@ -581,6 +621,9 @@ export interface SpacesApi {
 
   /** Space-membership sub-surface (Phase 4 v2 — sharing). */
   readonly members: SpacesMembersApi;
+
+  /** ADR-055 — checklists + ticket gating. */
+  readonly checklists: SpacesChecklistsApi;
 
   /**
    * Toggle a Space between 'user' (default) and 'shared' (AI-managed).
@@ -840,6 +883,33 @@ class UninitializedSpacesApi implements SpacesApi {
 
     async getOrCreatePerson(_input: PersonUpsertInput): Promise<Person> {
       throw notInitialized('identity.getOrCreatePerson');
+    },
+  };
+
+  readonly checklists: SpacesChecklistsApi = {
+    async create(_input: CreateChecklistInput): Promise<Checklist> {
+      throw notInitialized('checklists.create');
+    },
+    async list(_spaceId: string): Promise<Checklist[]> {
+      throw notInitialized('checklists.list');
+    },
+    async attach(_input: AttachChecklistInput): Promise<void> {
+      throw notInitialized('checklists.attach');
+    },
+    async forTicket(_ticketId: string): Promise<TicketChecklist[]> {
+      throw notInitialized('checklists.forTicket');
+    },
+    async setItem(
+      _input: SetChecklistItemInput
+    ): Promise<{ checkedIndexes: number[]; complete: boolean }> {
+      throw notInitialized('checklists.setItem');
+    },
+    async detach(
+      _ticketId: string,
+      _checklistId: string,
+      _phase: ChecklistPhase
+    ): Promise<void> {
+      throw notInitialized('checklists.detach');
     },
   };
 

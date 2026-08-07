@@ -995,3 +995,129 @@ export interface SearchItemsOpts {
   /** Default 50; cap is server-side. */
   limit?: number;
 }
+
+// ─── Checklists (ADR-055) ────────────────────────────────────────────────
+//
+// A dedicated `:Checklist` node, designed from the doctrine in Atul
+// Gawande's *The Checklist Manifesto* rather than invented:
+//
+//   - MODE is the book's central taxonomy. DO-CONFIRM: do the work from
+//     memory, then pause and confirm every item was done. READ-DO: read
+//     each item and perform it as you go, recipe-style. The mode changes
+//     how a UI must present the run, so it is a first-class param.
+//   - PAUSE POINT: a checklist runs at a defined pause point in the
+//     workflow ("before incision", "before engine start"). A checklist
+//     without one is just a list; the field is required.
+//   - KILLER ITEMS: the steps most dangerous to skip AND most often
+//     skipped. The book is emphatic a checklist is NOT a how-to — it
+//     exists for these. Flagged per item so a runner can render them
+//     distinctly.
+//   - BREVITY: aviation practice is 5–9 items, runnable in 60–90
+//     seconds. We hard-cap at 12 with a validation error that cites the
+//     doctrine, rather than silently accepting a procedure manual.
+//   - LIVING DOCUMENT: Boeing revises constantly; `version` +
+//     `revisedAt` make revision a schema property, not tribal memory.
+//
+// Tickets connect via two relationship types — PREFLIGHT_CHECKLIST and
+// POSTFLIGHT_CHECKLIST — each carrying an `obligation` (required /
+// recommended / optional) and the RUN STATE for that ticket (which
+// items are checked, by whom). A `required` preflight gates the ticket
+// out of `open`; a `required` postflight gates it out of `done`.
+
+/** How a checklist is run — the book's two-mode taxonomy, verbatim. */
+export type ChecklistMode = 'DO-CONFIRM' | 'READ-DO';
+
+export const CHECKLIST_MODES: ReadonlyArray<ChecklistMode> = ['DO-CONFIRM', 'READ-DO'] as const;
+
+/** Doctrine cap: 5–9 ideal; 12 is the hard ceiling before rejection. */
+export const MAX_CHECKLIST_ITEMS = 12;
+
+/** One step on a checklist. */
+export interface ChecklistItemSpec {
+  /** Precise, familiar wording — one line. */
+  text: string;
+  /** Killer item: most dangerous to skip, most often skipped. */
+  killer?: boolean;
+}
+
+/** The `:Checklist` node as read from the graph. */
+export interface Checklist {
+  id: string;
+  name: string;
+  mode: ChecklistMode;
+  /** WHEN this runs, in words ("before merge", "before publish"). */
+  pausePoint: string;
+  items: ChecklistItemSpec[];
+  /** Revision counter — checklists are living documents. */
+  version: number;
+  /** ISO timestamp of the last revision. */
+  revisedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/** Which side of the work the checklist guards. */
+export type ChecklistPhase = 'preflight' | 'postflight';
+
+/** How binding an attached checklist is. */
+export type ChecklistObligation = 'required' | 'recommended' | 'optional';
+
+export const CHECKLIST_OBLIGATIONS: ReadonlyArray<ChecklistObligation> = [
+  'required',
+  'recommended',
+  'optional',
+] as const;
+
+/**
+ * One checklist attached to one ticket: the edge, its obligation, and
+ * the run state living ON the relationship (a ticket runs a given
+ * checklist once; history belongs to the activity stream).
+ *
+ * Run state is a native LIST OF ITEM INDEXES so a single check/uncheck
+ * is one atomic Cypher list operation — two agents checking different
+ * items concurrently cannot clobber each other, which JSON-blob state
+ * cannot guarantee. Per-item attribution is traded away for that
+ * atomicity (v1 records only the last actor); the book cares that the
+ * run happened at the pause point, not who ticked which box.
+ */
+export interface TicketChecklist {
+  checklist: Checklist;
+  phase: ChecklistPhase;
+  obligation: ChecklistObligation;
+  /** Indexes into `Checklist.items` checked for THIS ticket. */
+  checkedIndexes: number[];
+  /** True when every item is checked. */
+  complete: boolean;
+  completedAt?: string;
+  /** Last actor to change the run. */
+  lastCheckedBy?: string;
+  lastCheckedAt?: string;
+}
+
+/** Input for `checklists.create(...)`. */
+export interface CreateChecklistInput {
+  spaceId: string;
+  name: string;
+  mode: ChecklistMode;
+  pausePoint: string;
+  items: ChecklistItemSpec[];
+}
+
+/** Input for `checklists.attach(...)`. */
+export interface AttachChecklistInput {
+  ticketId: string;
+  checklistId: string;
+  phase: ChecklistPhase;
+  obligation: ChecklistObligation;
+}
+
+/** Input for `checklists.setItemChecked(...)`. */
+export interface SetChecklistItemInput {
+  ticketId: string;
+  checklistId: string;
+  phase: ChecklistPhase;
+  itemIndex: number;
+  checked: boolean;
+  /** Who is checking — the current viewer id. */
+  actorId?: string;
+}

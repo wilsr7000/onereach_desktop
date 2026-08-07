@@ -32,6 +32,13 @@ export const SPACES_ERROR_CODES = {
   /** Spaces SDK called before `initSpaces()` ran. */
   NOT_INITIALIZED: 'SPACES_NOT_INITIALIZED',
   /**
+   * ADR-055 — a REQUIRED checklist gates this ticket transition and is
+   * not complete. Preflight gates leaving `open`; postflight gates
+   * entering `done`. The error names the incomplete checklists so the
+   * renderer can deep-link to the run.
+   */
+  CHECKLIST_REQUIRED: 'SPACES_CHECKLIST_REQUIRED',
+  /**
    * `create()` or `rename()` collided with an existing Space name in the
    * same account. Names are unique per account; renderers surface this
    * as "A space called 'X' already exists -- try a different name."
