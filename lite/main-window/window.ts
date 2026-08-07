@@ -109,8 +109,8 @@ const BACKGROUND = '#0e0e10';
 /**
  * Home-tab mode (2026-08-07, updated same day per user request): the
  * default Home surface is the CONFIGURED remote page (Settings →
- * Home; default = the WISER capture join room), with `{accountId}`
- * substitution for personalization. Overrides:
+ * Home; default = the GSX Product Expert email-triage prototype), with
+ * `{accountId}` substitution for personalization. Overrides:
  *   LITE_HOME=learn  → the local Learning Center page (lite/learn)
  *   LITE_HOME=feed   → the old remote IDW feed
  *   LITE_HOME=chrome → neither; boot-chat home view
@@ -1160,8 +1160,8 @@ function clearTabPartitionStorage(partition: string, tabId: string): void {
  * never blank.
  */
 /**
- * Mount the configured remote Home page (Settings → Home; default is
- * the WISER capture join room). Remote content: NO preload per
+ * Mount the configured remote Home page (Settings → Home). Remote
+ * content: NO preload per
  * ADR-038 — it must never reach window.lite.*. A `{accountId}`
  * placeholder in the configured URL is substituted with the signed-in
  * GSX account id (an identifier, not a credential). Load failure
@@ -1210,8 +1210,8 @@ function attachRemoteHome(win: BrowserWindow): void {
     const { url: configured } = await readHomeUrl();
     const accountId = getAuthApi().getSession('edison')?.accountId ?? null;
     const resolved = resolveHomeUrl(configured, accountId);
-    // The default Home page is the WISER capture join room, which
-    // needs mic/camera. Grant media ONLY to the configured page's own
+    // Some Home pages (e.g. the WISER capture join room) need
+    // mic/camera. Grant media ONLY to the configured page's own
     // origin — every other permission and origin still denies.
     try {
       const origin = new URL(resolved).origin;

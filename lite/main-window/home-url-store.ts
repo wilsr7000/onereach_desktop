@@ -3,8 +3,8 @@
  *
  * The main window's Home tab loads a remote page; WHICH page is a
  * user setting (Settings → Home) persisted as one JSON file under
- * userData. 2026-08-07, per user request: the default is the WISER
- * meeting capture join page for the standing onereach-lite room.
+ * userData. Default: the GSX Product Expert email-triage prototype
+ * (see DEFAULT_HOME_URL).
  *
  * The stored URL may contain the literal placeholder `{accountId}`,
  * substituted at load time with the signed-in GSX account id — so a
@@ -19,9 +19,14 @@ import { app } from 'electron';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-/** The default Home page: the WISER capture join room for this app. */
+/**
+ * The default Home page (2026-08-07, third iteration by user request):
+ * the GSX Product Expert email-triage prototype on the Learning
+ * Machine. The signed-in GSX account id rides the query string via the
+ * placeholder, per the original request for this URL.
+ */
 export const DEFAULT_HOME_URL =
-  'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/capture/join.html?room=onereach-lite-8f1aa9#k=BH9OJKfxYyV4aXr2XceB2ejUMO-WAyhXl9c34IhbvXq23SBKtQxSRoYoeM12ySo3dYU-uOdtXQxzlxK_MtuoDew';
+  'https://thelearningmachine-dev.up.railway.app/prototype/gsx-product-expert/live/email-triage?accountId={accountId}';
 
 /** Overridable for tests. */
 let baseDirOverride: string | null = null;

@@ -34,13 +34,17 @@ describe('home-url store', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('defaults to the WISER capture join room', async () => {
+  it('defaults to the GSX Product Expert email-triage prototype', async () => {
     const state = await readHomeUrl();
     expect(state.isDefault).toBe(true);
     expect(state.url).toBe(DEFAULT_HOME_URL);
-    expect(DEFAULT_HOME_URL).toContain('capture/join.html?room=onereach-lite-');
-    // The room key rides the fragment — it must be part of the default.
-    expect(DEFAULT_HOME_URL).toContain('#k=');
+    expect(DEFAULT_HOME_URL).toContain(
+      'thelearningmachine-dev.up.railway.app/prototype/gsx-product-expert/live/email-triage'
+    );
+    // The original request for this URL asked for the GSX account id
+    // on the query string — the placeholder delivers it at load time.
+    expect(DEFAULT_HOME_URL).toContain('accountId={accountId}');
+    expect(validateHomeUrl(DEFAULT_HOME_URL)).toBe(DEFAULT_HOME_URL);
   });
 
   it('round-trips a custom URL and resets to default with null', async () => {
@@ -78,7 +82,10 @@ describe('home-url store', () => {
     expect(resolveHomeUrl('https://x.example/app?accountId={accountId}', null)).toBe(
       'https://x.example/app?accountId='
     );
-    expect(resolveHomeUrl(DEFAULT_HOME_URL, 'acct-1')).toBe(DEFAULT_HOME_URL);
+    expect(resolveHomeUrl(DEFAULT_HOME_URL, 'acct-1')).toContain('accountId=acct-1');
+    expect(resolveHomeUrl('https://x.example/static', 'acct-1')).toBe(
+      'https://x.example/static'
+    );
   });
 });
 

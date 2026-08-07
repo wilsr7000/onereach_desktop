@@ -61,7 +61,7 @@ export function mountHome(container: HTMLElement): (() => void) | undefined {
   const render = (state: { url: string; isDefault: boolean }): void => {
     input.value = state.url;
     note.textContent = state.isDefault
-      ? 'Using the default (WISER capture join room).'
+      ? 'Using the default (GSX Product Expert — email triage).'
       : 'Custom URL set.';
   };
 
