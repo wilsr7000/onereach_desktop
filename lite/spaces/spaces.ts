@@ -1960,6 +1960,131 @@ function buildSharedMembersRow(
   return row;
 }
 
+// ─── Access duration (ADR-052) ───────────────────────────────────────
+//
+// The mental model we present is "who can see this, and until when" —
+// not the five mechanisms underneath (bucket privacy, file TTL, link
+// expiry, Space visibility, grant expiry). A member row answers the
+// second half of that question in words, or says nothing at all when
+// access is permanent.
+
+/** Access-duration presets. `''` is permanent. */
+const ACCESS_PRESETS: ReadonlyArray<{ value: string; ms: number; label: string }> = [
+  { value: '24h', ms: 24 * 60 * 60 * 1000, label: '24 hours' },
+  { value: '7d', ms: 7 * 24 * 60 * 60 * 1000, label: '7 days' },
+  { value: '30d', ms: 30 * 24 * 60 * 60 * 1000, label: '30 days' },
+  { value: '90d', ms: 90 * 24 * 60 * 60 * 1000, label: '90 days' },
+];
+
+/** Resolve a preset to an absolute instant, or null for permanent. */
+export function accessPresetToIso(value: string, now: number = Date.now()): string | null {
+  const preset = ACCESS_PRESETS.find((p) => p.value === value);
+  return preset === undefined ? null : new Date(now + preset.ms).toISOString();
+}
+
+export type AccessState = 'permanent' | 'active' | 'soon' | 'expired';
+
+/**
+ * Classify a grant. `expired` is a first-class state rather than an
+ * absence: the member stays listed so the owner can see WHY someone
+ * lost access, instead of silently vanishing from the list.
+ */
+export function accessState(
+  member: { accessExpiresAt?: string },
+  now: number = Date.now()
+): AccessState {
+  const raw = member.accessExpiresAt;
+  if (typeof raw !== 'string' || raw.trim().length === 0) return 'permanent';
+  const at = Date.parse(raw);
+  if (Number.isNaN(at)) return 'permanent';
+  if (at <= now) return 'expired';
+  return at - now <= 24 * 60 * 60 * 1000 ? 'soon' : 'active';
+}
+
+/**
+ * Label for a grant.
+ *
+ * Relative when it's urgent ("expires in 6h" — you need to act), and
+ * absolute once it's far enough out ("until 14 Aug" — you're planning
+ * around a date). A single format would be wrong at one end or the
+ * other. Permanent says nothing at all: the common case shouldn't add
+ * visual noise to every row.
+ */
+export function accessLabel(
+  member: { accessExpiresAt?: string },
+  now: number = Date.now()
+): string {
+  const state = accessState(member, now);
+  if (state === 'permanent') return '';
+  if (state === 'expired') return 'access expired';
+  const at = Date.parse(member.accessExpiresAt as string);
+  const ms = at - now;
+  if (ms <= 48 * 60 * 60 * 1000) {
+    const mins = Math.round(ms / 60000);
+    if (mins < 60) return `expires in ${Math.max(1, mins)}m`;
+    return `expires in ${Math.round(mins / 60)}h`;
+  }
+  const d = new Date(at);
+  const MONTHS = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  return `until ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()] ?? ''}`;
+}
+
+/**
+ * Ask for an access duration. Returns `undefined` when cancelled —
+ * distinct from `null`, which means "permanent".
+ */
+function promptAccessDuration(who: string): string | null | undefined {
+  const options = ACCESS_PRESETS.map((p, i) => `${i + 1}. ${p.label}`).join('\n');
+  const answer = window.prompt(
+    `How long should ${who} have access?\n\n${options}\n0. Permanent\n\n` +
+      `Enter a number, or an ISO date (2026-12-31T00:00:00Z).`,
+    '0'
+  );
+  if (answer === null) return undefined;
+  const trimmed = answer.trim();
+  if (trimmed === '' || trimmed === '0') return null;
+  const idx = Number.parseInt(trimmed, 10);
+  if (Number.isFinite(idx) && idx >= 1 && idx <= ACCESS_PRESETS.length) {
+    return accessPresetToIso(ACCESS_PRESETS[idx - 1]?.value ?? '');
+  }
+  // Anything else is treated as an explicit instant. Invalid values are
+  // rejected by the SDK with a readable message rather than silently
+  // becoming permanent access.
+  return trimmed;
+}
+
+/** Change (or renew) a member's access duration. */
+async function changeMemberAccess(
+  spaceId: string,
+  member: LiteSpacesMemberView,
+  refresh?: () => Promise<void>
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const who = member.name.length > 0 ? member.name : member.id;
+  const choice = promptAccessDuration(who);
+  if (choice === undefined) return;
+  try {
+    const envelope = await bridge.members.add(spaceId, member.id, { expiresAt: choice });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(
+      choice === null
+        ? `${who} now has permanent access`
+        : `${who}: ${accessLabel({ accessExpiresAt: choice })}`
+    );
+    if (refresh !== undefined) await refresh();
+    else await loadSharedSpaceDashboard(spaceId);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
 function buildMemberChip(
   spaceId: string,
   member: LiteSpacesMemberView,
@@ -1977,6 +2102,29 @@ function buildMemberChip(
   kindEl.className = 'spaces-shared-member-chip-kind';
   kindEl.textContent = member.kind;
   chip.appendChild(kindEl);
+
+  // Access duration. Always clickable — permanent renders as a quiet
+  // "∞" affordance rather than nothing, so adding a deadline is
+  // discoverable instead of hidden behind a menu nobody opens.
+  const state = accessState(member);
+  chip.setAttribute('data-access', state);
+  const access = document.createElement('button');
+  access.type = 'button';
+  access.className = `spaces-member-access spaces-member-access-${state}`;
+  const label = accessLabel(member);
+  access.textContent = state === 'permanent' ? '∞' : label;
+  access.title =
+    state === 'permanent'
+      ? `${member.name || member.id} has permanent access — click to set a time limit`
+      : state === 'expired'
+        ? `Access ended — click to renew`
+        : `Access ${label} — click to change`;
+  access.setAttribute('aria-label', access.title);
+  access.addEventListener('click', () => {
+    void changeMemberAccess(spaceId, member, refresh);
+  });
+  chip.appendChild(access);
+
   const remove = document.createElement('button');
   remove.type = 'button';
   remove.className = 'spaces-shared-member-chip-remove';
@@ -2347,12 +2495,23 @@ async function openAddMemberPrompt(
       if (isNewEmail) {
         await bridge.identity.getOrCreatePerson({ id: memberId, email: memberId });
       }
-      const envelope = await bridge.members.add(spaceId, memberId);
+      // Ask for a duration at the moment of granting. Defaults to
+      // permanent (least surprise), but putting the question here means
+      // time-limited access is a first-class choice rather than
+      // something you have to remember to go back and set.
+      const expiresAt = promptAccessDuration(memberId);
+      if (expiresAt === undefined) return; // cancelled
+      const envelope = await bridge.members.add(spaceId, memberId, { expiresAt });
       if (envelope.ok === false) {
         showToast(envelope.error.message);
         return;
       }
-      showToast(`Added ${envelope.value.name || memberId}`);
+      const added = envelope.value.name || memberId;
+      showToast(
+        expiresAt === null
+          ? `Added ${added}`
+          : `Added ${added} · ${accessLabel({ accessExpiresAt: expiresAt })}`
+      );
       dispose();
       if (refresh !== undefined) await refresh();
       else await loadSharedSpaceDashboard(spaceId);

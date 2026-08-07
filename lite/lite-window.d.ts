@@ -1023,6 +1023,13 @@ interface LiteSpacesMemberView {
   kind: string;
   id: string;
   name: string;
+  /**
+   * ADR-052 — ISO instant this member's access lapses. Absent means
+   * permanent, which is what every grant made before expiry existed
+   * resolves to. A member whose grant has already lapsed is still
+   * returned by `list`, so the owner can see why they lost access.
+   */
+  accessExpiresAt?: string;
 }
 
 interface LiteSpacesMembersBridge {
@@ -1031,7 +1038,13 @@ interface LiteSpacesMembersBridge {
   /** Grant a Person or Agent access. Idempotent. */
   add(
     spaceId: string,
-    memberId: string
+    memberId: string,
+    /**
+     * Omit to leave an existing grant's expiry untouched, `null` for
+     * permanent access, or an ISO instant to time-limit it. The three
+     * are distinct intents all the way to the Cypher.
+     */
+    opts?: { expiresAt?: string | null }
   ): Promise<LiteSpacesIpcResult<LiteSpacesMemberView>>;
   /** Revoke access. No-op when already absent. */
   remove(spaceId: string, memberId: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;

@@ -1144,13 +1144,18 @@ export const CYPHER = {
   LIST_SPACE_MEMBERS: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
-    OPTIONAL MATCH (member)-[:HAS_ACCESS]->(s)
+    OPTIONAL MATCH (member)-[r:HAS_ACCESS]->(s)
       WHERE member:Person OR member:Agent
-    WITH member
+    WITH member, r
     WHERE member IS NOT NULL
+    // ADR-052 — deliberately NOT filtered on expiry. A lapsed member
+    // stays listed so the owner can see WHY someone lost sight of the
+    // Space and renew them. Silently dropping the row turns an expired
+    // grant into an unexplained disappearance.
     RETURN head(labels(member)) AS kind,
            member.id AS id,
-           coalesce(member.name, member.title, '') AS name
+           coalesce(member.name, member.title, '') AS name,
+           r.expiresUnixMs AS expiresUnixMs
     ORDER BY kind ASC, toLower(coalesce(member.name, member.id, '')) ASC
   `,
 
@@ -3176,10 +3181,14 @@ export class SdkSpacesClient {
       const r = raw as Record<string, unknown>;
       const id = optString(r, 'id');
       if (id === undefined || id.length === 0) continue;
+      const expiry = r['expiresUnixMs'];
       out.push({
         kind: optString(r, 'kind') ?? 'Person',
         id,
         name: optString(r, 'name') ?? '',
+        ...(typeof expiry === 'number'
+          ? { accessExpiresAt: new Date(expiry).toISOString() }
+          : {}),
       });
     }
     return out;

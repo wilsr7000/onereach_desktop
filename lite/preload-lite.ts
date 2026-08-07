@@ -799,14 +799,26 @@ interface SpacesIdentityBridge {
   }): Promise<SpacesIpcResultView<{ id: string; name: string; email?: string }>>;
 }
 
+/** A member row. `accessExpiresAt` absent means permanent access. */
+interface SpacesMemberView {
+  kind: string;
+  id: string;
+  name: string;
+  /** ADR-052 — ISO instant the grant lapses. Absent = permanent. */
+  accessExpiresAt?: string;
+}
+
 interface SpacesMembersBridge {
-  list(spaceId: string): Promise<
-    SpacesIpcResultView<Array<{ kind: string; id: string; name: string }>>
-  >;
+  list(spaceId: string): Promise<SpacesIpcResultView<SpacesMemberView[]>>;
   add(
     spaceId: string,
-    memberId: string
-  ): Promise<SpacesIpcResultView<{ kind: string; id: string; name: string }>>;
+    memberId: string,
+    /**
+     * Omit to leave an existing grant's expiry alone; `null` for
+     * permanent; an ISO instant to time-limit it.
+     */
+    opts?: { expiresAt?: string | null }
+  ): Promise<SpacesIpcResultView<SpacesMemberView>>;
   /** Search the account's people + agents for the add-member picker. */
   searchLibrary(
     q: string,
@@ -1669,10 +1681,15 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_MEMBERS_LIST, { spaceId }) as Promise<
         SpacesIpcResultView<Array<{ kind: string; id: string; name: string }>>
       >,
-    add: (spaceId, memberId) =>
-      ipcRenderer.invoke(SPACES_MEMBERS_ADD, { spaceId, memberId }) as Promise<
-        SpacesIpcResultView<{ kind: string; id: string; name: string }>
-      >,
+    add: (spaceId, memberId, opts) =>
+      ipcRenderer.invoke(SPACES_MEMBERS_ADD, {
+        spaceId,
+        memberId,
+        // Forward the key only when the caller set it: absent, null
+        // and a value are three different intents (leave / permanent
+        // / expire) all the way down to the Cypher.
+        ...(opts !== undefined && 'expiresAt' in opts ? { expiresAt: opts.expiresAt } : {}),
+      }) as Promise<SpacesIpcResultView<{ kind: string; id: string; name: string; accessExpiresAt?: string }>>,
     searchLibrary: (q, limit) =>
       ipcRenderer.invoke(SPACES_MEMBERS_SEARCH_LIBRARY, {
         q,

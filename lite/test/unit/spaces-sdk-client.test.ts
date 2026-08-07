@@ -247,6 +247,52 @@ describe('CYPHER source strings', () => {
 
 // ─── listSpaces() ────────────────────────────────────────────────────────
 
+describe('SdkSpacesClient directory searches', () => {
+  it('member library maps rows, defaults kind to Person, and skips id-less junk', async () => {
+    // Review finding (2026-08-06): the mapper used requireString on
+    // `id`, so ONE malformed node threw the whole directory search
+    // (LIST_SPACE_MEMBERS skips such rows instead).
+    const stub = buildStubQuery();
+    stub.setResponse('MEMBER_LIBRARY', []);
+    stub.setResponse('member:Person OR member:Agent', [
+      { kind: 'Person', id: 'dana@x.com', name: 'Dana', email: 'dana@x.com' },
+      { kind: 'Agent', id: 'agent-7', name: 'Risk Analyst', email: null },
+      { kind: 'Person', id: null, name: 'Broken row', email: null },
+      { kind: null, id: 'p-9', name: 'No kind', email: null },
+    ]);
+    const client = new SdkSpacesClient({ query: stub.fn });
+    const rows = await client.searchMemberLibrary('', 25);
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toEqual({ kind: 'Person', id: 'dana@x.com', name: 'Dana', email: 'dana@x.com' });
+    expect(rows[1]?.kind).toBe('Agent');
+    expect(rows[1]?.email).toBe('');
+    // Unknown/missing kind falls back to Person (never throws).
+    expect(rows[2]).toEqual({ kind: 'Person', id: 'p-9', name: 'No kind', email: '' });
+  });
+
+  it('member library clamps the limit and trims the query', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('member:Person OR member:Agent', []);
+    const client = new SdkSpacesClient({ query: stub.fn });
+    await client.searchMemberLibrary('  robb  ', 5000);
+    const call = stub.calls.find((c) => c.cypher.includes('member:Person OR member:Agent'));
+    expect(call?.parameters?.['q']).toBe('robb');
+    expect(call?.parameters?.['limit']).toBe(100);
+  });
+
+  it('agent library skips id-less rows too', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (g:Agent)', [
+      { id: 'a-1', name: 'Support', description: 'Helps', agentType: 'conversational' },
+      { id: null, name: 'Junk', description: '', agentType: null },
+    ]);
+    const client = new SdkSpacesClient({ query: stub.fn });
+    const rows = await client.searchAgentLibrary('', 25);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.id).toBe('a-1');
+  });
+});
+
 describe('SdkSpacesClient.listSpaces', () => {
   it('maps Cypher rows to Space objects with full property set', async () => {
     const stub = buildStubQuery();
@@ -2696,9 +2742,17 @@ describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
 
   it('LIST_SPACE_MEMBERS matches Person OR Agent via HAS_ACCESS', () => {
     expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)/);
+    // ADR-052 — the edge is bound (`r`) so the grant's expiry can be
+    // projected. Deliberately NOT filtered on expiry: a lapsed member
+    // stays listed so the owner can see why they lost access.
     expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(
-      /OPTIONAL MATCH \(member\)-\[:HAS_ACCESS\]->\(s\)/
+      /OPTIONAL MATCH \(member\)-\[r:HAS_ACCESS\]->\(s\)/
     );
+    expect(CYPHER.LIST_SPACE_MEMBERS).toContain('r.expiresUnixMs AS expiresUnixMs');
+    expect(
+      CYPHER.LIST_SPACE_MEMBERS.includes('expiresUnixMs > $nowMs'),
+      'listing must not hide lapsed members'
+    ).toBe(false);
     expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(/member:Person OR member:Agent/);
   });
 
@@ -2767,7 +2821,7 @@ describe('SdkSpacesClient.getOrCreatePerson', () => {
 describe('SdkSpacesClient.listSpaceMembers', () => {
   it('returns [] when no members', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('OPTIONAL MATCH (member)-[:HAS_ACCESS]', []);
+    stub.setResponse('OPTIONAL MATCH (member)-[r:HAS_ACCESS]', []);
     const client = makeClient(stub);
     const members = await client.listSpaceMembers('sp-1');
     expect(members).toEqual([]);
@@ -2775,7 +2829,7 @@ describe('SdkSpacesClient.listSpaceMembers', () => {
 
   it('maps rows into SpaceMember objects with default kind/name', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('OPTIONAL MATCH (member)-[:HAS_ACCESS]', [
+    stub.setResponse('OPTIONAL MATCH (member)-[r:HAS_ACCESS]', [
       { kind: 'Person', id: 'alice', name: 'Alice' },
       { kind: 'Agent', id: 'audit', name: 'Audit Agent' },
       { kind: 'Person', id: 'bob', name: '' },
@@ -2789,7 +2843,7 @@ describe('SdkSpacesClient.listSpaceMembers', () => {
 
   it('skips rows with missing/empty id (defensive)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('OPTIONAL MATCH (member)-[:HAS_ACCESS]', [
+    stub.setResponse('OPTIONAL MATCH (member)-[r:HAS_ACCESS]', [
       { kind: 'Person', id: '', name: 'No Id' },
       { kind: 'Person', id: 'alice', name: 'Alice' },
     ]);

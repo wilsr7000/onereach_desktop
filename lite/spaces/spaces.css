@@ -6682,3 +6682,68 @@ body {
 .spaces-share-status {
   margin-top: 0;
 }
+
+/* ── Access duration on a member chip (ADR-052) ─────────────────────
+ *
+ * Permanent is the quiet default: a low-contrast "∞" that is still a
+ * button, so adding a deadline is discoverable rather than hidden.
+ * A live deadline reads normally; the last day turns amber; a lapsed
+ * grant turns red and STAYS IN THE LIST, because a member who silently
+ * disappeared is a mystery, and one labelled "access expired" is a
+ * one-click fix.
+ * ------------------------------------------------------------------ */
+
+.spaces-member-access {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  margin-left: 2px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #6f6f78;
+  font: inherit;
+  font-size: 10.5px;
+  line-height: 1.5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.spaces-member-access:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  color: #c7c7cd;
+}
+
+.spaces-member-access:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.7);
+  outline-offset: 1px;
+}
+
+.spaces-member-access-permanent {
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.spaces-member-access-active {
+  color: #9a9aa3;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.spaces-member-access-soon {
+  color: #ffd56b;
+  border-color: rgba(255, 213, 107, 0.3);
+  background: rgba(255, 213, 107, 0.08);
+}
+
+.spaces-member-access-expired {
+  color: #ff9b9b;
+  border-color: rgba(255, 155, 155, 0.35);
+  background: rgba(255, 155, 155, 0.1);
+}
+
+/* A lapsed member is de-emphasised but still legible — present enough
+ * to notice and renew, quiet enough not to read as active. */
+.spaces-shared-member-chip[data-access='expired'] .spaces-shared-member-chip-name {
+  opacity: 0.6;
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 155, 155, 0.5);
+}
