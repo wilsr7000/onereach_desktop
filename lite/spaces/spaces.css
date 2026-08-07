@@ -6776,3 +6776,47 @@ body {
   text-decoration: line-through;
   text-decoration-color: rgba(255, 155, 155, 0.5);
 }
+
+/* ── Exposure confirmation + members-only marker ────────────────────
+ *
+ * The confirm panel borrows the picker's shell so it reads as part of
+ * the app rather than a system error dialog. Its primary button is
+ * amber, not blue: the action is legitimate but consequential, and
+ * Cancel holds focus so a stray Enter can't widen who sees an asset.
+ * ------------------------------------------------------------------ */
+
+.spaces-confirm-panel {
+  max-width: 460px;
+}
+
+.spaces-confirm-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 2px 2px;
+  color: #c7c7cd;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.spaces-confirm-body p {
+  margin: 0;
+}
+
+.spaces-confirm-go {
+  border-color: rgba(255, 213, 107, 0.45) !important;
+  background: rgba(255, 213, 107, 0.14) !important;
+  color: #ffd56b !important;
+}
+
+.spaces-confirm-go:hover {
+  background: rgba(255, 213, 107, 0.22) !important;
+}
+
+.spaces-membership-lock {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.72;
+  line-height: 1;
+}

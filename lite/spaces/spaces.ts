@@ -2460,6 +2460,96 @@ async function cycleTicketStatus(ticket: RendererItem): Promise<void> {
  * all (it toasts "prompt() is not supported"), so every text prompt in
  * this renderer goes through here.
  */
+/**
+ * Inline confirmation for a consequential action.
+ *
+ * Same panel language as `askForText` rather than `window.confirm`: a
+ * system dialog reads as an app error, and this needs to read as a
+ * decision. `body` is rendered as paragraphs so the consequence can be
+ * stated in sentences instead of crammed into a title.
+ *
+ * Resolves true only on the explicit confirm — Escape, the backdrop,
+ * the close button and Cancel all resolve false, so the safe answer is
+ * the one every accidental interaction produces.
+ */
+function askToConfirm(
+  title: string,
+  body: string,
+  confirmLabel: string
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    document.querySelector('.spaces-confirm-backdrop')?.remove();
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      backdrop.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(value);
+    };
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Escape') finish(false);
+    };
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'spaces-member-picker-backdrop spaces-confirm-backdrop';
+    const panel = document.createElement('div');
+    panel.className = 'spaces-member-picker spaces-confirm-panel';
+    panel.setAttribute('role', 'alertdialog');
+    panel.setAttribute('aria-label', title);
+
+    const head = document.createElement('div');
+    head.className = 'spaces-member-picker-head';
+    const heading = document.createElement('span');
+    heading.textContent = title;
+    head.appendChild(heading);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'spaces-member-picker-close';
+    close.setAttribute('aria-label', 'Cancel');
+    close.textContent = '×';
+    close.addEventListener('click', () => finish(false));
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    const text = document.createElement('div');
+    text.className = 'spaces-confirm-body';
+    for (const para of body.split('\n\n')) {
+      if (para.trim().length === 0) continue;
+      const p = document.createElement('p');
+      p.textContent = para;
+      text.appendChild(p);
+    }
+    panel.appendChild(text);
+
+    const actions = document.createElement('div');
+    actions.className = 'spaces-text-prompt-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'spaces-new-asset-button';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => finish(false));
+    actions.appendChild(cancel);
+    const go = document.createElement('button');
+    go.type = 'button';
+    go.className = 'spaces-new-asset-button spaces-confirm-go';
+    go.textContent = confirmLabel;
+    go.addEventListener('click', () => finish(true));
+    actions.appendChild(go);
+    panel.appendChild(actions);
+
+    backdrop.appendChild(panel);
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop) finish(false);
+    });
+    document.addEventListener('keydown', onKey);
+    // Focus Cancel, not the confirm: a stray Enter should not widen
+    // who can see a restricted asset.
+    cancel.focus();
+  });
+}
+
 function askForText(title: string, placeholder = ''): Promise<string | null> {
   return new Promise((resolve) => {
     document.querySelector('.spaces-text-prompt-backdrop')?.remove();
@@ -5138,6 +5228,18 @@ function buildMembershipRow(
   name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
   row.appendChild(name);
 
+  // Which Spaces are members-only has to be visible AT THE MOMENT OF
+  // CHOOSING, not just in the warning afterwards -- otherwise the only
+  // signal that a choice matters is the dialog telling you off.
+  if (isRestrictedSpace(space)) {
+    const lock = document.createElement('span');
+    lock.className = 'spaces-membership-lock';
+    lock.textContent = '🔒';
+    lock.title = 'Members-only — only people with access can see this Space';
+    lock.setAttribute('aria-label', 'members-only space');
+    row.appendChild(lock);
+  }
+
   if (space.kind === 'shared') {
     const badge = document.createElement('span');
     badge.className = 'spaces-membership-kind';
@@ -5152,6 +5254,102 @@ function buildMembershipRow(
  * the new state, so on failure we put it back and say why -- rather
  * than silently diverging from the graph.
  */
+// ─── The union-rule guardrail ────────────────────────────────────────
+//
+// Asset visibility is a UNION: an item is visible if ANY Space it
+// belongs to is visible. The Cypher says so outright —
+//
+//   "An item in both a restricted space and an open one is visible —
+//    it genuinely lives in the open space."
+//
+// That was defensible when filing into a second Space meant hunting
+// through a dropdown. It is not defensible now: the membership panel
+// makes it one click, and the AI suggester actively proposes Spaces.
+// So the single most likely way to leak a restricted asset is to
+// accept a helpful suggestion.
+//
+// The rule itself stays — an item really does live in the open Space,
+// and silently refusing would be worse. What changes is that the
+// consequence is stated BEFORE it happens, and only in the case where
+// it actually changes who can see the thing.
+
+/** True when this Space is members-only. */
+export function isRestrictedSpace(space: { visibility?: string } | undefined): boolean {
+  return space?.visibility === 'restricted';
+}
+
+/**
+ * Would adding this item to `target` widen who can see it?
+ *
+ * Only when the item is currently in at least one Space and EVERY one
+ * of them is restricted, and the target is open. If the item already
+ * sits in any open Space, or is uncategorized, its visibility is
+ * already account-wide and this add changes nothing about exposure.
+ */
+export function wouldExposeRestrictedItem(
+  currentSpaceIds: ReadonlySet<string>,
+  target: { id: string; visibility?: string },
+  allSpaces: ReadonlyArray<{ id: string; visibility?: string }>
+): boolean {
+  if (isRestrictedSpace(target)) return false;
+  if (currentSpaceIds.size === 0) return false;
+  const byId = new Map(allSpaces.map((s) => [s.id, s]));
+  let known = 0;
+  for (const id of currentSpaceIds) {
+    const space = byId.get(id);
+    // An unknown Space is one we cannot prove is restricted. Treat it
+    // as open: better to skip the warning than to cry wolf on an item
+    // that was already public, which trains people to click through.
+    if (space === undefined) return false;
+    if (!isRestrictedSpace(space)) return false;
+    known += 1;
+  }
+  return known > 0;
+}
+
+/** Copy for the exposure confirmation. Names the consequence, not the rule. */
+export function exposureWarningText(
+  itemTitle: string,
+  targetName: string,
+  restrictedNames: ReadonlyArray<string>
+): string {
+  const from =
+    restrictedNames.length === 1
+      ? `“${restrictedNames[0]}”`
+      : `${restrictedNames.length} members-only spaces`;
+  return (
+    `“${itemTitle}” is currently only in ${from}, so only people with access can see it.\n\n` +
+    `Adding it to “${targetName}” makes it visible to everyone in the account — ` +
+    `it stays in ${restrictedNames.length === 1 ? 'the members-only space' : 'those spaces'} too, ` +
+    `but that no longer limits who can see it.`
+  );
+}
+
+/** Space ids the item currently belongs to, from the rendered checkboxes. */
+function currentSpaceIdsFor(itemId: string): ReadonlySet<string> {
+  const ids = new Set<string>();
+  const item = state.items.find((i) => i.id === itemId);
+  for (const c of item?.otherSpaces ?? []) {
+    if (typeof c.id === 'string') ids.add(c.id);
+  }
+  if (
+    state.activeScopeId !== HOME_SCOPE_ID &&
+    state.activeScopeId !== UNCATEGORIZED_SPACE_ID &&
+    typeof state.activeScopeId === 'string' &&
+    state.activeScopeId.length > 0
+  ) {
+    ids.add(state.activeScopeId);
+  }
+  return ids;
+}
+
+/** Display title for an item id, for use in confirmation copy. */
+function itemTitleFor(itemId: string): string {
+  const item = state.items.find((i) => i.id === itemId);
+  const title = item?.title ?? '';
+  return title.length > 0 ? title : 'This item';
+}
+
 async function toggleSpaceMembership(
   itemId: string,
   space: RendererSpace,
@@ -5160,6 +5358,29 @@ async function toggleSpaceMembership(
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
   const wantMember = box.checked;
+
+  // Union-rule guardrail: adding a restricted-only item to an open
+  // Space makes it visible account-wide. Say so before it happens.
+  if (wantMember) {
+    const currentIds = currentSpaceIdsFor(itemId);
+    if (wouldExposeRestrictedItem(currentIds, space, state.spaces)) {
+      const restrictedNames = [...currentIds]
+        .map((id) => state.spaces.find((s) => s.id === id))
+        .filter((s): s is RendererSpace => s !== undefined)
+        .map((s) => (s.name.length > 0 ? s.name : '(unnamed)'));
+      const title = itemTitleFor(itemId);
+      const ok = await askToConfirm(
+        'Make this visible to everyone?',
+        exposureWarningText(title, space.name, restrictedNames),
+        'Add anyway'
+      );
+      if (!ok) {
+        box.checked = false;
+        return;
+      }
+    }
+  }
+
   box.disabled = true;
   try {
     const envelope = wantMember
@@ -5194,10 +5415,23 @@ async function loadSpaceSuggestions(
 ): Promise<void> {
   const ai = window.lite?.ai;
   if (ai === undefined || typeof ai.suggestSpaces !== 'function') return;
+  // An item living only in members-only Spaces is deliberately
+  // limited. Because visibility is a UNION, suggesting an open Space
+  // for it would be recommending the exposure -- the guardrail on the
+  // checkbox would then have to argue against our own suggestion. So
+  // for a restricted-only item, only other restricted Spaces are
+  // offered. The user can still tick an open one by hand and confirm.
+  const restrictedOnly =
+    memberIds.size > 0 &&
+    [...memberIds].every((id) =>
+      isRestrictedSpace(state.spaces.find((s) => s.id === id))
+    );
+
   // Only offer Spaces it is NOT already in -- suggesting a Space you
   // are already filed under is noise.
   const candidates = state.spaces
     .filter((sp) => !memberIds.has(sp.id))
+    .filter((sp) => !restrictedOnly || isRestrictedSpace(sp))
     .map((sp) => ({
       id: sp.id,
       name: sp.name,
