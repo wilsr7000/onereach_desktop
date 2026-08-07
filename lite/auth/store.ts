@@ -1742,25 +1742,52 @@ function earliestCookieExpiryMs(
  * attribute so the cloned cookie behaves identically to the source on
  * the target partition.
  *
- * Notes:
- *   - `url` is required by `cookies.set`. We synthesize it from the
- *     cookie's domain (stripping a leading dot) and protocol (`https:`
- *     is mandatory when `secure: true`, which OneReach cookies are).
- *   - We deliberately omit `sameSite` when undefined so Electron
- *     defaults take over, but explicitly pass through when the source
- *     specified one.
+ * THE HOST-ONLY DISTINCTION IS THE WHOLE GAME. Electron's read shape
+ * reports a `domain` for every cookie — including host-only cookies,
+ * which merely record the host they were set on (`hostOnly: true`).
+ * Passing that `domain` back into `cookies.set()` converts the cookie
+ * into a Domain-attribute cookie. For most cookies that is subtly
+ * wrong (it widens them to subdomains); for `__Host-`-prefixed cookies
+ * it is fatal: the RFC 6265bis prefix contract REQUIRES secure +
+ * path=/ + NO Domain attribute, so Chromium rejects the set outright
+ * (`EXCLUDE_INVALID_PREFIX`).
+ *
+ * That rejection is why auto-login kept dying: OneReach signs in via
+ * Google SSO, and Google's session lives in `__Host-GAPS` /
+ * `__Host-1PLSID` / `__Host-3PLSID` on accounts.google.com. The clone
+ * dropped exactly those three on every boot — 32 OneReach cookies
+ * arrived, the Google session didn't — so every launch bounced through
+ * the full Google login + 2FA, and every launch fired sign-in
+ * notifications at the user.
+ *
+ * Rules, in order:
+ *   - Host-only source (`hostOnly === true`) -> NO `domain` in the set
+ *     details; the host is conveyed by `url` alone.
+ *   - `__Host-` name -> additionally force `secure: true` and
+ *     `path: '/'`, and never send `domain`, whatever the read shape
+ *     claimed. Belt-and-braces: a source that violates the contract
+ *     cannot produce a set() that violates it too.
+ *   - Genuine domain cookies (leading-dot domain, `hostOnly` false or
+ *     absent) keep their `domain` verbatim.
+ *   - `url` is synthesized from the domain (stripping a leading dot);
+ *     `https:` is mandatory when `secure: true`.
+ *   - `sameSite` passes through only when the source specified one.
  */
-function cookieSetDetailsFromSource(c: Cookie): Electron.CookiesSetDetails {
+export function cookieSetDetailsFromSource(c: Cookie): Electron.CookiesSetDetails {
   const host = (c.domain ?? '').replace(/^\./, '');
-  const url = `https://${host}${c.path ?? '/'}`;
+  const isHostPrefixed = c.name.startsWith('__Host-');
+  const isHostOnly = c.hostOnly === true || isHostPrefixed;
+  const path = isHostPrefixed ? '/' : (c.path ?? '/');
+  const url = `https://${host}${path}`;
   const details: Electron.CookiesSetDetails = {
     url,
     name: c.name,
     value: c.value,
   };
-  if (c.domain !== undefined) details.domain = c.domain;
-  if (c.path !== undefined) details.path = c.path;
-  if (c.secure !== undefined) details.secure = c.secure;
+  if (!isHostOnly && c.domain !== undefined) details.domain = c.domain;
+  if (c.path !== undefined || isHostPrefixed) details.path = path;
+  if (isHostPrefixed) details.secure = true;
+  else if (c.secure !== undefined) details.secure = c.secure;
   if (c.httpOnly !== undefined) details.httpOnly = c.httpOnly;
   if (c.sameSite !== undefined) details.sameSite = c.sameSite;
   if (typeof c.expirationDate === 'number') details.expirationDate = c.expirationDate;
