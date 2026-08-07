@@ -54,6 +54,8 @@ const TOTP_GET_CURRENT_CODE = 'lite:totp:get-current-code';
 const TOTP_DELETE_SECRET = 'lite:totp:delete-secret';
 
 const SETTINGS_OPEN = 'lite:settings:open';
+const HOME_URL_GET = 'lite:main-window:homeUrl:get';
+const HOME_URL_SET = 'lite:main-window:homeUrl:set';
 const API_DOCS_OPEN = 'lite:api-docs:open';
 const HEALTH_SNAPSHOT = 'lite:health:snapshot';
 const TELEMETRY_GET_STATUS = 'lite:telemetry:getStatus';
@@ -2401,6 +2403,20 @@ const bootChat: BootChatBridge = {
 
 contextBridge.exposeInMainWorld('lite', {
   ...liteMetadata,
+  homeUrl: {
+    get: () =>
+      ipcRenderer.invoke(HOME_URL_GET) as Promise<{
+        url: string;
+        isDefault: boolean;
+        defaultUrl: string;
+      }>,
+    set: (url: string | null) =>
+      ipcRenderer.invoke(HOME_URL_SET, { url }) as Promise<{
+        url: string;
+        isDefault: boolean;
+        defaultUrl: string;
+      }>,
+  },
   auth,
   totp,
   settings,

@@ -902,6 +902,13 @@ interface LiteSpacesContributorView {
 }
 
 /** Learning Center (2026-08-07): workspace signals for mission detection. */
+/** Configurable Home-tab URL (Settings → Home). */
+interface LiteHomeUrlState {
+  url: string;
+  isDefault: boolean;
+  defaultUrl: string;
+}
+
 interface LiteLearnSignalsView {
   spaces: number;
   otherMembers: number;
@@ -1420,6 +1427,11 @@ interface LiteWindowBridge {
   totp?: LiteTotpBridge;
   settings?: LiteSettingsBridge;
   spaces?: LiteSpacesBridge;
+  /** Configurable Home-tab URL (Settings → Home). */
+  homeUrl?: {
+    get(): Promise<LiteHomeUrlState>;
+    set(url: string | null): Promise<LiteHomeUrlState>;
+  };
   apiDocs?: LiteApiDocsBridge;
   health?: LiteHealthBridge;
   telemetry?: LiteTelemetryBridge;

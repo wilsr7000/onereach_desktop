@@ -33,6 +33,7 @@ import {
 } from 'electron';
 import type { Rectangle } from 'electron';
 import { dirname, join } from 'node:path';
+import { readHomeUrl, resolveHomeUrl } from './home-url-store.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
@@ -106,18 +107,25 @@ const BACKGROUND = '#0e0e10';
  * original boot-chat home view as the Home-tab content.
  */
 /**
- * Home-tab mode (2026-08-07): the default Home surface is now the
- * LOCAL Learning Center page (lite/learn) — tutorials + individualized
- * progress for the WISER Method, this app, and the Invisible Machines
- * ecosystem. `LITE_HOME=feed` restores the previous remote IDW feed;
- * `LITE_HOME=chrome` disables both and shows the boot-chat home view.
+ * Home-tab mode (2026-08-07, updated same day per user request): the
+ * default Home surface is the CONFIGURED remote page (Settings →
+ * Home; default = the WISER capture join room), with `{accountId}`
+ * substitution for personalization. Overrides:
+ *   LITE_HOME=learn  → the local Learning Center page (lite/learn)
+ *   LITE_HOME=feed   → the old remote IDW feed
+ *   LITE_HOME=chrome → neither; boot-chat home view
  */
-const HOME_TAB_MODE: 'learn' | 'feed' | 'chrome' =
+const HOME_TAB_MODE: 'remote-learn' | 'learn' | 'feed' | 'chrome' =
   process.env.LITE_HOME === 'chrome'
     ? 'chrome'
     : process.env.LITE_HOME === 'feed'
       ? 'feed'
-      : 'learn';
+      : process.env.LITE_HOME === 'learn'
+        ? 'learn'
+        : 'remote-learn';
+
+/** Own partition for the remote Home page — isolated cookie jar. */
+const HOME_REMOTE_PARTITION = 'persist:lite-home-remote';
 
 const IDW_HOME_URL: string | null =
   HOME_TAB_MODE === 'feed'
@@ -201,7 +209,9 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     // Mount the IDW home feed (default) as the Home-tab content, then
     // reconcile + rehydrate any persisted tabs. The feed sits below the
     // tab bar and reconcileViews shows it only while Home is active.
-    if (HOME_TAB_MODE === 'learn') {
+    if (HOME_TAB_MODE === 'remote-learn') {
+      attachRemoteHome(win);
+    } else if (HOME_TAB_MODE === 'learn') {
       attachLearnHome(win);
     } else if (IDW_HOME_URL !== null) {
       attachHomeFeed(win);
@@ -1149,6 +1159,87 @@ function clearTabPartitionStorage(partition: string, tabId: string): void {
  * bundled boot-chat home view shows through underneath — the Home tab is
  * never blank.
  */
+/**
+ * Mount the configured remote Home page (Settings → Home; default is
+ * the WISER capture join room). Remote content: NO preload per
+ * ADR-038 — it must never reach window.lite.*. A `{accountId}`
+ * placeholder in the configured URL is substituted with the signed-in
+ * GSX account id (an identifier, not a credential). Load failure
+ * hides the view so the boot-chat home shows through.
+ */
+function attachRemoteHome(win: BrowserWindow): void {
+  if (homeFeedView !== null) return;
+  const view = new WebContentsView({
+    webPreferences: {
+      // NO preload -- remote content must not reach window.lite.*.
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+      webSecurity: true,
+      partition: HOME_REMOTE_PARTITION,
+    },
+  });
+  view.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const scheme = new URL(url).protocol;
+      if (scheme === 'https:' || scheme === 'http:') {
+        void shell.openExternal(url);
+      }
+    } catch {
+      /* malformed URL — drop */
+    }
+    return { action: 'deny' };
+  });
+  view.webContents.on('did-fail-load', (_e, errorCode, errorDescription) => {
+    if (errorCode === -3) return; // ABORTED
+    getLoggingApi().warn('main-window', 'remote home failed to load; revealing boot-chat home', {
+      errorCode,
+      errorDescription,
+    });
+    try {
+      view.setVisible(false);
+    } catch {
+      /* best-effort */
+    }
+  });
+  homeFeedView = view;
+  win.contentView.addChildView(view);
+  view.setBounds(computeContentBounds(win));
+  view.setVisible(true);
+  void (async () => {
+    const { url: configured } = await readHomeUrl();
+    const accountId = getAuthApi().getSession('edison')?.accountId ?? null;
+    const resolved = resolveHomeUrl(configured, accountId);
+    // The default Home page is the WISER capture join room, which
+    // needs mic/camera. Grant media ONLY to the configured page's own
+    // origin — every other permission and origin still denies.
+    try {
+      const origin = new URL(resolved).origin;
+      view.webContents.session.setPermissionRequestHandler(
+        (contents, permission, callback) => {
+          const requesterOrigin = (() => {
+            try {
+              return new URL(contents.getURL()).origin;
+            } catch {
+              return null;
+            }
+          })();
+          callback(permission === 'media' && requesterOrigin === origin);
+        }
+      );
+    } catch {
+      /* origin parse failure — leave default (deny) behavior */
+    }
+    // NOTE: do not log the URL — the join link's fragment carries the
+    // room key.
+    void view.webContents.loadURL(resolved).catch((err: unknown) => {
+      getLoggingApi().warn('main-window', 'remote home initial load rejected', {
+        error: (err as Error).message,
+      });
+    });
+  })();
+}
+
 function attachLearnHome(win: BrowserWindow): void {
   if (homeFeedView !== null) return;
   if (mainWindowConfig === null) {

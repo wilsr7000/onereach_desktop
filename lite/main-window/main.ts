@@ -15,6 +15,7 @@
  * event on entry so renderer-driven activity is observable in `/logs`.
  */
 
+import { DEFAULT_HOME_URL, readHomeUrl, writeHomeUrl } from './home-url-store.js';
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import {
   getMainWindowApi,
@@ -46,6 +47,8 @@ export const MAIN_WINDOW_IPC = {
   LIST_TABS: 'lite:main-window:list-tabs',
   GET_ACTIVE: 'lite:main-window:get-active',
   GO_HOME: 'lite:main-window:go-home',
+  HOME_URL_GET: 'lite:main-window:homeUrl:get',
+  HOME_URL_SET: 'lite:main-window:homeUrl:set',
   RELOAD_ACTIVE: 'lite:main-window:reload-active',
   CHANGED: 'lite:main-window:changed',
 } as const;
@@ -110,6 +113,18 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
   const api = getMainWindowApi();
 
   // ── IPC handlers ───────────────────────────────────────────────────────
+
+  ipcMain.handle(MAIN_WINDOW_IPC.HOME_URL_GET, async () => {
+    const state = await readHomeUrl();
+    return { ...state, defaultUrl: DEFAULT_HOME_URL };
+  });
+
+  ipcMain.handle(MAIN_WINDOW_IPC.HOME_URL_SET, async (_event, payload: unknown) => {
+    const raw = (payload as { url?: unknown })?.url;
+    // null resets to the default; anything else must validate.
+    const state = await writeHomeUrl(raw === null ? null : String(raw ?? ''));
+    return { ...state, defaultUrl: DEFAULT_HOME_URL };
+  });
 
   ipcMain.handle(MAIN_WINDOW_IPC.LIST_TABS, async (): Promise<Tab[]> => {
     getLoggingApi().event(MAIN_WINDOW_EVENTS.IPC_LIST_TABS);

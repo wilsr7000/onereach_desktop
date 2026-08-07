@@ -19,6 +19,7 @@
 export {};
 
 import { mountAccount } from './sections/account.js';
+import { mountHome } from './sections/home.js';
 import { mountTwoFactor } from './sections/two-factor.js';
 import { mountNeon } from './sections/neon.js';
 import { mountIdws } from './sections/idws.js';
@@ -118,6 +119,11 @@ const SECTIONS: SectionDescriptor[] = [
     title: 'Diagnostics',
     icon: ICON_DIAGNOSTICS,
     mount: mountDiagnostics,
+  },
+  {
+    id: 'home',
+    title: 'Home',
+    mount: mountHome,
   },
   {
     id: 'developer',

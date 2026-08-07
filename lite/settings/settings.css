@@ -1836,3 +1836,34 @@ body {
     transition: none;
   }
 }
+
+
+/* ─── Home section (configurable Home-tab URL, 2026-08-07) ───────────── */
+
+.home-url-label {
+  display: block;
+  margin: 14px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.home-url-input {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  outline: none;
+}
+
+.home-url-input:focus {
+  border-color: rgba(96, 156, 255, 0.65);
+}
+
+.home-pane .dev-actions {
+  margin-top: 12px;
+}

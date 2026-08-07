@@ -269,13 +269,14 @@ describe('Learning Center wiring (source-level)', () => {
     return fs.readFileSync(found, 'utf8');
   };
 
-  it('the main window Home tab defaults to the Learning Center page', () => {
+  it('the main window Home tab defaults to the configured remote page', () => {
     const src = read('main-window/window.ts');
-    expect(src).toMatch(/HOME_TAB_MODE[\s\S]{0,200}'learn'/);
-    expect(src).toContain("HOME_TAB_MODE === 'learn'");
-    expect(src).toContain('attachLearnHome(win)');
-    // The old remote feed stays reachable, opt-in.
+    expect(src).toContain("'remote-learn'");
+    expect(src).toContain('attachRemoteHome(win)');
+    // The local Learning Center + old feed stay reachable, opt-in.
+    expect(src).toContain("process.env.LITE_HOME === 'learn'");
     expect(src).toContain("process.env.LITE_HOME === 'feed'");
+    expect(src).toContain('attachLearnHome(win)');
   });
 
   it('the learn view gets the kernel preload; lesson links leave via the OS browser', () => {
