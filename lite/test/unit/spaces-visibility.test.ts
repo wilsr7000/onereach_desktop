@@ -57,12 +57,93 @@ describe('visibility predicates in the Cypher surface', () => {
   const gatedSpaceQueries: Array<[string, string]> = [
     ['LIST_SPACES', CYPHER.LIST_SPACES],
     ['LIST_ITEMS_IN_SPACE', CYPHER.LIST_ITEMS_IN_SPACE],
+    // The 2026-08-07 review pass: read surfaces that leaked restricted
+    // Spaces' CONTENTS even though the sidebar hid the Space itself.
+    ['LIST_TICKETS_IN_SPACE', CYPHER.LIST_TICKETS_IN_SPACE],
+    ['GET_CURRENT_PLAYBOOK', CYPHER.GET_CURRENT_PLAYBOOK],
+    ['HOME_RECENT_EVENTS', CYPHER.HOME_RECENT_EVENTS],
+    ['HOME_TOP_CONTRIBUTORS', CYPHER.HOME_TOP_CONTRIBUTORS],
+    ['HOME_PERMISSION_SUMMARY', CYPHER.HOME_PERMISSION_SUMMARY],
+    ['HOME_ENTITY_COUNTS_FALLBACK', CYPHER.HOME_ENTITY_COUNTS_FALLBACK],
   ];
   const gatedAssetQueries: Array<[string, string]> = [
     ['GET_ITEM', CYPHER.GET_ITEM],
     ['SEARCH_ITEMS', CYPHER.SEARCH_ITEMS],
     ['HOME_RECENT_ITEMS', CYPHER.HOME_RECENT_ITEMS],
+    ['ITEM_RECENT_COMMITS', CYPHER.ITEM_RECENT_COMMITS],
   ];
+
+  /**
+   * Deliberately UNGATED, each with a reason. Listed so the next
+   * reviewer sees a decision, not an omission:
+   *  - FIND_ASSET_BY_FILE_KEY / FIND_AGENT_ASSET_IN_SPACE /
+   *    LIST_INLINE_BINARY_ASSETS: main-process write-path helpers
+   *    (orphan-cleanup ambiguity guard, create dedupe, GSX migration).
+   *    Viewer-gating them would make cleanup DELETE files whose assets
+   *    are merely invisible to the current viewer.
+   *  - AGENT_LIBRARY_SEARCH / MEMBER_LIBRARY_SEARCH /
+   *    HOME_AGENTS_SAMPLE: account-wide directories by design.
+   *  - SPACE_EXISTS_BY_ID / SPACE_ITEM_COUNT: internal pre-flights;
+   *    the mutations they serve are themselves gated now.
+   *  - UNCATEGORIZED_*: items with no Space are visible by definition.
+   */
+  const DELIBERATELY_UNGATED = [
+    'FIND_ASSET_BY_FILE_KEY',
+    'FIND_AGENT_ASSET_IN_SPACE',
+    'LIST_INLINE_BINARY_ASSETS',
+    'AGENT_LIBRARY_SEARCH',
+    'MEMBER_LIBRARY_SEARCH',
+    'HOME_AGENTS_SAMPLE',
+    'SPACE_EXISTS_BY_ID',
+    'SPACE_ITEM_COUNT',
+    // Internal endpoint-diff helper on the agent WRITE path; the
+    // renderer reads endpoints through gated GET_ITEM projections.
+    'GET_AGENT_ENDPOINTS',
+  ];
+
+  it('every ungated MATCH query is on the deliberate list — no accidental leaks', () => {
+    const undeclared: string[] = [];
+    for (const [name, body] of Object.entries(CYPHER)) {
+      if (!/\bMATCH\b/.test(body)) continue;
+      const gated =
+        body.includes('SPACE_VISIBLE') === false && // predicates are interpolated…
+        !body.includes('coalesce(s.visibility') &&
+        !body.includes('coalesce(vs.visibility') &&
+        !body.includes('coalesce(other.visibility') &&
+        !body.includes('$viewerId');
+      const writes = /\b(MERGE|CREATE|SET|DELETE|DETACH)\b/.test(body);
+      if (gated && !writes && !name.startsWith('UNCATEGORIZED') && !name.startsWith('LIST_ITEMS_UNCATEGORIZED')) {
+        if (!DELIBERATELY_UNGATED.includes(name)) undeclared.push(name);
+      }
+    }
+    expect(undeclared, 'new read query lacks visibility AND is not on the deliberate list').toEqual([]);
+  });
+
+  it('space chips cannot name a restricted Space', () => {
+    // An item reachable through one open Space must not reveal the
+    // NAMES of restricted Spaces it also belongs to. GET_ITEM gates
+    // the `s`-bound chips join; LIST_ITEMS_IN_SPACE gates its
+    // `other`-bound join.
+    expect(CYPHER.GET_ITEM).toContain('coalesce(vs.visibility'); // the item itself
+    expect(CYPHER.GET_ITEM).toContain('coalesce(s.visibility'); // its chips
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain('coalesce(other.visibility');
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain('r2.expiresUnixMs');
+  });
+
+  it('membership + space mutations require the caller to see the Space', () => {
+    for (const q of [
+      CYPHER.ADD_SPACE_MEMBER,
+      CYPHER.REMOVE_SPACE_MEMBER,
+      CYPHER.UPDATE_SPACE,
+      CYPHER.RENAME_SPACE,
+      CYPHER.SOFT_DELETE_SPACE,
+      CYPHER.HARD_DELETE_SPACE,
+      CYPHER.UNDELETE_SPACE,
+    ]) {
+      expect(q).toContain("coalesce(s.visibility, 'open')");
+      expect(q).toContain('$viewerId');
+    }
+  });
 
   it.each(gatedSpaceQueries)('%s gates on the space visibility predicate', (_name, q) => {
     expect(q).toContain("coalesce(s.visibility, 'open') <> 'restricted'");

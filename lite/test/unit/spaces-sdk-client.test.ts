@@ -2823,10 +2823,16 @@ describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
       /OPTIONAL MATCH \(member\)-\[r:HAS_ACCESS\]->\(s\)/
     );
     expect(CYPHER.LIST_SPACE_MEMBERS).toContain('r.expiresUnixMs AS expiresUnixMs');
-    expect(
-      CYPHER.LIST_SPACE_MEMBERS.includes('expiresUnixMs > $nowMs'),
-      'listing must not hide lapsed members'
-    ).toBe(false);
+    // Two DIFFERENT expiry checks must not be conflated:
+    //   - the VIEWER's grant (inside the SPACE_VISIBLE EXISTS) may and
+    //     does check expiry — an expired viewer cannot read a
+    //     restricted roster (2026-08-07 gating pass);
+    //   - the ROSTER edge must NOT be expiry-filtered — lapsed members
+    //     stay listed so the owner can see why and renew them.
+    // So: the member OPTIONAL MATCH carries only the label check.
+    expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(
+      /OPTIONAL MATCH \(member\)-\[r:HAS_ACCESS\]->\(s\)\n\s+WHERE member:Person OR member:Agent\n\s+WITH member, r/
+    );
     expect(CYPHER.LIST_SPACE_MEMBERS).toMatch(/member:Person OR member:Agent/);
   });
 
@@ -2841,9 +2847,14 @@ describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
     expect(CYPHER.ADD_SPACE_MEMBER).toContain('r.expiresUnixMs = $expiresUnixMs');
   });
 
-  it('REMOVE_SPACE_MEMBER deletes the HAS_ACCESS edge', () => {
+  it('REMOVE_SPACE_MEMBER deletes the edge — and only for an authorized caller', () => {
+    // 2026-08-07 gating pass: the Space is matched FIRST, gated by
+    // SPACE_VISIBLE, so a caller who cannot see a restricted Space
+    // cannot strip its members. No match -> the documented no-op.
+    expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)/);
+    expect(CYPHER.REMOVE_SPACE_MEMBER).toContain("coalesce(s.visibility, 'open')");
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(
-      /MATCH \(member \{id: \$memberId\}\)-\[r:HAS_ACCESS\]->\(s:Space \{id: \$spaceId\}\)/
+      /MATCH \(member \{id: \$memberId\}\)-\[r:HAS_ACCESS\]->\(s\)/
     );
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(/DELETE r/);
   });

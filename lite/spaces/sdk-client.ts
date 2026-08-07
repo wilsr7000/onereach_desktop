@@ -176,6 +176,20 @@ const MAX_LIMIT = 500;
  */
 const GRANT_LIVE = `(r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs)`;
 
+/**
+ * SPACE_VISIBLE for a space bound as `other` (the GET_ITEM chips join).
+ * Without it, an item visible through one open Space showed chips
+ * NAMING every restricted Space it also belongs to — and names are
+ * often the sensitive part.
+ */
+const OTHER_SPACE_VISIBLE = `(
+        coalesce(other.visibility, 'open') <> 'restricted'
+        OR ($viewerId <> '' AND EXISTS {
+          MATCH (:Person {id: $viewerId})-[r2:HAS_ACCESS]->(other)
+          WHERE (r2.expiresUnixMs IS NULL OR r2.expiresUnixMs > $nowMs)
+        })
+      )`;
+
 const SPACE_VISIBLE = `(
         coalesce(s.visibility, 'open') <> 'restricted'
         OR ($viewerId <> '' AND EXISTS {
@@ -288,6 +302,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
       WHERE other.id <> s.id
         AND other.deletedAt IS NULL
+        AND ${OTHER_SPACE_VISIBLE}
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     WITH a,
          collect(DISTINCT { id: other.id,
@@ -402,6 +417,7 @@ export const CYPHER = {
   ITEM_RECENT_COMMITS: `
     MATCH (a:Asset {id: $id})
       WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (c:Commit)
       WHERE c.assetId = $id
          OR c.targetId = $id
@@ -426,6 +442,8 @@ export const CYPHER = {
       WHERE a.deletedAt IS NULL
         AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     OPTIONAL MATCH (editor:Person)-[:LAST_EDITED]->(a)
     OPTIONAL MATCH (a)-[:TAGGED_AS]->(t:Tag)
@@ -517,9 +535,9 @@ export const CYPHER = {
     RETURN labels
   `,
   HOME_ENTITY_COUNTS_FALLBACK: `
-    MATCH (s:Space) WHERE s.deletedAt IS NULL RETURN 'Space' AS kind, count(s) AS n
+    MATCH (s:Space) WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE} RETURN 'Space' AS kind, count(s) AS n
     UNION ALL
-    MATCH (a:Asset) RETURN 'Asset' AS kind, count(a) AS n
+    MATCH (a:Asset) WHERE a.deletedAt IS NULL AND ${ASSET_VISIBLE} RETURN 'Asset' AS kind, count(a) AS n
     UNION ALL
     MATCH (p:Person) RETURN 'Person' AS kind, count(p) AS n
     UNION ALL
@@ -588,6 +606,9 @@ export const CYPHER = {
   HOME_TOP_CONTRIBUTORS: `
     MATCH (c:Commit)
     WHERE c.timestamp >= $sinceMs
+    OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
+    WITH c, s
+    WHERE s IS NULL OR (s.deletedAt IS NULL AND ${SPACE_VISIBLE})
     RETURN c.author AS author,
            count(c) AS events,
            toString(max(c.timestamp)) AS lastEventAt
@@ -609,6 +630,8 @@ export const CYPHER = {
     WHERE ($since IS NULL OR c.timestamp >= $since)
       AND ($spaceId IS NULL OR c.spaceId = $spaceId)
     OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
+    WITH c, s
+    WHERE s IS NULL OR (s.deletedAt IS NULL AND ${SPACE_VISIBLE})
     RETURN c.hash AS id,
            c.author AS author,
            c.message AS kind,
@@ -738,6 +761,7 @@ export const CYPHER = {
   HOME_PERMISSION_SUMMARY: `
     MATCH (s:Space)
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     WITH count(s) AS visible
     RETURN visible AS visibleSpaceCount
   `,
@@ -804,6 +828,7 @@ export const CYPHER = {
   RENAME_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (other:Space)
       WHERE other.id <> $id
         AND toLower(coalesce(other.name, '')) = toLower($name)
@@ -835,6 +860,7 @@ export const CYPHER = {
   UPDATE_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     SET s.updatedAt = $now
     FOREACH (_ IN CASE WHEN $writeDescription THEN [1] ELSE [] END |
       SET s.description = $description
@@ -924,6 +950,7 @@ export const CYPHER = {
   SOFT_DELETE_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     SET s.deletedAt = $now,
         s.updatedAt = $now
     RETURN s.id AS id
@@ -938,6 +965,7 @@ export const CYPHER = {
    */
   HARD_DELETE_SPACE: `
     MATCH (s:Space {id: $id})
+      WHERE ${SPACE_VISIBLE}
     DELETE s
   `,
 
@@ -950,6 +978,7 @@ export const CYPHER = {
   UNDELETE_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NOT NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
     WITH s, count(a) AS itemCount
     SET s.deletedAt = null,
@@ -993,6 +1022,7 @@ export const CYPHER = {
   GET_CURRENT_PLAYBOOK: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]->(canonical:Asset)
     OPTIONAL MATCH (legacy:Asset {id: s.currentPlaybookId})
     WITH coalesce(canonical, legacy) AS pb
@@ -1040,6 +1070,7 @@ export const CYPHER = {
         AND a.deletedAt IS NULL
         AND coalesce(a.type, a.assetType) = 'ticket'
         AND ($status IS NULL OR coalesce(a.status, 'open') = $status)
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a)-[:ASSIGNED_TO]->(assignee)
       WHERE assignee:Person OR assignee:Agent
     OPTIONAL MATCH (a)-[:DECOMPOSED_FROM]->(pb:Asset)
@@ -1186,6 +1217,7 @@ export const CYPHER = {
   LIST_SPACE_MEMBERS: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (member)-[r:HAS_ACCESS]->(s)
       WHERE member:Person OR member:Agent
     WITH member, r
@@ -1210,6 +1242,7 @@ export const CYPHER = {
   ADD_SPACE_MEMBER: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     MATCH (member {id: $memberId})
       WHERE member:Person OR member:Agent
     MERGE (member)-[r:HAS_ACCESS]->(s)
@@ -1255,7 +1288,9 @@ export const CYPHER = {
    * the count and just re-renders).
    */
   REMOVE_SPACE_MEMBER: `
-    MATCH (member {id: $memberId})-[r:HAS_ACCESS]->(s:Space {id: $spaceId})
+    MATCH (s:Space {id: $spaceId})
+      WHERE ${SPACE_VISIBLE}
+    MATCH (member {id: $memberId})-[r:HAS_ACCESS]->(s)
       WHERE member:Person OR member:Agent
     DELETE r
     RETURN $memberId AS id
