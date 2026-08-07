@@ -193,4 +193,26 @@ test.describe('WISER guest page — screen-share render & layout', () => {
 
     await page.screenshot({ path: path.join(SHOT_DIR, 'mobile-two-shares.png') });
   });
+
+  test('phone: mute/camera/leave controls stay on screen while sharing (worst case)', async ({ page }) => {
+    // Regression: .session-view lacked min-height:0, so with a share active the
+    // flex column grew to content height and overflow:hidden clipped the
+    // controls bar — "mute and camera controls go away when screen sharing".
+    await page.setViewportSize({ width: 375, height: 667 });
+    await setupShares(page, [
+      { sid: 'sid-rich', name: 'Rich', color: '#2f9e44' },
+      { sid: 'local', name: 'You', color: '#3b5bdb' },
+    ]);
+    // Worst case: the settings panel adds its height too.
+    await page.evaluate(() => guest.toggleDevicePanel());
+
+    const vh = 667;
+    for (const id of ['micBtn', 'camBtn', 'shareBtn', 'leaveBtn']) {
+      const box = await page.locator('#' + id).boundingBox();
+      expect(box, id + ' should render').toBeTruthy();
+      expect(box.y, id + ' top on screen').toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height, id + ' bottom on screen').toBeLessThanOrEqual(vh + 1);
+    }
+    await page.screenshot({ path: path.join(SHOT_DIR, 'phone-share-controls.png') });
+  });
 });

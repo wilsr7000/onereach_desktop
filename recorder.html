@@ -566,6 +566,14 @@
         transition: border-color var(--transition-fast);
       }
 
+      /* Long space names ellipsize instead of clipping mid-letter when the
+         window is near its 600px minimum width. */
+      .hub-identity select {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
       .hub-identity input:focus,
       .hub-identity select:focus {
         outline: none;
@@ -1094,16 +1102,22 @@
         font-family: 'JetBrains Mono', monospace;
       }
 
+      /* Collapsed (max-width: 0) while hidden so the invisible buttons don't
+         reserve row width and squeeze the space name down to a few chars. */
       .hub-room-actions {
         display: flex;
         gap: 4px;
         opacity: 0;
-        transition: opacity var(--transition-fast);
+        max-width: 0;
+        overflow: hidden;
+        transition: opacity var(--transition-fast), max-width var(--transition-fast);
         flex-shrink: 0;
       }
 
-      .hub-room-row:hover .hub-room-actions {
+      .hub-room-row:hover .hub-room-actions,
+      .hub-room-row:focus-within .hub-room-actions {
         opacity: 1;
+        max-width: 120px;
       }
 
       .hub-room-btn {
@@ -3039,6 +3053,9 @@
         background-position: right 12px center;
         padding-right: 32px;
         transition: border-color 0.2s;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
 
       .session-space-selector select:focus {
@@ -6527,6 +6544,11 @@
 
           // Clean up meeting tokens when window is closed without clicking End Session
           window.addEventListener('beforeunload', () => {
+            // Complete the meeting object too (status -> completed + artifact
+            // links + post-meeting analysis). Fire-and-forget: the IPC handler
+            // runs in the main process, which outlives this renderer, so the
+            // analysis still lands even as the window goes away.
+            this._completeActiveMeeting('window-close');
             // Guests must not clear the host's tokens
             if (this._meetingRoomName && this.sessionRole === 'host' && window.recorder) {
               const roomName = this._meetingRoomName;
@@ -7965,6 +7987,7 @@
 
         async startLiveTranscription() {
           this._transcriptionUnavailableReason = null;
+          this._transcriptionIntentionalStop = false;
 
           // Need at least one live audio source (mixed destination, session
           // mix, or the recording stream's mic) to feed the realtime API.
@@ -8033,18 +8056,26 @@
               // Show status
               this.elements.transcriptionStatus.classList.add('visible', 'active');
               this.elements.transcriptionStatusText.textContent = 'Live captions';
+              // Let web guests show their CC indicator
+              this._broadcastCcState(!this._agentPaused);
 
-              // Start the periodic transcript file flush (every 5 seconds)
-              this.startTranscriptFileFlush();
-
-              // Start streaming audio
-              try {
-                this.startAudioStreaming();
-                console.log('[Transcription] Audio streaming started at 24kHz');
-              } catch (err) {
-                this._transcriptionUnavailableReason = 'error';
-                this._trackError('audio-streaming', err.message);
-                console.error('[Transcription] Audio streaming failed:', err);
+              // On a fresh start, spin up the transcript file flush + the audio
+              // pipeline. On a RECONNECT (the realtime session capped out
+              // mid-meeting) both are already running, so reuse them -- the
+              // existing ScriptProcessor simply feeds the new socket, and the
+              // transcript continues with no gap beyond the brief reconnect.
+              if (!this.transcriptionProcessor) {
+                this.startTranscriptFileFlush();
+                try {
+                  this.startAudioStreaming();
+                  console.log('[Transcription] Audio streaming started at 24kHz');
+                } catch (err) {
+                  this._transcriptionUnavailableReason = 'error';
+                  this._trackError('audio-streaming', err.message);
+                  console.error('[Transcription] Audio streaming failed:', err);
+                }
+              } else {
+                console.log('[Transcription] Reconnected; reusing audio pipeline + flush');
               }
             };
 
@@ -8062,7 +8093,29 @@
             };
 
             this.transcriptionWs.onclose = (ev) => {
-              console.log('[Transcription] WebSocket closed');
+              console.log('[Transcription] WebSocket closed', ev && ev.code);
+              // The OpenAI realtime session caps its duration, so on a long
+              // meeting the socket closes mid-recording. Without a reconnect the
+              // transcript silently stops -- confirmed: a 225-min meeting only
+              // captured ~60 min. Reconnect while still recording so the whole
+              // meeting is transcribed; the audio pipeline is reused (no gap).
+              if (this._transcriptionIntentionalStop || !this.isRecording) return;
+              const attempt = (this._transcriptionReconnectAttempts = (this._transcriptionReconnectAttempts || 0) + 1);
+              if (attempt > 20) {
+                console.warn('[Transcription] Giving up reconnect after 20 attempts');
+                if (this.elements.transcriptionStatusText) {
+                  this.elements.transcriptionStatusText.textContent = 'Captions stopped';
+                }
+                return;
+              }
+              const delay = Math.min(1000 * Math.pow(1.5, attempt - 1), 15000);
+              clearTimeout(this._transcriptionReconnectTimer);
+              this._transcriptionReconnectTimer = setTimeout(() => {
+                if (this.isRecording && !this._transcriptionIntentionalStop) {
+                  console.log('[Transcription] Reconnecting live transcription (attempt ' + attempt + ')');
+                  this.startLiveTranscription();
+                }
+              }, delay);
             };
           } catch (error) {
             this._transcriptionUnavailableReason = 'error';
@@ -8196,12 +8249,16 @@
         handleTranscriptionEvent(data) {
           switch (data.type) {
             case 'conversation.item.input_audio_transcription.delta':
+              // Real transcript flowing => healthy session; reset reconnect
+              // backoff so a later session cap starts fresh from attempt 1.
+              this._transcriptionReconnectAttempts = 0;
               if (data.delta) {
                 this.interimText += data.delta;
                 // Show interim caption with speaker name if in a meeting
                 const speakerPrefix =
                   this.sessionConnected && this._currentSpeakerName ? this._currentSpeakerName + ': ' : '';
                 this.showCaption(speakerPrefix + this.interimText, true);
+                this._broadcastCaption(this.interimText, this._currentSpeakerName, false);
               }
               break;
 
@@ -8233,6 +8290,7 @@
                   });
                   const displayText = speaker ? speaker + ': ' + finalText : finalText;
                   this.showCaption(displayText, false);
+                  this._broadcastCaption(finalText, speaker, true);
                   // Clear after display
                   setTimeout(() => {
                     if (this.elements.captionText.textContent === displayText) {
@@ -8259,6 +8317,11 @@
         },
 
         stopLiveTranscription() {
+          // Deliberate stop -> don't let onclose schedule a reconnect.
+          this._transcriptionIntentionalStop = true;
+          clearTimeout(this._transcriptionReconnectTimer);
+          // Guests drop their CC indicator + caption bar
+          this._broadcastCcState(false);
           this._lastAudioRMS = 0;
           if (this.transcriptionProcessor) {
             this.transcriptionProcessor.disconnect();
@@ -9875,6 +9938,7 @@
             const row = document.createElement('div');
             row.className = 'hub-room-row' + (this._selectedRoomId === space.id ? ' active' : '');
             row.dataset.spaceId = space.id;
+            row.title = space.name || space.id;
             row.onclick = (e) => {
               if (e.target.closest('.hub-room-btn')) return;
               this.selectRoom(space.id);
@@ -10416,6 +10480,10 @@
                 },
                 [participant.identity]
               );
+              // Late joiners also need to know captions are flowing
+              if (this.transcriptionWs && this.transcriptionWs.readyState === WebSocket.OPEN) {
+                this._broadcastCcState(!this._agentPaused, [participant.identity]);
+              }
             }
           });
 
@@ -10703,6 +10771,19 @@
 
             // Local preview + recording stream (camera + session audio mix)
             this._attachLocalSessionMedia();
+
+            // Join should just join: enter the session immediately instead of
+            // gating on a ParticipantConnected EVENT. Participants who are
+            // ALREADY in the room when we connect (host leaving and returning
+            // to a live meeting) never fire that event, which left the host
+            // stuck on "Waiting for participants" while guests were visibly
+            // in the room. Containers for existing participants are ensured
+            // here; their tracks arrive via the normal TrackSubscribed path.
+            this._enterSessionMode();
+            this._livekitRoom.remoteParticipants?.forEach((p) => {
+              this._ensureParticipantContainer(p.sid, p.name || p.identity);
+            });
+            this._updateLayout();
 
             // 5. Publish guest page and build join link
             els.publicJoinSection.style.display = 'block';
@@ -11293,6 +11374,9 @@
             }
           }
 
+          // Guests' CC indicator tracks the pause (no captions while paused).
+          this._broadcastCcState(!paused);
+
           this.showStatus(paused ? 'AI paused — recording continues' : 'AI resumed', 'info');
         },
 
@@ -11600,6 +11684,35 @@
           this._updateLayout();
           this.showStatus('Screen sharing stopped', 'info');
           console.log('[LiveKit] Screen share stopped');
+        },
+
+        // ── Caption broadcast to web guests ─────────────────────────
+        // Transcription runs on the HOST only (it holds the OpenAI key and the
+        // session audio mix), so without these messages guests never see that
+        // transcription is happening. Interims are throttled to one per 400ms;
+        // finals always go out and reset the throttle window.
+        _broadcastCaption(text, speaker, isFinal) {
+          if (!this.sessionConnected || !this._livekitRoom || !text) return;
+          const now = Date.now();
+          if (!isFinal) {
+            if (now - (this._lastCaptionBroadcastAt || 0) < 400) return;
+            this._lastCaptionBroadcastAt = now;
+          } else {
+            this._lastCaptionBroadcastAt = 0;
+          }
+          this.sendSessionData({
+            type: 'live-caption',
+            text: String(text).slice(0, 600),
+            speaker: speaker || null,
+            final: !!isFinal,
+          });
+        },
+
+        // Tells guests whether live captions are flowing (transcription up and
+        // not paused), so their CC indicator matches reality.
+        _broadcastCcState(active, destinationIdentities) {
+          if (!this.sessionConnected || !this._livekitRoom) return;
+          this.sendSessionData({ type: 'cc-state', active: !!active }, destinationIdentities);
         },
 
         // Send data to session peers (LiveKit or legacy data channel)
@@ -12337,47 +12450,59 @@
           }
         },
 
+        // Complete the active Meeting Object (status -> completed, artifact
+        // links, then post-meeting analysis: summary / action items /
+        // decisions / vibe). Idempotent: clears _activeMeeting so a second
+        // call is a no-op. Called from sessionCleanup (End Session) AND from
+        // the window's beforeunload -- a real 225-min meeting ended by just
+        // closing the window left its meeting stuck at status "scheduled"
+        // with no analysis, because completion only ran on an explicit End.
+        async _completeActiveMeeting(reason) {
+          if (!this._activeMeeting || !this._activeMeetingItemId) return;
+          const meeting = this._activeMeeting;
+          const itemId = this._activeMeetingItemId;
+          // Claim before awaiting so a concurrent second caller no-ops.
+          this._lastCompletedMeeting = meeting;
+          this._activeMeeting = null;
+          this._activeMeetingItemId = null;
+          try {
+            const participants = [...(this._participants?.values() || [])].map(p => ({
+              identity: p.identity || 'Guest',
+            }));
+            await window.recorder.completeMeeting({
+              spaceId: meeting.spaceId,
+              itemId,
+              meetingId: meeting.id,
+              participants,
+              // Link the artifacts the agent captured so the meeting object
+              // records them (and the graph can draw meeting->transcript /
+              // meeting->recording). Best-effort: whatever finished saving.
+              transcriptItemId: this._lastTranscriptItemId || null,
+              recordingItemIds: this._lastRecordingItemIds || [],
+            });
+            console.log('[Meeting] Object completed (' + (reason || 'end') + '):', meeting.id);
+
+            // Trigger post-meeting analysis (non-blocking background task)
+            window.recorder.postMeetingAnalyze({
+              spaceId: meeting.spaceId,
+              itemId,
+              meetingId: meeting.id,
+            })
+              .then(r => {
+                if (r?.success && !r.skipped) {
+                  console.log('[Meeting] Post-meeting analysis complete, vibe:', r.meeting?.post?.vibeScore?.score);
+                }
+              })
+              .catch(e => console.warn('[Meeting] Post-meeting analysis failed:', e.message));
+          } catch (e) {
+            console.warn('[Meeting] Object completion failed (non-blocking):', e.message);
+          }
+        },
+
         // Cleanup session resources
         async sessionCleanup() {
           // Complete the Meeting Object via IPC
-          if (this._activeMeeting && this._activeMeetingItemId) {
-            try {
-              const participants = [...(this._participants?.values() || [])].map(p => ({
-                identity: p.identity || 'Guest',
-              }));
-              await window.recorder.completeMeeting({
-                spaceId: this._activeMeeting.spaceId,
-                itemId: this._activeMeetingItemId,
-                meetingId: this._activeMeeting.id,
-                participants,
-                // Link the artifacts the agent captured so the meeting object
-                // records them (and the graph can draw meeting->transcript /
-                // meeting->recording). Best-effort: whatever finished saving.
-                transcriptItemId: this._lastTranscriptItemId || null,
-                recordingItemIds: this._lastRecordingItemIds || [],
-              });
-              console.log('[Meeting] Object completed:', this._activeMeeting.id);
-
-              // Trigger post-meeting analysis (non-blocking background task)
-              const _analysisData = {
-                spaceId: this._activeMeeting.spaceId,
-                itemId: this._activeMeetingItemId,
-                meetingId: this._activeMeeting.id,
-              };
-              window.recorder.postMeetingAnalyze(_analysisData)
-                .then(r => {
-                  if (r?.success && !r.skipped) {
-                    console.log('[Meeting] Post-meeting analysis complete, vibe:', r.meeting?.post?.vibeScore?.score);
-                  }
-                })
-                .catch(e => console.warn('[Meeting] Post-meeting analysis failed:', e.message));
-            } catch (e) {
-              console.warn('[Meeting] Object completion failed (non-blocking):', e.message);
-            }
-            this._lastCompletedMeeting = this._activeMeeting;
-            this._activeMeeting = null;
-            this._activeMeetingItemId = null;
-          }
+          await this._completeActiveMeeting('session-end');
 
           this.sessionConnected = false;
           this.sessionRole = null;

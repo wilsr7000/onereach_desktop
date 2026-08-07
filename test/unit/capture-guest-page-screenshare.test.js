@@ -169,3 +169,124 @@ describe('guest page — simultaneous screen sharing (remote app)', () => {
     expect(labels(document)).toEqual(['Participant is sharing']);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// LIVE CAPTIONS FROM THE HOST (guest side). The host broadcasts
+// live-caption / cc-state data messages; these drive the CC chip and the
+// caption bar. Same jsdom harness — we call the real handlers directly,
+// exactly as the DataReceived dispatcher does after its host-identity gate.
+// ═══════════════════════════════════════════════════════════════════
+
+describe('guest page — live captions from the host', () => {
+  let guest, document;
+
+  beforeEach(() => {
+    ({ guest, document } = loadGuestWithDom());
+  });
+
+  const bar = (d) => d.getElementById('guestCaption');
+  const chip = (d) => d.getElementById('ccLive');
+
+  it('cc-state true shows the CC chip; false hides chip and caption bar', () => {
+    guest._setCcState(true);
+    expect(chip(document).classList.contains('visible')).toBe(true);
+
+    guest._handleLiveCaption({ text: 'hello there', speaker: 'Rich', final: false });
+    expect(bar(document).classList.contains('visible')).toBe(true);
+
+    guest._setCcState(false);
+    expect(chip(document).classList.contains('visible')).toBe(false);
+    expect(bar(document).classList.contains('visible')).toBe(false);
+  });
+
+  it('renders speaker-prefixed text; interim vs final styling', () => {
+    guest._handleLiveCaption({ text: 'first half', speaker: 'Rich', final: false });
+    const txt = document.getElementById('guestCaptionText');
+    expect(txt.textContent).toBe('Rich: first half');
+    expect(bar(document).classList.contains('interim')).toBe(true);
+
+    guest._handleLiveCaption({ text: 'first half done.', speaker: 'Rich', final: true });
+    expect(txt.textContent).toBe('Rich: first half done.');
+    expect(bar(document).classList.contains('interim')).toBe(false);
+  });
+
+  it('a caption implies CC is live (indicator lights even without cc-state)', () => {
+    expect(chip(document).classList.contains('visible')).toBe(false);
+    guest._handleLiveCaption({ text: 'implicit activation', speaker: null, final: false });
+    expect(chip(document).classList.contains('visible')).toBe(true);
+  });
+
+  it('caption text is rendered as text, never markup (injection-safe)', () => {
+    guest._handleLiveCaption({ text: '<img src=x onerror=alert(1)>', speaker: '<b>Evil</b>', final: true });
+    const txt = document.getElementById('guestCaptionText');
+    expect(txt.querySelector('img')).toBeNull();
+    expect(txt.querySelector('b')).toBeNull();
+    expect(txt.textContent).toContain('<img src=x onerror=alert(1)>');
+  });
+
+  it('empty caption messages are ignored', () => {
+    expect(() => guest._handleLiveCaption({ text: '', final: true })).not.toThrow();
+    expect(() => guest._handleLiveCaption(null)).not.toThrow();
+    expect(bar(document).classList.contains('visible')).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// RECORDING TRANSFER GUARDS. A meeting ending abruptly used to hijack the
+// guest's screen with a doomed "uploading" overlay that then failed — the
+// old guard only checked the room OBJECT existed (it survives disconnect).
+// ═══════════════════════════════════════════════════════════════════
+
+describe('guest page — recording transfer guards', () => {
+  let guest, document;
+
+  beforeEach(() => {
+    ({ guest, document } = loadGuestWithDom());
+  });
+
+  const overlayActive = (d) => d.getElementById('transferOverlay').classList.contains('active');
+  const title = (d) => d.getElementById('transferTitle').textContent;
+
+  it('empty recording: no upload theater, blob discarded', async () => {
+    guest.recordedBlob = { size: 100 };
+    await guest.sendRecordingToHost();
+    expect(overlayActive(document)).toBe(false);
+    expect(guest.recordedBlob).toBeNull();
+  });
+
+  it('room disconnected: straight to download, zero chunks sent', async () => {
+    guest.recordedBlob = { size: 50000 };
+    guest.room = { state: 'disconnected', localParticipant: {}, remoteParticipants: new Map() };
+    let sent = 0;
+    guest.sendData = () => { sent++; };
+    await guest.sendRecordingToHost();
+    expect(title(document)).toBe('Meeting connection closed');
+    expect(sent).toBe(0);
+    expect(overlayActive(document)).toBe(true); // download UI is shown
+  });
+
+  it('host left (room still connected): download offered, zero chunks sent', async () => {
+    guest.recordedBlob = { size: 50000 };
+    const remotes = new Map([['g1', { identity: 'guest-3' }]]); // no host
+    guest.room = { state: 'connected', localParticipant: {}, remoteParticipants: remotes };
+    let sent = 0;
+    guest.sendData = () => { sent++; };
+    await guest.sendRecordingToHost();
+    expect(title(document)).toBe('Host has left the meeting');
+    expect(sent).toBe(0);
+  });
+
+  it('host present + connected: transfer proceeds and completes', async () => {
+    const bytes = new ArrayBuffer(20000);
+    guest.recordedBlob = { size: 20000, type: 'video/webm', arrayBuffer: async () => bytes };
+    const remotes = new Map([['h', { identity: 'host' }]]);
+    guest.room = { state: 'connected', localParticipant: {}, remoteParticipants: remotes };
+    const sentTypes = [];
+    guest.sendData = (d) => { sentTypes.push(d && d.type ? d.type : 'chunk'); };
+    await guest.sendRecordingToHost();
+    expect(sentTypes[0]).toBe('track-transfer-start');
+    expect(sentTypes[sentTypes.length - 1]).toBe('track-transfer-complete');
+    expect(sentTypes.filter((t) => t === 'chunk').length).toBeGreaterThan(0);
+    expect(title(document)).toBe('Transfer complete');
+  });
+});
