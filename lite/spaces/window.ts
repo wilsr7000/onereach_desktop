@@ -169,6 +169,18 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
       sandbox: true,
       nodeIntegration: false,
       webSecurity: true,
+      // Chromium's PDF viewer is implemented as a PLUGIN, and Electron
+      // defaults `plugins` to false. Without this, every
+      // `<embed type="application/pdf">` in this window silently fails
+      // to instantiate — which is why PDF tile previews rendered blank
+      // and the detail pane's inline viewer showed nothing.
+      //
+      // The failure was not silent in the logs once renderer
+      // diagnostics existed: each attempt emitted
+      // "Electron sandboxed_renderer.bundle.js script failed to run"
+      // plus a TypeError from the sandbox bootstrap, twice per refresh
+      // cycle, indefinitely.
+      plugins: true,
     },
   });
 
