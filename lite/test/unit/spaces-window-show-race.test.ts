@@ -48,6 +48,35 @@ describe('clampToDisplay — title bar must stay grabbable', () => {
     expect(got.y, 'must not be dragged to the primary top').toBe(-880);
   });
 
+  it('pushes a window out from under the macOS menu bar (observed at y=3)', () => {
+    // The window was found stuck at y=3: `bounds.y` is 0 on the primary
+    // display and INCLUDES the menu bar, so y=3 passed the old clamp
+    // while the title bar sat behind the menu bar — no grab handle, no
+    // reachable close button. workArea.y is the first usable row.
+    const withMenuBar = [
+      { bounds: { x: 0, y: 0, width: 1728, height: 1117 },
+        workArea: { x: 0, y: 37, width: 1728, height: 1080 } },
+    ];
+    const got = clampToDisplay({ x: 423, y: 3, width: 1124, height: 692 }, withMenuBar);
+    expect(got.y, 'title bar must clear the menu bar').toBe(37);
+    expect(got.x).toBe(423);
+  });
+
+  it('still clamps correctly when a display reports no workArea', () => {
+    const noWorkArea = [{ bounds: { x: 0, y: 0, width: 1728, height: 1117 } }];
+    const got = clampToDisplay({ x: 100, y: -21, width: 800, height: 600 }, noWorkArea);
+    expect(got.y).toBe(0);
+  });
+
+  it('leaves a window below the menu bar untouched', () => {
+    const withMenuBar = [
+      { bounds: { x: 0, y: 0, width: 1728, height: 1117 },
+        workArea: { x: 0, y: 37, width: 1728, height: 1080 } },
+    ];
+    const got = clampToDisplay({ x: 200, y: 150, width: 1200, height: 800 }, withMenuBar);
+    expect(got.y).toBe(150);
+  });
+
   it('leaves a well-placed window untouched', () => {
     const got = clampToDisplay({ x: 200, y: 150, width: 1200, height: 800 }, TWO_DISPLAYS);
     expect(got).toEqual({ x: 200, y: 150, width: 1200, height: 800 });

@@ -426,7 +426,7 @@ export function parseBounds(raw: unknown): Partial<Rectangle> | null {
  */
 export function clampToDisplay(
   bounds: { width: number; height: number; x?: number; y?: number },
-  displays?: Array<{ bounds: Rectangle }>
+  displays?: Array<{ bounds: Rectangle; workArea?: Rectangle }>
 ): Rectangle {
   const width = Math.max(bounds.width, MIN_WIDTH);
   const height = Math.max(bounds.height, MIN_HEIGHT);
@@ -469,7 +469,7 @@ export function clampToDisplay(
   // macOS menu bar -- visible, but impossible to grab and move back.
   // Push the top edge down onto the host display; never push it up, so
   // a deliberately-placed window keeps its position.
-  const host =
+  const hostDisplay =
     all.find(
       ({ bounds: db }) =>
         bounds.x !== undefined &&
@@ -478,8 +478,15 @@ export function clampToDisplay(
         bounds.x < db.x + db.width &&
         bounds.y + height > db.y &&
         bounds.y < db.y + db.height
-    )?.bounds ?? all[0]?.bounds;
-  const y = host !== undefined ? Math.max(bounds.y, host.y) : bounds.y;
+    ) ?? all[0];
+  // Clamp to the WORK AREA's top, not the display's. `bounds.y` is 0 on
+  // the primary display and INCLUDES the macOS menu bar, so a window at
+  // y=3 passed this check while its title bar sat behind the menu bar —
+  // visible, but with no grab handle and no reachable close button
+  // (observed in the wild 2026-08-07 at exactly y=3). `workArea.y`
+  // starts below the menu bar, which is the first usable row.
+  const hostTop = hostDisplay?.workArea?.y ?? hostDisplay?.bounds.y;
+  const y = hostTop !== undefined ? Math.max(bounds.y, hostTop) : bounds.y;
   return {
     x: bounds.x,
     y,
