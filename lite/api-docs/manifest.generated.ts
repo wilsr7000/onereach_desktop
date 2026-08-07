@@ -2884,7 +2884,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 31,
+        "count": 34,
         "entries": [
           {
             "constantKey": "LIST_SPACES_START",
@@ -2944,6 +2944,21 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "UNCATEGORIZED_COUNT_FAIL",
             "name": "spaces.uncategorizedCount.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "LEARN_SIGNALS_START",
+            "name": "spaces.learn.signals.start",
+            "description": ""
+          },
+          {
+            "constantKey": "LEARN_SIGNALS_FINISH",
+            "name": "spaces.learn.signals.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "LEARN_SIGNALS_FAIL",
+            "name": "spaces.learn.signals.fail",
             "description": ""
           },
           {
@@ -3044,6 +3059,59 @@ export const MANIFEST: Manifest = {
         ]
       },
       "readme": "# Spaces Module\n\n**Status**: Phase 1 + Phase 2 + chunk 3k/3o (Home view) shipped. The Spaces window opens with **Home** as the default scope — a 5-card news feed that surfaces what's in your data room (entity counts + 30-day sparklines, top contributors over the last week, agents in your account, your visible-Space count, and the most-recently-added items). Sidebar lists every `:Space` the active account can see and surfaces the Uncategorized intake count. When you click into a Space (or Uncategorized) the main pane switches to the existing item-cards view: `:Asset` cards (surfaced as \"Items\" in the renderer naming) with multi-Space chips, optional provenance, and a right-rail detail panel. Cypher-backed throughout; no stubs remain.\n\nThe Phase 0.5 Discovery panel that previously lived at the bottom of the Spaces window has moved to **Settings → Diagnostics → \"Spaces Discovery (engineer)\"** — same runner, same JSON output, but no longer crowding the user-facing UI. See [`HOME-V1.md`](./HOME-V1.md) for the chunk detail.\n\n**Schema**: queries follow the canonical OneReach graph schema documented in the `(:Schema)` nodes themselves: node label `:Asset`, edge `[:BELONGS_TO]` from Asset to Space, creator edge `[:CREATED]` from Person to Asset. Every projected field uses `coalesce(canonical, legacy, default)` so existing data written by the legacy `omnigraph-client.js` push path (which writes `title` / `assetType` / `fileUrl` / snake_case timestamps) still renders alongside data using the canonical names. The TypeScript surface (`Item`, `ItemSummary`) keeps the friendlier \"Item\" naming for renderers; only the Cypher uses the storage label.\n\n> Spaces is a **platform primitive**, not a Lite-only feature. The Lite UI in this module is the first consumer of the SDK; future consumers include GSX agents, Cowork integrations, and the Approval + Audit event stream. The methods on `SpacesApi` ARE the platform contract -- treat them with that level of stability discipline. See the spaces plan (\"Spaces as Platform Primitive\" section).\n\n## Public surface (`api.ts`)\n\n```ts\nimport { getSpacesApi } from '../spaces/api.js';\n\nconst api = getSpacesApi();\napi.open();                                          // launch / focus the window\n\n// Phase 1 + 2 (browse)\nawait api.listSpaces();                              // every :Space the account can read\nawait api.getUncategorizedCount();                   // :Asset nodes with no :BELONGS_TO edge\nawait api.items.list({ kind: 'uncategorized' });     // Items without a :Space\nawait api.items.list({ kind: 'space', spaceId: '…' }); // Items in one :Space (+ chips)\nawait api.items.get(itemId);                          // full Item incl. content + metadata\n\n// Home view (chunk 3k + 3o) — read-only news-feed data\nawait api.getEntityCounts();                          // { spaces, assets, people, agents }\nawait api.listRecentItems({ limit: 3 });              // most-recent :Asset, ItemSummary shape\nawait api.topContributors({ window: 'week', limit: 4 }); // :Commit aggregates by author\nawait api.listRecentEvents({ limit: 50 });            // :Commit projection (id/author/kind/timestamp/space)\nawait api.listAgentsSample({ limit: 3 });             // first N :Agent alphabetically\nawait api.getPermissionSummary();                     // { visibleSpaceCount, totalSpaceCount? }\n```\n\nUse `resolveSpaceScope(id)` at any UI/IPC boundary that hands a plain id into the SDK. The synthetic Uncategorized id is exported as `UNCATEGORIZED_SPACE_ID` and is the only string the renderer/IPC layer ever uses; the typed `SpaceScope` union is what every internal call site sees.\n\n### Cypher\n\nAll eleven queries live as module constants on `lite/spaces/sdk-client.ts` so they're greppable, diffable in code review, and asserted on by unit tests (regression-guarded against accidental drift):\n\n- `CYPHER.LIST_SPACES`, `UNCATEGORIZED_COUNT`, `LIST_ITEMS_UNCATEGORIZED`, `LIST_ITEMS_IN_SPACE`, `GET_ITEM` — Phase 1 + 2 browse\n- `CYPHER.HOME_ENTITY_COUNTS` (+ `_FALLBACK`), `HOME_RECENT_ITEMS`, `HOME_TOP_CONTRIBUTORS`, `HOME_RECENT_EVENTS`, `HOME_AGENTS_SAMPLE`, `HOME_PERMISSION_SUMMARY` — Home view (chunk 3k)\n\n### Provenance projection\n\nEach item-list query and `getItem` optionally project a `producedBy` row via the canonical creator edge `(:Person)-[:CREATED]->(:Asset)` (per the `_RelationshipTypes` Schema node). When the edge is absent, the projection collapses to `null` and the renderer omits the provenance line. Future producer types (`:Agent`, `:Workflow`, etc.) will widen the OPTIONAL MATCH as those modules port over.\n\n## Internal layout\n\n| File                  | Role                                                                       |\n| --------------------- | -------------------------------------------------------------------------- |\n| `api.ts`              | Public surface + singleton swap pattern. The only allowed importer.        |\n| `types.ts`            | `Space`, `Item`, `ItemSummary`, `ListOpts`, etc.                           |\n| `scope.ts`            | `SpaceScope` union + `resolveSpaceScope` helper.                           |\n| `errors.ts`           | `SpacesError` + `SPACES_ERROR_CODES`.                                      |\n| `events.ts`           | `SpacesEvent` taxonomy + `SPACES_EVENTS` catalog.                          |\n| `sdk-client.ts`       | Cypher wrapper. Phase 1+ injects `getNeonApi().query` at boot.             |\n| `discovery.ts`        | Phase 0.5 query runner (main-process; uses `getNeonApi()`). Now invoked from Settings → Diagnostics, not the Spaces window. |\n| `discovery-format.ts` | Renderer-safe types + Markdown formatter for discovery results.            |\n| `window.ts`           | Single-instance `BrowserWindow` factory.                                   |\n| `ipc.ts`              | `lite:spaces:*` IPC handler registration (incl. `lite:spaces:home:*`).      |\n| `main.ts`             | `initSpaces()` orchestrator + Tools-menu wiring.                           |\n| `spaces.html/css`     | Renderer chrome + Home view + item card / chip / detail-pane styles.       |\n| `spaces.ts`           | Renderer entrypoint (IIFE bundled by esbuild). Default scope is Home.       |\n| `DISCOVERY.md`        | Phase 0.5 reference: Q1–Q6 queries + Q5/Q6 operational template.           |\n| `DISCOVERY-PHASE-3.md`| Phase 3 D-series operational questions for Edison; gates 3d/3g.             |\n| `HOME-V1.md`          | Chunk detail for Home (3k + 3o).                                            |\n| `ROADMAP.md`          | Phases shipped / sketched / out of scope.                                  |\n\n## Error catalog\n\n| Code                          | Trigger                                                          |\n| ----------------------------- | ---------------------------------------------------------------- |\n| `SPACES_NOT_AUTHENTICATED`    | No `mult` token / no active account.                             |\n| `SPACES_NOT_FOUND`            | Space / item missing, or filtered out by ACL.                    |\n| `SPACES_FORBIDDEN`            | Caller lacks read/mutate permission on the target.               |\n| `SPACES_CYPHER`               | Neon query failed (transient, syntax, or malformed result).      |\n| `SPACES_NETWORK`              | DNS / TCP / TLS / fetch reject on the way to Edison.             |\n| `SPACES_INVALID_INPUT`        | Empty id, bad limit, malformed payload.                          |\n| `SPACES_NOT_INITIALIZED`      | SDK called before `initSpaces()` ran.                            |\n\nThe SDK client normalizes the underlying `NEON_*` codes to the spaces-side codes above so callers only ever see one error taxonomy. See `normalizeError()` in `sdk-client.ts`.\n\n## Conformance\n\n`lite/test/unit/spaces-api.test.ts` runs `runApiConformanceContract` per Rule 12. Required surface: `['open', 'listSpaces', 'getUncategorizedCount', 'items']` (the new Home methods extend the surface but are not part of the conformance baseline yet).\n\n## Test coverage\n\n| File                                       | Layer covered                                                                |\n| ------------------------------------------ | ---------------------------------------------------------------------------- |\n| `spaces-api.test.ts`                       | Singleton swap + conformance contract.                                       |\n| `spaces-discovery.test.ts`                 | Phase 0.5 Q1–Q4 runner shape.                                                |\n| `spaces-sdk-client.test.ts`                | Cypher source regression guards (incl. 6 Home queries), row-to-domain mapping, error normalization. |\n| `spaces-renderer.test.ts`                  | Pure DOM builders (sidebar rows, item cards, chips, detail pane, formatters). |\n| `spaces-home-cards.test.ts`                | Home view pure builders + `formatBigNumber` / `formatRecency` / `sparklinePath` rules. |\n| `spaces-renderer-integration.test.ts`      | Sidebar search filter + intake pulse (driven via the renderer bundle).        |\n| `spaces/home-flow.test.ts` (integration)   | End-to-end Home view: 5 cards loaded / empty / error states against an in-memory bridge. |\n| `spaces/platform-contract.test.ts` (integration) | Platform-primitive contract assertions across the SDK surface.            |\n| `spaces/trust-principles.test.ts` (integration)  | Reversibility harness across mutation methods (Phase 3+).                  |\n\n## Out of scope (this phase)\n\n- `addToSpace` / `removeFromSpace` mutations (Phase 3 chunks 3a-3c)\n- Per-Space activity-tab drill-down (extension of 3k in v2)\n- Real bidirectional sync (v2 chunk 3l)\n- Auto-metadata pipeline beyond Space suggestions (v2 chunk 3j)\n- Ontology-aware navigation (v2 chunk 3m)\n- Agents as first-class room participants — subscribe-and-react (v2 chunk 3n)\n- Real-time activity pulse (server WebSocket prerequisite; no plan to add)\n- Pin / favorite Spaces (small follow-up; not roadmap-level)\n"
+    },
+    {
+      "slug": "telemetry",
+      "title": "Telemetry",
+      "summary": "Telemetry module -- PUBLIC API.\n\nThe only file other lite modules import from this module (ADR-019 /\nRule 11). The surface is deliberately tiny: read status, record a\nconsent decision, run the one-time ask. Everything else -- counting,\nsealing, sending -- is internal, because no other module has any\nbusiness influencing what leaves the machine.\n\nThe consent invariant the whole module hangs off: nothing is ever\nsent unless the persisted record says exactly `granted`. The\nuninitialized default below therefore reports `unset` and treats\n`setConsent` as a no-op -- a caller racing boot cannot conjure a\ngrant out of an uninitialized module.",
+      "surface": {
+        "interfaceName": "TelemetryApi",
+        "interfaceDescription": "Telemetry surface. Implemented by `initTelemetry()` in `main.ts`;\nthe default is a safe uninitialized stand-in.",
+        "methods": [
+          {
+            "name": "getStatus",
+            "signature": "getStatus(): TelemetryStatus",
+            "description": "Current consent + identity + accumulation day.",
+            "tags": [
+              {
+                "tag": "returns",
+                "value": "The live status. Never throws; the uninitialized\n  implementation returns an empty-identity, `unset`-consent shape."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "setConsent",
+            "signature": "setConsent(state: 'granted' | 'denied'): TelemetryStatus",
+            "description": "Record a consent decision (Settings toggle / consent dialog).",
+            "tags": [
+              {
+                "tag": "param",
+                "value": "state `'granted'` opts this install in; `'denied'` opts out.\n  Anything else must be ignored by implementations."
+              },
+              {
+                "tag": "returns",
+                "value": "The status after the decision."
+              }
+            ],
+            "examples": []
+          },
+          {
+            "name": "promptIfNeeded",
+            "signature": "promptIfNeeded(parent: BrowserWindow | null): Promise<void>",
+            "description": "Show the one-time consent ask if it is still owed (consent is\n`unset`). Resolves without prompting when a decision exists.",
+            "tags": [
+              {
+                "tag": "param",
+                "value": "parent Window to parent the dialog to; null for app-modal."
+              }
+            ],
+            "examples": []
+          }
+        ]
+      },
+      "events": null,
+      "readme": "# `lite/telemetry/` — Alpha Usage Telemetry\n\nPer-install daily rollups for the alpha rollout, behind an Apple-style opt-in. Answers \"how is the app behaving in the wild\" — versions, crashes, surface usage — without measuring the person using it.\n\n- **Public API**: [`api.ts`](api.ts) — `TelemetryApi`, `getTelemetryApi()` singleton, `CONSENT_DISCLOSURE`\n- **Internal**:\n  - [`consent.ts`](consent.ts) — the gate (`maySend`), the prompt policy (`shouldPrompt`), the disclosure + its runtime enforcement\n  - [`identity.ts`](identity.ts) — random per-install UUID (deliberately not hardware-derived)\n  - [`store.ts`](store.ts) — per-day counter accumulation + the seal-once day rollover\n  - [`rollup.ts`](rollup.ts) — payload shaping (minute rounding, capped counter maps)\n  - [`main.ts`](main.ts) — files, dialog, event subscriptions, tick, seal-and-send (`@internal`)\n- **Tests**: [`../test/unit/telemetry-api.test.ts`](../test/unit/telemetry-api.test.ts), [`../test/unit/telemetry-consent.test.ts`](../test/unit/telemetry-consent.test.ts), [`../test/unit/telemetry-rollup.test.ts`](../test/unit/telemetry-rollup.test.ts), [`../test/unit/telemetry-identity-store.test.ts`](../test/unit/telemetry-identity-store.test.ts)\n\n---\n\n## The two rules\n\n1. **Nothing leaves the machine without consent.** Opt-in, default off, revocable, never re-asked after a \"no\". `maySend()` is strict `=== 'granted'` — a malformed, tampered, or JSON-round-tripped record means NO. The app is fully functional with consent off, forever.\n\n2. **The payload is a rollup, not a transcript.** Counts, versions, presence booleans. Never log lines, asset titles, file names, URLs, or anything typed. `CONSENT_DISCLOSURE` is code, and `disclosureViolations()` rejects any payload carrying a field the prompt didn't mention — adding a field fails tests until the disclosure is updated too.\n\n## What one day's rollup contains\n\nVersion, platform/arch, app-open minutes (rounded — exact timings would reconstruct someone's working hours), launch count, error counts by category (capped, remainder as `__other`), surface-open counts from a fixed vocabulary, bug-reports-filed count, and four health presence booleans. See `DailyRollup` in [`types.ts`](types.ts).\n\n## Where rollups go\n\nEach install mints a random UUID on first run and, on first send, creates a **restricted** Space named `Lite Install <id8>` (ADR-051 visibility). The creating user is auto-granted access — you can always see what your machine reports — and the alpha maintainer is granted permanent access (ADR-052 `expiresAt: null`). One text item per day, `metadata.source = 'lite-telemetry'`.\n\n## Consent lifecycle\n\n- Boot (2.5s after window): `promptIfNeeded()` shows the one-time ask — dialog with the full disclosure, **Don't Share** as `cancelId` so Escape/dismiss is a NO.\n- Settings → Diagnostics → **Usage sharing**: the decision is visible and reversible forever after.\n- Consent granted on day 30 sends from day 30 — the backlog collected while unconsented is never shipped.\n\n## Failure posture\n\nEverything soft-fails: a graph outage, a missing Space, a corrupt state file — telemetry logs a warning and misses a day. It never surfaces an error to the user, never retries aggressively, and never blocks boot.\n"
     },
     {
       "slug": "tools",
@@ -3519,5 +3587,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-07T02:23:35.351Z"
+  "generatedAt": "2026-08-07T03:02:54.369Z"
 } as const;

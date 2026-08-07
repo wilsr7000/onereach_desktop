@@ -34,6 +34,14 @@ export const mountDiagnostics: SectionDescriptor['mount'] = (container) => {
 
   void renderInitial(root);
 
+  // Usage sharing lives OUTSIDE `root`: the snapshot refresh cycle
+  // rewrites root.innerHTML wholesale, and the consent control must
+  // not be blown away (or lose focus) because someone hit Refresh.
+  const sharing = document.createElement('div');
+  sharing.className = 'diag-card diag-usage-sharing';
+  container.appendChild(sharing);
+  void renderUsageSharing(sharing);
+
   return (): void => {
     disposed = true;
     if (copyResetTimer !== null) {
@@ -470,4 +478,57 @@ function escapeHtml(s: string): string {
 
 function escapeAttr(s: string): string {
   return s.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+
+// ── Usage sharing (telemetry consent) ────────────────────────────────
+//
+// The Settings-side half of the Apple-style ask: the boot dialog asks
+// once; this is where the decision is visible and reversible forever
+// after. Copy mirrors CONSENT_DISCLOSURE — if that changes, change
+// this too (the disclosure itself lives in lite/telemetry/consent.ts
+// and is enforced against the payload at send time).
+
+async function renderUsageSharing(target: HTMLElement): Promise<void> {
+  const bridge = window.lite?.telemetry;
+  if (bridge === undefined) {
+    // Older kernel without the module: show nothing rather than a
+    // broken control.
+    target.remove();
+    return;
+  }
+
+  let status: LiteTelemetryStatusView;
+  try {
+    status = await bridge.getStatus();
+  } catch {
+    target.remove();
+    return;
+  }
+
+  const render = (st: LiteTelemetryStatusView): void => {
+    const on = st.consent.state === 'granted';
+    target.innerHTML = `
+      <section class="diag-section">
+        <h3 class="diag-section-title">Usage sharing</h3>
+        <p class="diag-usage-copy">
+          Send a short daily summary of how this copy of Lite is running —
+          version, app-open minutes, error counts by area, and which
+          surfaces were opened. Never anything you type, upload, or open.
+        </p>
+        <div class="diag-usage-row">
+          <button type="button" class="diag-usage-toggle" role="switch"
+                  aria-checked="${on ? 'true' : 'false'}"
+                  aria-label="Share daily usage summaries">
+            <span class="diag-usage-knob"></span>
+          </button>
+          <span class="diag-usage-state">${on ? 'Sharing daily summaries' : 'Not sharing'}</span>
+        </div>
+        <p class="diag-usage-meta">Install id: <code>${st.installId}</code></p>
+      </section>`;
+    const toggle = target.querySelector<HTMLButtonElement>('.diag-usage-toggle');
+    toggle?.addEventListener('click', () => {
+      void bridge.setConsent(on ? 'denied' : 'granted').then(render);
+    });
+  };
+  render(status);
 }

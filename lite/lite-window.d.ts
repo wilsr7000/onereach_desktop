@@ -344,6 +344,25 @@ interface LiteAppHealthSnapshotView {
   diagnostics: LiteHealthDiagnosticsSnapshotView;
 }
 
+/** Renderer view of telemetry status (ADR-052-adjacent; no secrets). */
+interface LiteTelemetryStatusView {
+  installId: string;
+  consent: {
+    state: 'unset' | 'granted' | 'denied';
+    decidedAt?: string;
+    decidedInVersion?: string;
+  };
+  /** UTC day currently accumulating. */
+  day: string;
+  /** The per-install Space id once ensured, else null. */
+  spaceId: string | null;
+}
+
+interface LiteTelemetryBridge {
+  getStatus(): Promise<LiteTelemetryStatusView>;
+  setConsent(state: 'granted' | 'denied'): Promise<LiteTelemetryStatusView>;
+}
+
 interface LiteHealthBridge {
   /**
    * Build a fresh snapshot of "what is true right now" across
@@ -876,6 +895,22 @@ interface LiteSpacesContributorView {
   lastEventAt: string;
 }
 
+/** Learning Center (2026-08-07): workspace signals for mission detection. */
+interface LiteLearnSignalsView {
+  spaces: number;
+  otherMembers: number;
+  kinds: Record<string, number>;
+}
+
+/** Learning Center persisted progress (mirrors LearnProgress). */
+interface LiteLearnProgressView {
+  version: 1;
+  role: 'designer' | 'builder' | 'leader' | null;
+  done: Record<string, string>;
+  lastLessonId: string | null;
+  updatedAt: string;
+}
+
 interface LiteSpacesEventView {
   id: string;
   author: string;
@@ -957,6 +992,14 @@ interface LiteSpacesBridge {
    */
   refresh(): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   getUncategorizedCount(): Promise<LiteSpacesIpcResult<number>>;
+  /** Learning Center bridge (replaces Home, 2026-08-07). */
+  learn: {
+    signals(): Promise<LiteSpacesIpcResult<LiteLearnSignalsView>>;
+    progressGet(): Promise<LiteSpacesIpcResult<LiteLearnProgressView>>;
+    progressSave(
+      progress: LiteLearnProgressView
+    ): Promise<LiteSpacesIpcResult<LiteLearnProgressView>>;
+  };
   items: LiteSpacesItemsBridge;
   /** Phase 0.5 -- run Q1-Q4 verification queries. */
   runDiscovery(): Promise<LiteSpacesIpcResult<LiteSpacesDiscoveryResultsView>>;
@@ -1373,6 +1416,7 @@ interface LiteWindowBridge {
   spaces?: LiteSpacesBridge;
   apiDocs?: LiteApiDocsBridge;
   health?: LiteHealthBridge;
+  telemetry?: LiteTelemetryBridge;
   neon?: LiteNeonBridge;
   idw?: LiteIdwBridge;
   tools?: LiteToolsBridge;

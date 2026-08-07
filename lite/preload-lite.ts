@@ -56,6 +56,8 @@ const TOTP_DELETE_SECRET = 'lite:totp:delete-secret';
 const SETTINGS_OPEN = 'lite:settings:open';
 const API_DOCS_OPEN = 'lite:api-docs:open';
 const HEALTH_SNAPSHOT = 'lite:health:snapshot';
+const TELEMETRY_GET_STATUS = 'lite:telemetry:getStatus';
+const TELEMETRY_SET_CONSENT = 'lite:telemetry:setConsent';
 
 // Spaces (Phase 0): only OPEN is bridged for the renderer today. The
 // data methods (LIST_SPACES, UNCATEGORIZED_COUNT, ITEMS_LIST, ITEMS_GET)
@@ -67,6 +69,9 @@ const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
 const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
+const SPACES_LEARN_SIGNALS = 'lite:spaces:learn:signals';
+const SPACES_LEARN_PROGRESS_GET = 'lite:spaces:learn:progressGet';
+const SPACES_LEARN_PROGRESS_SAVE = 'lite:spaces:learn:progressSave';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
 const SPACES_ITEMS_GET = 'lite:spaces:items:get';
 const SPACES_ITEMS_RESOLVE_FILE_URL = 'lite:spaces:items:resolveFileUrl';
@@ -850,6 +855,13 @@ interface SpacesBridge {
    */
   refresh(): Promise<SpacesIpcResultView<{ ok: true }>>;
   getUncategorizedCount(): Promise<SpacesIpcResultView<number>>;
+  learn: {
+    signals(): Promise<SpacesIpcResultView<LiteLearnSignalsView>>;
+    progressGet(): Promise<SpacesIpcResultView<LiteLearnProgressView>>;
+    progressSave(
+      progress: LiteLearnProgressView
+    ): Promise<SpacesIpcResultView<LiteLearnProgressView>>;
+  };
   items: SpacesItemsBridge;
   /**
    * Phase 0.5 discovery -- run Q1-Q4 verification queries against the
@@ -891,6 +903,26 @@ interface SpacesBridge {
    * cached value, so the re-paint is free.
    */
   onCacheUpdate(handler: (update: SpacesCacheUpdateView) => void): () => void;
+}
+
+/** Renderer view of telemetry status (ADR-052-adjacent; no secrets). */
+interface LiteTelemetryStatusView {
+  installId: string;
+  consent: {
+    state: 'unset' | 'granted' | 'denied';
+    decidedAt?: string;
+    decidedInVersion?: string;
+  };
+  /** UTC day currently accumulating. */
+  day: string;
+  /** The per-install Space id once ensured, else null. */
+  spaceId: string | null;
+}
+
+interface TelemetryBridge {
+  getStatus(): Promise<LiteTelemetryStatusView>;
+  /** Only 'granted' | 'denied' are accepted; anything else is a no-op. */
+  setConsent(state: 'granted' | 'denied'): Promise<LiteTelemetryStatusView>;
 }
 
 interface HealthBridge {
@@ -1486,6 +1518,20 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_REFRESH) as Promise<SpacesIpcResultView<{ ok: true }>>,
   getUncategorizedCount: () =>
     ipcRenderer.invoke(SPACES_UNCATEGORIZED_COUNT) as Promise<SpacesIpcResultView<number>>,
+  learn: {
+    signals: () =>
+      ipcRenderer.invoke(SPACES_LEARN_SIGNALS) as Promise<
+        SpacesIpcResultView<LiteLearnSignalsView>
+      >,
+    progressGet: () =>
+      ipcRenderer.invoke(SPACES_LEARN_PROGRESS_GET) as Promise<
+        SpacesIpcResultView<LiteLearnProgressView>
+      >,
+    progressSave: (progress: LiteLearnProgressView) =>
+      ipcRenderer.invoke(SPACES_LEARN_PROGRESS_SAVE, progress) as Promise<
+        SpacesIpcResultView<LiteLearnProgressView>
+      >,
+  },
   items: {
     list: (scopeId, opts) =>
       ipcRenderer.invoke(SPACES_ITEMS_LIST, {
@@ -1737,6 +1783,18 @@ const spaces: SpacesBridge = {
 
 const health: HealthBridge = {
   snapshot: () => ipcRenderer.invoke(HEALTH_SNAPSHOT) as Promise<LiteAppHealthSnapshotView>,
+};
+
+/**
+ * Telemetry consent + status. Read-mostly: the renderer can show the
+ * install id and flip consent from Settings -> Diagnostics; everything
+ * else about telemetry is main-process business.
+ */
+const telemetry: TelemetryBridge = {
+  getStatus: () =>
+    ipcRenderer.invoke(TELEMETRY_GET_STATUS) as Promise<LiteTelemetryStatusView>,
+  setConsent: (state) =>
+    ipcRenderer.invoke(TELEMETRY_SET_CONSENT, { state }) as Promise<LiteTelemetryStatusView>,
 };
 
 const neon: NeonBridge = {
@@ -2341,6 +2399,7 @@ contextBridge.exposeInMainWorld('lite', {
   apiDocs,
   spaces,
   health,
+  telemetry,
   neon,
   idw,
   tools,

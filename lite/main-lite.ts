@@ -45,6 +45,7 @@ import { initTray, type TrayHandle } from './tray/main.js';
 import { initSpaces, type SpacesHandle } from './spaces/main.js';
 import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
+import { initTelemetry, type TelemetryHandle } from './telemetry/main.js';
 import { initNeon, type NeonHandle } from './neon/main.js';
 import { initIdw, type IdwHandle } from './idw/main.js';
 import { initTools, type ToolsHandle } from './tools/main.js';
@@ -217,6 +218,7 @@ let trayHandle: TrayHandle | null = null;
 let spacesHandle: SpacesHandle | null = null;
 let apiDocsHandle: ApiDocsHandle | null = null;
 let healthHandle: HealthHandle | null = null;
+let telemetryHandle: TelemetryHandle | null = null;
 let neonHandle: NeonHandle | null = null;
 let idwHandle: IdwHandle | null = null;
 let toolsHandle: ToolsHandle | null = null;
@@ -934,6 +936,26 @@ app
       });
     }
 
+    // Telemetry (alpha monitoring). Counting is always local; nothing
+    // leaves the machine without the consent gate in lite/telemetry.
+    // Initialized after health because the daily rollup embeds the
+    // health snapshot's presence booleans at seal time.
+    try {
+      telemetryHandle = initTelemetry({
+        version: LITE_VERSION,
+        userDataPath,
+        logger: {
+          info: (msg, data) => getLoggingApi().info('telemetry', msg, data),
+          warn: (msg, data) => getLoggingApi().warn('telemetry', msg, data),
+          error: (msg, data) => getLoggingApi().error('telemetry', msg, data),
+        },
+      });
+    } catch (err) {
+      getLoggingApi().error('telemetry', 'initTelemetry threw', {
+        error: (err as Error).message,
+      });
+    }
+
     // Seed the menu registry with kernel entries, then start the builder.
     seedKernelMenu({
       onReportBug: () => openBugReportModal(),
@@ -1067,6 +1089,14 @@ app
         error: (err as Error).message,
       });
     }
+
+    // The one-time telemetry ask (Apple-style: once, plain language,
+    // dismissal is NO). Delayed a beat so it never races the window's
+    // first paint — a consent dialog over a blank window reads as
+    // malware, not as a considered ask.
+    setTimeout(() => {
+      void telemetryHandle?.promptIfNeeded(mainWindow);
+    }, 2_500);
 
     // Boot span -- close the success path. The window is on screen but
     // ready-to-show is async; treating window creation as the boot's

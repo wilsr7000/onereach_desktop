@@ -35,6 +35,7 @@ describe('API docs manifest', () => {
         'onboarding',
         'settings',
         'spaces',
+        'telemetry',
         'tools',
         'totp',
         'university',

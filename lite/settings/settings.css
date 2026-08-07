@@ -1755,3 +1755,84 @@ body {
   overflow: auto;
   white-space: pre;
 }
+
+/* ── Usage sharing (telemetry consent) ─────────────────────────────
+ * Same switch language as the Spaces upload pane: the state is stated
+ * in words next to the control, and "on" is visually distinct without
+ * being alarming — sharing is a legitimate choice, not a warning.
+ * ------------------------------------------------------------------ */
+
+.diag-usage-copy {
+  margin: 0 0 10px;
+  color: #9a9aa3;
+  font-size: 12px;
+  line-height: 1.55;
+  max-width: 62ch;
+}
+
+.diag-usage-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.diag-usage-toggle {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.07);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.diag-usage-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #c7c7cd;
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.diag-usage-toggle[aria-checked='true'] {
+  background: rgba(79, 140, 255, 0.75);
+  border-color: rgba(79, 140, 255, 0.9);
+}
+
+.diag-usage-toggle[aria-checked='true'] .diag-usage-knob {
+  transform: translateX(16px);
+  background: #0f1115;
+}
+
+.diag-usage-toggle:focus-visible {
+  outline: 2px solid rgba(79, 140, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.diag-usage-state {
+  font-size: 12.5px;
+  color: #d2d2d6;
+}
+
+.diag-usage-meta {
+  margin: 10px 0 0;
+  font-size: 11px;
+  color: #6f6f78;
+}
+
+.diag-usage-meta code {
+  font-size: 10.5px;
+  color: #9a9aa3;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .diag-usage-toggle,
+  .diag-usage-knob {
+    transition: none;
+  }
+}
