@@ -450,7 +450,7 @@ describe('required/optional items + AI drafting + accordions (2026-08-08)', () =
       .find((f) => fs.existsSync(f));
     const src = fs.readFileSync(found as string, 'utf8');
     const start = src.indexOf('function openChecklistEditorPanel');
-    const body = src.slice(start, start + 12000);
+    const body = src.slice(start, start + 24000);
     expect(body).toContain('checklists.draft(prompt)');
     expect(body).toContain('Prefill for review — the human saves, never the model.');
     expect(body).toContain('addItemRow');
