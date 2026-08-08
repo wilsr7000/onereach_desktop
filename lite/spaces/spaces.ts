@@ -1800,11 +1800,30 @@ interface RendererAssetVersion {
   mimeType?: string;
 }
 
+/**
+ * Narrow view of the item-versioning bridge methods. The full typed
+ * surface lands with the concurrent session's versioning wiring; until
+ * then this lets HEAD compile and run without shipping half-wired code.
+ */
+type ItemVersioningBridge = {
+  versions?: (id: string, limit: number) => Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>;
+  getVersion?: (id: string, seq: number) => Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>;
+  restoreVersion?: (id: string, seq: number, editorId?: string) => Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>;
+};
+
+function itemVersioningBridge(): ItemVersioningBridge | null {
+  const items = window.lite?.spaces?.items as unknown as ItemVersioningBridge | undefined;
+  if (items === undefined || typeof items.versions !== 'function') return null;
+  return items;
+}
+
 async function loadItemHistory(itemId: string): Promise<void> {
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
+  const vb = itemVersioningBridge();
+  if (vb?.versions === undefined) return;
   try {
-    const envelope = await bridge.items.versions(itemId, 50);
+    const envelope = (await vb.versions(itemId, 50)) as
+      | { ok: true; value: RendererAssetVersion[] }
+      | { ok: false; error: { message: string } };
     if (envelope.ok === false) {
       window.logging?.warn?.('spaces', 'version history load failed', {
         itemId,
@@ -1950,11 +1969,16 @@ function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLElement {
 }
 
 async function openVersionViewer(itemId: string, seq: number): Promise<void> {
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
+  const vb = itemVersioningBridge();
+  if (vb?.getVersion === undefined) {
+    showToast('Version history needs a newer build of Lite.');
+    return;
+  }
   let version: RendererAssetVersion | null = null;
   try {
-    const envelope = await bridge.items.getVersion(itemId, seq);
+    const envelope = (await vb.getVersion(itemId, seq)) as
+      | { ok: true; value: RendererAssetVersion | null }
+      | { ok: false; error: { message: string } };
     if (envelope.ok === false) {
       showToast(`Couldn't load version: ${envelope.error.message}`);
       return;
@@ -2044,8 +2068,11 @@ async function openVersionViewer(itemId: string, seq: number): Promise<void> {
 }
 
 async function restoreVersion(itemId: string, seq: number): Promise<void> {
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
+  const vb = itemVersioningBridge();
+  if (vb?.restoreVersion === undefined) {
+    showToast('Version history needs a newer build of Lite.');
+    return;
+  }
   const ok = await askToConfirm(
     `Restore version ${seq}?`,
     'This makes that version the current one. Your present state is saved as a new version first, so nothing is lost — you can restore back to it.',
@@ -2054,11 +2081,11 @@ async function restoreVersion(itemId: string, seq: number): Promise<void> {
   if (!ok) return;
   try {
     const editorId = readCurrentEditorId();
-    const envelope = await bridge.items.restoreVersion(
+    const envelope = (await vb.restoreVersion(
       itemId,
       seq,
       editorId ?? undefined
-    );
+    )) as { ok: true; value?: unknown } | { ok: false; error: { message: string } };
     if (envelope.ok === false) {
       showToast(`Restore failed: ${envelope.error.message}`);
       return;
