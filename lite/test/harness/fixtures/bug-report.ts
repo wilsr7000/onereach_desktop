@@ -15,6 +15,7 @@ export interface MakeBugReportPayloadOverrides {
   timestamp?: string;
   appTag?: BugReportPayload['appTag'];
   source?: BugReportPayload['source'];
+  feedbackType?: BugReportPayload['feedbackType'];
   version?: string;
   os?: BugReportPayload['os'];
   description?: string;
@@ -49,6 +50,7 @@ export function makeBugReportPayload(
     timestamp: ts,
     appTag: overrides.appTag ?? 'lite',
     source: overrides.source ?? 'user-bug-report',
+    feedbackType: overrides.feedbackType ?? 'bug',
     version: overrides.version ?? '5.0.0',
     os: overrides.os ?? { platform: 'darwin', release: '23.5.0', arch: 'arm64' },
     description: overrides.description ?? 'a test bug',

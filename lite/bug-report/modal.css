@@ -744,3 +744,34 @@ button:hover {
 .result.error {
   border-left-color: var(--or-danger) !important;
 }
+
+/* ── Bug ↔ feature toggle (2026-08-08) ─────────────────────────────────── */
+
+.feedback-type-row {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 10px;
+}
+
+.feedback-type-option {
+  flex: 0 0 auto;
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: #a9adbb;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+
+.feedback-type-option:hover {
+  color: #e8eaf0;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+.feedback-type-option.is-active {
+  background: rgba(123, 167, 255, 0.14);
+  border-color: rgba(123, 167, 255, 0.55);
+  color: #9cc0ff;
+}

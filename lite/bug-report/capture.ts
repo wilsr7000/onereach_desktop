@@ -15,6 +15,22 @@ import type { AppHealthSnapshot } from '../health/api.js';
 export type BugReportStatus = 'open' | 'resolved';
 
 /**
+ * What the user is filing. A single modal serves both because the
+ * capture, redaction, storage, and triage machinery is identical — the
+ * only differences are the framing (a bug describes broken behaviour; a
+ * feature requests new behaviour) and how the graph ticket is coloured
+ * and titled. Defaults to `'bug'` for payloads that predate this field.
+ */
+export type FeedbackType = 'bug' | 'feature';
+
+/** Runtime guard + allow-list for `FeedbackType` at trust boundaries. */
+export const FEEDBACK_TYPES: readonly FeedbackType[] = ['bug', 'feature'];
+
+export function isFeedbackType(v: unknown): v is FeedbackType {
+  return v === 'bug' || v === 'feature';
+}
+
+/**
  * A file attached to a bug report. The actual bytes live in
  * OneReach Files (see `lite/files/api.ts`); the payload only
  * carries the metadata needed to fetch them on demand.
@@ -45,6 +61,14 @@ export interface BugReportPayload {
   appTag: 'lite';
   /** Marker so the regression-test pipeline can distinguish real bugs from synthetic fixtures */
   source: 'user-bug-report';
+  /**
+   * Bug or feature request. Both flow through the same capture /
+   * redaction / KV / graph-mirror machinery; the type drives framing
+   * (modal copy, ticket colouring, triage filters). Payloads written
+   * before this field existed deserialize as `'bug'` via
+   * `migrateLegacyPayload`.
+   */
+  feedbackType: FeedbackType;
   /** App version from package.json */
   version: string;
   /** OS info */
@@ -110,6 +134,11 @@ export interface CaptureContext {
   /** User-supplied description (already typed in the modal) */
   userDescription: string;
   /**
+   * Bug or feature request. Optional so existing callers keep working;
+   * capture() defaults it to `'bug'`.
+   */
+  feedbackType?: FeedbackType;
+  /**
    * Optional current-state health snapshot to include in the payload.
    * Already secret-free by construction (see `lite/health/types.ts`).
    * The caller is responsible for fetching it via
@@ -153,6 +182,7 @@ export function capture(ctx: CaptureContext): BugReportPayload {
     timestamp: now,
     appTag: 'lite',
     source: 'user-bug-report',
+    feedbackType: isFeedbackType(ctx.feedbackType) ? ctx.feedbackType : 'bug',
     version: ctx.version,
     os: {
       platform: ctx.platform,
@@ -186,6 +216,7 @@ export function migrateLegacyPayload(payload: Partial<BugReportPayload> & Record
     timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : new Date().toISOString(),
     appTag: 'lite',
     source: 'user-bug-report',
+    feedbackType: isFeedbackType(payload.feedbackType) ? payload.feedbackType : 'bug',
     version: typeof payload.version === 'string' ? payload.version : '0.0.0',
     os: payload.os ?? { platform: 'darwin', release: '', arch: '' },
     description: typeof payload.description === 'string' ? payload.description : '',

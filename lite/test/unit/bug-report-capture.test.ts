@@ -381,3 +381,37 @@ describe('capture with attachments', () => {
     expect(migrated.healthSnapshot).toBeUndefined();
   });
 });
+
+// ─── Feedback type (bug ↔ feature, 2026-08-08) ─────────────────────────
+
+import { isFeedbackType } from '../../bug-report/capture.js';
+
+describe('feedbackType', () => {
+  const ctx = {
+    version: '0.1.0',
+    platform: 'darwin' as NodeJS.Platform,
+    release: '23.5.0',
+    arch: 'arm64',
+    recentLogLines: [],
+    userDescription: 'add exports please',
+  };
+
+  it('defaults to bug when the context omits it (and for legacy payloads)', () => {
+    const p = capture(ctx);
+    expect(p.feedbackType).toBe('bug');
+    const legacy = migrateLegacyPayload({ description: 'old' });
+    expect(legacy.feedbackType).toBe('bug');
+  });
+
+  it('carries an explicit feature type through capture', () => {
+    const p = capture({ ...ctx, feedbackType: 'feature' as const });
+    expect(p.feedbackType).toBe('feature');
+  });
+
+  it('isFeedbackType admits only the two real values', () => {
+    expect(isFeedbackType('bug')).toBe(true);
+    expect(isFeedbackType('feature')).toBe(true);
+    expect(isFeedbackType('sabotage')).toBe(false);
+    expect(isFeedbackType(undefined)).toBe(false);
+  });
+});

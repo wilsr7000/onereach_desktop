@@ -1,6 +1,6 @@
 /**
- * The default "Onereach.ai Lite Bugs" Space, and mirroring filed
- * reports into it.
+ * The default "Onereach.ai Lite Feedback" Space, and mirroring filed
+ * reports into it as tickets (bugs AND feature requests).
  *
  * The load-bearing assertion in this file is the SOFT-FAIL contract: a
  * graph that is down, a Space that can't be created, an items.create
@@ -11,12 +11,12 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  ensureLiteBugsSpace,
-  fileBugReportToGraph,
-  buildBugItemTitle,
-  buildBugItemContent,
-  LITE_BUGS_SPACE_NAME,
-  LITE_BUGS_SPACE_DESCRIPTION,
+  ensureLiteFeedbackSpace,
+  fileFeedbackToGraph,
+  buildFeedbackItemTitle,
+  buildFeedbackItemContent,
+  LITE_FEEDBACK_SPACE_NAME,
+  LITE_FEEDBACK_SPACE_DESCRIPTION,
 } from '../../bug-report/space.js';
 import type { BugReportPayload } from '../../bug-report/capture.js';
 import type { SpacesApi, Space } from '../../spaces/api.js';
@@ -30,10 +30,12 @@ function stubApi(over: {
   listSpaces?: () => Promise<Space[]>;
   createSpace?: (input: unknown) => Promise<Space>;
   create?: (input: unknown) => Promise<unknown>;
+  setSpaceKind?: (id: string, kind: string) => Promise<string>;
 }): SpacesApi {
   return {
     listSpaces: over.listSpaces ?? (async (): Promise<Space[]> => []),
-    createSpace: over.createSpace ?? (async (): Promise<Space> => space('new', LITE_BUGS_SPACE_NAME)),
+    createSpace: over.createSpace ?? (async (): Promise<Space> => space('new', LITE_FEEDBACK_SPACE_NAME)),
+    setSpaceKind: over.setSpaceKind ?? (async (): Promise<string> => 'shared'),
     items: {
       create: over.create ?? (async (): Promise<unknown> => ({ id: 'item-1' })),
     },
@@ -46,6 +48,7 @@ function payload(over: Partial<BugReportPayload> = {}): BugReportPayload {
     timestamp: '2026-08-06T12:00:00.000Z',
     appTag: 'lite',
     source: 'user-bug-report',
+    feedbackType: 'bug',
     version: '0.0.31',
     os: { platform: 'darwin', release: '25.5.0', arch: 'arm64' },
     description: 'Spaces window renders blank after login',
@@ -58,17 +61,17 @@ function payload(over: Partial<BugReportPayload> = {}): BugReportPayload {
   } as BugReportPayload;
 }
 
-describe('ensureLiteBugsSpace', () => {
+describe('ensureLiteFeedbackSpace', () => {
   it('reuses an existing Space rather than creating a duplicate', async () => {
     let created = 0;
     const api = stubApi({
-      listSpaces: async () => [space('s1', 'Other'), space('s2', LITE_BUGS_SPACE_NAME)],
+      listSpaces: async () => [space('s1', 'Other'), space('s2', LITE_FEEDBACK_SPACE_NAME)],
       createSpace: async () => {
         created += 1;
-        return space('nope', LITE_BUGS_SPACE_NAME);
+        return space('nope', LITE_FEEDBACK_SPACE_NAME);
       },
     });
-    const result = await ensureLiteBugsSpace(api);
+    const result = await ensureLiteFeedbackSpace(api);
     expect(result.outcome).toBe('found');
     expect(result.space?.id).toBe('s2');
     expect(created, 'must not create when one already exists').toBe(0);
@@ -76,9 +79,9 @@ describe('ensureLiteBugsSpace', () => {
 
   it('matches the name case-insensitively and ignores stray whitespace', async () => {
     const api = stubApi({
-      listSpaces: async () => [space('s9', '  onereach.ai lite BUGS ')],
+      listSpaces: async () => [space('s9', '  onereach.ai lite FEEDBACK ')],
     });
-    const result = await ensureLiteBugsSpace(api);
+    const result = await ensureLiteFeedbackSpace(api);
     expect(result.outcome).toBe('found');
     expect(result.space?.id).toBe('s9');
   });
@@ -89,14 +92,14 @@ describe('ensureLiteBugsSpace', () => {
       listSpaces: async () => [],
       createSpace: async (i) => {
         input = i as typeof input;
-        return space('fresh', LITE_BUGS_SPACE_NAME);
+        return space('fresh', LITE_FEEDBACK_SPACE_NAME);
       },
     });
-    const result = await ensureLiteBugsSpace(api);
+    const result = await ensureLiteFeedbackSpace(api);
     expect(result.outcome).toBe('created');
     expect(result.space?.id).toBe('fresh');
-    expect(input.name).toBe(LITE_BUGS_SPACE_NAME);
-    expect(input.description).toBe(LITE_BUGS_SPACE_DESCRIPTION);
+    expect(input.name).toBe(LITE_FEEDBACK_SPACE_NAME);
+    expect(input.description).toBe(LITE_FEEDBACK_SPACE_DESCRIPTION);
   });
 
   it('treats a lost create race as success and adopts the winner', async () => {
@@ -105,13 +108,13 @@ describe('ensureLiteBugsSpace', () => {
       listSpaces: async () => {
         listCalls += 1;
         // First list: empty (so we try to create). Second: the winner.
-        return listCalls === 1 ? [] : [space('winner', LITE_BUGS_SPACE_NAME)];
+        return listCalls === 1 ? [] : [space('winner', LITE_FEEDBACK_SPACE_NAME)];
       },
       createSpace: async () => {
         throw Object.assign(new Error('name taken'), { code: 'SPACES_DUPLICATE_NAME' });
       },
     });
-    const result = await ensureLiteBugsSpace(api);
+    const result = await ensureLiteFeedbackSpace(api);
     expect(result.outcome).toBe('raced');
     expect(result.space?.id).toBe('winner');
   });
@@ -122,7 +125,7 @@ describe('ensureLiteBugsSpace', () => {
         throw new Error('ECONNREFUSED');
       },
     });
-    const result = await ensureLiteBugsSpace(api);
+    const result = await ensureLiteFeedbackSpace(api);
     expect(result.outcome).toBe('failed');
     expect(result.space).toBeNull();
     expect(result.error).toContain('ECONNREFUSED');
@@ -136,10 +139,10 @@ describe('ensureLiteBugsSpace', () => {
       },
       createSpace: async () => {
         created += 1;
-        return space('x', LITE_BUGS_SPACE_NAME);
+        return space('x', LITE_FEEDBACK_SPACE_NAME);
       },
     });
-    await ensureLiteBugsSpace(api);
+    await ensureLiteFeedbackSpace(api);
     expect(created, 'a blind create on a failed list risks a duplicate').toBe(0);
   });
 
@@ -150,7 +153,7 @@ describe('ensureLiteBugsSpace', () => {
         throw Object.assign(new Error('duplicate'), { code: 'SPACES_DUPLICATE_NAME' });
       },
     });
-    const result = await ensureLiteBugsSpace(api);
+    const result = await ensureLiteFeedbackSpace(api);
     expect(result.outcome).toBe('failed');
     expect(result.error).toContain('not visible');
   });
@@ -158,21 +161,31 @@ describe('ensureLiteBugsSpace', () => {
 
 describe('bug item rendering', () => {
   it('titles with the version and the first line of the description', () => {
-    expect(buildBugItemTitle(payload())).toBe('[0.0.31] Spaces window renders blank after login');
+    expect(buildFeedbackItemTitle(payload())).toBe('[0.0.31] [bug] Spaces window renders blank after login');
   });
 
   it('falls back to a generic title when no description was given', () => {
-    expect(buildBugItemTitle(payload({ description: '   ' }))).toBe('[0.0.31] Bug report');
+    expect(buildFeedbackItemTitle(payload({ description: '   ' }))).toBe('[0.0.31] [bug] Bug report');
+  });
+
+  it('tags feature requests distinctly and falls back to a feature title', () => {
+    expect(
+      buildFeedbackItemTitle(payload({ feedbackType: 'feature', description: 'Add dark exports' }))
+    ).toBe('[0.0.31] [idea] Add dark exports');
+    expect(
+      buildFeedbackItemTitle(payload({ feedbackType: 'feature', description: '  ' }))
+    ).toBe('[0.0.31] [idea] Feature request');
   });
 
   it('truncates a very long first line', () => {
-    const title = buildBugItemTitle(payload({ description: 'x'.repeat(400) }));
-    expect(title.length).toBeLessThanOrEqual(130);
+    const title = buildFeedbackItemTitle(payload({ description: 'x'.repeat(400) }));
+    expect(title.length).toBeLessThanOrEqual(136);
     expect(title.endsWith('…')).toBe(true);
   });
 
   it('renders description, metadata and logs into the body', () => {
-    const body = buildBugItemContent(payload());
+    const body = buildFeedbackItemContent(payload());
+    expect(body).toContain('**Type:** Bug report');
     expect(body).toContain('Spaces window renders blank after login');
     expect(body).toContain('**App version:** 0.0.31');
     expect(body).toContain('darwin 25.5.0 arm64');
@@ -180,27 +193,29 @@ describe('bug item rendering', () => {
   });
 
   it('omits the log section entirely when there are no logs', () => {
-    expect(buildBugItemContent(payload({ recentLogs: '' }))).not.toContain('Recent logs');
+    expect(buildFeedbackItemContent(payload({ recentLogs: '' }))).not.toContain('Recent logs');
   });
 });
 
-describe('fileBugReportToGraph — soft-fail contract', () => {
+describe('fileFeedbackToGraph — soft-fail contract', () => {
   it('files the report into the ensured Space', async () => {
     let input: { spaceId?: string; kind?: string; metadata?: Record<string, unknown> } = {};
     const api = stubApi({
-      listSpaces: async () => [space('bugs', LITE_BUGS_SPACE_NAME)],
+      listSpaces: async () => [space('bugs', LITE_FEEDBACK_SPACE_NAME)],
       create: async (i) => {
         input = i as typeof input;
         return { id: 'item-9' };
       },
     });
-    const result = await fileBugReportToGraph(payload(), api);
+    const result = await fileFeedbackToGraph(payload(), api);
     expect(result.filed).toBe(true);
     expect(input.spaceId).toBe('bugs');
-    expect(input.kind).toBe('text');
+    // Tickets, not notes — filings land on the triage board.
+    expect(input.kind).toBe('ticket');
     // The join back to the KV system of record.
     expect(input.metadata?.['bugReportTimestamp']).toBe('2026-08-06T12:00:00.000Z');
-    expect(input.metadata?.['source']).toBe('lite-bug-report');
+    expect(input.metadata?.['source']).toBe('lite-feedback');
+    expect(input.metadata?.['feedbackType']).toBe('bug');
   });
 
   it('returns filed:false instead of throwing when the Space cannot be resolved', async () => {
@@ -209,19 +224,19 @@ describe('fileBugReportToGraph — soft-fail contract', () => {
         throw new Error('graph down');
       },
     });
-    const result = await fileBugReportToGraph(payload(), api);
+    const result = await fileFeedbackToGraph(payload(), api);
     expect(result.filed).toBe(false);
     expect(result.error).toContain('graph down');
   });
 
   it('returns filed:false instead of throwing when the item write is rejected', async () => {
     const api = stubApi({
-      listSpaces: async () => [space('bugs', LITE_BUGS_SPACE_NAME)],
+      listSpaces: async () => [space('bugs', LITE_FEEDBACK_SPACE_NAME)],
       create: async () => {
         throw new Error('write rejected');
       },
     });
-    const result = await fileBugReportToGraph(payload(), api);
+    const result = await fileFeedbackToGraph(payload(), api);
     expect(result.filed).toBe(false);
     expect(result.spaceId).toBe('bugs');
     expect(result.error).toContain('write rejected');

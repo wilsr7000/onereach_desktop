@@ -39,8 +39,16 @@
       <hr class="section-divider" />
 
       <section class="report-new">
-        <div class="section-label">File a new bug report</div>
-        <p class="section-description">Your report includes app version, OS, and the last 200 log lines (with secrets automatically redacted).</p>
+        <div class="section-label" id="new-report-label">File a new bug report</div>
+        <div class="feedback-type-row" role="radiogroup" aria-label="What are you filing?">
+          <button type="button" id="type-bug" class="feedback-type-option is-active" role="radio" aria-checked="true">
+            Report a bug
+          </button>
+          <button type="button" id="type-feature" class="feedback-type-option" role="radio" aria-checked="false">
+            Suggest a feature
+          </button>
+        </div>
+        <p class="section-description" id="new-report-description">Your report includes app version, OS, and the last 200 log lines (with secrets automatically redacted).</p>
         <textarea
           id="description"
           placeholder="What happened? Steps to reproduce. Expected vs actual behavior."

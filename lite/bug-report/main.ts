@@ -13,7 +13,7 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import * as os from 'node:os';
 import * as http from 'node:http';
-import { capture, type BugReportAttachment, type BugReportPayload } from './capture.js';
+import { capture, isFeedbackType, type BugReportAttachment, type BugReportPayload, type FeedbackType } from './capture.js';
 import { getBugReportApi, _resetBugReportApiForTesting } from './api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getHealthApi, type AppHealthSnapshot } from '../health/api.js';
@@ -83,20 +83,26 @@ export function initBugReport(opts: InitOptions): void {
     return capturePreview(userDescription);
   });
 
-  ipcMain.handle(IPC_SAVE, async (_event, userDescription: string, attachments?: unknown) => {
-    getLoggingApi().event('bug-report.ipc.save');
-    if (typeof userDescription !== 'string') {
-      throw new Error('userDescription must be a string');
+  ipcMain.handle(
+    IPC_SAVE,
+    async (_event, userDescription: string, attachments?: unknown, feedbackType?: unknown) => {
+      getLoggingApi().event('bug-report.ipc.save');
+      if (typeof userDescription !== 'string') {
+        throw new Error('userDescription must be a string');
+      }
+      const sanitizedAttachments = sanitizeAttachments(attachments);
+      if (sanitizedAttachments.length > MAX_ATTACHMENTS_PER_REPORT) {
+        throw new Error(
+          `attachments exceeds the per-report cap (${MAX_ATTACHMENTS_PER_REPORT})`
+        );
+      }
+      // Trust boundary: anything that isn't exactly a known type files
+      // as a bug — never reject a report over a bad discriminator.
+      const type = isFeedbackType(feedbackType) ? feedbackType : 'bug';
+      const payload = await buildPayload(userDescription, sanitizedAttachments, type);
+      return getBugReportApi().save(payload);
     }
-    const sanitizedAttachments = sanitizeAttachments(attachments);
-    if (sanitizedAttachments.length > MAX_ATTACHMENTS_PER_REPORT) {
-      throw new Error(
-        `attachments exceeds the per-report cap (${MAX_ATTACHMENTS_PER_REPORT})`
-      );
-    }
-    const payload = await buildPayload(userDescription, sanitizedAttachments);
-    return getBugReportApi().save(payload);
-  });
+  );
 
   ipcMain.handle(
     IPC_ATTACH,
@@ -325,7 +331,8 @@ async function capturePreview(userDescription: string): Promise<{
  */
 async function buildPayload(
   userDescription: string,
-  attachments: BugReportAttachment[] = []
+  attachments: BugReportAttachment[] = [],
+  feedbackType: FeedbackType = 'bug'
 ): Promise<BugReportPayload> {
   if (options === null) {
     throw new Error('initBugReport must be called before buildPayload');
@@ -353,6 +360,7 @@ async function buildPayload(
     arch: process.arch,
     recentLogLines,
     userDescription,
+    feedbackType,
     ...(healthSnapshot !== undefined ? { healthSnapshot } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
   });

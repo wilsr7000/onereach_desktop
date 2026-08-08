@@ -1439,8 +1439,17 @@ const bugReport: BugReportBridge = {
   capture: (userDescription: string) => ipcRenderer.invoke(BUG_REPORT_CAPTURE, userDescription),
   getPrefill: () =>
     ipcRenderer.invoke(BUG_REPORT_GET_PREFILL) as Promise<{ prefill: string | null }>,
-  save: (userDescription: string, attachments?: BugReportAttachmentView[]) =>
-    ipcRenderer.invoke(BUG_REPORT_SAVE, userDescription, attachments) as Promise<BugReportSaveResult>,
+  save: (
+    userDescription: string,
+    attachments?: BugReportAttachmentView[],
+    feedbackType?: 'bug' | 'feature'
+  ) =>
+    ipcRenderer.invoke(
+      BUG_REPORT_SAVE,
+      userDescription,
+      attachments,
+      feedbackType
+    ) as Promise<BugReportSaveResult>,
   close: () => ipcRenderer.send(BUG_REPORT_CLOSE),
   list: () => ipcRenderer.invoke(BUG_REPORT_LIST),
   read: (idOrPath: string) => ipcRenderer.invoke(BUG_REPORT_READ, idOrPath),

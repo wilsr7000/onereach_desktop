@@ -1,13 +1,17 @@
 /**
- * The default Space that Onereach.ai Lite bug reports are filed into.
+ * The default Space that Onereach.ai Lite feedback — bug reports AND
+ * feature requests — is filed into, as TICKETS.
  *
- * Bug reports live in KV (`lite-bugs`) — that stays the system of
+ * Reports live in KV (`lite-bugs`) — that stays the system of
  * record, because it carries the redaction guarantee, the triage
  * status, and the CRUD surface the modal drives. What KV does NOT give
  * anyone is a place to *look*. This module mirrors each filed report
- * into the graph as an item in a well-known Space, so bugs show up
- * where every other kind of work already lives: searchable, filterable,
- * linkable, and visible to whoever is triaging.
+ * into the graph as a TICKET in a well-known shared Space, so feedback
+ * shows up where every other kind of work already lives: on the ticket
+ * board (open → in progress → done), searchable, filterable, linkable,
+ * and drivable by whoever is triaging. Feature requests and bugs share
+ * one Space — triage wants one queue, and `feedbackType` metadata (plus
+ * the title tag) keeps them distinguishable at a glance.
  *
  * Two invariants matter more than anything else here:
  *
@@ -30,7 +34,7 @@
  */
 
 import type { SpacesApi, Space, Item } from '../spaces/api.js';
-import type { BugReportPayload } from './capture.js';
+import type { BugReportPayload, FeedbackType } from './capture.js';
 
 /**
  * Canonical name of the Space. Matched case-insensitively when looking
@@ -40,24 +44,30 @@ import type { BugReportPayload } from './capture.js';
  * cause a second one to be created alongside the first. Rename in the
  * Spaces UI instead, and note that reports filed before the rename stay
  * where they are.
+ *
+ * History: filings before 2026-08-08 went to "Onereach.ai Lite Bugs"
+ * as plain text items. That Space keeps its history; new filings are
+ * tickets here.
  */
-export const LITE_BUGS_SPACE_NAME = 'Onereach.ai Lite Bugs';
+export const LITE_FEEDBACK_SPACE_NAME = 'Onereach.ai Lite Feedback';
 
 /**
  * Shown in the Spaces sidebar and — because it is what the AI
  * space-suggester reads — it is also how the model learns what belongs
  * here. Worth keeping concrete.
  */
-export const LITE_BUGS_SPACE_DESCRIPTION =
-  'Bug reports filed from the Onereach.ai Lite desktop app. Each item is a ' +
-  'user-submitted report with the app version, platform, and recent log ' +
-  'lines attached. Secrets and PII are redacted before the report is stored.';
+export const LITE_FEEDBACK_SPACE_DESCRIPTION =
+  'Bug reports and feature requests filed from the Onereach.ai Lite desktop ' +
+  'app, as tickets. Bug tickets carry the app version, platform, and recent ' +
+  'log lines; feature tickets carry the request. Secrets and PII are ' +
+  'redacted before anything is stored. Triage on the ticket board: ' +
+  'open → in progress → done.';
 
-/** Sidebar dot colour — red, so bugs read as bugs at a glance. */
-export const LITE_BUGS_SPACE_COLOR = '#e5484d';
+/** Sidebar dot colour — amber: a triage queue, not an alarm. */
+export const LITE_FEEDBACK_SPACE_COLOR = '#f0a020';
 
 /** Lucide icon key for the Space. */
-export const LITE_BUGS_SPACE_ICON = 'bug';
+export const LITE_FEEDBACK_SPACE_ICON = 'inbox';
 
 /** Result of ensuring the Space exists. Never throws — see module doc. */
 export interface EnsureSpaceResult {
@@ -73,12 +83,12 @@ export interface EnsureSpaceResult {
  * Case-insensitive, whitespace-tolerant name match. Space names are
  * user-editable, so someone may have typed a stray trailing space.
  */
-function matchesBugSpaceName(name: unknown): boolean {
-  return typeof name === 'string' && name.trim().toLowerCase() === LITE_BUGS_SPACE_NAME.toLowerCase();
+function matchesFeedbackSpaceName(name: unknown): boolean {
+  return typeof name === 'string' && name.trim().toLowerCase() === LITE_FEEDBACK_SPACE_NAME.toLowerCase();
 }
 
-function findBugSpace(spaces: ReadonlyArray<Space>): Space | null {
-  return spaces.find((s) => matchesBugSpaceName(s.name)) ?? null;
+function findFeedbackSpace(spaces: ReadonlyArray<Space>): Space | null {
+  return spaces.find((s) => matchesFeedbackSpaceName(s.name)) ?? null;
 }
 
 /**
@@ -93,12 +103,12 @@ function isDuplicateNameError(err: unknown): boolean {
 }
 
 /**
- * Find the Lite bugs Space, creating it on first use. Idempotent and
- * race-safe. Never throws.
+ * Find the Lite feedback Space, creating it on first use. Idempotent
+ * and race-safe. Never throws.
  */
-export async function ensureLiteBugsSpace(api: SpacesApi): Promise<EnsureSpaceResult> {
+export async function ensureLiteFeedbackSpace(api: SpacesApi): Promise<EnsureSpaceResult> {
   try {
-    const existing = findBugSpace(await api.listSpaces());
+    const existing = findFeedbackSpace(await api.listSpaces());
     if (existing !== null) return { space: existing, outcome: 'found' };
   } catch (err) {
     // Can't even list -- the graph is unreachable. Don't attempt a
@@ -109,11 +119,21 @@ export async function ensureLiteBugsSpace(api: SpacesApi): Promise<EnsureSpaceRe
 
   try {
     const created = await api.createSpace({
-      name: LITE_BUGS_SPACE_NAME,
-      description: LITE_BUGS_SPACE_DESCRIPTION,
-      color: LITE_BUGS_SPACE_COLOR,
-      iconKey: LITE_BUGS_SPACE_ICON,
+      name: LITE_FEEDBACK_SPACE_NAME,
+      description: LITE_FEEDBACK_SPACE_DESCRIPTION,
+      color: LITE_FEEDBACK_SPACE_COLOR,
+      iconKey: LITE_FEEDBACK_SPACE_ICON,
     });
+    // Shared kind renders the ticket board (open / in progress / done)
+    // instead of the tile grid — that IS the triage surface. Best-effort:
+    // a plain Space still files tickets fine, so a kind-set failure must
+    // not fail the ensure. Only set on CREATE — if a triager later flips
+    // the kind deliberately, we respect it.
+    try {
+      await api.setSpaceKind(created.id, 'shared');
+    } catch {
+      // tickets still land; the board is presentation, not storage
+    }
     return { space: created, outcome: 'created' };
   } catch (err) {
     if (!isDuplicateNameError(err)) {
@@ -122,14 +142,14 @@ export async function ensureLiteBugsSpace(api: SpacesApi): Promise<EnsureSpaceRe
     // Lost the race. Someone else created it between our list and our
     // create -- re-read and use theirs.
     try {
-      const raced = findBugSpace(await api.listSpaces());
+      const raced = findFeedbackSpace(await api.listSpaces());
       if (raced !== null) return { space: raced, outcome: 'raced' };
       // Duplicate-name, yet not in the list. The name is taken by a
       // Space we can't see (visibility gating), so we cannot file here.
       return {
         space: null,
         outcome: 'failed',
-        error: `"${LITE_BUGS_SPACE_NAME}" already exists but is not visible to this account.`,
+        error: `"${LITE_FEEDBACK_SPACE_NAME}" already exists but is not visible to this account.`,
       };
     } catch (listErr) {
       return { space: null, outcome: 'failed', error: describeError(listErr) };
@@ -137,21 +157,31 @@ export async function ensureLiteBugsSpace(api: SpacesApi): Promise<EnsureSpaceRe
   }
 }
 
-/** One-line title for the Space item. Bug titles are the triage index. */
-export function buildBugItemTitle(payload: BugReportPayload): string {
+/**
+ * Human tag for the title — the glanceable bug/idea marker on the
+ * ticket board. Kept short so real summaries keep the room.
+ */
+function titleTag(feedbackType: FeedbackType): string {
+  return feedbackType === 'feature' ? '[idea]' : '[bug]';
+}
+
+/** One-line ticket title. Titles are the triage index. */
+export function buildFeedbackItemTitle(payload: BugReportPayload): string {
   const raw = typeof payload.description === 'string' ? payload.description.trim() : '';
   const firstLine = raw.split('\n').find((l) => l.trim().length > 0)?.trim() ?? '';
-  const summary = firstLine.length > 0 ? firstLine : 'Bug report';
+  const fallback = payload.feedbackType === 'feature' ? 'Feature request' : 'Bug report';
+  const summary = firstLine.length > 0 ? firstLine : fallback;
   const clipped = summary.length > 120 ? `${summary.slice(0, 117)}…` : summary;
   const version = typeof payload.version === 'string' ? payload.version.trim() : '';
-  return version.length > 0 ? `[${version}] ${clipped}` : clipped;
+  const tag = titleTag(payload.feedbackType);
+  return version.length > 0 ? `[${version}] ${tag} ${clipped}` : `${tag} ${clipped}`;
 }
 
 /**
  * Markdown body. The payload reaching here is ALREADY redacted by the
  * store — this function must never re-introduce a raw field.
  */
-export function buildBugItemContent(payload: BugReportPayload): string {
+export function buildFeedbackItemContent(payload: BugReportPayload): string {
   const lines: string[] = [];
   const description = typeof payload.description === 'string' ? payload.description.trim() : '';
   lines.push(description.length > 0 ? description : '_No description provided._');
@@ -164,6 +194,7 @@ export function buildBugItemContent(payload: BugReportPayload): string {
       ? [os.platform, os.release, os.arch].filter((p) => typeof p === 'string' && p.length > 0).join(' ')
       : '';
   const meta: Array<[string, string]> = [
+    ['Type', payload.feedbackType === 'feature' ? 'Feature request' : 'Bug report'],
     ['Reported', typeof payload.timestamp === 'string' ? payload.timestamp : ''],
     ['App version', typeof payload.version === 'string' ? payload.version : ''],
     ['Platform', platform],
@@ -194,27 +225,30 @@ export interface FileBugResult {
 }
 
 /**
- * Mirror an already-saved, already-redacted report into the bugs Space.
+ * Mirror an already-saved, already-redacted report into the feedback
+ * Space as a TICKET (`kind: 'ticket'`, status defaults to open) so it
+ * lands on the triage board rather than as an inert note.
  *
  * Soft-fails by contract: the caller has already persisted to KV, so a
  * graph failure here costs visibility, not the report.
  */
-export async function fileBugReportToGraph(
+export async function fileFeedbackToGraph(
   payload: BugReportPayload,
   api: SpacesApi
 ): Promise<FileBugResult> {
-  const ensured = await ensureLiteBugsSpace(api);
+  const ensured = await ensureLiteFeedbackSpace(api);
   if (ensured.space === null) {
     return { filed: false, ...(ensured.error !== undefined ? { error: ensured.error } : {}) };
   }
   try {
     const item = await api.items.create({
       spaceId: ensured.space.id,
-      title: buildBugItemTitle(payload),
-      kind: 'text',
-      content: buildBugItemContent(payload),
+      title: buildFeedbackItemTitle(payload),
+      kind: 'ticket',
+      content: buildFeedbackItemContent(payload),
       metadata: {
-        source: 'lite-bug-report',
+        source: 'lite-feedback',
+        feedbackType: payload.feedbackType,
         // The KV key -- this is the join back to the system of record.
         bugReportTimestamp: payload.timestamp,
         ...(typeof payload.version === 'string' ? { appVersion: payload.version } : {}),

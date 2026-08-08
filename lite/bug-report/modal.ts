@@ -76,7 +76,8 @@ interface BugReportBridge {
   }>;
   save(
     userDescription: string,
-    attachments?: BugReportAttachment[]
+    attachments?: BugReportAttachment[],
+    feedbackType?: 'bug' | 'feature'
   ): Promise<BugReportSaveResult>;
   close(): void;
   list(): Promise<BugReportSummary[]>;
@@ -129,6 +130,36 @@ const payloadPreview = $<HTMLPreElement>('payload-preview');
 const redactionStatus = $<HTMLSpanElement>('redaction-status');
 const sendBtn = $<HTMLButtonElement>('send');
 const cancelBtn = $<HTMLButtonElement>('cancel');
+
+// ── Bug ↔ feature toggle ────────────────────────────────────────────────
+// One modal files both; the toggle swaps framing (labels, placeholder,
+// CTA) and rides along on save() so the graph ticket is typed. Bugs
+// stay the default — the window title and menu entry still say bugs.
+let feedbackType: 'bug' | 'feature' = 'bug';
+const typeBugBtn = $<HTMLButtonElement>('type-bug');
+const typeFeatureBtn = $<HTMLButtonElement>('type-feature');
+const newReportLabel = $<HTMLDivElement>('new-report-label');
+const newReportDescription = $<HTMLParagraphElement>('new-report-description');
+
+function applyFeedbackType(next: 'bug' | 'feature'): void {
+  feedbackType = next;
+  const isBug = next === 'bug';
+  typeBugBtn.classList.toggle('is-active', isBug);
+  typeBugBtn.setAttribute('aria-checked', isBug ? 'true' : 'false');
+  typeFeatureBtn.classList.toggle('is-active', !isBug);
+  typeFeatureBtn.setAttribute('aria-checked', isBug ? 'false' : 'true');
+  newReportLabel.textContent = isBug ? 'File a new bug report' : 'Suggest a feature';
+  newReportDescription.textContent = isBug
+    ? 'Your report includes app version, OS, and the last 200 log lines (with secrets automatically redacted).'
+    : 'Describe the feature and the problem it solves. Your app version and OS ride along so we know your setup; secrets are redacted automatically.';
+  descriptionInput.placeholder = isBug
+    ? 'What happened? Steps to reproduce. Expected vs actual behavior.'
+    : 'What should the app do, and what would it help you accomplish?';
+  sendBtn.textContent = isBug ? 'Send Bug Report' : 'Send Suggestion';
+}
+
+typeBugBtn.addEventListener('click', () => applyFeedbackType('bug'));
+typeFeatureBtn.addEventListener('click', () => applyFeedbackType('feature'));
 const resultDiv = $<HTMLDivElement>('result');
 const reportsCount = $<HTMLSpanElement>('reports-count');
 const reportsCountNoun = $<HTMLSpanElement>('reports-count-noun');
@@ -361,8 +392,9 @@ sendBtn.addEventListener('click', async () => {
   sendBtn.disabled = true;
   cancelBtn.disabled = true;
   try {
-    await window.bugReport.save(descriptionInput.value, validAttachments);
-    resultDiv.textContent = 'Bug report sent. Thanks.';
+    await window.bugReport.save(descriptionInput.value, validAttachments, feedbackType);
+    resultDiv.textContent =
+      feedbackType === 'feature' ? 'Suggestion sent. Thanks.' : 'Bug report sent. Thanks.';
     resultDiv.classList.remove('hidden', 'error');
     // Clear staged attachments -- they live in the saved report now.
     stagedAttachments.length = 0;
