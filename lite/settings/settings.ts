@@ -302,6 +302,10 @@ function buildContentPane(section: SectionDescriptor): HTMLElement {
 
   const header = document.createElement('div');
   header.className = 'pane-header';
+  const eyebrow = document.createElement('span');
+  eyebrow.className = 'pane-eyebrow';
+  eyebrow.textContent = 'Settings';
+  header.appendChild(eyebrow);
   const h2 = document.createElement('h2');
   h2.className = 'pane-title';
   h2.textContent = section.title;
