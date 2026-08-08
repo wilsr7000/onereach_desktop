@@ -468,3 +468,111 @@ describe('checklist progress label (required-aware)', () => {
     ).toBe('1/2 required · 1 optional done');
   });
 });
+
+// ─── Shared-dashboard error states (2026-08-08 review) ───────────────────
+//
+// The bug: loadSharedSpaceDashboard mapped failed tickets/members reads
+// to [] and swallowed the catch — a failing members query rendered as
+// "No members yet" on a multi-user surface. The builders now take the
+// recorded per-section error and render a distinct banner; the empty-
+// state copy is reserved for reads that actually succeeded.
+
+interface DashboardBuilders {
+  buildSharedMembersRow(space: unknown, members: unknown[], loadError?: string): HTMLElement;
+  buildSharedDashboardPlaybook(
+    space: unknown,
+    playbook: unknown,
+    loadError?: string
+  ): HTMLElement;
+  buildSharedDashboardTickets(
+    space: unknown,
+    tickets: unknown[],
+    loading: boolean,
+    loadError?: string
+  ): HTMLElement;
+}
+
+function dashboardBuilders(): DashboardBuilders {
+  return handle() as unknown as DashboardBuilders;
+}
+
+const SPACE = { id: 'sp-err', name: 'Team Space' };
+
+describe('shared-dashboard sections — a failed read is not an empty list', () => {
+  it('members: error renders a banner, never "No members yet"', () => {
+    const row = dashboardBuilders().buildSharedMembersRow(SPACE, [], 'HTTP 500');
+    const banner = row.querySelector('.spaces-banner-error');
+    expect(banner?.textContent).toContain("Couldn't load members");
+    expect(banner?.textContent).toContain('HTTP 500');
+    expect(row.textContent).not.toContain('No members yet');
+  });
+
+  it('members: a successful empty read keeps the familiar empty state', () => {
+    const row = dashboardBuilders().buildSharedMembersRow(SPACE, []);
+    expect(row.querySelector('.spaces-banner-error')).toBeNull();
+    expect(row.textContent).toContain('No members yet');
+  });
+
+  it('tickets: error renders a banner, never "No tickets yet"', () => {
+    const section = dashboardBuilders().buildSharedDashboardTickets(
+      SPACE,
+      [],
+      false,
+      'query failed'
+    );
+    const banner = section.querySelector('.spaces-banner-error');
+    expect(banner?.textContent).toContain("Couldn't load tickets");
+    expect(section.textContent).not.toContain('No tickets yet');
+  });
+
+  it('tickets: a successful empty read keeps the CTA empty state', () => {
+    const section = dashboardBuilders().buildSharedDashboardTickets(SPACE, [], false);
+    expect(section.querySelector('.spaces-banner-error')).toBeNull();
+    expect(section.textContent).toContain('No tickets yet');
+  });
+
+  it('playbook: error renders a banner, never the "No playbook set" coaching', () => {
+    const section = dashboardBuilders().buildSharedDashboardPlaybook(SPACE, null, 'nope');
+    const banner = section.querySelector('.spaces-banner-error');
+    expect(banner?.textContent).toContain("Couldn't load the playbook");
+    expect(section.textContent).not.toContain('No playbook set');
+  });
+
+  it('playbook: a successful null read keeps the coaching empty state', () => {
+    const section = dashboardBuilders().buildSharedDashboardPlaybook(SPACE, null);
+    expect(section.querySelector('.spaces-banner-error')).toBeNull();
+    expect(section.textContent).toContain('No playbook set');
+  });
+});
+
+describe('loadSharedSpaceDashboard wiring (source-level)', () => {
+  const source = (): string => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const candidates = [path.resolve('spaces/spaces.ts'), path.resolve('lite/spaces/spaces.ts')];
+    const found = candidates.find((p) => fs.existsSync(p));
+    if (found === undefined) throw new Error(`spaces.ts not found: ${candidates.join(', ')}`);
+    return fs.readFileSync(found, 'utf8');
+  };
+
+  it('records per-section envelope failures, logs them, and keeps prior data', () => {
+    const src = source();
+    const start = src.indexOf('async function loadSharedSpaceDashboard');
+    expect(start, 'loader not found — renamed?').toBeGreaterThan(-1);
+    const body = src.slice(start, start + 4000);
+    // Each failed section records its message instead of faking [].
+    expect(body).toMatch(/errors\.playbook = playbookRes\.error\.message/);
+    expect(body).toMatch(/errors\.tickets = ticketsRes\.error\.message/);
+    expect(body).toMatch(/errors\.members = membersRes\.error\.message/);
+    // …logs it…
+    expect(body).toMatch(/'shared-dashboard tickets load failed'/);
+    expect(body).toMatch(/'shared-dashboard members load failed'/);
+    // …keeps the last good data (stale beats blank on a shared surface)…
+    expect(body).toMatch(/prior\?\.tickets \?\? \[\]/);
+    expect(body).toMatch(/prior\?\.members \?\? \[\]/);
+    // …and the catch is no longer silent.
+    expect(body).toMatch(/'shared-dashboard load threw'/);
+  });
+});

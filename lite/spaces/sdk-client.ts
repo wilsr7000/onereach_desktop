@@ -1454,9 +1454,14 @@ export const CYPHER = {
   `,
 
   /**
-   * Remove a member from a Space. No-op when the edge is already
-   * absent. Returns 1 if removed, 0 otherwise (the renderer ignores
-   * the count and just re-renders).
+   * Remove a member from a Space. Returns the count of HAS_ACCESS
+   * edges actually deleted (2026-08-08 release review): this is an
+   * access REVOKE, so the result must be verifiable — the old
+   * `RETURN $memberId` echoed the parameter whether or not anything
+   * was deleted. The aggregation yields exactly one row even when the
+   * MATCH found nothing (deleted = 0), so an EMPTY result can only
+   * mean the query itself failed (the Edison endpoint surfaces Cypher
+   * errors as empty 200s). The TS wrapper throws on both.
    */
   REMOVE_SPACE_MEMBER: `
     MATCH (s:Space {id: $spaceId})
@@ -1464,7 +1469,7 @@ export const CYPHER = {
     MATCH (member {id: $memberId})-[r:HAS_ACCESS]->(s)
       WHERE member:Person OR member:Agent
     DELETE r
-    RETURN $memberId AS id
+    RETURN count(r) AS deleted
   `,
 
   /**
@@ -1999,6 +2004,7 @@ export const CYPHER = {
         id: cpre.id, name: cpre.name, mode: cpre.mode,
         pausePoint: cpre.pausePoint, itemsJson: cpre.items,
         itemCount: coalesce(cpre.itemCount, 0),
+        requiredIdx: cpre.requiredIdx,
         version: coalesce(cpre.version, 1)
       } END) AS pres,
       collect(DISTINCT CASE WHEN cpost IS NULL THEN NULL ELSE {
@@ -2011,6 +2017,7 @@ export const CYPHER = {
         id: cpost.id, name: cpost.name, mode: cpost.mode,
         pausePoint: cpost.pausePoint, itemsJson: cpost.items,
         itemCount: coalesce(cpost.itemCount, 0),
+        requiredIdx: cpost.requiredIdx,
         version: coalesce(cpost.version, 1)
       } END) AS posts
     RETURN [x IN pres WHERE x IS NOT NULL] + [x IN posts WHERE x IS NOT NULL] AS links
@@ -3871,9 +3878,15 @@ export class SdkSpacesClient {
   }
 
   /**
-   * Remove a member's access to a Space. No-op when the edge is
-   * already absent; returns silently in either case so callers can
-   * call without a try/catch around "edge was missing."
+   * Remove a member's access to a Space.
+   *
+   * SECURITY (2026-08-08 release review): this is an access REVOKE, so
+   * the result is verified rather than assumed. The Cypher returns the
+   * deleted-edge count; zero means nothing was removed (the member was
+   * already absent, or the Space is not visible to this viewer), and an
+   * empty result means the query itself failed (Edison surfaces Cypher
+   * errors as empty 200s). Both throw — a revoke that did not happen
+   * must never look done.
    */
   async removeSpaceMember(spaceId: string, memberId: string): Promise<void> {
     const validSpaceId = validateSpaceId(spaceId);
@@ -3884,10 +3897,29 @@ export class SdkSpacesClient {
         context: { memberId },
       });
     }
-    await this.run(CYPHER.REMOVE_SPACE_MEMBER, {
+    const rows = await this.run(CYPHER.REMOVE_SPACE_MEMBER, {
       spaceId: validSpaceId,
       memberId,
     });
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (row === undefined) {
+      throw new SpacesError({
+        code: 'SPACES_CYPHER',
+        message: 'Member removal returned no result — access may NOT have been revoked.',
+        remediation: 'Retry, then re-open the member list to verify the grant is gone.',
+        context: { op: 'members.remove', spaceId: validSpaceId, memberId },
+      });
+    }
+    const deleted = typeof row['deleted'] === 'number' ? row['deleted'] : 0;
+    if (deleted === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message:
+          'No access grant was removed — the member may already be gone, or the Space is not visible to you.',
+        remediation: 'Refresh the member list to confirm the current state.',
+        context: { op: 'members.remove', spaceId: validSpaceId, memberId },
+      });
+    }
   }
 
   /** @internal -- helper for disambiguating empty mutation results. */
@@ -5599,6 +5631,20 @@ function rowToTicketChecklist(link: Record<string, unknown>): TicketChecklist | 
     ? (link['checkedIdx'] as unknown[]).filter((n): n is number => typeof n === 'number')
     : [];
   const itemCount = typeof link['itemCount'] === 'number' ? link['itemCount'] : base.items.length;
+  // Required-aware completion (2026-08-08 release review): mirror the
+  // rule SET_CHECKLIST_ITEM_* and TICKET_GATE_STATE apply in Cypher —
+  // a null requiredIdx (legacy v1 node) means every item counts; a
+  // list means only the REQUIRED items gate. The run card and the gate
+  // must agree, or a checklist with optional items reads "incomplete"
+  // on the card even while the gate passes it.
+  const requiredIdx = Array.isArray(link['requiredIdx'])
+    ? (link['requiredIdx'] as unknown[]).filter((n): n is number => typeof n === 'number')
+    : null;
+  const checkedSet = new Set(checkedIndexes);
+  const complete =
+    requiredIdx === null
+      ? itemCount > 0 && checkedIndexes.length === itemCount
+      : requiredIdx.every((req) => checkedSet.has(req));
   return {
     checklist: base,
     phase: link['phase'] === 'postflight' ? 'postflight' : 'preflight',
@@ -5607,7 +5653,7 @@ function rowToTicketChecklist(link: Record<string, unknown>): TicketChecklist | 
         ? link['obligation']
         : 'recommended',
     checkedIndexes,
-    complete: itemCount > 0 && checkedIndexes.length === itemCount,
+    complete,
     ...(typeof link['completedAt'] === 'string' && link['completedAt'].length > 0
       ? { completedAt: link['completedAt'] }
       : {}),

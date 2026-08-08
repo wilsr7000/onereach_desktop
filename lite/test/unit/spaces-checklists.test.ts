@@ -438,6 +438,12 @@ describe('required/optional items + AI drafting + accordions (2026-08-08)', () =
     // Create + update persist the denormalized list.
     expect(CYPHER.CREATE_CHECKLIST).toContain('requiredIdx: $requiredIdx');
     expect(CYPHER.UPDATE_CHECKLIST).toContain('c.requiredIdx = $requiredIdx');
+    // ...and the READ path returns it (2026-08-08 release review): the
+    // run-card `complete` is computed from this projection, so if the
+    // read drops requiredIdx the card falls back to the v1 all-items
+    // rule and disagrees with the gate.
+    expect(CYPHER.GET_TICKET_CHECKLISTS).toContain('requiredIdx: cpre.requiredIdx');
+    expect(CYPHER.GET_TICKET_CHECKLISTS).toContain('requiredIdx: cpost.requiredIdx');
   });
 
   it('the editor is structured rows + AI draft; drafts are reviewed, never auto-saved', () => {
@@ -495,6 +501,69 @@ describe('parseChecklistItems round-trips the v2 fields', () => {
     expect(items[1]?.more).toBe('Only the ops page.');
     expect(items[0]?.killer).toBe(true);
     expect(items[0]?.optional).toBeUndefined();
+  });
+});
+
+describe('getTicketChecklists — the run card agrees with the gate (2026-08-08 review)', () => {
+  // A checklist with one optional item: the gate passes once both
+  // REQUIRED items are checked, and the run card must say the same.
+  const ITEMS = [
+    { text: 'Verify backups' },
+    { text: 'Update the wiki', optional: true },
+    { text: 'Tag the release' },
+  ];
+  const linkRow = (overrides: Record<string, unknown>): Array<Record<string, unknown>> => [
+    {
+      links: [
+        {
+          phase: 'preflight',
+          obligation: 'required',
+          checkedIdx: [],
+          completedAt: null,
+          lastCheckedBy: null,
+          lastCheckedAt: null,
+          id: 'c1',
+          name: 'Deploy',
+          mode: 'DO-CONFIRM',
+          pausePoint: 'before merge',
+          itemsJson: JSON.stringify(ITEMS),
+          itemCount: ITEMS.length,
+          requiredIdx: [0, 2],
+          version: 2,
+          ...overrides,
+        },
+      ],
+    },
+  ];
+  const forTicket = async (
+    overrides: Record<string, unknown>
+  ): Promise<boolean | undefined> => {
+    const { api } = client((cypher) =>
+      cypher.includes('AS links') ? linkRow(overrides) : []
+    );
+    const links = await api.getTicketChecklists('t1');
+    return links[0]?.complete;
+  };
+
+  it('complete when every REQUIRED item is checked, optional unchecked', async () => {
+    // The regression: the mapper used the v1 all-items rule
+    // (checked.length === itemCount), so this exact state — gate open,
+    // work done — rendered "2/2 required" next to an incomplete card.
+    await expect(forTicket({ checkedIdx: [0, 2] })).resolves.toBe(true);
+  });
+
+  it('incomplete while a required item is unchecked, even with the optional done', async () => {
+    await expect(forTicket({ checkedIdx: [0, 1] })).resolves.toBe(false);
+  });
+
+  it('legacy checklist (requiredIdx null) keeps the all-items rule', async () => {
+    await expect(forTicket({ requiredIdx: null, checkedIdx: [0, 1] })).resolves.toBe(false);
+    await expect(forTicket({ requiredIdx: null, checkedIdx: [0, 1, 2] })).resolves.toBe(true);
+  });
+
+  it('all-optional checklist (requiredIdx []) is trivially complete — gate parity', async () => {
+    // Cypher: all(req IN [] WHERE ...) is TRUE; the mapper must match.
+    await expect(forTicket({ requiredIdx: [], checkedIdx: [] })).resolves.toBe(true);
   });
 });
 
