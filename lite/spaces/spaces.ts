@@ -1851,17 +1851,90 @@ async function loadItemHistory(itemId: string): Promise<void> {
 }
 
 /** History section: current marker + one row per prior snapshot. */
+/** Collapse preference — one global toggle, remembered per install. */
+const HISTORY_COLLAPSED_KEY = 'lite.spaces.detail.history.collapsed';
+
+function historyStartsCollapsed(): boolean {
+  try {
+    // Collapsed by default: the pane stays calm, and the summary line
+    // carries the glanceable facts (count · last updated · last change).
+    return window.localStorage.getItem(HISTORY_COLLAPSED_KEY) !== 'expanded';
+  } catch {
+    return true;
+  }
+}
+
+function persistHistoryCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(HISTORY_COLLAPSED_KEY, collapsed ? 'collapsed' : 'expanded');
+  } catch {
+    // preference only
+  }
+}
+
 export function buildDetailHistory(
   itemId: string,
   versions: ReadonlyArray<RendererAssetVersion>
 ): HTMLElement {
   const section = document.createElement('section');
   section.className = 'spaces-detail-history';
+  if (historyStartsCollapsed()) section.classList.add('is-collapsed');
 
-  const label = document.createElement('div');
-  label.className = 'spaces-detail-label';
-  label.textContent = `History · ${versions.length} version${versions.length === 1 ? '' : 's'}`;
-  section.appendChild(label);
+  // Header: chevron + label + collapsed-mode summary (count · last
+  // updated · latest change one-liner). The whole header toggles.
+  const header = document.createElement('button');
+  header.type = 'button';
+  header.className = 'spaces-history-header';
+  header.setAttribute(
+    'aria-expanded',
+    section.classList.contains('is-collapsed') ? 'false' : 'true'
+  );
+
+  const chevron = document.createElement('span');
+  chevron.className = 'spaces-history-chevron';
+  chevron.setAttribute('aria-hidden', 'true');
+  chevron.textContent = '▸';
+  header.appendChild(chevron);
+
+  const label = document.createElement('span');
+  label.className = 'spaces-history-label';
+  label.textContent = 'History';
+  header.appendChild(label);
+
+  const newest = versions[0];
+  const meta = document.createElement('span');
+  meta.className = 'spaces-history-meta';
+  const parts: string[] = [`${versions.length} version${versions.length === 1 ? '' : 's'}`];
+  if (newest !== undefined && newest.editedAt.length > 0) {
+    parts.push(formatRelativeTime(newest.editedAt));
+  }
+  meta.textContent = parts.join(' · ');
+  header.appendChild(meta);
+
+  // The latest change description rides the collapsed header — the
+  // "what just happened" at a glance. Hidden when expanded (the rows
+  // carry it there).
+  if (newest !== undefined) {
+    const latest = document.createElement('span');
+    latest.className = 'spaces-history-latest';
+    latest.textContent =
+      typeof newest.changeSummary === 'string' && newest.changeSummary.length > 0
+        ? newest.changeSummary
+        : typeof newest.restoredFromSeq === 'number'
+          ? `Restored v${newest.restoredFromSeq}`
+          : '';
+    if (latest.textContent.length > 0) header.appendChild(latest);
+  }
+
+  header.addEventListener('click', () => {
+    const collapsed = section.classList.toggle('is-collapsed');
+    header.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    persistHistoryCollapsed(collapsed);
+  });
+  section.appendChild(header);
+
+  const body = document.createElement('div');
+  body.className = 'spaces-history-body-wrap';
 
   const list = document.createElement('ul');
   list.className = 'spaces-history-list';
@@ -1869,9 +1942,10 @@ export function buildDetailHistory(
   // "Current" pseudo-row so the newest state reads as the live one.
   const currentLi = document.createElement('li');
   currentLi.className = 'spaces-history-row is-current';
-  const curDot = document.createElement('span');
-  curDot.className = 'spaces-history-dot';
-  currentLi.appendChild(curDot);
+  const curGlyph = document.createElement('span');
+  curGlyph.className = 'spaces-history-glyph';
+  curGlyph.textContent = '●';
+  currentLi.appendChild(curGlyph);
   const curBody = document.createElement('div');
   curBody.className = 'spaces-history-body';
   const curTop = document.createElement('div');
@@ -1887,8 +1961,14 @@ export function buildDetailHistory(
   for (const v of versions) {
     list.appendChild(buildHistoryRow(itemId, v));
   }
-  section.appendChild(list);
+  body.appendChild(list);
+  section.appendChild(body);
   return section;
+}
+
+/** Minimal monochrome glyph per row: ✎ edit, ↺ restore, ● current. */
+function historyGlyphFor(v: RendererAssetVersion): string {
+  return typeof v.restoredFromSeq === 'number' ? '↺' : '✎';
 }
 
 export function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLElement {
@@ -1896,7 +1976,8 @@ export function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLEl
   li.className = 'spaces-history-row';
 
   const dot = document.createElement('span');
-  dot.className = 'spaces-history-dot';
+  dot.className = 'spaces-history-glyph';
+  dot.textContent = historyGlyphFor(v);
   li.appendChild(dot);
 
   const body = document.createElement('div');
@@ -6621,15 +6702,15 @@ function buildEmptyItemsState(scopeId: string): HTMLElement {
   title.className = 'spaces-empty-items-title';
   title.textContent =
     scopeId === UNCATEGORIZED_SPACE_ID
-      ? 'Nothing waiting for triage'
-      : 'No items in this Space yet';
+      ? 'Nothing waiting — all clear'
+      : 'A blank Space, waiting for you';
   wrap.appendChild(title);
   const body = document.createElement('p');
   body.className = 'spaces-empty-items-body';
   body.textContent =
     scopeId === UNCATEGORIZED_SPACE_ID
-      ? 'Items that arrive without being filed land here. When an agent drops new output into the graph, you will see it appear in this list.'
-      : 'Add a file, paste a note or a link, or point an agent at it.';
+      ? 'Items that arrive without a home land here for triage. When an agent drops new output into the graph, it shows up in this list.'
+      : 'Drop in a file, paste a note or a link, or point an agent at it. Whatever you add stays findable — forever.';
   wrap.appendChild(body);
 
   // The uncategorized lane is genuinely passive — things ARRIVE there,

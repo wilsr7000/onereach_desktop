@@ -470,10 +470,25 @@ describe('version history section', () => {
       },
     ] as never);
 
-    expect(section.querySelector('.spaces-detail-label')?.textContent).toContain('3 versions');
+    // Collapsed by default, with the glanceable summary on the header:
+    // count + last-updated + the newest change one-liner.
+    expect(section.classList.contains('is-collapsed')).toBe(true);
+    expect(section.querySelector('.spaces-history-meta')?.textContent).toContain('3 versions');
+    expect(section.querySelector('.spaces-history-latest')?.textContent).toContain('Restored v2');
+
+    // Clicking the header expands and flips aria-expanded.
+    const header = section.querySelector<HTMLButtonElement>('.spaces-history-header');
+    header?.click();
+    expect(section.classList.contains('is-collapsed')).toBe(false);
+    expect(header?.getAttribute('aria-expanded')).toBe('true');
+
     const rows = section.querySelectorAll('.spaces-history-row');
     expect(rows.length).toBe(4); // Current + 3
     expect(rows[0]?.classList.contains('is-current')).toBe(true);
+    // Minimal icon language: ● current, ↺ restore, ✎ edit.
+    expect(rows[0]?.querySelector('.spaces-history-glyph')?.textContent).toBe('●');
+    expect(rows[1]?.querySelector('.spaces-history-glyph')?.textContent).toBe('↺');
+    expect(rows[2]?.querySelector('.spaces-history-glyph')?.textContent).toBe('✎');
 
     const v3 = rows[1];
     expect(v3?.querySelector('.spaces-history-seq')?.textContent).toBe('v3');

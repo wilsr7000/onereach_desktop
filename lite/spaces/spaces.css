@@ -8529,3 +8529,201 @@ body {
   color: rgba(255, 255, 255, 0.55);
   padding: 8px 0;
 }
+
+/* ═══════════════════════════════════════════════════════════════════
+ * THE QUIET MACHINE — design pass (2026-08-08)
+ * Tufte's honesty × Apple's restraint × Nirvana's soul.
+ * See lite/DESIGN-LANGUAGE.md. One block, so it reads as one intent.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* — The Space name is the identity of the whole view. Give it the
+ *   editorial serif and let it breathe: Tufte's hero, set quietly. */
+.spaces-view-header-title {
+  font-family: var(--or-font-display);
+  font-size: 25px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--or-text-primary);
+}
+
+/* — Tiles settle on a spring, and lift with intent, not a jolt. */
+.spaces-card {
+  transition:
+    transform 220ms var(--or-ease-spring),
+    border-color 220ms var(--or-ease-out),
+    box-shadow 220ms var(--or-ease-out);
+}
+.spaces-card:hover {
+  transform: translateY(-2px);
+}
+
+/* — Small multiples: the kind-accent tiles are ONE family. Each is a
+ *   left spine of colour + a matching wash, same weight, differing
+ *   only in hue. Quiet until hovered, then the spine warms. */
+.spaces-card-preview-playbook,
+.spaces-card-preview-transcript,
+.spaces-card-preview-knowledge,
+.spaces-card-preview-journey,
+.spaces-card-preview-agent {
+  position: relative;
+}
+.spaces-card-preview-transcript { box-shadow: inset 3px 0 0 rgba(45, 212, 191, 0.55); }
+.spaces-card-preview-knowledge  { box-shadow: inset 3px 0 0 rgba(52, 211, 153, 0.55); }
+.spaces-card-preview-journey    { box-shadow: inset 3px 0 0 rgba(79, 140, 255, 0.55); }
+.spaces-card-preview-agent      { box-shadow: inset 3px 0 0 rgba(240, 164, 75, 0.55); }
+.spaces-card:hover .spaces-card-preview-transcript { box-shadow: inset 4px 0 0 rgba(45, 212, 191, 0.9); }
+.spaces-card:hover .spaces-card-preview-knowledge  { box-shadow: inset 4px 0 0 rgba(52, 211, 153, 0.9); }
+.spaces-card:hover .spaces-card-preview-journey    { box-shadow: inset 4px 0 0 rgba(79, 140, 255, 0.9); }
+.spaces-card:hover .spaces-card-preview-agent      { box-shadow: inset 4px 0 0 rgba(240, 164, 75, 0.9); }
+
+/* — Fun: the playbook star catches the light on hover. The cap-chew's
+ *   cousin — a small mark that rewards attention. */
+.spaces-card:hover .spaces-card-playbook-star {
+  animation: or-twinkle 900ms var(--or-ease-out);
+}
+@keyframes or-twinkle {
+  0%   { transform: scale(1) rotate(0); filter: drop-shadow(0 0 4px rgba(232, 179, 75, 0.35)); }
+  40%  { transform: scale(1.28) rotate(9deg); filter: drop-shadow(0 0 10px rgba(245, 215, 110, 0.85)); }
+  100% { transform: scale(1) rotate(0); filter: drop-shadow(0 0 4px rgba(232, 179, 75, 0.35)); }
+}
+
+/* — Fun: the hexagon mark breathes when idle — the machine is alive.
+ *   Slow, almost subliminal; killed by prefers-reduced-motion. */
+.spaces-hex-logo,
+.learn-hero-logo svg {
+  animation: or-breathe 6s var(--or-ease-out) infinite;
+}
+
+/* — Empty states stop shrugging. No dashed box; a centred mark with a
+ *   heartbeat and a human line. "Come as you are." */
+.spaces-empty-items {
+  border: none;
+  background: none;
+  padding: 44px 28px;
+  max-width: 460px;
+}
+.spaces-empty-items::before {
+  content: '✎';
+  display: block;
+  font-size: 30px;
+  line-height: 1;
+  margin: 0 auto 16px;
+  width: 68px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--or-accent-strong);
+  border: 1px solid rgba(123, 219, 255, 0.22);
+  box-shadow: inset 0 0 30px rgba(123, 219, 255, 0.06);
+  animation: or-breathe 4.5s var(--or-ease-out) infinite;
+}
+.spaces-empty-items-title {
+  font-family: var(--or-font-display);
+  font-size: 17px;
+  font-weight: 500;
+}
+.spaces-empty-items-body {
+  color: var(--or-text-muted);
+}
+
+/* — The bulk-select + "+ New" primary actions settle on the spring. */
+.spaces-items-new,
+.spaces-empty-items-cta,
+.learn-cta {
+  transition:
+    filter 140ms var(--or-ease-out),
+    transform 160ms var(--or-ease-spring),
+    box-shadow 160ms var(--or-ease-out);
+}
+.spaces-items-new:hover,
+.spaces-empty-items-cta:hover,
+.learn-cta:hover {
+  transform: translateY(-1px);
+}
+
+
+/* --- History polish: collapsible + summary header + glyphs (2026-08-08) --- */
+
+.spaces-history-header {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 2px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 80ms ease;
+  min-width: 0;
+}
+
+.spaces-history-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.spaces-history-chevron {
+  flex: 0 0 auto;
+  width: 11px;
+  font-size: 10px;
+  color: #6f7688;
+  transform: rotate(90deg);
+  transition: transform 100ms ease;
+}
+
+.spaces-detail-history.is-collapsed .spaces-history-chevron {
+  transform: rotate(0deg);
+}
+
+.spaces-history-label {
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #8b93a7;
+}
+
+.spaces-history-meta {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #6f7688;
+}
+
+.spaces-history-latest {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-style: italic;
+  color: #7d8496;
+  display: none;
+}
+
+/* The latest-change one-liner is the collapsed mode's payload. */
+.spaces-detail-history.is-collapsed .spaces-history-latest {
+  display: block;
+}
+
+.spaces-detail-history.is-collapsed .spaces-history-body-wrap {
+  display: none;
+}
+
+.spaces-history-glyph {
+  flex: 0 0 auto;
+  width: 16px;
+  text-align: center;
+  margin-top: 2px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #5b6172;
+}
+
+.spaces-history-row.is-current .spaces-history-glyph {
+  color: #6ee7b7;
+  font-size: 9px;
+}
