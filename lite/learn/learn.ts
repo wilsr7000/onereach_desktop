@@ -30,6 +30,7 @@ import {
   type LearnerRole,
 } from '../spaces/learn-content.js';
 import { renderMarkdown, buildHexMazeLogo } from '../spaces/render-shared.js';
+import { bootRenderer } from '../renderer-boot.js';
 
 const pageState: {
   progress: LiteLearnProgressView | null;
@@ -556,10 +557,11 @@ window.__learnPageForTesting = {
   },
 };
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    void boot();
-  });
-} else {
-  void boot();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+bootRenderer({
+  scope: 'learn',
+  title: 'Learn failed to load',
+  init: () => boot(),
+});

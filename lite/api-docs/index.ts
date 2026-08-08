@@ -18,6 +18,7 @@ export {};
 import { marked } from 'marked';
 import { MANIFEST } from './manifest.generated.js';
 import type { ModuleDoc, MethodDoc, EventDoc } from './types.js';
+import { bootRenderer } from '../renderer-boot.js';
 
 // ─── State ──────────────────────────────────────────────────────────────
 
@@ -348,9 +349,13 @@ function renderReadme(markdown: string): HTMLElement {
 }
 
 // ─── Run ────────────────────────────────────────────────────────────────
+//
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-  bootstrap();
-}
+bootRenderer({
+  scope: 'api-docs',
+  title: 'The API Reference failed to load',
+  init: () => bootstrap(),
+});

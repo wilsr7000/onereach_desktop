@@ -123,5 +123,13 @@ module.exports = {
       // file resolves to foo.ts when foo.js doesn't exist.
       extensions: ['.ts', '.js', '.mjs', '.cjs', '.json'],
     },
+    // Keep resolved paths as-written instead of realpath-ing through
+    // symlinks. Otherwise a checkout whose node_modules is a symlink
+    // (e.g. a git worktree borrowing the main checkout's install)
+    // reports every package import as `../../../node_modules/...`,
+    // which escapes the `^(lite/|lib/|node_modules/)` allowlist and
+    // drowns the report in false violations. Resolution targets are
+    // identical either way; only the reported path shape changes.
+    preserveSymlinks: true,
   },
 };

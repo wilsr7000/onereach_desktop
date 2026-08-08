@@ -199,9 +199,23 @@ describe('review-fix wiring invariants (source-level)', () => {
   });
 
   it('the fatal overlay is gated to boot failures only', () => {
+    // The gate itself now lives in the SHARED boot guard
+    // (lite/renderer-boot.ts, extracted 2026-08-08 so every renderer
+    // gets it); spaces.ts's contract is (a) boot through it and
+    // (b) mark first paint after the first space-list render.
     const src = source();
-    expect(src).toMatch(/if \(spacesBootSucceeded\) return;/);
-    expect(src).toMatch(/spacesBootSucceeded = true;/);
+    expect(src).toMatch(/bootRenderer\(\{/);
+    expect(src).toMatch(/markSpacesBootSucceeded = ctx\.markBootSucceeded;/);
+    expect(src).toMatch(/markSpacesBootSucceeded\(\);/);
+
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const helper = [path.resolve('renderer-boot.ts'), path.resolve('lite/renderer-boot.ts')].find(
+      (p) => fs.existsSync(p)
+    );
+    expect(helper, 'renderer-boot.ts not found — moved?').toBeDefined();
+    const helperSrc = fs.readFileSync(helper as string, 'utf8');
+    expect(helperSrc).toMatch(/if \(bootSucceeded\) return;/);
   });
 
   it('the agent-library search has a supersession guard', () => {

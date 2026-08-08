@@ -11,7 +11,7 @@
 
 /// <reference path="../lite-window.d.ts" />
 
-export {};
+import { bootRenderer } from '../renderer-boot.js';
 
 interface ToolEntryView {
   id: string;
@@ -326,8 +326,11 @@ function showToast(message: string, kind: 'success' | 'error' | 'info'): void {
   }, 3000);
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-  bootstrap();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+bootRenderer({
+  scope: 'tools-manager',
+  title: 'The Tools manager failed to load',
+  init: () => bootstrap(),
+});

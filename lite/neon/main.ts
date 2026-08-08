@@ -23,6 +23,16 @@ import { NEON_EVENTS } from './events.js';
 import type { NeonConfig, NeonRecord, NeonStatus } from './types.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getNamedQuery } from './named-queries.js';
+import { wrapIpcHandler } from '../errors.js';
+
+/**
+ * Marker key for the renderer's `parseError` (preload-lite.ts). Every
+ * handler is registered through `wrapIpcHandler` with this marker so
+ * unknown errors reach the renderer as `{ code: 'UNKNOWN', message }`
+ * instead of Electron's generic "Error invoking remote method"
+ * (2026-08-08 hardening review).
+ */
+const IPC_ERROR_MARKER = '__neonError';
 
 // ---------------------------------------------------------------------------
 // IPC channel names. All prefixed `lite:neon:` per Rule 3.
@@ -79,7 +89,7 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
   // keep calling getNeonApi().query() directly.
   ipcMain.handle(
     NEON_IPC.QUERY_NAMED,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _event: IpcMainInvokeEvent,
       payload: { name?: unknown; parameters?: unknown }
     ): Promise<{ records: NeonRecord[] }> => {
@@ -109,25 +119,27 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
       } catch (err) {
         if (err instanceof NeonError) {
           log.warn('named query rejected', { name, code: err.code });
-          throw new Error(JSON.stringify({ __neonError: err.toJSON() }));
+        } else {
+          log.error('named query unexpected error', { name, error: (err as Error).message });
         }
-        log.error('named query unexpected error', { name, error: (err as Error).message });
+        // wrapIpcHandler envelopes: typed errors keep their code,
+        // anything else crosses as UNKNOWN.
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     NEON_IPC.STATUS,
-    async (_event: IpcMainInvokeEvent): Promise<NeonStatus> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent): Promise<NeonStatus> => {
       getLoggingApi().event(NEON_EVENTS.IPC_STATUS);
       return getNeonApi().status();
-    }
+    })
   );
 
   ipcMain.handle(
     NEON_IPC.TEST_CONNECTION,
-    async (_event: IpcMainInvokeEvent): Promise<{ ok: boolean; error?: string; code?: string }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent): Promise<{ ok: boolean; error?: string; code?: string }> => {
       getLoggingApi().event(NEON_EVENTS.IPC_TEST_CONNECTION);
       try {
         const ok = await getNeonApi().ping();
@@ -148,12 +160,12 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
           error: (err as Error).message,
         };
       }
-    }
+    })
   );
 
   ipcMain.handle(
     NEON_IPC.CONFIGURE,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _event: IpcMainInvokeEvent,
       payload: unknown
     ): Promise<{ ok: true; status: NeonStatus }> => {
@@ -167,12 +179,12 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
       } catch (err) {
         if (err instanceof NeonError) {
           log.warn('configure rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __neonError: err.toJSON() }));
+        } else {
+          log.error('configure unexpected error', { error: (err as Error).message });
         }
-        log.error('configure unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
   registered = true;

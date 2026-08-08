@@ -202,6 +202,102 @@ export function isLiteError(value: unknown): value is LiteError {
   return value instanceof LiteError;
 }
 
+// ---------------------------------------------------------------------------
+// IPC error envelopes (the `__xError` JSON pattern)
+// ---------------------------------------------------------------------------
+
+/**
+ * Wire shape of an error crossing `ipcMain.handle` -> renderer.
+ * Matches `LiteError.toJSON()`; the per-module `parseError`
+ * implementations in `preload-lite.ts` re-materialize exactly this.
+ */
+export type LiteErrorJSON = ReturnType<LiteError['toJSON']>;
+
+/**
+ * Project any thrown value into the `__xError` JSON envelope that
+ * crosses `ipcMain.handle` boundaries.
+ *
+ * Errors don't serialize losslessly through Electron IPC: the renderer
+ * receives a generic `Error` whose `.message` is prefixed with
+ * "Error invoking remote method '<channel>': ". The lite convention
+ * (see each module's `parseError` in `preload-lite.ts`) is to smuggle
+ * a JSON payload in the message under a module marker key, e.g.
+ * `{"__neonError":{...}}` -- the preload skips to the first `{` and
+ * parses from there.
+ *
+ * Before the 2026-08-08 hardening review only TYPED module errors were
+ * enveloped; everything else was rethrown raw, so the renderer's
+ * `parseError` returned null and the user saw Electron's generic
+ * message. This helper is the catch-all:
+ *
+ *   - already-enveloped `Error` (message starts with the marker
+ *     envelope) -- returned as-is, so double-wrapping is impossible
+ *   - `LiteError` (any subclass) -- `err.toJSON()`, stable code kept
+ *   - anything else -- `{ code: 'UNKNOWN', message }`
+ *
+ * @param marker Module marker key, e.g. `'__neonError'`. Must match
+ *   the key the module's renderer-side `parseError` looks for.
+ */
+export function envelopeIpcError(marker: string, err: unknown): Error {
+  if (err instanceof Error && err.message.startsWith(`{"${marker}"`)) {
+    return err;
+  }
+  const json: LiteErrorJSON =
+    err instanceof LiteError
+      ? err.toJSON()
+      : new LiteError({
+          code: 'UNKNOWN',
+          message: err instanceof Error ? err.message : String(err),
+          cause: err,
+        }).toJSON();
+  let wire: string;
+  try {
+    wire = JSON.stringify({ [marker]: json });
+  } catch {
+    // A LiteError carried unserializable context. The catch-all must
+    // never itself throw -- fall back to the minimal envelope.
+    wire = JSON.stringify({
+      [marker]: {
+        name: 'LiteError',
+        code: 'UNKNOWN',
+        message: json.message,
+        context: {},
+        remediation: DEFAULT_REMEDIATION,
+      },
+    });
+  }
+  return new Error(wire);
+}
+
+/**
+ * Wrap an `ipcMain.handle` listener so ANYTHING it throws crosses the
+ * IPC boundary as a parseable envelope -- typed module errors keep
+ * their code, unknown errors surface as `{ code: 'UNKNOWN', message }`
+ * instead of Electron's opaque "Error invoking remote method".
+ *
+ * Wrap at the registration site; handler bodies stay untouched (their
+ * own catch blocks keep doing contextual logging and rethrow raw):
+ *
+ *   ipcMain.handle(
+ *     NEON_IPC.STATUS,
+ *     wrapIpcHandler('__neonError', async (_event) => {
+ *       return getNeonApi().status();
+ *     })
+ *   );
+ */
+export function wrapIpcHandler<Args extends unknown[], R>(
+  marker: string,
+  handler: (...args: Args) => R
+): (...args: Args) => Promise<Awaited<R>> {
+  return async (...args: Args): Promise<Awaited<R>> => {
+    try {
+      return await handler(...args);
+    } catch (err) {
+      throw envelopeIpcError(marker, err);
+    }
+  };
+}
+
 function formatCause(cause: unknown): string {
   if (cause instanceof Error) {
     return `${cause.name}: ${cause.message}`;

@@ -20,8 +20,7 @@
 // don't collide on declaration merging).
 /// <reference path="./lite-window.d.ts" />
 
-// File is a module so esbuild treats it as ESM input.
-export {};
+import { bootRenderer } from './renderer-boot.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -283,11 +282,14 @@ function bootstrap(): void {
     });
 }
 
-// Run after DOM is ready (the script tag is at the end of <body>, so
-// `document.readyState` is 'interactive' or 'complete' here, but be
-// defensive in case esbuild moves things later).
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-  bootstrap();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard). Runs
+// after DOM is ready (the script tag is at the end of <body>, so
+// `document.readyState` is 'interactive' or 'complete' here, but the
+// helper is defensive in case esbuild moves things later).
+bootRenderer({
+  scope: 'placeholder',
+  title: 'This window failed to load',
+  init: () => bootstrap(),
+});

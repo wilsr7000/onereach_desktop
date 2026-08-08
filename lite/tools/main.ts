@@ -30,6 +30,16 @@ import { TOOLS_EVENTS } from './events.js';
 import { initMenuBuilder, teardownMenuBuilder } from './menu-builder.js';
 import { openManagerWindow, closeManagerWindow } from './manager-window.js';
 import { getLoggingApi } from '../logging/api.js';
+import { wrapIpcHandler } from '../errors.js';
+
+/**
+ * Marker key for the renderer's `parseError` (preload-lite.ts). Every
+ * handler is registered through `wrapIpcHandler` with this marker so
+ * unknown errors reach the renderer as `{ code: 'UNKNOWN', message }`
+ * instead of Electron's generic "Error invoking remote method"
+ * (2026-08-08 hardening review).
+ */
+const IPC_ERROR_MARKER = '__toolsError';
 
 // ---------------------------------------------------------------------------
 // IPC channel names. All prefixed `lite:tools:` per Rule 3.
@@ -92,23 +102,23 @@ export function initTools(opts: InitToolsOptions): ToolsHandle {
 
   // ── IPC handlers ───────────────────────────────────────────────────────
 
-  ipcMain.handle(TOOLS_IPC.LIST, async (): Promise<ToolEntry[]> => {
+  ipcMain.handle(TOOLS_IPC.LIST, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<ToolEntry[]> => {
     getLoggingApi().event(TOOLS_EVENTS.IPC_LIST);
     return api.list();
-  });
+  }));
 
   ipcMain.handle(
     TOOLS_IPC.GET,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<ToolEntry | null> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<ToolEntry | null> => {
       getLoggingApi().event(TOOLS_EVENTS.IPC_GET);
       const id = validateNonEmptyString(payload?.id, 'id');
       return api.get(id);
-    }
+    })
   );
 
   ipcMain.handle(
     TOOLS_IPC.ADD,
-    async (_event: IpcMainInvokeEvent, payload: unknown): Promise<ToolEntry> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: unknown): Promise<ToolEntry> => {
       getLoggingApi().event(TOOLS_EVENTS.IPC_ADD);
       const input = validateAddPayload(payload);
       try {
@@ -118,17 +128,19 @@ export function initTools(opts: InitToolsOptions): ToolsHandle {
       } catch (err) {
         if (err instanceof ToolsError) {
           log.warn('add rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __toolsError: err.toJSON() }));
+        } else {
+          log.error('add unexpected error', { error: (err as Error).message });
         }
-        log.error('add unexpected error', { error: (err as Error).message });
+        // wrapIpcHandler envelopes: typed errors keep their code,
+        // anything else crosses as UNKNOWN.
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     TOOLS_IPC.UPDATE,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _event: IpcMainInvokeEvent,
       payload: { id?: unknown; patch?: unknown }
     ): Promise<ToolEntry> => {
@@ -142,17 +154,17 @@ export function initTools(opts: InitToolsOptions): ToolsHandle {
       } catch (err) {
         if (err instanceof ToolsError) {
           log.warn('update rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __toolsError: err.toJSON() }));
+        } else {
+          log.error('update unexpected error', { error: (err as Error).message });
         }
-        log.error('update unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     TOOLS_IPC.REMOVE,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(TOOLS_EVENTS.IPC_REMOVE);
       const id = validateNonEmptyString(payload?.id, 'id');
       try {
@@ -162,39 +174,39 @@ export function initTools(opts: InitToolsOptions): ToolsHandle {
       } catch (err) {
         if (err instanceof ToolsError) {
           log.warn('remove rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __toolsError: err.toJSON() }));
+        } else {
+          log.error('remove unexpected error', { error: (err as Error).message });
         }
-        log.error('remove unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     TOOLS_IPC.OPEN,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(TOOLS_EVENTS.IPC_OPEN);
       const id = validateNonEmptyString(payload?.id, 'id');
       const entry = await api.get(id);
       if (entry === null) {
-        const err = new ToolsError({
+        // Typed throw -- wrapIpcHandler envelopes it for parseError.
+        throw new ToolsError({
           code: TOOLS_ERROR_CODES.NOT_FOUND,
           message: `Tool not found: ${id}`,
           context: { op: 'open', id },
           remediation: 'Refresh the list -- the tool may have been removed.',
         });
-        throw new Error(JSON.stringify({ __toolsError: err.toJSON() }));
       }
       openExternal(entry);
       return { ok: true };
-    }
+    })
   );
 
-  ipcMain.handle(TOOLS_IPC.OPEN_MANAGER, async (): Promise<{ ok: true }> => {
+  ipcMain.handle(TOOLS_IPC.OPEN_MANAGER, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ ok: true }> => {
     getLoggingApi().event(TOOLS_EVENTS.IPC_OPEN_MANAGER);
     openManagerFromHandle();
     return { ok: true };
-  });
+  }));
 
   // ── Menu builder ───────────────────────────────────────────────────────
 
