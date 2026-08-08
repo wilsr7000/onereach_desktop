@@ -6789,9 +6789,14 @@ export function buildSpaceChip(chip: RendererSpaceChipRef): HTMLElement {
 function buildFilteredEmptyState(): HTMLElement {
   const box = document.createElement('div');
   box.className = 'spaces-empty-items';
+  const mark = document.createElement('span');
+  mark.className = 'spaces-empty-items-mark';
+  mark.setAttribute('aria-hidden', 'true');
+  mark.textContent = '⌇';
+  box.appendChild(mark);
   const line = document.createElement('p');
   line.className = 'spaces-empty-items-line';
-  line.textContent = 'No items match this filter.';
+  line.textContent = 'Nothing matches that filter — yet.';
   box.appendChild(line);
   const clear = document.createElement('button');
   clear.type = 'button';
@@ -6812,6 +6817,11 @@ function buildFilteredEmptyState(): HTMLElement {
 function buildEmptyItemsState(scopeId: string): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'spaces-empty-items';
+  const mark = document.createElement('span');
+  mark.className = 'spaces-empty-items-mark';
+  mark.setAttribute('aria-hidden', 'true');
+  mark.textContent = scopeId === UNCATEGORIZED_SPACE_ID ? '✽' : '✎';
+  wrap.appendChild(mark);
   const title = document.createElement('h2');
   title.className = 'spaces-empty-items-title';
   title.textContent =
