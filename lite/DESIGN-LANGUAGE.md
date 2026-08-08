@@ -1,8 +1,15 @@
 # The Invisible Machine — Onereach.ai Lite design language
 
-> Tufte's honesty × Apple's restraint × Nirvana's soul.
+> **The machine organizes. The data speaks. The human leaves marks.**
 > The best machine is invisible: the interface disappears so the work
 > can be loved.
+
+The influences (Tufte's honesty × Apple's restraint × Nirvana's soul)
+were scaffolding; the creed above is the building. Apple designed the
+object. Tufte designed the information. Nirvana scribbled all over it —
+and nobody cleaned it up. A precision instrument made by people who
+distrust polish: low visual density from six feet away, high
+information density from six inches away.
 
 The name is the thesis, borrowed from the house canon — *Age of
 Invisible Machines*. Software at its best gets out of the way; you feel
@@ -66,6 +73,24 @@ halo, 2px offset. It appears on `:focus-visible`, never on mouse click.
 **Color** — the neutrals stay cool and deep (Tufte quiet); warmth
 enters through the accent temperature and the grain, not the base. The
 kind-accents are tuned as a set.
+
+## The three typographic voices
+
+Typography declares who is speaking, before a word is read:
+
+- **System** — clean sans (`-apple-system`). The chrome. Silent,
+  neutral, precise. Buttons, nav, labels.
+- **Knowledge** — the editorial serif (`--or-font-display`). What is
+  known: figures, findings, section identity, the North Star.
+- **Human** — traces of the hand (handwriting-adjacent marks, the ✎
+  line, rough circles, strikethroughs). Reserved for what a *person*
+  contributed: annotations, marginalia, crossed-out hypotheses.
+
+The rule is functional, not ornamental: machine-generated content is
+typeset; human contributions keep the hand. Uncertain relationships are
+pencil (dashed, lighter); established ones are crisp ink. Color is data,
+never decoration — the base stays monochrome so the kind-accent dots
+carry authority.
 
 ## Fun — the cap-chew family
 
