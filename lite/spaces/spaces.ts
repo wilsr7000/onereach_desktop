@@ -773,6 +773,9 @@ function wireSidebarToolbar(): void {
 
 const RECENT_SPACES_LIMIT = 5;
 
+/** RECENT trees a user explicitly folded this session (default: open). */
+const collapsedRecentTrees = new Set<string>();
+
 function renderRecentSpaces(): void {
   const list = document.getElementById('spaces-list-recent');
   if (list === null) return;
@@ -791,6 +794,31 @@ function renderRecentSpaces(): void {
     li.setAttribute('data-scope-id', space.id);
     li.setAttribute('role', 'button');
     li.setAttribute('tabindex', '0');
+    const expanded = !collapsedRecentTrees.has(space.id);
+    if (expanded) li.classList.add('is-expanded');
+    const expand = document.createElement('button');
+    expand.type = 'button';
+    expand.className = 'spaces-row-expand';
+    expand.setAttribute('aria-label', `Show items in ${space.name}`);
+    expand.textContent = '▸';
+    expand.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const nowOpen = li.classList.toggle('is-expanded');
+      if (nowOpen) {
+        collapsedRecentTrees.delete(space.id);
+        li.insertAdjacentElement('afterend', buildSpaceChildren(space.id));
+      } else {
+        collapsedRecentTrees.add(space.id);
+        const holder = li.nextElementSibling;
+        if (
+          holder instanceof HTMLElement &&
+          holder.classList.contains('spaces-tree-children-holder')
+        ) {
+          holder.remove();
+        }
+      }
+    });
+    li.appendChild(expand);
     const dot = document.createElement('span');
     dot.className = 'spaces-row-dot';
     if (typeof space.color === 'string' && space.color.length > 0) {
@@ -802,6 +830,9 @@ function renderRecentSpaces(): void {
     name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
     li.appendChild(name);
     list.appendChild(li);
+    if (expanded) {
+      list.appendChild(buildSpaceChildren(space.id));
+    }
   }
 }
 

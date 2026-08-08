@@ -361,6 +361,16 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(focus('missing')).toBe(false);
   });
 
+  it('RECENT spaces render their item trees expanded by default', () => {
+    // "recent spaces should be expanded by default" (2026-08-08).
+    const body = bodyOf('function renderRecentSpaces', 3500);
+    expect(body).toContain('collapsedRecentTrees');
+    // Expanded unless explicitly folded this session…
+    expect(body).toMatch(/const expanded = !collapsedRecentTrees\.has\(space\.id\);/);
+    // …and the tree actually renders on paint, not only on click.
+    expect(body).toMatch(/if \(expanded\) \{\s*\n\s*list\.appendChild\(buildSpaceChildren\(space\.id\)\);/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);
