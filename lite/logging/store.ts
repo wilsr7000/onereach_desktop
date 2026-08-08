@@ -173,14 +173,18 @@ export class LoggingStore {
     this.publish(record);
   }
 
-  start(name: string, data?: unknown): Span {
+  start(name: string, data?: unknown, opts?: { level?: 'debug' | 'info' }): Span {
     this.assertValidEventName(name);
     const spanId = this.newId();
     const startedAt = this.now();
+    // Routine high-frequency spans (cache-refresh reads, per-query
+    // transport spans) run at 'debug' so idle traffic stays out of the
+    // info-level bug-report window. `.fail` is always 'error'.
+    const level = opts?.level ?? 'info';
     // Emit the .start event right away.
     const startRecord = this.buildRecord({
       name: `${name}.start`,
-      level: 'info',
+      level,
       spanId,
       ...(data !== undefined ? { data } : {}),
     });
@@ -191,6 +195,7 @@ export class LoggingStore {
       spanId,
       startedAt,
       now: this.now,
+      level,
       emit: (childRecord) => {
         // Span emits its finish/fail events through the same publish
         // path so subscriptions catch them.

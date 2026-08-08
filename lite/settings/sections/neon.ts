@@ -73,6 +73,7 @@ async function render(container: HTMLElement): Promise<void> {
   try {
     status = await bridge.status();
   } catch (err) {
+    window.logging?.warn?.('settings', 'neon status read failed', { error: (err as Error).message });
     renderError(container, (err as Error).message);
     return;
   }
@@ -290,6 +291,7 @@ async function saveFlow(
       void render(container);
     }, 400);
   } catch (err) {
+    window.logging?.error?.('settings', 'neon credentials save failed', { error: (err as Error).message });
     const parsed = neon().parseError(err);
     if (parsed !== null) {
       setStatus(els.banner, `${parsed.message} ${parsed.remediation}`.trim(), 'error');
@@ -316,6 +318,7 @@ async function testFlow(els: FormElements): Promise<void> {
       setStatus(els.banner, msg, 'error');
     }
   } catch (err) {
+    window.logging?.error?.('settings', 'neon test failed', { error: (err as Error).message });
     setStatus(els.banner, (err as Error).message ?? 'Test failed.', 'error');
   } finally {
     els.save.disabled = false;

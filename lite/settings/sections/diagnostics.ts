@@ -68,6 +68,7 @@ export const mountDiagnostics: SectionDescriptor['mount'] = (container) => {
     try {
       snap = await bridge.snapshot();
     } catch (err) {
+      window.logging?.warn?.('settings', 'health snapshot failed', { error: (err as Error).message });
       if (disposed) return;
       target.innerHTML = errorHTML((err as Error).message);
       attachActionHandlers(target, null, bridge);
@@ -136,6 +137,7 @@ export const mountDiagnostics: SectionDescriptor['mount'] = (container) => {
       if (disposed) return;
       output.textContent = JSON.stringify(envelope, null, 2);
     } catch (err) {
+      window.logging?.warn?.('settings', 'diagnostics action failed', { error: (err as Error).message });
       if (disposed) return;
       output.textContent =
         err instanceof Error ? `Error: ${err.message}` : `Error: ${String(err)}`;

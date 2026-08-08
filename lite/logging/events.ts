@@ -62,6 +62,8 @@ export class Span {
   private readonly nowFn: () => number;
   private readonly emit: (record: SpanEmitInput) => void;
   private readonly serializeErr: (err: unknown) => SerializedEventError;
+  /** Level for `.start` / `.finish`; `.fail` is always 'error'. */
+  private readonly level: LogLevel;
   private done = false;
 
   constructor(opts: SpanConstructorOpts) {
@@ -71,6 +73,7 @@ export class Span {
     this.nowFn = opts.now;
     this.emit = opts.emit;
     this.serializeErr = opts.serializeError;
+    this.level = opts.level ?? 'info';
   }
 
   /**
@@ -82,7 +85,7 @@ export class Span {
     this.done = true;
     this.emit({
       name: `${this.name}.finish`,
-      level: 'info',
+      level: this.level,
       spanId: this.id,
       durationMs: this.nowFn() - this.startedAt,
       ...(data !== undefined ? { data } : {}),
@@ -114,6 +117,8 @@ interface SpanConstructorOpts {
   now: () => number;
   emit: (record: SpanEmitInput) => void;
   serializeError: (err: unknown) => SerializedEventError;
+  /** Level for `.start` / `.finish` (default 'info'). `.fail` stays 'error'. */
+  level?: LogLevel;
 }
 
 export interface SpanEmitInput {

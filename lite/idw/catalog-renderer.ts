@@ -167,6 +167,7 @@ async function initialLoad(): Promise<void> {
   try {
     status = await neon.status();
   } catch (err) {
+    window.logging?.warn?.('idw', 'OAGI status read failed', { error: (err as Error).message });
     showError(`Could not read OAGI status: ${(err as Error).message}`);
     return;
   }
@@ -196,6 +197,7 @@ async function initialLoad(): Promise<void> {
     catalog = records.map(mapRecordToEntry).filter((e): e is CatalogEntry => e !== null);
     catalog.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   } catch (err) {
+    window.logging?.warn?.('idw', 'catalog load failed', { error: (err as Error).message });
     const parsed = neon.parseError(err);
     if (parsed !== null) {
       showError(`${parsed.message} ${parsed.remediation}`.trim());
@@ -225,7 +227,8 @@ async function refreshInstalled(): Promise<void> {
       }
     }
     installed = { byCatalogId: map };
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('idw', 'installed-map load failed', { error: (err as Error).message });
     installed = { byCatalogId: new Map() };
   }
 }
@@ -590,6 +593,7 @@ async function installFlow(entry: CatalogEntry, btn: HTMLButtonElement): Promise
     await refreshInstalled();
     render();
   } catch (err) {
+    window.logging?.error?.('idw', 'catalog action failed', { error: (err as Error).message });
     const parsed = window.lite?.idw?.parseError !== undefined ? window.lite.idw.parseError(err) : null;
     const msg = parsed !== null ? `${parsed.message} ${parsed.remediation}`.trim() : (err as Error).message;
     showToast(msg, 'error');

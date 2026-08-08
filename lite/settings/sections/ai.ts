@@ -167,6 +167,7 @@ function wireForm(container: HTMLElement): void {
         }
         showBanner(banner, res.error.message, 'warn');
       } catch (err) {
+        window.logging?.error?.('settings', 'AI key save failed', { error: (err as Error).message });
         showBanner(banner, (err as Error).message, 'warn');
       } finally {
         save.disabled = false;
@@ -187,6 +188,7 @@ function wireForm(container: HTMLElement): void {
         }
         showBanner(banner, res.error.message, 'warn');
       } catch (err) {
+        window.logging?.error?.('settings', 'AI key clear failed', { error: (err as Error).message });
         showBanner(banner, (err as Error).message, 'warn');
       } finally {
         clear.disabled = false;

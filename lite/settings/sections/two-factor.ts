@@ -81,7 +81,8 @@ async function refresh(state: MountState): Promise<void> {
     } else {
       renderSignedOut(state, null);
     }
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('settings', 'two-factor refresh failed', { error: (err as Error).message });
     renderSignedOut(state, null);
   }
 }
@@ -154,6 +155,7 @@ async function scanFlow(state: MountState, source: 'screen' | 'clipboard', statu
     }
     setStatus(status, friendlyReason(result.reason ?? 'no-qr-found', source), 'error');
   } catch (err) {
+    window.logging?.warn?.('settings', 'QR scan failed', { error: (err as Error).message });
     showError(status, err);
   } finally {
     btnScreen.disabled = false;
@@ -179,6 +181,7 @@ async function manualSaveFlow(state: MountState, status: HTMLElement): Promise<v
       void refresh(state);
     }, 250);
   } catch (err) {
+    window.logging?.error?.('settings', 'two-factor save failed', { error: (err as Error).message });
     showError(status, err);
   } finally {
     btn.disabled = false;
@@ -308,6 +311,7 @@ async function removeFlow(state: MountState, status: HTMLElement): Promise<void>
     await totp().deleteSecret();
     void refresh(state);
   } catch (err) {
+    window.logging?.error?.('settings', 'two-factor remove failed', { error: (err as Error).message });
     showError(status, err);
   }
 }

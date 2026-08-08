@@ -305,6 +305,7 @@ const { getLogQueue } = require(path.join(libDir, 'log-event-queue')) as {
     info: (cat: string, msg: string, data?: unknown) => void;
     warn: (cat: string, msg: string, data?: unknown) => void;
     error: (cat: string, msg: string, data?: unknown) => void;
+    setMinLevel: (level: string) => void;
   };
 };
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -316,6 +317,19 @@ const { LogServer } = require(path.join(libDir, 'log-server')) as {
 };
 
 const logQueue = getLogQueue();
+// Floor the queue at 'info' (mirrors full's persisted-default). The
+// 2026-08-08 observability pass demoted routine per-tick successes
+// (neon.query spans, spaces cache-refresh read spans, the per-query
+// "query ok" line) to 'debug' so the 200-line bug-report window holds
+// real signal at idle — without a floor the lib queue's constructor
+// default ('debug') would capture them anyway. Failures log at
+// 'error' and always land. Override with LITE_LOG_LEVEL=debug, or at
+// runtime via POST /logging/level on the lite log server.
+const LITE_LOG_LEVELS = ['debug', 'info', 'warn', 'error'];
+const requestedLogLevel = process.env['LITE_LOG_LEVEL'] ?? 'info';
+logQueue.setMinLevel(
+  LITE_LOG_LEVELS.includes(requestedLogLevel) ? requestedLogLevel : 'info'
+);
 const logServer = new LogServer(logQueue, { port: LITE_LOG_PORT });
 
 // ============================================================================

@@ -408,6 +408,21 @@ export function _isDirectDownloadUrlForTesting(key: string): boolean {
  * Phase 1 replaces this with a real implementation that calls
  * `getNeonApi().query(...)` under the hood.
  */
+/**
+ * Span bases whose `.start` / `.finish` run at 'debug' instead of
+ * 'info'. These are the read ops the SpacesCache re-runs on its 60s
+ * background refresh — at idle they dominate the 200-line bug-report
+ * log window without carrying signal. Mutation spans stay 'info';
+ * `.fail` events are 'error' for every span, quiet or not.
+ */
+const QUIET_READ_SPANS = new Set<string>([
+  'spaces.listSpaces',
+  'spaces.uncategorizedCount',
+  'spaces.items.list',
+  'spaces.items.get',
+  'spaces.learn.signals',
+]);
+
 function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // Phase 1: the SDK client now executes real Cypher via the Neon
   // module. `getNeonApi()` lazily instantiates so we can pass the
@@ -418,7 +433,16 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     // ADR-030: wrap each instrumented SDK op in a span so Neon-backed
     // reads/writes are traceable in /logs?category=spaces -- including
     // the boot prewarm + background refresh paths that never cross IPC.
-    spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // Read spans run at 'debug': the 60s cache refresh re-runs every
+    // cached read, and their per-tick successes were flooding the
+    // 200-line bug-report window at idle. Mutations stay at 'info' and
+    // every `.fail` is 'error' — failures stay loud either way.
+    spanEmitter: (name, data) =>
+      getLoggingApi().start(
+        name,
+        data,
+        QUIET_READ_SPANS.has(name) ? { level: 'debug' } : undefined
+      ),
     // ADR-051: the viewing :Person.id for visibility gating. Same
     // convention as the renderer's boot whoAmI probe — lowercased
     // session email, falling back to accountId; null when signed out

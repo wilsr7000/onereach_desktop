@@ -171,6 +171,7 @@ function buildSpacesAdapter(): BootChatDeps['spaces'] | undefined {
           error: { code: result.error.code, message: result.error.message },
         };
       } catch (err) {
+        window.logging?.warn?.('main-window', 'spaces recentEvents bridge threw', { error: (err as Error).message });
         return {
           ok: false as const,
           error: {
@@ -280,7 +281,8 @@ async function startSignOut(): Promise<void> {
   if (auth === undefined) return;
   try {
     await auth.signOut(ENV);
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('main-window', 'signOut failed', { error: (err as Error).message });
     /* best-effort */
   }
   updateSignOutButton(false);
@@ -306,14 +308,16 @@ async function startSignIn(): Promise<void> {
   try {
     await auth.signIn(ENV);
     updateSignOutButton(true);
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('main-window', 'sign-in failed', { error: (err as Error).message });
     // User cancelled or sign-in failed. Restore the button so they can
     // retry; the cookie listener still sets the session up if cookies
     // landed before the throw, so we re-probe.
     try {
       const result = await auth.getSession(ENV);
       updateSignOutButton(result.session !== null);
-    } catch {
+    } catch (err) {
+      window.logging?.warn?.('main-window', 'session re-probe failed', { error: (err as Error).message });
       updateSignOutButton(false);
     }
   } finally {
@@ -454,7 +458,8 @@ async function bootstrap(): Promise<void> {
     try {
       const result = await auth.getSession(ENV);
       updateSignOutButton(result.session !== null);
-    } catch {
+    } catch (err) {
+      window.logging?.warn?.('main-window', 'session probe failed', { error: (err as Error).message });
       /* leave the sign-out button hidden */
     }
   }
@@ -474,7 +479,8 @@ async function bootstrap(): Promise<void> {
       const active = await mw.getActiveTabId();
       activeId = active.activeId;
       renderTabBar();
-    } catch {
+    } catch (err) {
+      window.logging?.warn?.('main-window', 'tab bar init failed', { error: (err as Error).message });
       /* tab bar starts empty */
     }
   }

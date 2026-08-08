@@ -142,6 +142,7 @@ async function initialLoad(state: SectionState): Promise<void> {
   try {
     state.entries = await bridge.list();
   } catch (err) {
+    window.logging?.warn?.('settings', 'IDW list failed', { error: (err as Error).message });
     renderError(state, (err as Error).message);
     return;
   }
@@ -299,6 +300,7 @@ function wireThirdPartyTiles(state: SectionState): void {
           showBanner(state, `${preset.label} added.`, 'success');
           // onChange listener re-renders; no manual reload needed.
         } catch (err) {
+          window.logging?.error?.('settings', 'IDW toggle failed', { error: (err as Error).message });
           const parsed = idw().parseError(err);
           const msg = parsed !== null
             ? `${parsed.message} ${parsed.remediation}`.trim()
@@ -390,7 +392,8 @@ function wireActions(state: SectionState): void {
   const openStoreBtn = el<HTMLButtonElement>(state.container, 'idw-open-store');
   if (openStoreBtn !== null) {
     openStoreBtn.addEventListener('click', () => {
-      void idw().openStore().catch(() => {
+      void idw().openStore().catch((err) => {
+        window.logging?.warn?.('settings', 'OAGI Store open failed', { error: (err as Error).message });
         showBanner(state, 'Could not open the OAGI Store window.', 'error');
       });
     });
@@ -757,6 +760,7 @@ async function handleFormSubmit(state: SectionState, wrap: HTMLElement, editing:
       showBanner(state, `Added: ${label}`, 'success');
     }
   } catch (err) {
+    window.logging?.error?.('settings', 'IDW form submit failed', { error: (err as Error).message });
     const parsed = idw().parseError(err);
     const msg = parsed !== null ? `${parsed.message} ${parsed.remediation}`.trim() : (err as Error).message;
     showFormError(errorEl, msg);
@@ -810,6 +814,7 @@ async function removeFlow(state: SectionState, id: string): Promise<void> {
     await idw().remove(id);
     showBanner(state, `Removed: ${entry.label}`, 'success');
   } catch (err) {
+    window.logging?.error?.('settings', 'IDW remove failed', { error: (err as Error).message });
     const parsed = idw().parseError(err);
     const msg = parsed !== null ? `${parsed.message} ${parsed.remediation}`.trim() : (err as Error).message;
     showBanner(state, msg, 'error');

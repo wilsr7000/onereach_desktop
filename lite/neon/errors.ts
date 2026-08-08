@@ -40,7 +40,12 @@ export interface NeonErrorOptions extends Omit<LiteErrorOptions, 'code'> {
   code: NeonErrorCode;
   /** HTTP status code, if the failure originated from a server response. */
   status?: number;
-  /** First ~200 chars of the response body, for diagnostics. */
+  /**
+   * Response body for diagnostics. Kept in-memory on `.responseBody`;
+   * only mirrored into logged `.context` (first 200 chars) when
+   * `LITE_LOG_LEVEL=debug` — bodies can echo graph data. Otherwise the
+   * context carries a content-free `bodyLength`.
+   */
   responseBody?: string;
 }
 
@@ -51,7 +56,8 @@ export interface NeonErrorOptions extends Omit<LiteErrorOptions, 'code'> {
  *
  * Carries:
  *   - `.code` -- one of `NEON_ERROR_CODES`
- *   - `.context` -- `{ op, cypher (truncated), status?, body? }`
+ *   - `.context` -- `{ op, cypher (truncated), status?, bodyLength? }`
+ *     (`body` excerpt only when `LITE_LOG_LEVEL=debug`)
  *   - `.remediation` -- short, action-oriented hint
  *   - `.cause` -- the underlying Error (network, abort, etc.)
  *   - `.status` / `.responseBody` -- legacy convenience fields, mirror
@@ -59,6 +65,19 @@ export interface NeonErrorOptions extends Omit<LiteErrorOptions, 'code'> {
  *
  * See `lite/neon/README.md` for the full error catalog.
  */
+/**
+ * Whether error CONTEXT (the part that lands in logs via span `.fail`
+ * serialization and IPC error envelopes) may include response-body
+ * excerpts. Bodies can echo graph data — query results, user content
+ * inside server error messages — so they only enter logged context
+ * when verbose diagnostics are explicitly on (`LITE_LOG_LEVEL=debug`).
+ * Read per-construction (not at import) so tests and long-running
+ * sessions see env changes.
+ */
+function includeBodyInLoggedContext(): boolean {
+  return typeof process !== 'undefined' && process.env?.['LITE_LOG_LEVEL'] === 'debug';
+}
+
 export class NeonError extends LiteError {
   public readonly status: number | undefined;
   public readonly responseBody: string | undefined;
@@ -67,8 +86,15 @@ export class NeonError extends LiteError {
     const context: Record<string, unknown> = { ...(options.context ?? {}) };
     if (options.status !== undefined) context['status'] = options.status;
     if (options.responseBody !== undefined) {
-      const trimmed = options.responseBody.slice(0, 200);
-      context['body'] = trimmed;
+      // Content-free tell by default (0 bytes vs. a real payload is
+      // itself diagnostic); the excerpt itself is debug-gated. The
+      // in-memory `.responseBody` field below is always populated for
+      // in-process consumers (e.g. Settings test-connection banner).
+      if (includeBodyInLoggedContext()) {
+        context['body'] = options.responseBody.slice(0, 200);
+      } else {
+        context['bodyLength'] = options.responseBody.length;
+      }
     }
     const baseOptions: LiteErrorOptions = {
       code: options.code,
