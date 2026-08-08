@@ -3889,19 +3889,24 @@ export class SdkSpacesClient {
     parameters?: Record<string, unknown>
   ): Promise<Array<Record<string, unknown>>> {
     try {
-      // `$nowMs` is injected for EVERY query rather than bound per call
-      // site. Access grants can expire (ADR-052), so the visibility
-      // predicate needs the current time -- and that predicate is
-      // interpolated into a dozen different queries. Binding it at each
-      // one would mean a single forgotten parameter silently breaking
-      // access control, which is the kind of bug that fails open. Here
-      // it cannot be forgotten. An explicit `nowMs` in `parameters`
-      // still wins, so tests can pin the clock.
-      const withClock =
+      // `$nowMs` and `$viewerId` are injected for EVERY query rather
+      // than bound per call site. Access grants can expire (ADR-052)
+      // and visibility is viewer-relative (ADR-051), so the predicates
+      // need both -- and they are interpolated into a dozen different
+      // queries. Binding them at each one would mean a single forgotten
+      // parameter silently breaking access control. That is not
+      // hypothetical: LIST_TICKETS_IN_SPACE gained the visibility
+      // predicate without its call site gaining `viewerId`, Neo4j
+      // rejected the query for the missing parameter, the Edison flow
+      // mapped the rejection to an empty result set, and every shared
+      // dashboard showed "No tickets yet" against real data. Central
+      // injection makes the omission impossible. Explicit values in
+      // `parameters` still win, so tests can pin the clock or viewer.
+      const withInjected =
         parameters === undefined
-          ? { nowMs: this.now() }
-          : { nowMs: this.now(), ...parameters };
-      return await this.queryFn(cypher, withClock);
+          ? { nowMs: this.now(), viewerId: this.viewerParam() }
+          : { nowMs: this.now(), viewerId: this.viewerParam(), ...parameters };
+      return await this.queryFn(cypher, withInjected);
     } catch (err) {
       throw normalizeError(err);
     }

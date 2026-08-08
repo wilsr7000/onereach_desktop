@@ -499,7 +499,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ offset: 0, limit: 100 });
+    expect(call?.parameters).toEqual({ offset: 0, limit: 100, viewerId: '' });
     expect(call?.cypher).toContain('OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)');
   });
 
@@ -567,7 +567,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' }, { limit: 999_999, offset: 50 });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ offset: 50, limit: 500 });
+    expect(call?.parameters).toEqual({ offset: 50, limit: 500, viewerId: '' });
   });
 });
 
@@ -1013,7 +1013,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
     const tags = await client.addTag('i-1', '  q3  ');
     expect(tags).toEqual(['q3']);
     const addCall = stub.calls.find((c) => c.cypher.includes('MERGE (t:Tag {name: $tag})'));
-    expect(addCall?.parameters).toEqual({ id: 'i-1', tag: 'q3' });
+    expect(addCall?.parameters).toEqual({ id: 'i-1', tag: 'q3', viewerId: '' });
   });
 
   it('removeTag rejects empty / oversize tags + empty id', async () => {
@@ -1052,7 +1052,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
     const tags = await client.removeTag('i-1', '  policy ');
     expect(tags).toEqual([]);
     const removeCall = stub.calls.find((c) => c.cypher.includes('-[r:TAGGED_AS]->'));
-    expect(removeCall?.parameters).toEqual({ id: 'i-1', tag: 'policy' });
+    expect(removeCall?.parameters).toEqual({ id: 'i-1', tag: 'policy', viewerId: '' });
   });
 });
 
@@ -1384,7 +1384,7 @@ describe('SdkSpacesClient.listRecentEvents', () => {
     const client = makeClient(stub);
     await client.listRecentEvents();
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 50, since: null, spaceId: null });
+    expect(call?.parameters).toEqual({ limit: 50, since: null, spaceId: null, viewerId: '' });
   });
 
   it('passes since when provided as a non-negative number', async () => {
@@ -1397,6 +1397,7 @@ describe('SdkSpacesClient.listRecentEvents', () => {
       limit: 10,
       since: 1700000000000,
       spaceId: null,
+      viewerId: '',
     });
   });
 
@@ -1406,7 +1407,7 @@ describe('SdkSpacesClient.listRecentEvents', () => {
     const client = makeClient(stub);
     await client.listRecentEvents({ limit: 1_000_000 });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 200, since: null, spaceId: null });
+    expect(call?.parameters).toEqual({ limit: 200, since: null, spaceId: null, viewerId: '' });
   });
 
   it('passes spaceId when provided (per-Space mini-Home)', async () => {
@@ -1415,7 +1416,7 @@ describe('SdkSpacesClient.listRecentEvents', () => {
     const client = makeClient(stub);
     await client.listRecentEvents({ limit: 20, spaceId: 'sp-77' });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 20, since: null, spaceId: 'sp-77' });
+    expect(call?.parameters).toEqual({ limit: 20, since: null, spaceId: 'sp-77', viewerId: '' });
   });
 
   it('treats an empty spaceId as "no scope" (null), not an empty match', async () => {
@@ -1424,7 +1425,7 @@ describe('SdkSpacesClient.listRecentEvents', () => {
     const client = makeClient(stub);
     await client.listRecentEvents({ spaceId: '' });
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 50, since: null, spaceId: null });
+    expect(call?.parameters).toEqual({ limit: 50, since: null, spaceId: null, viewerId: '' });
   });
 
   it('maps rows; missing spaceId / spaceName drop the optional fields', async () => {
@@ -1460,10 +1461,10 @@ describe('SdkSpacesClient.listAgentsSample', () => {
     const client = makeClient(stub);
     await client.listAgentsSample();
     let call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 3 });
+    expect(call?.parameters).toEqual({ limit: 3, viewerId: '' });
     await client.listAgentsSample({ limit: 9999 });
     call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ limit: 200 });
+    expect(call?.parameters).toEqual({ limit: 200, viewerId: '' });
   });
 
   it('maps rows; description defaults to empty string', async () => {
@@ -2053,7 +2054,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
     const client = makeClient(stub);
     await client.itemRecentCommits('asset-1');
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ id: 'asset-1', limit: 20, since: null });
+    expect(call?.parameters).toEqual({ id: 'asset-1', limit: 20, since: null, viewerId: '' });
   });
 
   it('caps limit at 100', async () => {
@@ -2331,6 +2332,7 @@ describe('SdkSpacesClient.listTickets', () => {
       status: null,
       limit: 200,
       offset: 0,
+      viewerId: '',
     });
   });
 
@@ -3015,7 +3017,7 @@ describe('SdkSpacesClient.removeSpaceMember', () => {
     const client = makeClient(stub);
     await client.removeSpaceMember('sp-1', 'alice');
     const call = stub.calls[stub.calls.length - 1];
-    expect(call?.parameters).toEqual({ spaceId: 'sp-1', memberId: 'alice' });
+    expect(call?.parameters).toEqual({ spaceId: 'sp-1', memberId: 'alice', viewerId: '' });
   });
 });
 

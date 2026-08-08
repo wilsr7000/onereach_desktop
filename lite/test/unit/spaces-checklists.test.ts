@@ -219,6 +219,56 @@ describe('the required-checklist gate', () => {
   });
 });
 
+// ─── 2b. Central param injection ─────────────────────────────────────
+//
+// Regression for the silent-empty-tickets bug: LIST_TICKETS_IN_SPACE
+// gained the ADR-051 visibility predicate (which reads $viewerId)
+// without its call site gaining the parameter. Neo4j rejected the
+// query; the Edison flow mapped the rejection to an empty result set;
+// every shared dashboard showed "No tickets yet" against real data.
+// run() now injects viewerId (like nowMs) so the omission is
+// structurally impossible.
+
+describe('run() injects viewerId and nowMs into every query', () => {
+  it('listTickets carries viewerId even though its call site never binds it', async () => {
+    const { api, calls } = client(() => []);
+    await api.listTickets('space-1');
+    const q = calls.find((c) => c.cypher.includes("= 'ticket'"));
+    expect(q?.params['viewerId']).toBe('robb@onereach.com');
+    expect(q?.params['nowMs']).toBe(NOW);
+  });
+
+  it('every checklist read carries viewerId', async () => {
+    const { api, calls } = client((cypher) =>
+      cypher.includes('requiredPre') ? [] : []
+    );
+    await api.listChecklists('space-1');
+    await api.getTicketChecklists('t1');
+    for (const c of calls) {
+      if (c.cypher.includes('$viewerId')) {
+        expect(c.params['viewerId'], c.cypher.slice(0, 60)).toBe('robb@onereach.com');
+      }
+    }
+    expect(calls.length).toBeGreaterThan(0);
+  });
+
+  it('an explicit viewerId in call-site params still wins (tests can pin)', async () => {
+    const calls: Recorded[] = [];
+    const api = new SdkSpacesClient({
+      now: () => NOW,
+      viewerId: () => 'robb@onereach.com',
+      query: async (cypher: string, params?: Record<string, unknown>) => {
+        calls.push({ cypher, params: params ?? {} });
+        return [];
+      },
+    });
+    // listSpaces binds viewerId explicitly at the call site.
+    await api.listSpaces();
+    const q = calls[0];
+    expect(q?.params['viewerId']).toBe('robb@onereach.com');
+  });
+});
+
 // ─── 3. Query-shape guards (the visibility sweep also covers these) ──
 
 describe('checklist Cypher carries the visibility predicates', () => {
