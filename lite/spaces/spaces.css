@@ -7193,3 +7193,349 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
 }
+
+/* ─── VS Code-style sidebar (WISER Playbooks parity, 2026-08-07) ─────────
+   Toolbar pins at top, accent action rows under it, and the sections
+   scroll independently. Later-in-file overrides deliberately re-shape
+   the legacy .spaces-sidebar container. */
+
+.spaces-sidebar {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.spaces-sidebar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 10px 8px 14px;
+  flex: 0 0 auto;
+}
+
+.spaces-sidebar-brand {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: #9aa1b2;
+}
+
+.spaces-sidebar-toolbar-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.spaces-toolbar-icon-button {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: #8b93a7;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.spaces-toolbar-icon-button:hover {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8eaf0;
+}
+
+.spaces-sidebar-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 8px 10px;
+  flex: 0 0 auto;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.spaces-action-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #c6cbd8;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.spaces-action-row:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.spaces-action-row-accent {
+  color: #7ba7ff;
+}
+
+.spaces-action-row-accent:hover {
+  background: rgba(123, 167, 255, 0.1);
+}
+
+.spaces-action-row-glyph {
+  font-size: 12px;
+  width: 14px;
+  text-align: center;
+}
+
+.spaces-action-row-badge {
+  margin-left: auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(123, 167, 255, 0.16);
+  color: #7ba7ff;
+}
+
+/* The scrolling region owns the sections. Dark thin scrollbar — never
+   ship a default white scrollbar on a dark body. */
+.spaces-sidebar-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 8px 8px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+.spaces-sidebar-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.spaces-sidebar-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+
+.spaces-sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.24);
+}
+
+.spaces-sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── Collapsible sections ── */
+
+.spaces-side-section {
+  margin-top: 6px;
+}
+
+.spaces-side-header-row {
+  display: flex;
+  align-items: center;
+}
+
+.spaces-side-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  width: 100%;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  color: #8b93a7;
+  transition: background 80ms ease, color 80ms ease;
+}
+
+.spaces-side-header:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: #c6cbd8;
+}
+
+.spaces-side-header-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.spaces-side-chevron {
+  display: inline-block;
+  width: 12px;
+  font-size: 10px;
+  line-height: 1;
+  transform: rotate(90deg);
+  transition: transform 100ms ease;
+}
+
+.spaces-side-section.is-collapsed .spaces-side-chevron {
+  transform: rotate(0deg);
+}
+
+.spaces-side-section.is-collapsed .spaces-side-body {
+  display: none;
+}
+
+.spaces-side-header-meta {
+  flex: 0 0 auto;
+  padding-right: 4px;
+}
+
+/* Compact sort control living in the Spaces section header. */
+.spaces-side-header-meta .spaces-sidebar-sort-select {
+  background: transparent;
+  border: none;
+  color: #6f7688;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.spaces-side-header-meta .spaces-sidebar-sort-select:hover {
+  color: #c6cbd8;
+}
+
+/* ── Tree rows (search results + per-Space item trees) ── */
+
+.spaces-side-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.spaces-side-tree-group {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: #5b6172;
+  padding: 6px 8px 2px;
+}
+
+.spaces-side-tree-empty {
+  font-size: 12px;
+  color: #5b6172;
+  padding: 4px 10px 6px;
+  font-style: italic;
+}
+
+.spaces-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 5px;
+  font-size: 12.5px;
+  color: #b9bfcc;
+  cursor: pointer;
+  transition: background 80ms ease;
+}
+
+.spaces-tree-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #e8eaf0;
+}
+
+.spaces-tree-item-glyph {
+  flex: 0 0 auto;
+  width: 14px;
+  text-align: center;
+  font-size: 11px;
+  color: #6f7688;
+}
+
+.spaces-tree-item-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spaces-tree-item-where {
+  flex: 0 0 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: #5b6172;
+}
+
+/* ── Space rows gain an explorer chevron + nested item trees ── */
+
+.spaces-row-space {
+  grid-template-columns: 14px 18px 1fr auto;
+}
+
+.spaces-row-expand {
+  width: 14px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #5b6172;
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 100ms ease, color 80ms ease;
+}
+
+.spaces-row-expand:hover {
+  color: #e8eaf0;
+}
+
+.spaces-row.is-expanded .spaces-row-expand {
+  transform: rotate(90deg);
+}
+
+.spaces-tree-children-holder {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.spaces-tree-children-holder.is-hidden {
+  display: none;
+}
+
+.spaces-tree-children {
+  margin: 0 0 2px 14px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* Search input sits inside the Search section body now. */
+.spaces-side-body .spaces-sidebar-search {
+  padding: 2px 4px 4px;
+}
+
+/* Space rows: flex, not grid — the row carries a variable set of
+   trailing chips (AI badge, lock, count, ⋯ menu) and the old 3-col
+   grid wrapped them onto a phantom second line. */
+.spaces-row-space {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.spaces-row-space .spaces-row-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spaces-row-space .spaces-row-count {
+  flex: 0 0 auto;
+}

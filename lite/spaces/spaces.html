@@ -410,73 +410,167 @@
         (always present below Home, above the user's Spaces).
       -->
       <nav id="spaces-sidebar" class="spaces-sidebar" aria-label="Spaces">
-        <div class="spaces-sidebar-section spaces-sidebar-section-home">
-          <ul class="spaces-list" id="spaces-list-home">
-            <li
-              class="spaces-row spaces-row-home is-active"
-              data-scope-id="__home__"
-              role="button"
-              tabindex="0"
-            >
-              <span class="spaces-row-dot spaces-row-dot-home" aria-hidden="true"></span>
-              <span class="spaces-row-name">Home</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="spaces-sidebar-search">
-          <input
-            type="search"
-            id="spaces-sidebar-search-input"
-            class="spaces-sidebar-search-input"
-            placeholder="Search Spaces…"
-            autocomplete="off"
-            spellcheck="false"
-            aria-label="Filter Spaces by name"
-          />
-        </div>
-        <div class="spaces-sidebar-sort">
-          <label for="spaces-sidebar-sort-select" class="spaces-sidebar-sort-label">Sort</label>
-          <select
-            id="spaces-sidebar-sort-select"
-            class="spaces-sidebar-sort-select"
-            aria-label="Sort Spaces"
-          >
-            <option value="name">Name (A→Z)</option>
-            <option value="recent">Recently updated</option>
-          </select>
-        </div>
-
-        <div class="spaces-sidebar-section">
-          <div class="spaces-sidebar-title">Intake</div>
-          <ul class="spaces-list" id="spaces-list-intake">
-            <li class="spaces-row spaces-row-intake" data-scope-id="__uncategorized__">
-              <span class="spaces-row-dot spaces-row-dot-intake"></span>
-              <span class="spaces-row-name">Uncategorized</span>
-              <span class="spaces-row-count" data-count-target="uncategorized">—</span>
-            </li>
-          </ul>
-        </div>
-
-        <div class="spaces-sidebar-section">
-          <div class="spaces-sidebar-title spaces-sidebar-title-with-action">
-            <span>Spaces</span>
+        <!--
+          WISER Playbooks / VS Code-style explorer sidebar (2026-08-07).
+          Structure: toolbar (brand + icon actions) → accent action rows
+          → collapsible sections (Search / Recent / Intake / Spaces).
+          Section collapse state persists per install; the Spaces section
+          rows expand in place to reveal each Space's items as a tree.
+          Legacy ids (search input, sort select, list ULs, refresh +
+          shared buttons) are preserved — renderer wiring and jsdom
+          fixtures address those, not this file.
+        -->
+        <div class="spaces-sidebar-toolbar">
+          <span class="spaces-sidebar-brand">Spaces</span>
+          <span class="spaces-sidebar-toolbar-actions">
+            <button
+              type="button"
+              id="spaces-sidebar-search-toggle"
+              class="spaces-toolbar-icon-button"
+              title="Search spaces and items (⌘F)"
+              aria-label="Search spaces and items"
+            >⌕</button>
             <button
               type="button"
               id="spaces-refresh-button"
-              class="spaces-refresh-button"
+              class="spaces-toolbar-icon-button"
               title="Refresh from the graph (picks up Spaces created in WISER Playbooks or by agents)"
               aria-label="Refresh spaces"
             >⟳</button>
             <button
               type="button"
-              id="spaces-new-shared-button"
-              class="spaces-new-shared-button"
-              title="Create a new shared space (AI-managed)"
-              aria-label="Create a new shared space"
-            >+ Shared</button>
+              id="spaces-sidebar-collapse-all"
+              class="spaces-toolbar-icon-button"
+              title="Collapse all sections"
+              aria-label="Collapse all sections"
+            >⊟</button>
+          </span>
+        </div>
+
+        <div class="spaces-sidebar-actions">
+          <button
+            type="button"
+            id="spaces-action-new-space"
+            class="spaces-action-row spaces-action-row-accent"
+          >
+            <span class="spaces-action-row-glyph" aria-hidden="true">＋</span>
+            <span>New Space</span>
+          </button>
+          <button
+            type="button"
+            id="spaces-new-shared-button"
+            class="spaces-action-row"
+            title="Create a new shared space (AI-managed)"
+            aria-label="Create a new shared space"
+          >
+            <span class="spaces-action-row-glyph" aria-hidden="true">＋</span>
+            <span>Shared Space</span>
+            <span class="spaces-action-row-badge">AI</span>
+          </button>
+        </div>
+
+        <div class="spaces-sidebar-scroll">
+          <div class="spaces-sidebar-section spaces-sidebar-section-home">
+            <ul class="spaces-list" id="spaces-list-home">
+              <li
+                class="spaces-row spaces-row-home is-active"
+                data-scope-id="__home__"
+                role="button"
+                tabindex="0"
+              >
+                <span class="spaces-row-dot spaces-row-dot-home" aria-hidden="true"></span>
+                <span class="spaces-row-name">Home</span>
+              </li>
+            </ul>
           </div>
-          <ul class="spaces-list" id="spaces-list-spaces">
+
+          <section class="spaces-side-section" data-side-section="search">
+            <button
+              type="button"
+              class="spaces-side-header"
+              data-side-toggle="search"
+              aria-expanded="false"
+            >
+              <span class="spaces-side-chevron" aria-hidden="true">▸</span>
+              <span class="spaces-side-header-label">Search</span>
+            </button>
+            <div class="spaces-side-body">
+              <div class="spaces-sidebar-search">
+                <input
+                  type="search"
+                  id="spaces-sidebar-search-input"
+                  class="spaces-sidebar-search-input"
+                  placeholder="Search spaces + items…"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-label="Search spaces by name and items by content"
+                />
+              </div>
+              <ul class="spaces-side-tree" id="spaces-search-results"></ul>
+            </div>
+          </section>
+
+          <section class="spaces-side-section" data-side-section="recent">
+            <button
+              type="button"
+              class="spaces-side-header"
+              data-side-toggle="recent"
+              aria-expanded="true"
+            >
+              <span class="spaces-side-chevron" aria-hidden="true">▸</span>
+              <span class="spaces-side-header-label">Recent</span>
+            </button>
+            <div class="spaces-side-body">
+              <ul class="spaces-list spaces-side-tree" id="spaces-list-recent"></ul>
+            </div>
+          </section>
+
+          <section class="spaces-side-section" data-side-section="intake">
+            <button
+              type="button"
+              class="spaces-side-header"
+              data-side-toggle="intake"
+              aria-expanded="true"
+            >
+              <span class="spaces-side-chevron" aria-hidden="true">▸</span>
+              <span class="spaces-side-header-label">Intake</span>
+            </button>
+            <div class="spaces-side-body">
+              <ul class="spaces-list" id="spaces-list-intake">
+                <li class="spaces-row spaces-row-intake" data-scope-id="__uncategorized__">
+                  <span class="spaces-row-dot spaces-row-dot-intake"></span>
+                  <span class="spaces-row-name">Uncategorized</span>
+                  <span class="spaces-row-count" data-count-target="uncategorized">—</span>
+                </li>
+              </ul>
+            </div>
+          </section>
+
+          <section class="spaces-side-section" data-side-section="spaces">
+            <div class="spaces-side-header-row">
+              <button
+                type="button"
+                class="spaces-side-header"
+                data-side-toggle="spaces"
+                aria-expanded="true"
+              >
+                <span class="spaces-side-chevron" aria-hidden="true">▸</span>
+                <span class="spaces-side-header-label">Spaces</span>
+              </button>
+              <span class="spaces-side-header-meta">
+                <select
+                  id="spaces-sidebar-sort-select"
+                  class="spaces-sidebar-sort-select"
+                  aria-label="Sort Spaces"
+                  title="Sort spaces"
+                >
+                  <option value="name">A→Z</option>
+                  <option value="recent">Recent</option>
+                </select>
+              </span>
+            </div>
+            <div class="spaces-side-body">
+              <ul class="spaces-list" id="spaces-list-spaces">
             <!--
               Loading skeleton: three shimmer rows mirror the typical
               Space-row shape so first paint shows structure, not text.
@@ -495,6 +589,8 @@
               <span class="spaces-skeleton-name"></span>
             </li>
           </ul>
+            </div>
+          </section>
         </div>
       </nav>
 

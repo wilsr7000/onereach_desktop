@@ -331,6 +331,8 @@ export function markVisitNow(): void {
 function init(): void {
   applyActiveRow(state.activeScopeId);
   wireSidebarClicks();
+  wireSidebarSections();
+  wireSidebarToolbar();
   wireSidebarSearch();
   wireSidebarSort();
   wireMutationsUI();
@@ -581,7 +583,22 @@ function wireSidebarSearch(): void {
   if (!(input instanceof HTMLInputElement)) return;
   input.addEventListener('input', () => {
     state.searchQuery = input.value;
+    // Live name filter over the Spaces sections (instant), plus the
+    // debounced cross-space item search below the input (WISER-style).
     applySidebarFilter();
+    scheduleGlobalItemSearch(input.value);
+  });
+  input.addEventListener('keydown', (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+    if (input.value.length > 0) {
+      input.value = '';
+      state.searchQuery = '';
+      applySidebarFilter();
+      renderGlobalSearchResults(null);
+      event.stopPropagation();
+      return;
+    }
+    setSectionCollapsed('search', true);
   });
 }
 
@@ -616,7 +633,367 @@ function applySidebarFilter(): void {
     const name = row.querySelector<HTMLElement>('.spaces-row-name')?.textContent ?? '';
     const visible = query.length === 0 || matchesSearchQuery(name, query);
     row.classList.toggle('is-hidden', !visible);
+    // A filtered-out Space also hides its expanded item tree (the
+    // holder is the row's immediate sibling, see buildSpaceChildren).
+    const holder = row.nextElementSibling;
+    if (holder instanceof HTMLElement && holder.classList.contains('spaces-tree-children-holder')) {
+      holder.classList.toggle('is-hidden', !visible);
+    }
   }
+}
+
+// ─── VS Code-style sidebar (WISER Playbooks parity, 2026-08-07) ────────
+//
+// The sidebar mirrors the WISER Playbooks explorer: collapsible
+// chevroned sections (Search / Recent / Intake / Spaces), a global
+// search that spans Space names AND item content, and per-Space item
+// trees that expand in place. Section collapse state persists per
+// install so the sidebar opens the way the user left it.
+
+const SIDEBAR_COLLAPSE_KEY = 'lite.spaces.sidebar.collapsed';
+
+/** Sections collapsed by default on first run: search stays tucked away. */
+const SIDEBAR_DEFAULT_COLLAPSED: Record<string, boolean> = {
+  search: true,
+  recent: false,
+  intake: false,
+  spaces: false,
+};
+
+function readCollapsedSections(): Record<string, boolean> {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
+    if (raw === null) return { ...SIDEBAR_DEFAULT_COLLAPSED };
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object') {
+      return { ...SIDEBAR_DEFAULT_COLLAPSED };
+    }
+    return { ...SIDEBAR_DEFAULT_COLLAPSED, ...(parsed as Record<string, boolean>) };
+  } catch {
+    return { ...SIDEBAR_DEFAULT_COLLAPSED };
+  }
+}
+
+function persistCollapsedSections(map: Record<string, boolean>): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSE_KEY, JSON.stringify(map));
+  } catch {
+    // best-effort — a full quota just means the state doesn't stick
+  }
+}
+
+function applySectionCollapsed(section: HTMLElement, collapsed: boolean): void {
+  section.classList.toggle('is-collapsed', collapsed);
+  const toggle = section.querySelector<HTMLElement>('[data-side-toggle]');
+  if (toggle !== null) toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+function setSectionCollapsed(name: string, collapsed: boolean): void {
+  const section = document.querySelector<HTMLElement>(
+    `.spaces-side-section[data-side-section="${name}"]`
+  );
+  if (section === null) return;
+  applySectionCollapsed(section, collapsed);
+  const map = readCollapsedSections();
+  map[name] = collapsed;
+  persistCollapsedSections(map);
+}
+
+function wireSidebarSections(): void {
+  const map = readCollapsedSections();
+  const sections = Array.from(
+    document.querySelectorAll<HTMLElement>('.spaces-side-section[data-side-section]')
+  );
+  for (const section of sections) {
+    const name = section.getAttribute('data-side-section') ?? '';
+    applySectionCollapsed(section, map[name] === true);
+  }
+  // Delegated toggle clicks (headers are buttons; the Spaces header's
+  // sort <select> lives OUTSIDE the button so it never toggles).
+  const sidebar = document.getElementById('spaces-sidebar');
+  if (sidebar === null) return;
+  sidebar.addEventListener('click', (event: MouseEvent): void => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const toggle = target.closest<HTMLElement>('[data-side-toggle]');
+    if (toggle === null) return;
+    const name = toggle.getAttribute('data-side-toggle') ?? '';
+    const section = toggle.closest<HTMLElement>('.spaces-side-section');
+    if (section === null || name.length === 0) return;
+    setSectionCollapsed(name, !section.classList.contains('is-collapsed'));
+  });
+}
+
+function expandAndFocusSearch(): void {
+  setSectionCollapsed('search', false);
+  const input = document.getElementById('spaces-sidebar-search-input');
+  if (input instanceof HTMLInputElement) {
+    input.focus();
+    input.select();
+  }
+}
+
+function wireSidebarToolbar(): void {
+  const searchToggle = document.getElementById('spaces-sidebar-search-toggle');
+  if (searchToggle !== null) {
+    searchToggle.addEventListener('click', () => {
+      const section = document.querySelector<HTMLElement>(
+        '.spaces-side-section[data-side-section="search"]'
+      );
+      if (section !== null && !section.classList.contains('is-collapsed')) {
+        setSectionCollapsed('search', true);
+        return;
+      }
+      expandAndFocusSearch();
+    });
+  }
+  const newSpace = document.getElementById('spaces-action-new-space');
+  if (newSpace !== null) {
+    newSpace.addEventListener('click', () => openNewSpaceDialog());
+  }
+  const collapseAll = document.getElementById('spaces-sidebar-collapse-all');
+  if (collapseAll !== null) {
+    collapseAll.addEventListener('click', () => {
+      for (const name of ['search', 'recent', 'intake', 'spaces']) {
+        setSectionCollapsed(name, true);
+      }
+    });
+  }
+  // ⌘F / Ctrl+F — the VS Code reflex. Search here means the sidebar
+  // search, not a find-in-page (the window has no such affordance).
+  document.addEventListener('keydown', (event: KeyboardEvent): void => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
+      event.preventDefault();
+      expandAndFocusSearch();
+    }
+  });
+}
+
+// ─── Recent section — the five most recently touched Spaces ────────────
+
+const RECENT_SPACES_LIMIT = 5;
+
+function renderRecentSpaces(): void {
+  const list = document.getElementById('spaces-list-recent');
+  if (list === null) return;
+  list.replaceChildren();
+  const recent = sortSpaces(state.spaces, 'recent').slice(0, RECENT_SPACES_LIMIT);
+  if (recent.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'spaces-side-tree-empty';
+    empty.textContent = 'Nothing yet';
+    list.appendChild(empty);
+    return;
+  }
+  for (const space of recent) {
+    const li = document.createElement('li');
+    li.className = 'spaces-row spaces-row-recent';
+    li.setAttribute('data-scope-id', space.id);
+    li.setAttribute('role', 'button');
+    li.setAttribute('tabindex', '0');
+    const dot = document.createElement('span');
+    dot.className = 'spaces-row-dot';
+    if (typeof space.color === 'string' && space.color.length > 0) {
+      dot.style.background = space.color;
+    }
+    li.appendChild(dot);
+    const name = document.createElement('span');
+    name.className = 'spaces-row-name';
+    name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+    li.appendChild(name);
+    list.appendChild(li);
+  }
+}
+
+// ─── Global search — Space names + item content, grouped results ───────
+
+/** Debounce for the cross-space item search (the name filter is live). */
+const GLOBAL_SEARCH_DEBOUNCE_MS = 250;
+let globalSearchTimer: number | null = null;
+let globalSearchSeq = 0;
+
+function scheduleGlobalItemSearch(query: string): void {
+  if (globalSearchTimer !== null) window.clearTimeout(globalSearchTimer);
+  const trimmed = query.trim();
+  if (trimmed.length < 2) {
+    renderGlobalSearchResults(null);
+    return;
+  }
+  globalSearchTimer = window.setTimeout(() => {
+    void runGlobalItemSearch(trimmed);
+  }, GLOBAL_SEARCH_DEBOUNCE_MS);
+}
+
+async function runGlobalItemSearch(query: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const seq = ++globalSearchSeq;
+  try {
+    const envelope = await bridge.items.search({ query, limit: 12 });
+    if (seq !== globalSearchSeq) return; // superseded by newer keystrokes
+    if (envelope.ok === false) {
+      renderGlobalSearchResults([]);
+      return;
+    }
+    renderGlobalSearchResults(envelope.value as RendererItemSummary[]);
+  } catch {
+    if (seq === globalSearchSeq) renderGlobalSearchResults([]);
+  }
+}
+
+/** Compact monochrome glyph per item kind for tree + result rows. */
+export function itemKindGlyph(kind: string): string {
+  switch (kind) {
+    case 'ticket': return '◫';
+    case 'agent': return '✦';
+    case 'playbook': return '▤';
+    case 'transcript': return '“';
+    case 'journey': return '➔';
+    case 'knowledge': return '◆';
+    case 'image': return '▣';
+    case 'video': return '▶';
+    case 'audio': return '♪';
+    case 'doc': return '▤';
+    case 'app': return '⌘';
+    default: return '▪';
+  }
+}
+
+/** null = no query (hide the panel); [] = query ran and found nothing. */
+function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
+  const list = document.getElementById('spaces-search-results');
+  if (list === null) return;
+  list.replaceChildren();
+  if (items === null) return;
+  const label = document.createElement('li');
+  label.className = 'spaces-side-tree-group';
+  label.textContent = 'Items';
+  list.appendChild(label);
+  if (items.length === 0) {
+    const empty = document.createElement('li');
+    empty.className = 'spaces-side-tree-empty';
+    empty.textContent = 'No matching items';
+    list.appendChild(empty);
+    return;
+  }
+  for (const item of items) {
+    const li = document.createElement('li');
+    li.className = 'spaces-tree-item spaces-search-result';
+    li.setAttribute('data-item-id', item.id);
+    li.setAttribute('role', 'button');
+    li.setAttribute('tabindex', '0');
+    const glyph = document.createElement('span');
+    glyph.className = 'spaces-tree-item-glyph';
+    glyph.textContent = itemKindGlyph(item.kind);
+    li.appendChild(glyph);
+    const title = document.createElement('span');
+    title.className = 'spaces-tree-item-title';
+    title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+    li.appendChild(title);
+    const chip = item.otherSpaces[0];
+    if (chip !== undefined) {
+      const where = document.createElement('span');
+      where.className = 'spaces-tree-item-where';
+      where.textContent = chip.name;
+      li.appendChild(where);
+    }
+    li.addEventListener('click', () => {
+      setActiveScope(chip?.id ?? UNCATEGORIZED_SPACE_ID);
+      void loadItemDetail(item.id);
+    });
+    list.appendChild(li);
+  }
+}
+
+// ─── Per-Space item trees — the explorer expansion ─────────────────────
+
+/** Space ids whose item tree is currently expanded (survives re-render). */
+const expandedSpaceTrees = new Set<string>();
+
+function buildSpaceChildren(spaceId: string): HTMLLIElement {
+  const holder = document.createElement('li');
+  holder.className = 'spaces-tree-children-holder';
+  holder.setAttribute('data-parent-space', spaceId);
+  const ul = document.createElement('ul');
+  ul.className = 'spaces-side-tree spaces-tree-children';
+  const loading = document.createElement('li');
+  loading.className = 'spaces-side-tree-empty';
+  loading.textContent = 'Loading…';
+  ul.appendChild(loading);
+  holder.appendChild(ul);
+  void loadSpaceChildren(spaceId, ul);
+  return holder;
+}
+
+async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.items.list(spaceId, { limit: 30 });
+    if (!ul.isConnected) return; // re-render replaced the tree
+    ul.replaceChildren();
+    if (envelope.ok === false) {
+      const err = document.createElement('li');
+      err.className = 'spaces-side-tree-empty';
+      err.textContent = 'Couldn’t load items';
+      ul.appendChild(err);
+      return;
+    }
+    const items = envelope.value as RendererItemSummary[];
+    if (items.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'spaces-side-tree-empty';
+      empty.textContent = 'Empty';
+      ul.appendChild(empty);
+      return;
+    }
+    for (const item of items) {
+      const li = document.createElement('li');
+      li.className = 'spaces-tree-item';
+      li.setAttribute('data-item-id', item.id);
+      li.setAttribute('role', 'button');
+      li.setAttribute('tabindex', '0');
+      const glyph = document.createElement('span');
+      glyph.className = 'spaces-tree-item-glyph';
+      glyph.textContent = itemKindGlyph(item.kind);
+      li.appendChild(glyph);
+      const title = document.createElement('span');
+      title.className = 'spaces-tree-item-title';
+      title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+      li.appendChild(title);
+      li.addEventListener('click', () => {
+        setActiveScope(spaceId);
+        void loadItemDetail(item.id);
+      });
+      ul.appendChild(li);
+    }
+  } catch {
+    if (!ul.isConnected) return;
+    ul.replaceChildren();
+    const err = document.createElement('li');
+    err.className = 'spaces-side-tree-empty';
+    err.textContent = 'Couldn’t load items';
+    ul.appendChild(err);
+  }
+}
+
+export function toggleSpaceTree(spaceId: string, row: HTMLElement): void {
+  const holder = row.nextElementSibling;
+  const isOpen = expandedSpaceTrees.has(spaceId);
+  if (isOpen) {
+    expandedSpaceTrees.delete(spaceId);
+    row.classList.remove('is-expanded');
+    if (
+      holder instanceof HTMLElement &&
+      holder.classList.contains('spaces-tree-children-holder')
+    ) {
+      holder.remove();
+    }
+    return;
+  }
+  expandedSpaceTrees.add(spaceId);
+  row.classList.add('is-expanded');
+  row.insertAdjacentElement('afterend', buildSpaceChildren(spaceId));
 }
 
 /**
@@ -1680,8 +2057,16 @@ function renderSpaceList(): void {
   // touched by the sort.
   const ordered = sortSpaces(state.spaces, state.sortMode);
   for (const space of ordered) {
-    list.appendChild(buildSpaceRow(space, space.id === state.activeScopeId));
+    const row = buildSpaceRow(space, space.id === state.activeScopeId);
+    list.appendChild(row);
+    // Re-attach the item tree for Spaces the user had expanded — a
+    // re-render must not silently fold the explorer back up.
+    if (expandedSpaceTrees.has(space.id)) {
+      list.appendChild(buildSpaceChildren(space.id));
+    }
   }
+  // The Recent section mirrors the same state; keep it in lockstep.
+  renderRecentSpaces();
   // Re-apply any standing search filter so a load doesn't break the
   // currently-typed query.
   applySidebarFilter();
@@ -1775,6 +2160,20 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   li.setAttribute('data-scope-id', space.id);
   li.setAttribute('role', 'button');
   li.setAttribute('tabindex', '0');
+
+  // Explorer chevron (WISER-parity): expands the Space's item tree in
+  // place. stopPropagation so the row's scope activation doesn't fire.
+  const expand = document.createElement('button');
+  expand.type = 'button';
+  expand.className = 'spaces-row-expand';
+  expand.setAttribute('aria-label', `Show items in ${space.name}`);
+  expand.textContent = '▸';
+  if (expandedSpaceTrees.has(space.id)) li.classList.add('is-expanded');
+  expand.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    toggleSpaceTree(space.id, li);
+  });
+  li.appendChild(expand);
 
   const dot = document.createElement('span');
   dot.className = 'spaces-row-dot';

@@ -289,3 +289,47 @@ describe('Uncategorized pulse dot (Phase 1d/1e)', () => {
     expect(countEl?.textContent).toBe('—');
   });
 });
+
+// ─── VS Code-style sidebar (WISER parity, 2026-08-07) ──────────────────
+//
+// The explorer mechanics: every Space row carries an expand chevron,
+// toggling it inserts/removes the item-tree holder as the row's
+// sibling, and tree rows tag items with a kind glyph. The full fetch
+// path is exercised live; these pin the DOM contract a re-render must
+// preserve (expanded trees survive repaints via expandedSpaceTrees).
+
+describe('sidebar explorer trees', () => {
+  it('buildSpaceRow renders the expand chevron ahead of the dot', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const row = mod.buildSpaceRow(
+      { id: 'sp-t', name: 'Tree Space', itemCount: 2 } as never,
+      false
+    );
+    const expand = row.querySelector('.spaces-row-expand');
+    expect(expand, 'chevron button missing').not.toBeNull();
+    expect(row.firstElementChild).toBe(expand);
+  });
+
+  it('toggleSpaceTree inserts a children holder after the row, then removes it', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    document.body.innerHTML = '<ul><li id="row-a" class="spaces-row spaces-row-space"></li></ul>';
+    const row = document.getElementById('row-a');
+    if (row === null) throw new Error('fixture row missing');
+
+    mod.toggleSpaceTree('sp-tree-1', row);
+    const holder = row.nextElementSibling;
+    expect(holder?.classList.contains('spaces-tree-children-holder')).toBe(true);
+    expect(row.classList.contains('is-expanded')).toBe(true);
+
+    mod.toggleSpaceTree('sp-tree-1', row);
+    expect(row.nextElementSibling).toBeNull();
+    expect(row.classList.contains('is-expanded')).toBe(false);
+  });
+
+  it('itemKindGlyph maps known kinds and falls back for unknown ones', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    expect(mod.itemKindGlyph('ticket')).toBe('◫');
+    expect(mod.itemKindGlyph('agent')).toBe('✦');
+    expect(mod.itemKindGlyph('never-heard-of-it')).toBe('▪');
+  });
+});
