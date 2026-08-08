@@ -322,6 +322,45 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src).toMatch(/sourceId \?\? ''\)\.includes\('sandbox_bundle'\)\) return;/);
   });
 
+  it('explorer selection focuses the tile without a grid rebuild', () => {
+    // "when I select an asset in the left menu it does not focus it in
+    // the tile middle menu" (2026-08-08). Same-Space selections get no
+    // repaint (the unchanged-refresh guard), so the focus must be a
+    // targeted class toggle + scroll, and a scope-switch selection must
+    // be honored by the NEXT paint via pendingTileFocusId.
+    const src = source();
+    expect(src).toMatch(/export function focusItemTile\(/);
+    const explorerClick = src.indexOf('setActiveScope(spaceId);\n        void loadItemDetail(item.id);');
+    expect(explorerClick).toBeGreaterThan(-1);
+    expect(src.slice(explorerClick, explorerClick + 500)).toContain('focusItemTile(item.id)');
+    expect(src.slice(explorerClick, explorerClick + 500)).toContain('pendingTileFocusId = item.id');
+    // renderItemList honors the pending focus after painting.
+    const render = bodyOf('function renderItemList', 6000);
+    expect(render).toContain('pendingTileFocusId !== null && focusItemTile(pendingTileFocusId)');
+  });
+
+  it('focusItemTile moves is-active and reports absence honestly', () => {
+    document.body.innerHTML = `
+      <section id="spaces-items-region">
+        <article class="spaces-card is-active" data-item-id="a"></article>
+        <article class="spaces-card" data-item-id="b"></article>
+      </section>`;
+    const w = window as unknown as {
+      __spacesRendererForTesting?: { focusItemTile?: (id: string) => boolean };
+    };
+    const focus = w.__spacesRendererForTesting?.focusItemTile;
+    expect(focus, 'focusItemTile must be on the test handle').toBeDefined();
+    if (focus === undefined) return;
+    expect(focus('b')).toBe(true);
+    expect(
+      document.querySelector('[data-item-id="b"]')?.classList.contains('is-active')
+    ).toBe(true);
+    expect(
+      document.querySelector('[data-item-id="a"]')?.classList.contains('is-active')
+    ).toBe(false);
+    expect(focus('missing')).toBe(false);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

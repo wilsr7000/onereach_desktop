@@ -964,6 +964,12 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
       li.addEventListener('click', () => {
         setActiveScope(spaceId);
         void loadItemDetail(item.id);
+        // Focus the tile too: immediately when the grid is already
+        // painted (same-Space selection — the unchanged-refresh guard
+        // means no repaint will come), else after the next paint.
+        if (!focusItemTile(item.id)) {
+          pendingTileFocusId = item.id;
+        }
       });
       ul.appendChild(li);
     }
@@ -2354,6 +2360,12 @@ function renderItemList(opts: RenderItemListOpts): void {
     grid.appendChild(buildItemCard(item, item.id === state.activeItemId));
   }
   wrap.appendChild(grid);
+
+  // A sidebar selection made before this paint (scope switch = async
+  // fetch) is honored now that the tile exists.
+  if (pendingTileFocusId !== null && focusItemTile(pendingTileFocusId)) {
+    pendingTileFocusId = null;
+  }
 
   // End-of-feed cue when nothing is filtered out.
   if (filteredItems.length >= 5 && filteredItems.length === state.items.length) {
@@ -4049,6 +4061,40 @@ async function performBulkDelete(btn: HTMLButtonElement): Promise<void> {
 // `buildTimelineRow`). `applyActiveCard` survives because the close-
 // detail-rail path still calls it through the legacy ID-grid
 // selector — harmless and idempotent.
+
+/**
+ * Explorer-selection → tile focus id awaiting the next grid paint.
+ * Set when the sidebar selects an asset whose Space isn't painted yet
+ * (scope switch = async fetch); consumed by renderItemList.
+ */
+let pendingTileFocusId: string | null = null;
+
+/**
+ * Focus an asset's TILE in the middle grid: move the is-active class
+ * and scroll the card into view. Pure DOM — deliberately not a grid
+ * rebuild, so it composes with the unchanged-refresh guard (which
+ * skips repaints when data didn't change; selecting an asset in the
+ * SAME Space must still move the highlight — found live 2026-08-08:
+ * "when I select an asset in the left menu it does not focus it in
+ * the tile middle menu"). Returns true when the tile existed.
+ */
+export function focusItemTile(itemId: string): boolean {
+  const region = document.getElementById('spaces-items-region');
+  if (region === null) return false;
+  let found: HTMLElement | null = null;
+  for (const card of Array.from(region.querySelectorAll<HTMLElement>('.spaces-card'))) {
+    const isTarget = card.getAttribute('data-item-id') === itemId;
+    card.classList.toggle('is-active', isTarget);
+    if (isTarget) found = card;
+  }
+  if (found === null) return false;
+  try {
+    found.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  } catch {
+    /* jsdom / detached — the class toggle already happened */
+  }
+  return true;
+}
 
 function applyActiveCard(grid: HTMLElement, itemId: string | null): void {
   for (const card of Array.from(grid.querySelectorAll<HTMLElement>('.spaces-card'))) {
@@ -10312,6 +10358,7 @@ function messageFrom(err: unknown): string {
 (window as unknown as {
   __spacesRendererForTesting?: unknown;
 }).__spacesRendererForTesting = {
+  focusItemTile,
   buildSpaceRow,
   buildItemCard,
   buildSpaceChip,
