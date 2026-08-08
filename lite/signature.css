@@ -34,6 +34,87 @@
   --or-transition-panel: 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --or-font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   --or-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* Display serif — heroes + section identity only, never body.
+     Tufte's editorial voice. */
+  --or-font-display: 'New York', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+
+  /* Modular type scale (1.2, base 13). One ladder for the whole app. */
+  --or-text-2xs: 11px;
+  --or-text-xs: 12px;
+  --or-text-sm: 13px;
+  --or-text-md: 15px;
+  --or-text-lg: 18px;
+  --or-text-xl: 22px;
+  --or-text-2xl: 28px;
+  --or-leading-tight: 1.25;
+  --or-leading-normal: 1.5;
+  --or-tracking-label: 0.08em; /* small-caps section labels */
+
+  /* 4px spacing grid. */
+  --or-space-1: 4px;
+  --or-space-2: 8px;
+  --or-space-3: 12px;
+  --or-space-4: 16px;
+  --or-space-5: 24px;
+  --or-space-6: 32px;
+
+  /* Motion — everything that moves, springs. Fades use out. */
+  --or-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --or-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* The ONE focus style. Beautiful + accessible, :focus-visible only. */
+  --or-focus-ring: 0 0 0 2px var(--or-bg-canvas), 0 0 0 4px var(--or-accent), 0 0 14px var(--or-accent-glow);
+}
+
+/* ── Global editorial + interaction polish ─────────────────────────── */
+
+/* Tabular numerals wherever data lives — counts, versions, progress. */
+.or-tnum,
+[data-count-target],
+.spaces-row-count,
+.spaces-card-playbook-pill,
+.learn-ring-label,
+.updates-value {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* Small-caps section identity — a hairline of type instead of a bar. */
+.or-eyebrow {
+  font-size: var(--or-text-2xs);
+  letter-spacing: var(--or-tracking-label);
+  text-transform: uppercase;
+  color: var(--or-text-muted);
+  font-weight: 600;
+}
+
+/* The single focus ring, on everything interactive, keyboard-only. */
+a:focus-visible,
+button:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible,
+summary:focus-visible {
+  outline: none;
+  box-shadow: var(--or-focus-ring);
+  border-radius: var(--or-radius-sm);
+}
+
+/* Text selection carries the brand, quietly. */
+::selection {
+  background: var(--or-accent-soft);
+  color: var(--or-text-primary);
+}
+
+/* A whisper of grain over the canvas — tape hiss under the record.
+   One tiled SVG noise, fixed, non-interactive, nearly invisible. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.018;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 * {
@@ -141,9 +222,16 @@ textarea:focus {
   width: 96px;
   height: 96px;
   margin: 0 auto 12px;
-  border: 1px solid rgba(79, 140, 255, 0.14);
+  border: 1px solid rgba(79, 140, 255, 0.16);
   border-radius: 50%;
-  box-shadow: inset 0 0 28px rgba(79, 140, 255, 0.04);
+  box-shadow: inset 0 0 28px rgba(79, 140, 255, 0.05);
+  /* A slow heartbeat — the empty state is alive, not shrugging. */
+  animation: or-breathe 4.5s var(--or-ease-out) infinite;
+}
+
+@keyframes or-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.75; }
+  50% { transform: scale(1.045); opacity: 1; }
 }
 
 .toast,
