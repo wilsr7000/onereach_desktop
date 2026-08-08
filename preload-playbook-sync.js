@@ -19,6 +19,23 @@ function getPlaybookMethods(label = 'preload') {
     respond: (jobId, questionId, answer) => ipcRenderer.invoke('playbook:respond', jobId, questionId, answer),
     cancel: (jobId) => ipcRenderer.invoke('playbook:cancel', jobId),
     findPlaybooks: (spaceId) => ipcRenderer.invoke('playbook:find', spaceId),
+    // Ranked search over title + tags + metadata + FULL CONTENT (all spaces
+    // unless opts.spaceId). Empty query lists every playbook.
+    searchPlaybooks: (query, opts) => ipcRenderer.invoke('playbook:search', query, opts),
+    // Agentic search: the LLM walks playbooks one by one resolving the
+    // natural-language query. Progress via onSearchProgress.
+    agenticSearchPlaybooks: (query, opts) => ipcRenderer.invoke('playbook:search-agentic', query, opts),
+    onSearchProgress: (callback) => {
+      const handler = (_event, data) => {
+        try {
+          callback(data);
+        } catch (err) {
+          console.warn('[preload] playbook:search-progress callback:', err.message);
+        }
+      };
+      ipcRenderer.on('playbook:search-progress', handler);
+      return () => ipcRenderer.removeListener('playbook:search-progress', handler);
+    },
     listJobs: (filters) => ipcRenderer.invoke('playbook:jobs', filters),
     onProgress: (callback) => {
       const handler = (_event, data) => {

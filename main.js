@@ -3285,6 +3285,37 @@ function setupSpacesAPI() {
     }
   });
 
+  // Deterministic playbook search: title, tags, metadata AND full content,
+  // ranked, across all spaces (or one). See lib/playbook-search.js.
+  ipcMain.handle('playbook:search', async (event, query, opts) => {
+    try {
+      return await require('./lib/playbook-search').searchPlaybooks(query, opts || {});
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
+  // Agentic playbook search: walks playbooks one by one, resolving each
+  // against the natural-language query with the LLM. Progress streams to the
+  // calling renderer as playbook:search-progress events.
+  ipcMain.handle('playbook:search-agentic', async (event, query, opts) => {
+    try {
+      const wc = event.sender;
+      return await require('./lib/playbook-search').agenticSearchPlaybooks(query, {
+        ...(opts || {}),
+        onProgress: (p) => {
+          try {
+            if (!wc.isDestroyed()) wc.send('playbook:search-progress', p);
+          } catch (_e) {
+            /* renderer went away mid-search -- keep searching */
+          }
+        },
+      });
+    } catch (error) {
+      return { error: error.message };
+    }
+  });
+
   ipcMain.handle('playbook:jobs', async (event, filters) => {
     try {
       return require('./lib/playbook-executor').listJobs(filters);
