@@ -24,6 +24,7 @@ import {
   type BootChatDeps,
 } from '../boot-chat/boot-chat.js';
 import type { CompressableEvent } from '../boot-chat/event-compressor.js';
+import { bootRenderer, type RendererBootContext } from '../renderer-boot.js';
 
 // File is a module so esbuild treats it as ESM input.
 export {};
@@ -355,7 +356,7 @@ window.__chromeForTesting = {
   },
 };
 
-async function bootstrap(): Promise<void> {
+async function bootstrap(boot?: RendererBootContext): Promise<void> {
   // Test env / broken preload: without the bridge nothing below can
   // work -- bail instead of throwing halfway through boot.
   if (window.lite === undefined) return;
@@ -479,14 +480,20 @@ async function bootstrap(): Promise<void> {
     }
   }
 
+  // The chrome is interactive from here (tab bar, shortcut buttons,
+  // auth wiring all painted) -- a later chat failure must log, not
+  // blank the whole main window.
+  boot?.markBootSucceeded();
+
   // 6. Start the chat. Drives verify → welcome → digest (or sign-in).
   await runChat();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    void bootstrap();
-  });
-} else {
-  void bootstrap();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners. Replaces the previously
+// unguarded `void bootstrap()` (2026-08-08 hardening review).
+bootRenderer({
+  scope: 'chrome',
+  title: 'Onereach.ai Lite failed to load',
+  init: (ctx) => bootstrap(ctx),
+});

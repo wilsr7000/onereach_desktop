@@ -29,6 +29,7 @@
  */
 
 import { UNCATEGORIZED_SPACE_ID } from './scope.js';
+import { bootRenderer } from '../renderer-boot.js';
 import type {
   DiscoveryQueryResult,
   DiscoveryResults,
@@ -566,7 +567,7 @@ async function loadSpaces(): Promise<void> {
     }
     state.spaces = envelope.value.filter(isWellFormedSpace);
     renderSpaceList();
-    spacesBootSucceeded = true;
+    markSpacesBootSucceeded();
   } catch (err) {
     state.loadingSpaces = false;
     renderSpaceListError(messageFrom(err));
@@ -14855,103 +14856,20 @@ async function performAssetRestore(itemId: string, title: string): Promise<void>
 }
 
 // ─── Boot ───────────────────────────────────────────────────────────────
+//
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners. First successful paint is
+// marked in `loadSpaces()` after the first space-list render -- past
+// that point, uncaught errors reach the central log via console.error
+// but never blank a working app.
 
-/**
- * Last-resort crash surface.
- *
- * A thrown exception during `init()` used to leave the window blank
- * with no message and nothing in any log -- indistinguishable from a
- * crash, and impossible to diagnose after the fact. Now the failure is
- * (a) printed to console.error, which the main process forwards to the
- * central log via `attachRendererDiagnostics`, and (b) shown to the
- * user as something they can act on rather than a black rectangle.
- *
- * Deliberately dependency-free and defined BEFORE boot: it must work
- * even when the failure happened while wiring up the app, so it cannot
- * rely on `showToast`, the bridge, or any DOM this file normally builds.
- */
-let spacesBootSucceeded = false;
+let markSpacesBootSucceeded: () => void = () => undefined;
 
-function reportFatalRendererError(scope: string, err: unknown): void {
-  const detail = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err);
-  // Routed to the central log by the main process.
-  console.error(`[spaces] fatal in ${scope}: ${detail}`);
-  // The opaque full-screen overlay is a BOOT-failure surface. After
-  // the first successful paint, a stray uncaught error in some click
-  // handler must not blank a working app — the console.error above
-  // already reaches the central log.
-  if (spacesBootSucceeded) return;
-  try {
-    if (document.getElementById('spaces-fatal') !== null) return;
-    const banner = document.createElement('div');
-    banner.id = 'spaces-fatal';
-    banner.setAttribute('role', 'alert');
-    banner.style.cssText = [
-      'position:fixed', 'inset:0', 'z-index:99999',
-      'display:flex', 'flex-direction:column', 'gap:12px',
-      'align-items:center', 'justify-content:center',
-      'padding:32px', 'text-align:center',
-      'background:#0F1115', 'color:#e6e6e6',
-      'font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
-    ].join(';');
-
-    const title = document.createElement('div');
-    title.textContent = 'Spaces failed to load';
-    title.style.cssText = 'font-size:18px;font-weight:600';
-
-    const body = document.createElement('div');
-    body.textContent = 'The error has been written to the log. Reload to try again.';
-    body.style.cssText = 'opacity:.75;max-width:44ch';
-
-    const pre = document.createElement('pre');
-    pre.textContent = detail.slice(0, 600);
-    pre.style.cssText = [
-      'max-width:80ch', 'max-height:30vh', 'overflow:auto',
-      'text-align:left', 'padding:12px', 'border-radius:8px',
-      'background:#171A21', 'color:#c6c9d1',
-      'font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
-      // Dark scrollbars -- never a white slab on a dark surface.
-      'scrollbar-color:#3a3f4b #171A21', 'scrollbar-width:thin',
-    ].join(';');
-
-    const reload = document.createElement('button');
-    reload.textContent = 'Reload';
-    reload.style.cssText =
-      'padding:8px 18px;border-radius:6px;border:1px solid #3a3f4b;' +
-      'background:#232833;color:#e6e6e6;cursor:pointer;font-size:13px';
-    reload.addEventListener('click', () => window.location.reload());
-
-    banner.append(title, body, pre, reload);
-    document.body.appendChild(banner);
-  } catch {
-    /* the DOM itself is unusable -- console.error above is all we have */
-  }
-}
-
-// Catch what escapes the boot path too: async failures from event
-// handlers and un-awaited promises, which are otherwise silent.
-window.addEventListener('error', (ev) => {
-  reportFatalRendererError('window.onerror', ev.error ?? ev.message);
+bootRenderer({
+  scope: 'spaces',
+  title: 'Spaces failed to load',
+  init: (ctx) => {
+    markSpacesBootSucceeded = ctx.markBootSucceeded;
+    return init();
+  },
 });
-window.addEventListener('unhandledrejection', (ev) => {
-  reportFatalRendererError('unhandledrejection', ev.reason);
-});
-
-function bootSpaces(): void {
-  try {
-    const result = init() as unknown;
-    // `init` is async -- an awaited rejection would otherwise only
-    // surface as an unhandled rejection with no context about boot.
-    if (result instanceof Promise) {
-      result.catch((err: unknown) => reportFatalRendererError('init', err));
-    }
-  } catch (err) {
-    reportFatalRendererError('init', err);
-  }
-}
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootSpaces, { once: true });
-} else {
-  bootSpaces();
-}

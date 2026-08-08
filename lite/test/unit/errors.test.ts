@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { LiteError, isLiteError, wrapAsLiteError } from '../../errors.js';
+import {
+  LiteError,
+  isLiteError,
+  wrapAsLiteError,
+  envelopeIpcError,
+  wrapIpcHandler,
+  type LiteErrorJSON,
+} from '../../errors.js';
 import { KVError, KV_ERROR_CODES } from '../../kv/api.js';
 import { BugReportError, BUG_REPORT_ERROR_CODES } from '../../bug-report/api.js';
 
@@ -200,5 +207,135 @@ describe('BugReportError', () => {
     } else {
       throw new Error('code branching failed');
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IPC error envelopes (2026-08-08 hardening review catch-all)
+// ---------------------------------------------------------------------------
+
+/** Parse the wire message back into the marker payload, preload-style. */
+function parseEnvelope(err: Error, marker: string): LiteErrorJSON | null {
+  const jsonStart = err.message.indexOf('{');
+  if (jsonStart < 0) return null;
+  try {
+    const parsed = JSON.parse(err.message.slice(jsonStart)) as Record<string, LiteErrorJSON>;
+    return parsed[marker] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+describe('envelopeIpcError', () => {
+  it('envelopes a LiteError with its stable code preserved', () => {
+    const typed = new KVError({
+      code: KV_ERROR_CODES.TIMEOUT,
+      message: 'KV get timed out after 5000ms',
+      remediation: 'Check your network and try again.',
+    });
+    const wire = envelopeIpcError('__kvError', typed);
+    const payload = parseEnvelope(wire, '__kvError');
+    expect(payload).not.toBeNull();
+    expect(payload?.code).toBe('KV_TIMEOUT');
+    expect(payload?.message).toBe('KV get timed out after 5000ms');
+    expect(payload?.remediation).toBe('Check your network and try again.');
+  });
+
+  it('envelopes a plain Error as UNKNOWN with the message preserved', () => {
+    const wire = envelopeIpcError('__neonError', new Error('cypher must be a string'));
+    const payload = parseEnvelope(wire, '__neonError');
+    expect(payload?.code).toBe('UNKNOWN');
+    expect(payload?.message).toBe('cypher must be a string');
+  });
+
+  it('envelopes a non-Error throw (string) as UNKNOWN', () => {
+    const wire = envelopeIpcError('__toolsError', 'boom');
+    const payload = parseEnvelope(wire, '__toolsError');
+    expect(payload?.code).toBe('UNKNOWN');
+    expect(payload?.message).toBe('boom');
+  });
+
+  it('passes an already-enveloped error through untouched (no double wrap)', () => {
+    const first = envelopeIpcError('__idwError', new Error('raw'));
+    const second = envelopeIpcError('__idwError', first);
+    expect(second).toBe(first);
+    // Parsing still yields the ORIGINAL payload, not UNKNOWN-of-JSON.
+    const payload = parseEnvelope(second, '__idwError');
+    expect(payload?.message).toBe('raw');
+  });
+
+  it('survives simulating the Electron IPC round trip (prefixed message)', () => {
+    const wire = envelopeIpcError('__mainWindowError', new Error('view is gone'));
+    // Electron re-throws in the renderer with this prefix; parseError
+    // implementations skip to the first `{`.
+    const rendererSide = new Error(
+      `Error invoking remote method 'lite:main-window:open-tab': Error: ${wire.message}`
+    );
+    const payload = parseEnvelope(rendererSide, '__mainWindowError');
+    expect(payload?.code).toBe('UNKNOWN');
+    expect(payload?.message).toBe('view is gone');
+  });
+
+  it('falls back to a minimal envelope when context is unserializable', () => {
+    const circular: Record<string, unknown> = {};
+    circular['self'] = circular;
+    const typed = new LiteError({
+      code: 'TEST_CIRCULAR',
+      message: 'has circular context',
+      context: circular,
+    });
+    const wire = envelopeIpcError('__kvError', typed);
+    const payload = parseEnvelope(wire, '__kvError');
+    expect(payload?.code).toBe('UNKNOWN');
+    expect(payload?.message).toBe('has circular context');
+  });
+});
+
+describe('wrapIpcHandler', () => {
+  it('passes through the resolved value untouched', async () => {
+    const handler = wrapIpcHandler('__kvError', async (a: number, b: number) => a + b);
+    await expect(handler(2, 3)).resolves.toBe(5);
+  });
+
+  it('envelopes a typed error thrown by the handler (code preserved)', async () => {
+    const handler = wrapIpcHandler('__kvError', async () => {
+      throw new KVError({ code: KV_ERROR_CODES.HTTP, message: 'HTTP 503' });
+    });
+    const err = await handler().catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(Error);
+    const payload = parseEnvelope(err as Error, '__kvError');
+    expect(payload?.code).toBe('KV_HTTP');
+  });
+
+  it('envelopes a synchronous validation throw as UNKNOWN', async () => {
+    const handler = wrapIpcHandler('__neonError', (): string => {
+      throw new Error('id must be a non-empty string');
+    });
+    const err = await handler().catch((e: unknown) => e as Error);
+    const payload = parseEnvelope(err as Error, '__neonError');
+    expect(payload?.code).toBe('UNKNOWN');
+    expect(payload?.message).toBe('id must be a non-empty string');
+  });
+
+  it('does not double-wrap handlers that already threw an envelope', async () => {
+    const handler = wrapIpcHandler('__neonError', async () => {
+      // The hand-built envelope pattern that predates the wrapper
+      // (e.g. neon QUERY_NAMED unknown-name rejection).
+      throw new Error(
+        JSON.stringify({
+          __neonError: {
+            name: 'NeonError',
+            code: 'NEON_INVALID_INPUT',
+            message: 'Unknown named query: nope',
+            context: {},
+            remediation: 'Register it in the owning module.',
+          },
+        })
+      );
+    });
+    const err = await handler().catch((e: unknown) => e as Error);
+    const payload = parseEnvelope(err as Error, '__neonError');
+    expect(payload?.code).toBe('NEON_INVALID_INPUT');
+    expect(payload?.message).toBe('Unknown named query: nope');
   });
 });

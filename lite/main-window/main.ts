@@ -35,6 +35,16 @@ import {
   _resetMainWindowForTesting,
 } from './window.js';
 import { getLoggingApi } from '../logging/api.js';
+import { wrapIpcHandler } from '../errors.js';
+
+/**
+ * Marker key for the renderer's `parseError` (preload-lite.ts). Every
+ * handler is registered through `wrapIpcHandler` with this marker so
+ * unknown errors reach the renderer as `{ code: 'UNKNOWN', message }`
+ * instead of Electron's generic "Error invoking remote method"
+ * (2026-08-08 hardening review).
+ */
+const IPC_ERROR_MARKER = '__mainWindowError';
 
 // ---------------------------------------------------------------------------
 // IPC channel names. All prefixed `lite:main-window:` per Rule 3.
@@ -114,30 +124,30 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
 
   // ── IPC handlers ───────────────────────────────────────────────────────
 
-  ipcMain.handle(MAIN_WINDOW_IPC.HOME_URL_GET, async () => {
+  ipcMain.handle(MAIN_WINDOW_IPC.HOME_URL_GET, wrapIpcHandler(IPC_ERROR_MARKER, async () => {
     const state = await readHomeUrl();
     return { ...state, defaultUrl: DEFAULT_HOME_URL };
-  });
+  }));
 
-  ipcMain.handle(MAIN_WINDOW_IPC.HOME_URL_SET, async (_event, payload: unknown) => {
+  ipcMain.handle(MAIN_WINDOW_IPC.HOME_URL_SET, wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: unknown) => {
     const raw = (payload as { url?: unknown })?.url;
     // null resets to the default; anything else must validate.
     const state = await writeHomeUrl(raw === null ? null : String(raw ?? ''));
     return { ...state, defaultUrl: DEFAULT_HOME_URL };
-  });
+  }));
 
-  ipcMain.handle(MAIN_WINDOW_IPC.LIST_TABS, async (): Promise<Tab[]> => {
+  ipcMain.handle(MAIN_WINDOW_IPC.LIST_TABS, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<Tab[]> => {
     getLoggingApi().event(MAIN_WINDOW_EVENTS.IPC_LIST_TABS);
     return api.listTabs();
-  });
+  }));
 
-  ipcMain.handle(MAIN_WINDOW_IPC.GET_ACTIVE, async (): Promise<{ activeId: string | null }> => {
+  ipcMain.handle(MAIN_WINDOW_IPC.GET_ACTIVE, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ activeId: string | null }> => {
     return { activeId: await api.getActiveTabId() };
-  });
+  }));
 
   ipcMain.handle(
     MAIN_WINDOW_IPC.OPEN_TAB,
-    async (_event: IpcMainInvokeEvent, payload: unknown): Promise<OpenTabResult> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: unknown): Promise<OpenTabResult> => {
       getLoggingApi().event(MAIN_WINDOW_EVENTS.IPC_OPEN_TAB);
       const input = validateOpenTabPayload(payload);
       try {
@@ -147,17 +157,19 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
       } catch (err) {
         if (err instanceof MainWindowError) {
           log.warn('open-tab rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __mainWindowError: err.toJSON() }));
+        } else {
+          log.error('open-tab unexpected error', { error: (err as Error).message });
         }
-        log.error('open-tab unexpected error', { error: (err as Error).message });
+        // wrapIpcHandler envelopes: typed errors keep their code,
+        // anything else crosses as UNKNOWN.
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     MAIN_WINDOW_IPC.CLOSE_TAB,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(MAIN_WINDOW_EVENTS.IPC_CLOSE_TAB);
       const id = validateNonEmptyString(payload?.id, 'id');
       try {
@@ -167,17 +179,17 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
       } catch (err) {
         if (err instanceof MainWindowError) {
           log.warn('close-tab rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __mainWindowError: err.toJSON() }));
+        } else {
+          log.error('close-tab unexpected error', { error: (err as Error).message });
         }
-        log.error('close-tab unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     MAIN_WINDOW_IPC.ACTIVATE_TAB,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(MAIN_WINDOW_EVENTS.IPC_ACTIVATE_TAB);
       const id = validateNonEmptyString(payload?.id, 'id');
       try {
@@ -187,34 +199,27 @@ export function initMainWindow(opts: InitMainWindowOptions): MainWindowHandle {
       } catch (err) {
         if (err instanceof MainWindowError) {
           log.warn('activate-tab rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __mainWindowError: err.toJSON() }));
+        } else {
+          log.error('activate-tab unexpected error', { error: (err as Error).message });
         }
-        log.error('activate-tab unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
-  ipcMain.handle(MAIN_WINDOW_IPC.GO_HOME, async (): Promise<{ ok: true }> => {
-    try {
-      await api.goHome();
-      return { ok: true };
-    } catch (err) {
-      if (err instanceof MainWindowError) {
-        throw new Error(JSON.stringify({ __mainWindowError: err.toJSON() }));
-      }
-      throw err;
-    }
-  });
+  ipcMain.handle(MAIN_WINDOW_IPC.GO_HOME, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ ok: true }> => {
+    await api.goHome();
+    return { ok: true };
+  }));
 
   // Reload the active tab / Home feed. Pure view op (window.ts handles
   // the WebContentsView + emits `main-window.reload-active`); never
   // rejects — returns { ok: false } when there's nothing to reload.
-  ipcMain.handle(MAIN_WINDOW_IPC.RELOAD_ACTIVE, async (): Promise<{ ok: boolean }> => {
+  ipcMain.handle(MAIN_WINDOW_IPC.RELOAD_ACTIVE, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ ok: boolean }> => {
     const ok = reloadActive();
     log.info('reload-active', { ok });
     return { ok };
-  });
+  }));
 
   // ── Live cross-window updates ──────────────────────────────────────────
   //

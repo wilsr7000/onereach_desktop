@@ -13,6 +13,8 @@
  * touches the DOM.
  */
 
+import { bootRenderer } from '../renderer-boot.js';
+
 interface LiteWindow {
   lite?: {
     version?: string;
@@ -141,8 +143,11 @@ function init(): void {
   initAnchorScroll();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+bootRenderer({
+  scope: 'help',
+  title: 'Help failed to load',
+  init: () => init(),
+});

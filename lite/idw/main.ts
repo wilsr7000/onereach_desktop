@@ -35,6 +35,16 @@ import { getLoggingApi } from '../logging/api.js';
 import { registerNamedQuery } from '../neon/api.js';
 import { getSettingsApi } from '../settings/api.js';
 import { getMainWindowApi } from '../main-window/api.js';
+import { wrapIpcHandler } from '../errors.js';
+
+/**
+ * Marker key for the renderer's `parseError` (preload-lite.ts). Every
+ * handler is registered through `wrapIpcHandler` with this marker so
+ * unknown errors reach the renderer as `{ code: 'UNKNOWN', message }`
+ * instead of Electron's generic "Error invoking remote method"
+ * (2026-08-08 hardening review).
+ */
+const IPC_ERROR_MARKER = '__idwError';
 
 // ---------------------------------------------------------------------------
 // IPC channel names. All prefixed `lite:idw:` per Rule 3.
@@ -111,32 +121,32 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
 
   // ── IPC handlers ───────────────────────────────────────────────────────
 
-  ipcMain.handle(IDW_IPC.LIST, async (): Promise<IdwEntry[]> => {
+  ipcMain.handle(IDW_IPC.LIST, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<IdwEntry[]> => {
     getLoggingApi().event(IDW_EVENTS.IPC_LIST);
     return api.list();
-  });
+  }));
 
   ipcMain.handle(
     IDW_IPC.LIST_BY_KIND,
-    async (_event: IpcMainInvokeEvent, payload: { kind?: unknown }): Promise<IdwEntry[]> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { kind?: unknown }): Promise<IdwEntry[]> => {
       getLoggingApi().event(IDW_EVENTS.IPC_LIST_BY_KIND);
       const kind = validateKind(payload?.kind);
       return api.listByKind(kind);
-    }
+    })
   );
 
   ipcMain.handle(
     IDW_IPC.GET,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<IdwEntry | null> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<IdwEntry | null> => {
       getLoggingApi().event(IDW_EVENTS.IPC_GET);
       const id = validateNonEmptyString(payload?.id, 'id');
       return api.get(id);
-    }
+    })
   );
 
   ipcMain.handle(
     IDW_IPC.ADD,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _event: IpcMainInvokeEvent,
       payload: unknown
     ): Promise<{ entry: IdwEntry; wasUpdate: boolean }> => {
@@ -149,17 +159,19 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
       } catch (err) {
         if (err instanceof IdwError) {
           log.warn('add rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __idwError: err.toJSON() }));
+        } else {
+          log.error('add unexpected error', { error: (err as Error).message });
         }
-        log.error('add unexpected error', { error: (err as Error).message });
+        // wrapIpcHandler envelopes: typed errors keep their code,
+        // anything else crosses as UNKNOWN.
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     IDW_IPC.UPDATE,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _event: IpcMainInvokeEvent,
       payload: { id?: unknown; patch?: unknown }
     ): Promise<IdwEntry> => {
@@ -173,17 +185,17 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
       } catch (err) {
         if (err instanceof IdwError) {
           log.warn('update rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __idwError: err.toJSON() }));
+        } else {
+          log.error('update unexpected error', { error: (err as Error).message });
         }
-        log.error('update unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     IDW_IPC.REMOVE,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(IDW_EVENTS.IPC_REMOVE);
       const id = validateNonEmptyString(payload?.id, 'id');
       try {
@@ -193,36 +205,35 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
       } catch (err) {
         if (err instanceof IdwError) {
           log.warn('remove rejected', { code: err.code, message: err.message });
-          throw new Error(JSON.stringify({ __idwError: err.toJSON() }));
+        } else {
+          log.error('remove unexpected error', { error: (err as Error).message });
         }
-        log.error('remove unexpected error', { error: (err as Error).message });
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     IDW_IPC.OPEN,
-    async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(IDW_EVENTS.IPC_OPEN);
       const id = validateNonEmptyString(payload?.id, 'id');
       const entry = await api.get(id);
       if (entry === null) {
-        // Surface as IdwError so the renderer's parseError works.
-        const err = new IdwError({
+        // Typed throw -- wrapIpcHandler envelopes it for parseError.
+        throw new IdwError({
           code: IDW_ERROR_CODES.NOT_FOUND,
           message: `Entry not found: ${id}`,
           context: { op: 'open', id },
           remediation: 'Refresh the list -- the entry may have been removed.',
         });
-        throw new Error(JSON.stringify({ __idwError: err.toJSON() }));
       }
       await openEntryAsTab(entry);
       return { ok: true };
-    }
+    })
   );
 
-  ipcMain.handle(IDW_IPC.OPEN_STORE, async (): Promise<{ ok: true }> => {
+  ipcMain.handle(IDW_IPC.OPEN_STORE, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ ok: true }> => {
     getLoggingApi().event(IDW_EVENTS.IPC_OPEN_STORE);
     if (initOptions === null) {
       throw new Error('initIdw must be called before opening the catalog window');
@@ -234,7 +245,7 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
     });
     getLoggingApi().event(IDW_EVENTS.STORE_OPENED);
     return { ok: true };
-  });
+  }));
 
   // ── Menu builder ───────────────────────────────────────────────────────
 

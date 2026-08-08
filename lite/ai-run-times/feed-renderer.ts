@@ -20,6 +20,7 @@
 /// <reference path="../lite-window.d.ts" />
 
 import { extractArticle } from './article-extractor.js';
+import { bootRenderer } from '../renderer-boot.js';
 
 export {};
 
@@ -112,11 +113,14 @@ function boot(): void {
   void initialLoad();
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', boot);
-} else {
-  boot();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+bootRenderer({
+  scope: 'ai-run-times',
+  title: 'AI Run Times failed to load',
+  init: () => boot(),
+});
 
 // ─── load ────────────────────────────────────────────────────────────────
 

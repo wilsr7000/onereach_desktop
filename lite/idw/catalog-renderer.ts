@@ -17,8 +17,7 @@
 
 /// <reference path="../lite-window.d.ts" />
 
-// File is a module so esbuild treats it as ESM input.
-export {};
+import { bootRenderer } from '../renderer-boot.js';
 
 // ---------------------------------------------------------------------------
 // State
@@ -719,8 +718,11 @@ function escapeAttr(s: string): string {
   return escapeHtml(s);
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-  bootstrap();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+bootRenderer({
+  scope: 'idw-catalog',
+  title: 'The OAGI Store failed to load',
+  init: () => bootstrap(),
+});

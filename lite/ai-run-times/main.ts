@@ -24,6 +24,16 @@ import {
 import { AI_RUN_TIMES_EVENTS } from './events.js';
 import { openAiRunTimesWindow, closeAiRunTimesWindow } from './window.js';
 import { getLoggingApi } from '../logging/api.js';
+import { wrapIpcHandler } from '../errors.js';
+
+/**
+ * Marker key for the renderer's `parseError` (preload-lite.ts). Every
+ * handler is registered through `wrapIpcHandler` with this marker so
+ * unknown errors reach the renderer as `{ code: 'UNKNOWN', message }`
+ * instead of Electron's generic "Error invoking remote method"
+ * (2026-08-08 hardening review).
+ */
+const IPC_ERROR_MARKER = '__aiRunTimesError';
 
 export const AI_RUN_TIMES_IPC = {
   LIST_ARTICLES: 'lite:ai-run-times:list-articles',
@@ -77,36 +87,37 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
   initOpts = opts;
   const api = getAiRunTimesApi();
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_ARTICLES, async (): Promise<Article[]> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_ARTICLES, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<Article[]> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_LIST_ARTICLES);
     return api.listArticles();
-  });
+  }));
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.REFRESH_FEED, async (): Promise<RefreshFeedResult> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.REFRESH_FEED, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<RefreshFeedResult> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_REFRESH_FEED);
     try {
       return await api.refreshFeed();
     } catch (err) {
       if (err instanceof AiRunTimesError) {
         log.warn('refresh-feed rejected', { code: err.code });
-        throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
       }
+      // wrapIpcHandler envelopes: typed errors keep their code,
+      // anything else crosses as UNKNOWN.
       throw err;
     }
-  });
+  }));
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.GET_ARTICLE,
-    async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<Article | null> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<Article | null> => {
       getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_GET_ARTICLE);
       const id = nonEmptyString(payload?.id, 'id');
       return api.getArticle(id);
-    }
+    })
   );
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.FETCH_ARTICLE_BODY,
-    async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<Article> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<Article> => {
       getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_FETCH_ARTICLE_BODY);
       const id = nonEmptyString(payload?.id, 'id');
       try {
@@ -114,21 +125,20 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('fetch-article-body rejected', { code: err.code });
-          throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
         }
         throw err;
       }
-    }
+    })
   );
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_PREFERENCES, async (): Promise<Preference[]> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_PREFERENCES, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<Preference[]> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_LIST_PREFERENCES);
     return api.listPreferences();
-  });
+  }));
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.SAVE_PREFERENCES,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _e: IpcMainInvokeEvent,
       payload: { enabledIds?: unknown }
     ): Promise<Preference[]> => {
@@ -139,21 +149,20 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('save-preferences rejected', { code: err.code });
-          throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
         }
         throw err;
       }
-    }
+    })
   );
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_FEED_SOURCES, async (): Promise<FeedSource[]> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_FEED_SOURCES, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<FeedSource[]> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_LIST_FEED_SOURCES);
     return api.listFeedSources();
-  });
+  }));
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.ADD_FEED_SOURCE,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _e: IpcMainInvokeEvent,
       payload: { label?: unknown; url?: unknown }
     ): Promise<FeedSource> => {
@@ -165,16 +174,15 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('add-feed-source rejected', { code: err.code });
-          throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
         }
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.REMOVE_FEED_SOURCE,
-    async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_e: IpcMainInvokeEvent, payload: { id?: unknown }): Promise<{ ok: true }> => {
       getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_REMOVE_FEED_SOURCE);
       const id = nonEmptyString(payload?.id, 'id');
       try {
@@ -182,16 +190,15 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('remove-feed-source rejected', { code: err.code });
-          throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
         }
         throw err;
       }
-    }
+    })
   );
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.TOGGLE_FEED_SOURCE,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _e: IpcMainInvokeEvent,
       payload: { id?: unknown; enabled?: unknown }
     ): Promise<FeedSource> => {
@@ -203,21 +210,20 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('toggle-feed-source rejected', { code: err.code });
-          throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
         }
         throw err;
       }
-    }
+    })
   );
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_READING_LOG, async (): Promise<ReadingLogEntry[]> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.LIST_READING_LOG, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<ReadingLogEntry[]> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_LIST_READING_LOG);
     return api.listReadingLog();
-  });
+  }));
 
   ipcMain.handle(
     AI_RUN_TIMES_IPC.RECORD_READ,
-    async (
+    wrapIpcHandler(IPC_ERROR_MARKER, async (
       _e: IpcMainInvokeEvent,
       payload: {
         articleId?: unknown;
@@ -278,24 +284,23 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
       } catch (err) {
         if (err instanceof AiRunTimesError) {
           log.warn('record-read rejected', { code: err.code });
-          throw new Error(JSON.stringify({ __aiRunTimesError: err.toJSON() }));
         }
         throw err;
       }
-    }
+    })
   );
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.CLEAR_READING_LOG, async (): Promise<{ ok: true }> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.CLEAR_READING_LOG, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ ok: true }> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_CLEAR_READING_LOG);
     return api.clearReadingLog();
-  });
+  }));
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.EXPORT_READING_LOG, async (): Promise<string> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.EXPORT_READING_LOG, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<string> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_EXPORT_READING_LOG);
     return api.exportReadingLog();
-  });
+  }));
 
-  ipcMain.handle(AI_RUN_TIMES_IPC.OPEN_WINDOW, async (): Promise<{ ok: true }> => {
+  ipcMain.handle(AI_RUN_TIMES_IPC.OPEN_WINDOW, wrapIpcHandler(IPC_ERROR_MARKER, async (): Promise<{ ok: true }> => {
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.IPC_OPEN_WINDOW);
     if (initOpts === null) {
       throw new Error('initAiRunTimes must be called before opening the window');
@@ -307,7 +312,7 @@ export function initAiRunTimes(opts: InitAiRunTimesOptions): AiRunTimesHandle {
     });
     getLoggingApi().event(AI_RUN_TIMES_EVENTS.WINDOW_OPENED);
     return { ok: true };
-  });
+  }));
 
   registered = true;
   log.info('ai-run-times initialized', {});

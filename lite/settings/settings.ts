@@ -18,6 +18,7 @@
 // File is a module so esbuild treats it as ESM input.
 export {};
 
+import { bootRenderer } from '../renderer-boot.js';
 import { mountAccount } from './sections/account.js';
 import { mountHome } from './sections/home.js';
 import { mountUpdates } from './sections/updates.js';
@@ -353,8 +354,11 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', bootstrap);
-} else {
-  bootstrap();
-}
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+bootRenderer({
+  scope: 'settings',
+  title: 'Settings failed to load',
+  init: () => bootstrap(),
+});

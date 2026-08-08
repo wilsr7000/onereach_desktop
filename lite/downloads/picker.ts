@@ -20,6 +20,8 @@
 
 /// <reference path="../lite-window.d.ts" />
 
+import { bootRenderer } from '../renderer-boot.js';
+
 type PickerSpaceView = {
   id: string;
   name: string;
@@ -83,7 +85,16 @@ const els = {
   saveBtn: document.getElementById('picker-save') as HTMLButtonElement | null,
 };
 
-void boot();
+// Shared crash surface (`lite/renderer-boot.ts`): fatal-error banner +
+// window error/unhandledrejection listeners (2026-08-08 hardening
+// review -- previously only the Spaces renderer had this guard).
+// `boot` handles its EXPECTED failure modes via `showFatal`; the guard
+// catches what escapes it.
+bootRenderer({
+  scope: 'download-picker',
+  title: 'The Save-to-Space picker failed to load',
+  init: () => boot(),
+});
 
 async function boot(): Promise<void> {
   // Wire static handlers first so user clicks during a slow bootstrap
