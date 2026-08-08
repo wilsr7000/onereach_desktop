@@ -265,7 +265,21 @@ export class EdisonNeonClient {
         });
       }
 
-      return extractRecords(parsed);
+      const records = extractRecords(parsed);
+      // The Edison flow maps some Cypher-side failures to a 200 whose
+      // body isn't a recognized result shape — which used to read as a
+      // perfectly normal empty result ("query ok, recordCount 0") and
+      // made a broken query indistinguishable from no-data (the
+      // silent-empty-tickets incident, d306299). Recognized-but-empty
+      // stays quiet; UNRECOGNIZED-and-empty gets a loud tell.
+      if (records.length === 0 && !isRecognizedResultShape(parsed)) {
+        this.log('warn', 'neon-client: response shape unrecognized — treated as empty', {
+          op,
+          cypher: cypher.slice(0, 200),
+          hint: 'A Cypher-side failure mapped to an empty 200 looks exactly like this. Verify the query before trusting the empty result.',
+        });
+      }
+      return records;
     } finally {
       clearTimeout(timeout);
     }
@@ -373,6 +387,28 @@ export function buildRequest(
  * return. Returns `[]` when the parsed body has no records (the
  * caller's responsibility to detect "no rows" vs error).
  */
+/**
+ * Whether the body matches one of the result shapes the proxy actually
+ * sends for successful queries (bare array, `{records}`, `{result}`,
+ * `{result:{records}}`). Empty string / null bodies count as recognized
+ * (a legitimate no-rows response). Everything else is the ambiguous
+ * "error mapped to 200" territory `extractRecords` flattens to `[]`.
+ */
+export function isRecognizedResultShape(parsed: unknown): boolean {
+  if (parsed === null || parsed === undefined) return true;
+  if (Array.isArray(parsed)) return true;
+  if (typeof parsed !== 'object') return false;
+  const obj = parsed as { records?: unknown; result?: unknown };
+  if (Array.isArray(obj.records)) return true;
+  if (obj.result !== undefined) {
+    if (Array.isArray(obj.result)) return true;
+    if (typeof obj.result === 'object' && obj.result !== null) {
+      return Array.isArray((obj.result as { records?: unknown }).records);
+    }
+  }
+  return false;
+}
+
 export function extractRecords(parsed: unknown): NeonRecord[] {
   if (Array.isArray(parsed)) return parsed.map(toRecord);
   if (parsed === null || typeof parsed !== 'object') return [];

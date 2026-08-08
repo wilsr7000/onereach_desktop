@@ -475,3 +475,60 @@ describe('required/optional items + AI drafting + accordions (2026-08-08)', () =
     expect(body).toContain('jsonMode: true');
   });
 });
+
+// ─── Review fixes (2026-08-08) ─────────────────────────────────────────
+
+describe('parseChecklistItems round-trips the v2 fields', () => {
+  it('preserves optional and more through a read (revise must not tighten gates)', async () => {
+    const itemsJson = JSON.stringify([
+      { text: 'Verify backups', killer: true },
+      { text: 'Update the wiki', optional: true, more: 'Only the ops page.' },
+    ]);
+    const { api } = client((cypher) =>
+      cypher.includes(':Checklist')
+        ? [{ id: 'c1', name: 'Deploy', mode: 'DO-CONFIRM', pausePoint: 'x', itemsJson, itemCount: 2, version: 1 }]
+        : []
+    );
+    const lists = await api.listChecklists('space-1');
+    const items = lists[0]?.items ?? [];
+    expect(items[1]?.optional).toBe(true);
+    expect(items[1]?.more).toBe('Only the ops page.');
+    expect(items[0]?.killer).toBe(true);
+    expect(items[0]?.optional).toBeUndefined();
+  });
+});
+
+describe('the blocked-status bypass is closed', () => {
+  it('blocked -> in_progress still gates the required preflight', async () => {
+    const { api } = client((cypher) =>
+      cypher.includes('requiredPre')
+        ? gateRows({ status: 'blocked', pre: [{ name: 'Launch readiness', complete: false }] })
+        : []
+    );
+    await expect(api.assertTicketStatusAllowed('t1', 'in_progress')).rejects.toThrow(
+      /Launch readiness/
+    );
+  });
+
+  it('blocked -> done gates preflight AND postflight', async () => {
+    const { api } = client((cypher) =>
+      cypher.includes('requiredPre')
+        ? gateRows({
+            status: 'blocked',
+            pre: [{ name: 'Pre', complete: false }],
+            post: [{ name: 'Post', complete: false }],
+          })
+        : []
+    );
+    await expect(api.assertTicketStatusAllowed('t1', 'done')).rejects.toThrow(/Pre.*Post|Pre/);
+  });
+
+  it('in_progress -> done still does NOT re-gate preflight', async () => {
+    const { api } = client((cypher) =>
+      cypher.includes('requiredPre')
+        ? gateRows({ status: 'in_progress', pre: [{ name: 'Pre', complete: false }] })
+        : []
+    );
+    await expect(api.assertTicketStatusAllowed('t1', 'done')).resolves.toBeUndefined();
+  });
+});

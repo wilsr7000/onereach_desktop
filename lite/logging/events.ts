@@ -142,10 +142,20 @@ export function serializeError(err: unknown): SerializedEventError {
     };
   }
   if (err instanceof Error) {
+    // The stack IS the diagnosis for exactly these unexpected plain
+    // Errors — dropping it while saying "see logs" left nothing to
+    // see (2026-08-08 logging review). Truncated to keep event rows
+    // readable; the top frames are the ones that matter.
+    const hasStack = typeof err.stack === 'string' && err.stack.length > 0;
     return {
       code: 'UNKNOWN',
       message: err.message,
-      remediation: 'See logs for stack trace.',
+      remediation: hasStack
+        ? 'Stack attached in context.'
+        : 'No stack was attached to this error.',
+      ...(hasStack
+        ? { context: { stack: (err.stack as string).split('\n').slice(0, 8).join('\n') } }
+        : {}),
       name: err.name,
     };
   }

@@ -431,7 +431,16 @@ export class SdkFilesClient {
       if (this.ensureToken !== null) {
         try {
           this.mintedToken = await this.ensureToken();
-        } catch {
+        } catch (err) {
+          // Still soft-fail (the raw token may work), but leave the
+          // root cause in the log: when the mint host is down, every
+          // account-scoped op 403s with a generic status and this
+          // discarded error is the only diagnosis (2026-08-08 logging
+          // review). The minter never puts the token in the message.
+          this.log('warn', 'files-client: account-token mint failed; falling back to raw token', {
+            op,
+            error: err instanceof Error ? err.message : String(err),
+          });
           this.mintedToken = null;
         }
       }

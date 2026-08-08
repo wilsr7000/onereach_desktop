@@ -913,13 +913,33 @@ async function runGlobalItemSearch(query: string): Promise<void> {
     const envelope = await bridge.items.search({ query, limit: 12 });
     if (seq !== globalSearchSeq) return; // superseded by newer keystrokes
     if (envelope.ok === false) {
-      renderGlobalSearchResults([]);
+      // A failed search must not read as "found nothing" (2026-08-08
+      // logging review) — say it failed, and leave a trace.
+      window.logging?.warn?.('spaces', 'sidebar item search failed', {
+        error: envelope.error.message,
+      });
+      renderGlobalSearchError();
       return;
     }
     renderGlobalSearchResults(envelope.value as RendererItemSummary[]);
-  } catch {
-    if (seq === globalSearchSeq) renderGlobalSearchResults([]);
+  } catch (err) {
+    if (seq !== globalSearchSeq) return;
+    window.logging?.warn?.('spaces', 'sidebar item search threw', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    renderGlobalSearchError();
   }
+}
+
+/** Distinct failed-search state — an error is not an empty result. */
+function renderGlobalSearchError(): void {
+  const list = document.getElementById('spaces-search-results');
+  if (list === null) return;
+  list.replaceChildren();
+  const row = document.createElement('li');
+  row.className = 'spaces-side-tree-empty';
+  row.textContent = 'Search failed — try again';
+  list.appendChild(row);
 }
 
 /** Compact monochrome glyph per item kind for tree + result rows. */
@@ -1442,7 +1462,10 @@ function openItemContextMenu(
         if (bridge === undefined) return;
         const envelope = await bridge.items.addToSpace(item.id, toSpaceId);
         showToast(envelope.ok ? `Added "${item.title}"` : envelope.error.message);
-        if (envelope.ok) refreshSpaceTree(toSpaceId);
+        if (envelope.ok) {
+          refreshSpaceTree(toSpaceId);
+          if (state.activeScopeId === toSpaceId) void loadItems();
+        }
       })();
     },
     moveTo: (toSpaceId) => {
@@ -1453,7 +1476,9 @@ function openItemContextMenu(
         if (envelope.ok) {
           refreshSpaceTree(inSpaceId);
           refreshSpaceTree(toSpaceId);
-          if (state.activeScopeId === inSpaceId) void loadItems();
+          if (state.activeScopeId === inSpaceId || state.activeScopeId === toSpaceId) {
+            void loadItems();
+          }
         }
       })();
     },
@@ -12478,20 +12503,41 @@ async function createSpaceFromWizard(): Promise<void> {
     const createdId = (created.value as { id?: unknown }).id;
     const id = typeof createdId === 'string' ? createdId : null;
 
-    // Flip to a shared (AI-managed) space when requested. Soft-fail: the
-    // space exists either way; the user can re-flip via the row menu.
-    if (w.shared && id !== null) {
+    // A create that "succeeded" without a usable id is the Edison
+    // empty-200 shape — the write may not have landed, and every
+    // follow-up (shared flip, member adds, navigation) would silently
+    // no-op while the toast claimed success (2026-08-08 logging
+    // review, P0). Fail loudly instead; the sidebar refresh on the
+    // next open shows the truth either way.
+    if (id === null) {
+      setWizardBusy(false);
+      window.logging?.error?.('spaces', 'wizard create returned no id', { name });
+      showWizardError(
+        `Creating "${name}" did not confirm. Check the sidebar after a refresh — it may or may not exist — and try again if it doesn't.`
+      );
+      return;
+    }
+
+    // Flip to a shared (AI-managed) space when requested. Soft-fail with
+    // a trace: the space exists either way; the user can re-flip via the
+    // row menu — but the toast must not claim "shared" when it isn't.
+    let sharedFlipFailed = false;
+    if (w.shared) {
       try {
-        await bridge.setSpaceKind(id, 'shared');
+        const flipped = await bridge.setSpaceKind(id, 'shared');
+        if (flipped.ok === false) sharedFlipFailed = true;
       } catch {
-        /* non-fatal */
+        sharedFlipFailed = true;
+      }
+      if (sharedFlipFailed) {
+        window.logging?.warn?.('spaces', 'wizard shared-flip failed', { id, name });
       }
     }
 
     // Add people up front. Per-person soft-fail; we report the tally.
     let peopleAdded = 0;
     let peopleFailed = 0;
-    if (id !== null) {
+    {
       for (const row of w.people) {
         const person = normalizeWizardPerson(row);
         if (person === null) continue;
@@ -12510,10 +12556,13 @@ async function createSpaceFromWizard(): Promise<void> {
       }
     }
 
-    const wasShared = w.shared;
+    const wasShared = w.shared && !sharedFlipFailed;
     closeNewSpaceDialog();
     await loadSpaces();
     let toast = wasShared ? `Created shared space "${name}"` : `Created "${name}"`;
+    if (sharedFlipFailed) {
+      toast += " · couldn't switch it to shared — use the row menu to retry";
+    }
     if (peopleAdded > 0) {
       toast += ` · ${peopleAdded} ${peopleAdded === 1 ? 'person' : 'people'} added`;
     }
@@ -12521,7 +12570,7 @@ async function createSpaceFromWizard(): Promise<void> {
       toast += ` · ${peopleFailed} couldn't be added`;
     }
     showToast(toast);
-    if (id !== null) setActiveScope(id);
+    setActiveScope(id);
   } catch (err) {
     setWizardBusy(false);
     showWizardError(messageFrom(err));

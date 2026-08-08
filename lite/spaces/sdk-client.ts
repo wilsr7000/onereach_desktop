@@ -1177,6 +1177,7 @@ export const CYPHER = {
   UPDATE_TICKET: `
     MATCH (a:Asset {id: $id})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
+        AND ${ASSET_VISIBLE}
     SET a.name = coalesce($title, a.name),
         a.title = coalesce($title, a.title),
         a.description = coalesce($description, a.description),
@@ -1632,6 +1633,7 @@ export const CYPHER = {
         AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     WITH a,
          collect(DISTINCT { id: s.id,
@@ -1740,12 +1742,14 @@ export const CYPHER = {
     OPTIONAL MATCH (tpre)-[pre:PREFLIGHT_CHECKLIST]->(c)
     SET pre.checkedIdx = [],
         pre.lastCheckedBy = null,
-        pre.lastCheckedAt = null
+        pre.lastCheckedAt = null,
+        pre.completedAt = null
     WITH c
     OPTIONAL MATCH (tpost)-[post:POSTFLIGHT_CHECKLIST]->(c)
     SET post.checkedIdx = [],
         post.lastCheckedBy = null,
-        post.lastCheckedAt = null
+        post.lastCheckedAt = null,
+        post.completedAt = null
     RETURN DISTINCT c.id AS id, coalesce(c.version, 1) AS version
   `,
 
@@ -3989,7 +3993,14 @@ export class SdkSpacesClient {
     const pre = readGateLinks(row['requiredPre']);
     const post = readGateLinks(row['requiredPost']);
     const blockers: string[] = [];
-    if (leavingOpen && current === 'open') {
+    // Preflight gates STARTING work: entering in_progress/done from any
+    // not-yet-started status. Gating only `current === 'open'` left a
+    // bypass — park the ticket (`blocked` is deliberately ungated) and
+    // move on from there, and the required preflight never ran
+    // (2026-08-08 review). A ticket already past open (in_progress)
+    // stays un-re-gated on its way to done; that is postflight's job.
+    const notYetStarted = current === 'open' || current === 'blocked';
+    if (leavingOpen && notYetStarted) {
       for (const g of pre) if (!g.complete) blockers.push(`preflight “${g.name}”`);
     }
     if (enteringDone) {
@@ -5228,6 +5239,14 @@ function parseChecklistItems(raw: unknown): ChecklistItemSpec[] {
       if (typeof text !== 'string' || text.length === 0) continue;
       const item: ChecklistItemSpec = { text };
       if ((x as { killer?: unknown }).killer === true) item.killer = true;
+      // v2 fields (bfa91ef). Dropping these on read silently converted
+      // every optional item back to required on the next revise (the
+      // editor seeds from the parsed items) and killed the optional
+      // badges + "more ▸" accordions — the write path stored them, the
+      // read path erased them. Preserve exactly what sanitize wrote.
+      if ((x as { optional?: unknown }).optional === true) item.optional = true;
+      const more = (x as { more?: unknown }).more;
+      if (typeof more === 'string' && more.length > 0) item.more = more;
       out.push(item);
     }
     return out;

@@ -211,6 +211,44 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
+// ============================================================================
+// GLOBAL ERROR HANDLERS — the net under every fire-and-forget `void fn()`
+// in main. Without these, a post-boot rejection or throw vanishes with no
+// log line in an app whose value prop is observability (2026-08-08
+// hardening review, P1; ported from main.js:66-88). Boot-time throws are
+// separately handled by the top-level catch → error dialog + quit. We do
+// NOT exit on uncaughtException — matching the legacy posture: log it,
+// keep the app up, let genuinely fatal states surface on their own.
+// ============================================================================
+
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  // eslint-disable-next-line no-console
+  console.error('[lite] [UNHANDLED REJECTION]', msg);
+  try {
+    getLoggingApi().error('app', `Unhandled promise rejection: ${msg}`, {
+      ...(reason instanceof Error && reason.stack !== undefined
+        ? { stack: reason.stack }
+        : {}),
+    });
+  } catch {
+    /* logging may not be initialized yet — console line above stands */
+  }
+});
+
+process.on('uncaughtException', (error, origin) => {
+  // eslint-disable-next-line no-console
+  console.error(`[lite] [UNCAUGHT EXCEPTION] (${origin})`, error.message);
+  try {
+    getLoggingApi().error('app', `Uncaught exception (${origin}): ${error.message}`, {
+      ...(error.stack !== undefined ? { stack: error.stack } : {}),
+      origin,
+    });
+  } catch {
+    /* logging may not be initialized yet — console line above stands */
+  }
+});
+
 let mainWindow: BrowserWindow | null = null;
 let updaterHandle: UpdaterHandle | null = null;
 let authHandle: AuthHandle | null = null;
