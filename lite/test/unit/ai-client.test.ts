@@ -367,3 +367,70 @@ describe('AiService', () => {
     );
   });
 });
+
+// ─── Time bounds on the Claude call path (2026-08-08 review) ─────────────
+//
+// A main-process `extractAssetMetadata` run hung indefinitely: the SDK
+// client was built with no timeout, and nothing above it enforced one.
+// The seam now carries an SDK-level per-attempt timeout AND an absolute
+// deadline that settles the promise even if the transport wedges.
+
+describe('withClaudeDeadline — the call always settles', () => {
+  it('rejects a wedged promise with a NETWORK AiError at the deadline', async () => {
+    const { withClaudeDeadline } = await import('../../ai/client.js');
+    const { vi } = await import('vitest');
+    vi.useFakeTimers();
+    try {
+      const wedged = new Promise<never>(() => undefined);
+      const guarded = withClaudeDeadline(wedged, 90_000);
+      const settled = guarded.then(
+        () => 'resolved',
+        (err: unknown) => err
+      );
+      await vi.advanceTimersByTimeAsync(90_000);
+      const outcome = await settled;
+      expect(outcome).toBeInstanceOf(AiError);
+      expect((outcome as AiError).code).toBe(AI_ERROR_CODES.NETWORK);
+      expect((outcome as AiError).message).toContain('90s');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes a timely result through untouched', async () => {
+    const { withClaudeDeadline } = await import('../../ai/client.js');
+    await expect(withClaudeDeadline(Promise.resolve('ok'), 90_000)).resolves.toBe('ok');
+  });
+
+  it('propagates the underlying rejection, not the deadline', async () => {
+    const { withClaudeDeadline } = await import('../../ai/client.js');
+    const boom = new Error('provider exploded');
+    await expect(withClaudeDeadline(Promise.reject(boom), 90_000)).rejects.toBe(boom);
+  });
+});
+
+describe('makeClaudeMessageCreator is time-bounded (source + constants)', () => {
+  it('constants sit in the review-mandated 60–90s band, deadline outermost', async () => {
+    const mod = await import('../../ai/client.js');
+    expect(mod.CLAUDE_ATTEMPT_TIMEOUT_MS).toBe(60_000);
+    expect(mod.CLAUDE_DEADLINE_MS).toBe(90_000);
+    expect(mod.CLAUDE_DEADLINE_MS).toBeGreaterThan(mod.CLAUDE_ATTEMPT_TIMEOUT_MS);
+    expect(mod.CLAUDE_MAX_RETRIES).toBe(1);
+  });
+
+  it('the Anthropic client is constructed WITH the timeout (source-level)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const candidates = [path.resolve('ai/client.ts'), path.resolve('lite/ai/client.ts')];
+    const found = candidates.find((p) => fs.existsSync(p));
+    if (found === undefined) throw new Error(`client.ts not found: ${candidates.join(', ')}`);
+    const src = fs.readFileSync(found, 'utf8');
+    const ctor = src.slice(src.indexOf('new Anthropic({'));
+    expect(ctor).toContain('timeout: CLAUDE_ATTEMPT_TIMEOUT_MS');
+    expect(ctor).toContain('maxRetries: CLAUDE_MAX_RETRIES');
+    // …and every created message runs under the absolute deadline.
+    expect(src).toMatch(/withClaudeDeadline\(\s*client\.messages\.create/);
+  });
+});

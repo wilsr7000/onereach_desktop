@@ -228,6 +228,14 @@ interface SpacesRendererState {
       tickets: RendererItem[];
       members: ReadonlyArray<LiteSpacesMemberView>;
       fetchedAt: number;
+      /**
+       * Per-section load failures (2026-08-08 release review). A failed
+       * read keeps the prior section data and records the message here,
+       * so the dashboard renders an error banner instead of passing off
+       * "the query failed" as "no tickets" / "no members" — on a
+       * multi-user surface those read as facts about the team.
+       */
+      errors?: { playbook?: string; tickets?: string; members?: string };
     }
   >;
   /** Polling timer handle for the active scope (Tier 3c). */
@@ -3024,7 +3032,7 @@ function renderSharedSpaceDashboard(
 
   // Member chips row.
   const cached = state.sharedDashboards.get(space.id);
-  wrap.appendChild(buildSharedMembersRow(space, cached?.members ?? []));
+  wrap.appendChild(buildSharedMembersRow(space, cached?.members ?? [], cached?.errors?.members));
 
   // Dashboard body — playbook block + tickets section.
   const body = document.createElement('div');
@@ -3032,11 +3040,18 @@ function renderSharedSpaceDashboard(
   body.setAttribute('data-space-id', space.id);
 
   // Playbook section
-  body.appendChild(buildSharedDashboardPlaybook(space, cached?.playbook ?? null));
+  body.appendChild(
+    buildSharedDashboardPlaybook(space, cached?.playbook ?? null, cached?.errors?.playbook)
+  );
 
   // Tickets section
   body.appendChild(
-    buildSharedDashboardTickets(space, cached?.tickets ?? [], busy && cached === undefined)
+    buildSharedDashboardTickets(
+      space,
+      cached?.tickets ?? [],
+      busy && cached === undefined,
+      cached?.errors?.tickets
+    )
   );
 
   // Checklists section (ADR-055 addendum, 2026-08-08): the Space's
@@ -3053,7 +3068,8 @@ function renderSharedSpaceDashboard(
 
 function buildSharedMembersRow(
   space: RendererSpace,
-  members: ReadonlyArray<LiteSpacesMemberView>
+  members: ReadonlyArray<LiteSpacesMemberView>,
+  loadError?: string
 ): HTMLElement {
   const row = document.createElement('div');
   row.className = 'spaces-shared-members';
@@ -3061,11 +3077,19 @@ function buildSharedMembersRow(
   label.className = 'spaces-shared-members-label';
   label.textContent = 'Members';
   row.appendChild(label);
+  // A failed read is NOT an empty list — "No members yet" on a shared
+  // surface reads as a fact about the team. Banner instead; any chips
+  // below it are the last good (possibly stale) data.
+  if (loadError !== undefined) {
+    row.appendChild(buildBanner('error', `Couldn't load members: ${loadError}`));
+  }
   if (members.length === 0) {
-    const empty = document.createElement('span');
-    empty.className = 'spaces-shared-members-empty';
-    empty.textContent = 'No members yet';
-    row.appendChild(empty);
+    if (loadError === undefined) {
+      const empty = document.createElement('span');
+      empty.className = 'spaces-shared-members-empty';
+      empty.textContent = 'No members yet';
+      row.appendChild(empty);
+    }
   } else {
     for (const m of members) {
       row.appendChild(buildMemberChip(space.id, m));
@@ -3311,7 +3335,8 @@ function buildMemberChip(
 
 function buildSharedDashboardPlaybook(
   space: RendererSpace,
-  playbook: RendererItem | null
+  playbook: RendererItem | null,
+  loadError?: string
 ): HTMLElement {
   const section = document.createElement('section');
   section.className = 'spaces-shared-section spaces-shared-section-playbook';
@@ -3321,14 +3346,22 @@ function buildSharedDashboardPlaybook(
   heading.textContent = 'Playbook';
   section.appendChild(heading);
 
+  if (loadError !== undefined) {
+    section.appendChild(buildBanner('error', `Couldn't load the playbook: ${loadError}`));
+  }
+
   if (playbook === null) {
-    const empty = document.createElement('div');
-    empty.className = 'spaces-shared-playbook-empty';
-    const msg = document.createElement('p');
-    msg.textContent =
-      'No playbook set. Add a plan to this space and promote it to playbook.';
-    empty.appendChild(msg);
-    section.appendChild(empty);
+    // Only claim "no playbook" when the read actually succeeded — a
+    // failed read already rendered its banner above.
+    if (loadError === undefined) {
+      const empty = document.createElement('div');
+      empty.className = 'spaces-shared-playbook-empty';
+      const msg = document.createElement('p');
+      msg.textContent =
+        'No playbook set. Add a plan to this space and promote it to playbook.';
+      empty.appendChild(msg);
+      section.appendChild(empty);
+    }
     return section;
   }
 
@@ -3373,7 +3406,8 @@ function buildSharedDashboardPlaybook(
 function buildSharedDashboardTickets(
   space: RendererSpace,
   tickets: ReadonlyArray<RendererItem>,
-  loading: boolean
+  loading: boolean,
+  loadError?: string
 ): HTMLElement {
   const section = document.createElement('section');
   section.className = 'spaces-shared-section spaces-shared-section-tickets';
@@ -3396,6 +3430,10 @@ function buildSharedDashboardTickets(
   headingRow.appendChild(addTicket);
   section.appendChild(headingRow);
 
+  if (loadError !== undefined) {
+    section.appendChild(buildBanner('error', `Couldn't load tickets: ${loadError}`));
+  }
+
   if (loading && tickets.length === 0) {
     const placeholder = document.createElement('div');
     placeholder.className = 'spaces-shared-tickets-loading';
@@ -3405,10 +3443,14 @@ function buildSharedDashboardTickets(
   }
 
   if (tickets.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'spaces-shared-tickets-empty';
-    empty.textContent = 'No tickets yet. Click "+ Ticket" to create one.';
-    section.appendChild(empty);
+    // A failed read must not masquerade as an empty board — the banner
+    // above already told the truth; stale groups (if any) render below.
+    if (loadError === undefined) {
+      const empty = document.createElement('p');
+      empty.className = 'spaces-shared-tickets-empty';
+      empty.textContent = 'No tickets yet. Click "+ Ticket" to create one.';
+      section.appendChild(empty);
+    }
     return section;
   }
 
@@ -3517,10 +3559,20 @@ function buildTicketCard(ticket: RendererItem): HTMLElement {
   return card;
 }
 
-/** Loader for the shared-space dashboard cache. */
+/**
+ * Loader for the shared-space dashboard cache.
+ *
+ * Failure honesty (2026-08-08 release review): a failed section read
+ * used to be mapped to `[]` / `null` and the catch was swallowed — a
+ * failing members query rendered as "No members yet" on a multi-user
+ * surface. Now each failed section keeps its prior cached data (stale
+ * beats blank), records the message in `errors`, and logs; the section
+ * builders render a distinct error banner from it.
+ */
 async function loadSharedSpaceDashboard(spaceId: string): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
+  const prior = state.sharedDashboards.get(spaceId);
   try {
     const [playbookRes, ticketsRes, membersRes] = await Promise.all([
       bridge.playbooks.current(spaceId),
@@ -3529,28 +3581,66 @@ async function loadSharedSpaceDashboard(spaceId: string): Promise<void> {
     ]);
     if (state.activeScopeId !== spaceId) return; // user navigated away
 
-    const playbook =
-      playbookRes.ok === true && playbookRes.value !== null
-        ? (playbookRes.value as RendererItem)
-        : null;
-    const tickets =
-      ticketsRes.ok === true ? (ticketsRes.value as RendererItem[]) : [];
-    const members =
-      membersRes.ok === true
-        ? (membersRes.value as LiteSpacesMemberView[])
-        : [];
+    const errors: { playbook?: string; tickets?: string; members?: string } = {};
+
+    let playbook: RendererItem | null = prior?.playbook ?? null;
+    if (playbookRes.ok === true) {
+      playbook = playbookRes.value !== null ? (playbookRes.value as RendererItem) : null;
+    } else {
+      errors.playbook = playbookRes.error.message;
+      window.logging?.warn?.('spaces', 'shared-dashboard playbook load failed', {
+        spaceId,
+        message: playbookRes.error.message,
+      });
+    }
+
+    let tickets: RendererItem[] = prior?.tickets ?? [];
+    if (ticketsRes.ok === true) {
+      tickets = ticketsRes.value as RendererItem[];
+    } else {
+      errors.tickets = ticketsRes.error.message;
+      window.logging?.warn?.('spaces', 'shared-dashboard tickets load failed', {
+        spaceId,
+        message: ticketsRes.error.message,
+      });
+    }
+
+    let members: ReadonlyArray<LiteSpacesMemberView> = prior?.members ?? [];
+    if (membersRes.ok === true) {
+      members = membersRes.value as LiteSpacesMemberView[];
+    } else {
+      errors.members = membersRes.error.message;
+      window.logging?.warn?.('spaces', 'shared-dashboard members load failed', {
+        spaceId,
+        message: membersRes.error.message,
+      });
+    }
+
     state.sharedDashboards.set(spaceId, {
       playbook,
       tickets,
       members,
       fetchedAt: Date.now(),
+      ...(Object.keys(errors).length > 0 ? { errors } : {}),
     });
     // Re-render only if we're still viewing this scope.
     if (state.activeScopeId === spaceId) {
       renderItemList({});
     }
-  } catch {
-    // Soft fail. The dashboard renders with empty caches; user can refresh.
+  } catch (err) {
+    // Whole-fetch failure (the bridge itself rejected). Keep prior
+    // data, flag every section, and repaint so the banners show.
+    const message = messageFrom(err);
+    window.logging?.error?.('spaces', 'shared-dashboard load threw', { spaceId, message });
+    if (state.activeScopeId !== spaceId) return;
+    state.sharedDashboards.set(spaceId, {
+      playbook: prior?.playbook ?? null,
+      tickets: prior?.tickets ?? [],
+      members: prior?.members ?? [],
+      fetchedAt: Date.now(),
+      errors: { playbook: message, tickets: message, members: message },
+    });
+    renderItemList({});
   }
 }
 
@@ -11673,6 +11763,10 @@ function messageFrom(err: unknown): string {
   buildTileHoverText,
   buildMemberPickerRow,
   buildExistingAssetRow,
+  // Shared-dashboard sections (2026-08-08 review: error-state honesty).
+  buildSharedMembersRow,
+  buildSharedDashboardPlaybook,
+  buildSharedDashboardTickets,
   renderMarkdown,
   renderInlineMarkdown,
   formatBytes,

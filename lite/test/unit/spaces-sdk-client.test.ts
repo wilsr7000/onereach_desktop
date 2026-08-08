@@ -2875,13 +2875,18 @@ describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
   it('REMOVE_SPACE_MEMBER deletes the edge — and only for an authorized caller', () => {
     // 2026-08-07 gating pass: the Space is matched FIRST, gated by
     // SPACE_VISIBLE, so a caller who cannot see a restricted Space
-    // cannot strip its members. No match -> the documented no-op.
+    // cannot strip its members.
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)/);
     expect(CYPHER.REMOVE_SPACE_MEMBER).toContain("coalesce(s.visibility, 'open')");
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(
       /MATCH \(member \{id: \$memberId\}\)-\[r:HAS_ACCESS\]->\(s\)/
     );
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(/DELETE r/);
+    // 2026-08-08 release review: the revoke returns evidence — a
+    // deleted-edge COUNT, not a parameter echo. The aggregation
+    // guarantees one row, so `[]` is distinguishable as a swallowed
+    // Cypher error (Edison empty-200) and zero as "nothing removed".
+    expect(CYPHER.REMOVE_SPACE_MEMBER).toContain('RETURN count(r) AS deleted');
   });
 });
 
@@ -3002,20 +3007,38 @@ describe('SdkSpacesClient.removeSpaceMember', () => {
     });
   });
 
-  it('returns silently when the edge is absent (no-op semantics)', async () => {
+  // 2026-08-08 release review: a REVOKE is verified, never assumed.
+  // The old contract returned silently on ANY result — combined with
+  // Edison's errors-as-empty-200s, a failed revoke looked done.
+
+  it('throws SPACES_CYPHER on an empty result (Edison-swallowed error)', async () => {
+    // A count() aggregation always yields one row; empty rows can only
+    // mean the query itself failed and Edison ate the error.
     const stub = buildStubQuery();
-    stub.setResponse('-[r:HAS_ACCESS]->(s:Space {id: $spaceId})', []);
+    stub.setResponse('count(r) AS deleted', []);
     const client = makeClient(stub);
-    await expect(client.removeSpaceMember('sp-1', 'alice')).resolves.toBeUndefined();
+    await expect(client.removeSpaceMember('sp-1', 'alice')).rejects.toMatchObject({
+      code: 'SPACES_CYPHER',
+      message: expect.stringContaining('may NOT have been revoked'),
+    });
   });
 
-  it('forwards spaceId + memberId as Cypher params', async () => {
+  it('throws SPACES_NOT_FOUND when zero edges were deleted', async () => {
+    // Member already absent, or the Space is not visible to the viewer
+    // — either way nothing was revoked, and the caller must know.
     const stub = buildStubQuery();
-    stub.setResponse('-[r:HAS_ACCESS]->(s:Space {id: $spaceId})', [
-      { id: 'alice' },
-    ]);
+    stub.setResponse('count(r) AS deleted', [{ deleted: 0 }]);
     const client = makeClient(stub);
-    await client.removeSpaceMember('sp-1', 'alice');
+    await expect(client.removeSpaceMember('sp-1', 'alice')).rejects.toMatchObject({
+      code: 'SPACES_NOT_FOUND',
+    });
+  });
+
+  it('resolves when an edge was deleted; forwards spaceId + memberId', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('count(r) AS deleted', [{ deleted: 1 }]);
+    const client = makeClient(stub);
+    await expect(client.removeSpaceMember('sp-1', 'alice')).resolves.toBeUndefined();
     const call = stub.calls[stub.calls.length - 1];
     expect(call?.parameters).toEqual({ spaceId: 'sp-1', memberId: 'alice', viewerId: '' });
   });

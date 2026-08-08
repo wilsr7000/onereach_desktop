@@ -94,15 +94,68 @@ export interface ClaudeResponse {
 export type ClaudeMessageCreator = (params: ClaudeCreateParams) => Promise<ClaudeResponse>;
 
 /**
+ * Time bounds for one Claude call (2026-08-08 release review — a
+ * main-process `extractAssetMetadata` run hung indefinitely):
+ *
+ *   - `CLAUDE_ATTEMPT_TIMEOUT_MS` is handed to the SDK, which aborts
+ *     the HTTP attempt at the socket level. One opportunistic retry
+ *     (`CLAUDE_MAX_RETRIES`) covers transient 429/5xx/connection blips.
+ *   - `CLAUDE_DEADLINE_MS` is enforced at the seam below and is
+ *     absolute: the returned promise ALWAYS settles by then, even if
+ *     the transport wedges in a way the SDK's own timer never sees.
+ */
+export const CLAUDE_ATTEMPT_TIMEOUT_MS = 60_000;
+export const CLAUDE_MAX_RETRIES = 1;
+export const CLAUDE_DEADLINE_MS = 90_000;
+
+/**
+ * Absolute-deadline guard: settle with the promise, or reject with a
+ * NETWORK `AiError` after `ms`. Exported for tests.
+ */
+export function withClaudeDeadline<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(
+        new AiError({
+          code: AI_ERROR_CODES.NETWORK,
+          message: `Claude did not respond within ${Math.round(ms / 1000)}s.`,
+          context: { provider: 'claude', timeoutMs: ms },
+          remediation: 'Check your network connection and try again.',
+        })
+      );
+    }, ms);
+    // Don't let a pending AI call hold the main process open.
+    (timer as unknown as { unref?: () => void }).unref?.();
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err as Error);
+      }
+    );
+  });
+}
+
+/**
  * Build the default SDK-backed message creator for a Claude config.
  * Constructs the `Anthropic` client once and returns a `messages.create`
- * caller.
+ * caller. Every call is time-bounded (see the constants above) so no
+ * caller — in particular main-process enrichment — can wedge on it.
  */
 export function makeClaudeMessageCreator(config: ClaudeConfig): ClaudeMessageCreator {
-  const client = new Anthropic({ apiKey: config.apiKey, baseURL: config.baseUrl });
+  const client = new Anthropic({
+    apiKey: config.apiKey,
+    baseURL: config.baseUrl,
+    timeout: CLAUDE_ATTEMPT_TIMEOUT_MS,
+    maxRetries: CLAUDE_MAX_RETRIES,
+  });
   return async (params) => {
-    const message = await client.messages.create(
-      params as unknown as Anthropic.MessageCreateParamsNonStreaming
+    const message = await withClaudeDeadline(
+      client.messages.create(params as unknown as Anthropic.MessageCreateParamsNonStreaming),
+      CLAUDE_DEADLINE_MS
     );
     return message as unknown as ClaudeResponse;
   };

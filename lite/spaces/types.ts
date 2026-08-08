@@ -1104,7 +1104,11 @@ export interface TicketChecklist {
   obligation: ChecklistObligation;
   /** Indexes into `Checklist.items` checked for THIS ticket. */
   checkedIndexes: number[];
-  /** True when every item is checked. */
+  /**
+   * True when every REQUIRED item is checked (every item, for legacy
+   * checklists with no requiredIdx) — the same rule the status gate
+   * applies, so the run card and the gate always agree.
+   */
   complete: boolean;
   completedAt?: string;
   /** Last actor to change the run. */
