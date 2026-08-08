@@ -52,6 +52,11 @@ import {
  * cleanly. Used as `data-scope-id` on the sidebar Home row.
  */
 import {
+  CHECKLIST_MANIFESTO,
+  COACH_ALL_CLEAR,
+  lintChecklistDraft,
+} from './checklist-manifesto.js';
+import {
   renderInlineMarkdown,
   renderMarkdown,
   buildHexMazeLogo,
@@ -9136,6 +9141,12 @@ function openChecklistEditorPanel(opts: {
   const heading = document.createElement('span');
   heading.textContent = existing === undefined ? 'New checklist' : `Revise "${existing.name}"`;
   head.appendChild(heading);
+  const helpBtn = document.createElement('button');
+  helpBtn.type = 'button';
+  helpBtn.className = 'spaces-checklist-help-btn';
+  helpBtn.setAttribute('aria-label', 'The Checklist Manifesto — what makes a great checklist');
+  helpBtn.textContent = '? Manifesto';
+  head.appendChild(helpBtn);
   const close = document.createElement('button');
   close.type = 'button';
   close.className = 'spaces-member-picker-close';
@@ -9144,6 +9155,47 @@ function openChecklistEditorPanel(opts: {
   close.addEventListener('click', () => backdrop.remove());
   head.appendChild(close);
   panel.appendChild(head);
+
+  // ── The manifesto drawer: the principles this editor coaches by. ──
+  const drawer = document.createElement('div');
+  drawer.className = 'spaces-checklist-manifesto';
+  drawer.hidden = true;
+  const drawerIntro = document.createElement('p');
+  drawerIntro.className = 'spaces-checklist-manifesto-intro';
+  drawerIntro.textContent =
+    'Eight principles, learned the hard way in aviation and surgery: experts fail by skipping, and a short, precise, anchored checklist is the cheapest defense ever invented.';
+  drawer.appendChild(drawerIntro);
+  for (const principle of CHECKLIST_MANIFESTO) {
+    const details = document.createElement('details');
+    details.className = 'spaces-checklist-manifesto-principle';
+    const summary = document.createElement('summary');
+    const t = document.createElement('strong');
+    t.textContent = principle.title;
+    summary.appendChild(t);
+    const r = document.createElement('span');
+    r.className = 'spaces-checklist-manifesto-rule';
+    r.textContent = ` — ${principle.rule}`;
+    summary.appendChild(r);
+    details.appendChild(summary);
+    const why = document.createElement('p');
+    why.className = 'spaces-checklist-manifesto-why';
+    why.textContent = principle.why;
+    details.appendChild(why);
+    const good = document.createElement('p');
+    good.className = 'spaces-checklist-manifesto-good';
+    good.textContent = `✓ ${principle.good}`;
+    details.appendChild(good);
+    const bad = document.createElement('p');
+    bad.className = 'spaces-checklist-manifesto-bad';
+    bad.textContent = `✗ ${principle.bad}`;
+    details.appendChild(bad);
+    drawer.appendChild(details);
+  }
+  panel.appendChild(drawer);
+  helpBtn.addEventListener('click', () => {
+    drawer.hidden = !drawer.hidden;
+    helpBtn.classList.toggle('is-open', !drawer.hidden);
+  });
 
   const nameInput = document.createElement('input');
   nameInput.type = 'text';
@@ -9202,6 +9254,46 @@ function openChecklistEditorPanel(opts: {
   }
   const rows: RowRefs[] = [];
 
+  // ── The live coach: holds the draft to the manifesto on every edit.
+  //    Guidance only — the save button never gates on it.
+  const coach = document.createElement('div');
+  coach.className = 'spaces-checklist-coach';
+  const meter = document.createElement('span');
+  meter.className = 'spaces-checklist-meter';
+  const runCoach = (): void => {
+    const items = rows.map((r) => ({
+      text: r.text.value,
+      killer: r.killer.checked,
+      optional: r.req.value === 'optional',
+    }));
+    const filled = items.filter((i) => i.text.trim().length > 0);
+    meter.textContent = `${filled.length} item${filled.length === 1 ? '' : 's'}`;
+    meter.classList.toggle('is-over', filled.length > 9);
+    coach.replaceChildren();
+    if (filled.length === 0) {
+      coach.hidden = true;
+      return;
+    }
+    coach.hidden = false;
+    const findings = lintChecklistDraft({
+      pausePoint: pauseInput.value,
+      items,
+    });
+    if (findings.length === 0) {
+      const ok = document.createElement('span');
+      ok.className = 'spaces-checklist-coach-clear';
+      ok.textContent = `✓ ${COACH_ALL_CLEAR}`;
+      coach.appendChild(ok);
+      return;
+    }
+    for (const finding of findings.slice(0, 2)) {
+      const line = document.createElement('span');
+      line.className = `spaces-checklist-coach-line is-${finding.severity}`;
+      line.textContent = finding.message;
+      coach.appendChild(line);
+    }
+  };
+
   const addItemRow = (seed?: {
     text?: string;
     killer?: boolean;
@@ -9256,6 +9348,39 @@ function openChecklistEditorPanel(opts: {
     moreToggle.textContent = 'more ▸';
     line.appendChild(moreToggle);
 
+    // Reorder: order is meaning in a checklist — killers early, the
+    // pause-point flow top to bottom.
+    const upBtn = document.createElement('button');
+    upBtn.type = 'button';
+    upBtn.className = 'spaces-checklist-editor-row-move';
+    upBtn.setAttribute('aria-label', 'Move item up');
+    upBtn.textContent = '↑';
+    upBtn.addEventListener('click', () => {
+      const at = rows.findIndex((r) => r.wrap === wrap);
+      if (at <= 0) return;
+      const prev = rows[at - 1];
+      if (prev === undefined) return;
+      rows.splice(at, 1);
+      rows.splice(at - 1, 0, { wrap, text, req, killer, more });
+      prev.wrap.before(wrap);
+    });
+    line.appendChild(upBtn);
+    const downBtn = document.createElement('button');
+    downBtn.type = 'button';
+    downBtn.className = 'spaces-checklist-editor-row-move';
+    downBtn.setAttribute('aria-label', 'Move item down');
+    downBtn.textContent = '↓';
+    downBtn.addEventListener('click', () => {
+      const at = rows.findIndex((r) => r.wrap === wrap);
+      if (at < 0 || at >= rows.length - 1) return;
+      const next = rows[at + 1];
+      if (next === undefined) return;
+      rows.splice(at, 1);
+      rows.splice(at + 1, 0, { wrap, text, req, killer, more });
+      next.wrap.after(wrap);
+    });
+    line.appendChild(downBtn);
+
     const removeBtn = document.createElement('button');
     removeBtn.type = 'button';
     removeBtn.className = 'spaces-checklist-editor-row-remove';
@@ -9265,8 +9390,12 @@ function openChecklistEditorPanel(opts: {
       const at = rows.findIndex((r) => r.wrap === wrap);
       if (at >= 0) rows.splice(at, 1);
       wrap.remove();
+      runCoach();
     });
     line.appendChild(removeBtn);
+    text.addEventListener('input', () => runCoach());
+    req.addEventListener('change', () => runCoach());
+    killer.addEventListener('change', () => runCoach());
 
     wrap.appendChild(line);
 
@@ -9301,8 +9430,18 @@ function openChecklistEditorPanel(opts: {
   addBtn.type = 'button';
   addBtn.className = 'spaces-checklist-editor-add';
   addBtn.textContent = '+ Add item';
-  addBtn.addEventListener('click', () => addItemRow());
-  panel.appendChild(addBtn);
+  addBtn.addEventListener('click', () => {
+    addItemRow();
+    runCoach();
+  });
+  const addRow = document.createElement('div');
+  addRow.className = 'spaces-checklist-editor-addrow';
+  addRow.appendChild(addBtn);
+  addRow.appendChild(meter);
+  panel.appendChild(addRow);
+  panel.appendChild(coach);
+  pauseInput.addEventListener('input', () => runCoach());
+  runCoach();
 
   const collectItems = (): Array<{
     text: string;
