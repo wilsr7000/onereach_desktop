@@ -1658,6 +1658,41 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
+            "name": "stopRecordingAsAgent",
+            "signature": "stopRecordingAsAgent(\n    windowId: string,\n    opts: GsxStopRecordingAsAgentOptions\n  ): Promise<GsxAgent>",
+            "description": "UI-AUTOMATION AGENTS (ADR-054). Finish a recording as a NAMED\nagent: the system -- not the user -- writes the agent's title,\ndescription, and per-param descriptions from the recording, in the\nsame model call that generalizes the steps into a `{param}`\ntemplate. The agent is callable by name via {@link invokeAgent}\nand (best-effort) published as an OKF asset into the \"GSX Build\"\nSpace. Without AI, the agent still exists with a slug-derived\ntitle and placeholder-scanned params.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "invokeAgent",
+            "signature": "invokeAgent(name: string, opts?: GsxInvokeAgentOptions): Promise<GsxInvokeAgentResult>",
+            "description": "Invoke an agent by name. Pass free-form `details` and the agent's\nparam descriptions are used to extract values from it (\"open the\nbilling bot flow\" -> `{ flowName: \"Billing Bot\" }`); structured\n`params` merge over extraction. Missing params throw\n`GSX_MISSING_PARAMS` naming them. The run itself goes through the\nstandard graded/repaired loop.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listAgents",
+            "signature": "listAgents(): Promise<GsxAgent[]>",
+            "description": "All registered UI-automation agents.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getAgent",
+            "signature": "getAgent(name: string): Promise<GsxAgent>",
+            "description": "One agent by name. Throws `GSX_AGENT_NOT_FOUND`.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "deleteAgent",
+            "signature": "deleteAgent(name: string): Promise<{ deleted: boolean }>",
+            "description": "Delete an agent and its learned script. Soft when unknown.",
+            "tags": [],
+            "examples": []
+          },
+          {
             "name": "listRuns",
             "signature": "listRuns(scriptId?: string): Promise<GsxRunRecord[]>",
             "description": "Run history, newest first (capped ring buffer).",
@@ -1689,7 +1724,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "GSX_EVENTS",
-        "count": 36,
+        "count": 47,
         "entries": [
           {
             "constantKey": "OPEN_WINDOW_START",
@@ -1752,6 +1787,21 @@ export const MANIFEST: Manifest = {
             "description": ""
           },
           {
+            "constantKey": "AGENT_INVOKE_START",
+            "name": "gsx.agent-invoke.start",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENT_INVOKE_FINISH",
+            "name": "gsx.agent-invoke.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENT_INVOKE_FAIL",
+            "name": "gsx.agent-invoke.fail",
+            "description": ""
+          },
+          {
             "constantKey": "STEP_RESULT",
             "name": "gsx.step.result",
             "description": ""
@@ -1764,6 +1814,21 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "RECORD_GENERALIZED",
             "name": "gsx.record.generalized",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENT_CREATED",
+            "name": "gsx.agent.created",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENT_DELETED",
+            "name": "gsx.agent.deleted",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENT_PUBLISHED",
+            "name": "gsx.agent.published",
             "description": ""
           },
           {
@@ -1870,10 +1935,35 @@ export const MANIFEST: Manifest = {
             "constantKey": "IPC_GET_RECORDING",
             "name": "gsx.ipc.get-recording",
             "description": ""
+          },
+          {
+            "constantKey": "IPC_STOP_RECORDING_AS_AGENT",
+            "name": "gsx.ipc.stop-recording-as-agent",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_INVOKE_AGENT",
+            "name": "gsx.ipc.invoke-agent",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_LIST_AGENTS",
+            "name": "gsx.ipc.list-agents",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_GET_AGENT",
+            "name": "gsx.ipc.get-agent",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_DELETE_AGENT",
+            "name": "gsx.ipc.delete-agent",
+            "description": ""
           }
         ]
       },
-      "readme": "# GSX Automation (`lite/gsx/`)\n\nOpen GSX studio windows (Designer, Flows, Files — any\n`studio.<env>.onereach.ai` surface) and drive their UI with\n**deterministic scripts** wrapped in an **evaluation feedback loop**.\n\n## The model\n\n- A **script** is versioned JSON: a list of steps\n  (`navigate` / `waitFor` / `click` / `fill` / `assertVisible` /\n  `assertUrl` / `assertText` / `wait`). Selector steps can carry a\n  `textFallback` so one selector drift doesn't kill the script.\n  `{accountId}`, `{env}`, and custom `{param}`s substitute at run time.\n- Every script carries its own **assertions** — they ARE the evaluation\n  criteria. Every run is graded: `pass`, `fail`, `error`,\n  `repaired-pass`, `repaired-fail`, and recorded as a `GsxRunRecord`.\n- **Hybrid repair**: when a run fails, the module snapshots the live\n  page (interactive elements + attributes), asks the AI module\n  (`lite/ai/`, Claude, main-process key) to correct the steps, and\n  re-runs. The LLM **edits scripts — it never free-drives the page.**\n- A repaired script that passes is saved as a **`learned` variant**\n  that shadows the seed: the next run replays deterministically with\n  no model call. A learned variant that fails\n  `GSX_INVALIDATE_AFTER_CONSECUTIVE_FAILURES` (3) runs in a row is\n  demoted back to the seed.\n\n```\nrun ──▶ grade (script's own assertions)\n         ├─ pass ────────────────────────────▶ record + stats\n         └─ fail/error\n              └─▶ snapshot page ─▶ AI repairs steps ─▶ re-run\n                    ├─ pass ─▶ save `learned` vN+1 (shadows seed)\n                    └─ fail ─▶ record `repaired-fail`\n   learned fails 3× in a row ─▶ demoted back to seed\n```\n\n## Windows\n\n- Standalone `BrowserWindow`, partition `persist:lite-gsx-<env>`\n  (stable per env — the GSX session sticks across restarts).\n- Auth cookies are injected **before** `loadURL` (ADR-042), so a\n  signed-in user lands authenticated.\n- **No preload** (ADR-038): automated pages never see `window.lite.*`.\n  All driving happens from the main process via `executeJavaScript`.\n- Navigation is contained to `https://*.onereach.ai`.\n\n## Usage (main process)\n\n```typescript\nimport { getGsxApi } from '../gsx/api.js';\n\nconst gsx = getGsxApi();\nconst win = await gsx.openWindow({ env: 'edison' });          // Designer shell\nconst run = await gsx.runScript({ scriptId: 'flows.open-by-name',\n                                  params: { flowName: 'My Flow' } });\nif (run.verdict !== 'pass') console.warn(run.failure, run.repair);\n```\n\nRenderer: same surface on `window.lite.gsx.*`.\n\n## Seed scripts\n\n| id | what it does |\n|---|---|\n| `designer.open` | Studio root for the signed-in account; asserts app shell + nav chrome |\n| `flows.list` | Flows view; asserts a flow collection rendered |\n| `flows.open-by-name` | Clicks the flow named `{flowName}`; asserts a designer canvas |\n| `files.open` | Files view |\n\nSeeds are read-only. `saveScript` with `source: \"learned\"` shadows a\nseed (or registers a new custom id); `deleteScript` on a learned id\nreverts to the seed.\n\n## The eval trail\n\nEvery transition is a typed event (ADR-032): `gsx.run.verdict`,\n`gsx.step.result`, `gsx.script.learned`, `gsx.script.invalidated`,\nplus spans for `gsx.open-window` / `gsx.run-script` / `gsx.repair`.\n`getStats()` returns per-script health (runs / passes / failures /\nconsecutive failures); `listRuns()` is the run corpus, capped at 200\nrecords, persisted in `gsx-automation.json` under userData.\n\n## Error catalog\n\n| Code | Meaning |\n|---|---|\n| `GSX_UNSUPPORTED_ENV` | Env not in `SUPPORTED_ENVIRONMENTS` |\n| `GSX_WINDOW_NOT_FOUND` | Unknown/closed windowId (or initGsx never ran) |\n| `GSX_SCRIPT_NOT_FOUND` | No script under that id |\n| `GSX_INVALID_SCRIPT` | Script (saved or AI-repaired) failed validation |\n| `GSX_RUN_NOT_FOUND` | Run record aged out of the ring buffer |\n| `GSX_URL_NOT_ALLOWED` | Non-`*.onereach.ai` URL refused |\n| `GSX_NAVIGATION_FAILED` | loadURL failed (network, auth) |\n| `GSX_AI_UNAVAILABLE` | Repair requested but AI module unusable |\n| `GSX_REPAIR_FAILED` | Model output didn't parse into a valid script |\n| `GSX_PERSIST_FAILED` | gsx-automation.json write failed (soft, logged) |\n| `GSX_SEED_READ_ONLY` | Attempted to overwrite/delete a seed |\n\nRepair-path failures never throw out of `runScript` — they land in the\nrun record's `repair.skippedReason`.\n"
+      "readme": "# GSX Automation (`lite/gsx/`)\n\nOpen GSX studio windows (Designer, Flows, Files — any\n`studio.<env>.onereach.ai` surface) and drive their UI with\n**deterministic scripts** wrapped in an **evaluation feedback loop**.\n\n## The model\n\n- A **script** is versioned JSON: a list of steps\n  (`navigate` / `waitFor` / `click` / `fill` / `assertVisible` /\n  `assertUrl` / `assertText` / `wait`). Selector steps can carry a\n  `textFallback` so one selector drift doesn't kill the script.\n  `{accountId}`, `{env}`, and custom `{param}`s substitute at run time.\n- Every script carries its own **assertions** — they ARE the evaluation\n  criteria. Every run is graded: `pass`, `fail`, `error`,\n  `repaired-pass`, `repaired-fail`, and recorded as a `GsxRunRecord`.\n- **Hybrid repair**: when a run fails, the module snapshots the live\n  page (interactive elements + attributes), asks the AI module\n  (`lite/ai/`, Claude, main-process key) to correct the steps, and\n  re-runs. The LLM **edits scripts — it never free-drives the page.**\n- A repaired script that passes is saved as a **`learned` variant**\n  that shadows the seed: the next run replays deterministically with\n  no model call. A learned variant that fails\n  `GSX_INVALIDATE_AFTER_CONSECUTIVE_FAILURES` (3) runs in a row is\n  demoted back to the seed.\n\n```\nrun ──▶ grade (script's own assertions)\n         ├─ pass ────────────────────────────▶ record + stats\n         └─ fail/error\n              └─▶ snapshot page ─▶ AI repairs steps ─▶ re-run\n                    ├─ pass ─▶ save `learned` vN+1 (shadows seed)\n                    └─ fail ─▶ record `repaired-fail`\n   learned fails 3× in a row ─▶ demoted back to seed\n```\n\n## Windows\n\n- Standalone `BrowserWindow`, partition `persist:lite-gsx-<env>`\n  (stable per env — the GSX session sticks across restarts).\n- Auth cookies are injected **before** `loadURL` (ADR-042), so a\n  signed-in user lands authenticated.\n- **No preload** (ADR-038): automated pages never see `window.lite.*`.\n  All driving happens from the main process via `executeJavaScript`.\n- Navigation is contained to `https://*.onereach.ai`.\n\n## Usage (main process)\n\n```typescript\nimport { getGsxApi } from '../gsx/api.js';\n\nconst gsx = getGsxApi();\nconst win = await gsx.openWindow({ env: 'edison' });          // Designer shell\nconst run = await gsx.runScript({ scriptId: 'flows.open-by-name',\n                                  params: { flowName: 'My Flow' } });\nif (run.verdict !== 'pass') console.warn(run.failure, run.repair);\n```\n\nRenderer: same surface on `window.lite.gsx.*`.\n\n## Seed scripts\n\n| id | what it does |\n|---|---|\n| `designer.open` | Studio root for the signed-in account; asserts app shell + nav chrome |\n| `flows.list` | Flows view; asserts a flow collection rendered |\n| `flows.open-by-name` | Clicks the flow named `{flowName}`; asserts a designer canvas |\n| `files.open` | Files view |\n\nSeeds are read-only. `saveScript` with `source: \"learned\"` shadows a\nseed (or registers a new custom id); `deleteScript` on a learned id\nreverts to the seed.\n\n## Teach mode (record → template)\n\nDon't write scripts — demonstrate them. Start a recording on an open\nGSX window, click through the task yourself, then stop and name it:\n\n```typescript\nconst win = await gsx.openWindow({});\nawait gsx.startRecording(win.windowId);\n// ... user clicks through GSX: opens Flows, clicks \"Billing Bot\" ...\nconst template = await gsx.stopRecording(win.windowId, {\n  scriptId: 'flows.open-taught',\n  title: 'Open a flow',\n  description: 'Opens the flow the user names from the Flows list',\n});\n// Replay against a DIFFERENT element:\nawait gsx.runScript({ scriptId: 'flows.open-taught',\n                      params: { flowName: 'Support Bot' } });\n```\n\nHow it works:\n\n- A page-side recorder (injected — GSX windows have no preload)\n  captures every click and final input value with **ranked selector\n  candidates** (data-testid > id > aria-label > name > class) plus the\n  element's **human label** (aria-label / `<label>` / placeholder).\n  The buffer write-throughs to sessionStorage so the click that causes\n  a navigation survives the page teardown. Passwords are never\n  recorded.\n- Main polls to drain the buffer, tracks navigations, and re-installs\n  the recorder after each page change.\n- `stopRecording` converts the recording to deterministic steps\n  (literal `accountId`/env are back-substituted to `{accountId}`/\n  `{env}`, and a final `assertUrl` pins the destination), then asks\n  the AI module to **generalize**: content-specific literals (the flow\n  you clicked, the text you typed) become named `{params}` derived\n  from the element labels, and assertions are kept/strengthened. If\n  the model is unavailable or returns garbage, the deterministic\n  recording is saved as-is — a walkthrough is never lost.\n- The result is an ordinary `learned` script: validated by the same\n  gate, run by the same runner, graded and repaired by the same eval\n  loop.\n\nRecording errors: `GSX_NOT_RECORDING` (stop without start),\n`GSX_EMPTY_RECORDING` (no actions captured).\n\n## UI-automation agents (record → agent → invoke by name)\n\nThe teach-mode UX, packaged: record a walkthrough and save it as a\n**named agent**. The system — not you — writes the agent's title,\ndescription, and per-param documentation from the recording, then\npublishes it as an agent asset into the core **\"GSX Build\" Space**\n(created on first use; soft-fails when signed out).\n\n```typescript\nconst win = await gsx.openWindow({});\nawait gsx.startRecording(win.windowId);\n// ...you click through GSX: Flows → click \"Billing Bot\"...\nconst agent = await gsx.stopRecordingAsAgent(win.windowId, {\n  name: 'open-flow',                       // the callable name\n  hint: 'opens a flow by name',            // optional intent hint\n});\nagent.title;        // \"Open a Flow\"            (AI-written)\nagent.description;  // \"Opens the named flow…\"  (AI-written)\nagent.params;       // [{ name: 'flowName', description: 'Display name…' }]\n\n// Anyone who knows the name can now invoke it with free-form details —\n// the param descriptions drive extraction:\nconst result = await gsx.invokeAgent('open-flow', {\n  details: 'open the support bot flow',\n});\nresult.params;      // { flowName: 'Support Bot' }   (extracted)\nresult.run.verdict; // graded like any other run\n\n// Structured params always work too (and win over extraction):\nawait gsx.invokeAgent('open-flow', { params: { flowName: 'Billing Bot' } });\n```\n\nManagement: `listAgents()`, `getAgent(name)`, `deleteAgent(name)`\n(also removes the agent's learned script). Renderer surface:\n`window.lite.gsx.*` same names.\n\nDesign guarantees:\n\n- **One model call at creation** describes + generalizes + documents\n  params. No AI available → the agent still exists (slug-derived\n  title, params scanned from `{placeholders}`) and is invokable with\n  structured params.\n- **Missing params fail loudly** (`GSX_MISSING_PARAMS` names them) —\n  extraction never guesses; values must appear in the details or be\n  passed explicitly.\n- The agent's template is an ordinary `learned` script (`agent.<name>`)\n  in the standard eval loop: graded runs, AI repair on UI drift,\n  versioned history.\n- The Space publication is an OKF document (title, description,\n  params, invocation snippet) — reviewable and shareable like any\n  other agent asset; `spaceItemId` links the two worlds.\n\n## The eval trail\n\nEvery transition is a typed event (ADR-032): `gsx.run.verdict`,\n`gsx.step.result`, `gsx.script.learned`, `gsx.script.invalidated`,\nplus spans for `gsx.open-window` / `gsx.run-script` / `gsx.repair`.\n`getStats()` returns per-script health (runs / passes / failures /\nconsecutive failures); `listRuns()` is the run corpus, capped at 200\nrecords, persisted in `gsx-automation.json` under userData.\n\n## Error catalog\n\n| Code | Meaning |\n|---|---|\n| `GSX_UNSUPPORTED_ENV` | Env not in `SUPPORTED_ENVIRONMENTS` |\n| `GSX_WINDOW_NOT_FOUND` | Unknown/closed windowId (or initGsx never ran) |\n| `GSX_SCRIPT_NOT_FOUND` | No script under that id |\n| `GSX_INVALID_SCRIPT` | Script (saved or AI-repaired) failed validation |\n| `GSX_RUN_NOT_FOUND` | Run record aged out of the ring buffer |\n| `GSX_URL_NOT_ALLOWED` | Non-`*.onereach.ai` URL refused |\n| `GSX_NAVIGATION_FAILED` | loadURL failed (network, auth) |\n| `GSX_AI_UNAVAILABLE` | Repair requested but AI module unusable |\n| `GSX_REPAIR_FAILED` | Model output didn't parse into a valid script |\n| `GSX_PERSIST_FAILED` | gsx-automation.json write failed (soft, logged) |\n| `GSX_SEED_READ_ONLY` | Attempted to overwrite/delete a seed |\n\nRepair-path failures never throw out of `runScript` — they land in the\nrun record's `repair.skippedReason`.\n"
     },
     {
       "slug": "health",
@@ -2426,8 +2516,8 @@ export const MANIFEST: Manifest = {
           },
           {
             "name": "start",
-            "signature": "start(name: string, data?: unknown): Span",
-            "description": "Start a span. Returns a {@link Span} you finish() or fail(). Auto-emits\n`<name>.start` now, `<name>.finish` (or `.fail`) when you complete it.",
+            "signature": "start(name: string, data?: unknown, opts?: { level?: 'debug' | 'info' }): Span",
+            "description": "Start a span. Returns a {@link Span} you finish() or fail(). Auto-emits\n`<name>.start` now, `<name>.finish` (or `.fail`) when you complete it.\n\n`opts.level` sets the severity of `.start` / `.finish` (default\n'info'). Pass 'debug' for routine high-frequency spans (background\ncache refresh, per-query transport) so idle traffic stays out of\nthe info-level bug-report log window. `.fail` is always 'error'\nregardless — failures stay loud.",
             "tags": [
               {
                 "tag": "throws",
@@ -2570,7 +2660,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "MAIN_WINDOW_EVENTS",
-        "count": 30,
+        "count": 31,
         "entries": [
           {
             "constantKey": "OPEN_TAB_START",
@@ -2620,6 +2710,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "CHANGED",
             "name": "main-window.changed",
+            "description": ""
+          },
+          {
+            "constantKey": "RAISED",
+            "name": "main-window.raised",
             "description": ""
           },
           {
@@ -3184,6 +3279,27 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
+            "name": "versions",
+            "signature": "versions(id: string, limit?: number): Promise<AssetVersionSummary[]>",
+            "description": "History for one asset, newest first (summaries — no content).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "getVersion",
+            "signature": "getVersion(id: string, seq: number): Promise<AssetVersion | null>",
+            "description": "One full snapshot, for the read-only version viewer.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "restoreVersion",
+            "signature": "restoreVersion(id: string, seq: number, editorId?: string): Promise<Item>",
+            "description": "Restore a prior version. Snapshots the present first — undoable.",
+            "tags": [],
+            "examples": []
+          },
+          {
             "name": "setMetadata",
             "signature": "setMetadata(id: string, metadata: ItemMetadata): Promise<Item>",
             "description": "Replace the metadata bag on an asset (Metadata sprint). Pass an\nempty `{}` to clear.",
@@ -3208,8 +3324,173 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 34,
+        "count": 115,
         "entries": [
+          {
+            "constantKey": "CHECKLISTS_CREATE_START",
+            "name": "spaces.checklists.create.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_CREATE_FINISH",
+            "name": "spaces.checklists.create.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_CREATE_FAIL",
+            "name": "spaces.checklists.create.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_LIST_START",
+            "name": "spaces.checklists.list.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_LIST_FINISH",
+            "name": "spaces.checklists.list.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_LIST_FAIL",
+            "name": "spaces.checklists.list.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_UPDATE_START",
+            "name": "spaces.checklists.update.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_UPDATE_FINISH",
+            "name": "spaces.checklists.update.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_UPDATE_FAIL",
+            "name": "spaces.checklists.update.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_DELETE_START",
+            "name": "spaces.checklists.delete.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_DELETE_FINISH",
+            "name": "spaces.checklists.delete.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_DELETE_FAIL",
+            "name": "spaces.checklists.delete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_ATTACH_START",
+            "name": "spaces.checklists.attach.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_ATTACH_FINISH",
+            "name": "spaces.checklists.attach.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_ATTACH_FAIL",
+            "name": "spaces.checklists.attach.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_CHECK_START",
+            "name": "spaces.checklists.check.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_CHECK_FINISH",
+            "name": "spaces.checklists.check.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_CHECK_FAIL",
+            "name": "spaces.checklists.check.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_DETACH_START",
+            "name": "spaces.checklists.detach.start",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_DETACH_FINISH",
+            "name": "spaces.checklists.detach.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "CHECKLISTS_DETACH_FAIL",
+            "name": "spaces.checklists.detach.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_LIST_START",
+            "name": "spaces.items.versions.list.start",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_LIST_FINISH",
+            "name": "spaces.items.versions.list.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_LIST_FAIL",
+            "name": "spaces.items.versions.list.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_GET_START",
+            "name": "spaces.items.versions.get.start",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_GET_FINISH",
+            "name": "spaces.items.versions.get.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_GET_FAIL",
+            "name": "spaces.items.versions.get.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_RESTORE_START",
+            "name": "spaces.items.versions.restore.start",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_RESTORE_FINISH",
+            "name": "spaces.items.versions.restore.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_RESTORE_FAIL",
+            "name": "spaces.items.versions.restore.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_ANNOTATE_START",
+            "name": "spaces.items.versions.annotate.start",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_ANNOTATE_FINISH",
+            "name": "spaces.items.versions.annotate.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "VERSIONS_ANNOTATE_FAIL",
+            "name": "spaces.items.versions.annotate.fail",
+            "description": ""
+          },
           {
             "constantKey": "LIST_SPACES_START",
             "name": "spaces.listSpaces.start",
@@ -3358,6 +3639,246 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "UNDELETE_FAIL",
             "name": "spaces.undelete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "SET_KIND_START",
+            "name": "spaces.setKind.start",
+            "description": ""
+          },
+          {
+            "constantKey": "SET_KIND_FINISH",
+            "name": "spaces.setKind.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "SET_KIND_FAIL",
+            "name": "spaces.setKind.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_CREATE_START",
+            "name": "spaces.items.create.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_CREATE_FINISH",
+            "name": "spaces.items.create.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_CREATE_FAIL",
+            "name": "spaces.items.create.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_UPDATE_START",
+            "name": "spaces.items.update.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_UPDATE_FINISH",
+            "name": "spaces.items.update.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_UPDATE_FAIL",
+            "name": "spaces.items.update.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_DELETE_START",
+            "name": "spaces.items.delete.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_DELETE_FINISH",
+            "name": "spaces.items.delete.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_DELETE_FAIL",
+            "name": "spaces.items.delete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_ADD_TAG_START",
+            "name": "spaces.items.addTag.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_ADD_TAG_FINISH",
+            "name": "spaces.items.addTag.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_ADD_TAG_FAIL",
+            "name": "spaces.items.addTag.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_REMOVE_TAG_START",
+            "name": "spaces.items.removeTag.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_REMOVE_TAG_FINISH",
+            "name": "spaces.items.removeTag.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_REMOVE_TAG_FAIL",
+            "name": "spaces.items.removeTag.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_SET_METADATA_START",
+            "name": "spaces.items.setMetadata.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_SET_METADATA_FINISH",
+            "name": "spaces.items.setMetadata.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_SET_METADATA_FAIL",
+            "name": "spaces.items.setMetadata.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_MOVE_TO_SPACE_START",
+            "name": "spaces.items.moveToSpace.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_MOVE_TO_SPACE_FINISH",
+            "name": "spaces.items.moveToSpace.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_MOVE_TO_SPACE_FAIL",
+            "name": "spaces.items.moveToSpace.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_ADD_TO_SPACE_START",
+            "name": "spaces.items.addToSpace.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_ADD_TO_SPACE_FINISH",
+            "name": "spaces.items.addToSpace.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_ADD_TO_SPACE_FAIL",
+            "name": "spaces.items.addToSpace.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_REMOVE_FROM_SPACE_START",
+            "name": "spaces.items.removeFromSpace.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_REMOVE_FROM_SPACE_FINISH",
+            "name": "spaces.items.removeFromSpace.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ITEMS_REMOVE_FROM_SPACE_FAIL",
+            "name": "spaces.items.removeFromSpace.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "TICKETS_CREATE_START",
+            "name": "spaces.tickets.create.start",
+            "description": ""
+          },
+          {
+            "constantKey": "TICKETS_CREATE_FINISH",
+            "name": "spaces.tickets.create.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "TICKETS_CREATE_FAIL",
+            "name": "spaces.tickets.create.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "TICKETS_UPDATE_START",
+            "name": "spaces.tickets.update.start",
+            "description": ""
+          },
+          {
+            "constantKey": "TICKETS_UPDATE_FINISH",
+            "name": "spaces.tickets.update.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "TICKETS_UPDATE_FAIL",
+            "name": "spaces.tickets.update.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENTS_CREATE_START",
+            "name": "spaces.agents.create.start",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENTS_CREATE_FINISH",
+            "name": "spaces.agents.create.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENTS_CREATE_FAIL",
+            "name": "spaces.agents.create.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENTS_CREATE_FROM_LIBRARY_START",
+            "name": "spaces.agents.createFromLibrary.start",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENTS_CREATE_FROM_LIBRARY_FINISH",
+            "name": "spaces.agents.createFromLibrary.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "AGENTS_CREATE_FROM_LIBRARY_FAIL",
+            "name": "spaces.agents.createFromLibrary.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "MEMBERS_ADD_START",
+            "name": "spaces.members.add.start",
+            "description": ""
+          },
+          {
+            "constantKey": "MEMBERS_ADD_FINISH",
+            "name": "spaces.members.add.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "MEMBERS_ADD_FAIL",
+            "name": "spaces.members.add.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "MEMBERS_REMOVE_START",
+            "name": "spaces.members.remove.start",
+            "description": ""
+          },
+          {
+            "constantKey": "MEMBERS_REMOVE_FINISH",
+            "name": "spaces.members.remove.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "MEMBERS_REMOVE_FAIL",
+            "name": "spaces.members.remove.fail",
             "description": ""
           },
           {
@@ -3911,5 +4432,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-07T21:43:55.520Z"
+  "generatedAt": "2026-08-08T23:21:24.877Z"
 } as const;

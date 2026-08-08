@@ -50,6 +50,7 @@ import { initNeon, type NeonHandle } from './neon/main.js';
 import { initIdw, type IdwHandle } from './idw/main.js';
 import { initTools, type ToolsHandle } from './tools/main.js';
 import { initAi, type AiHandle } from './ai/main.js';
+import { initGsx, type GsxHandle } from './gsx/main.js';
 import { initMainWindow, type MainWindowHandle } from './main-window/main.js';
 import { initEventBus, type EventBusHandle } from './event-bus/main.js';
 import { initUniversity, type UniversityHandle } from './university/main.js';
@@ -264,6 +265,7 @@ let neonHandle: NeonHandle | null = null;
 let idwHandle: IdwHandle | null = null;
 let toolsHandle: ToolsHandle | null = null;
 let aiHandle: AiHandle | null = null;
+let gsxHandle: GsxHandle | null = null;
 let mainWindowHandle: MainWindowHandle | null = null;
 let eventBusHandle: EventBusHandle | null = null;
 let universityHandle: UniversityHandle | null = null;
@@ -882,6 +884,21 @@ app
       });
     } catch (err) {
       getLoggingApi().error('ai', 'initAi threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Initialize GSX automation module. Registers IPC handlers
+    // (lite:gsx:*) for opening GSX studio windows and running
+    // deterministic navigation scripts with the AI-repair eval loop.
+    // Depends on auth (cookie injection + accountId) and ai (repair),
+    // both initialized above.
+    try {
+      gsxHandle = initGsx({
+        userDataDir: app.getPath('userData'),
+      });
+    } catch (err) {
+      getLoggingApi().error('gsx', 'initGsx threw', {
         error: (err as Error).message,
       });
     }
@@ -1518,6 +1535,11 @@ app.on('before-quit', () => {
   }
   try {
     aiHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    gsxHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }

@@ -1192,7 +1192,7 @@ Pending ports, ordered roughly by likely value but not committed:
 - tools-manager-window
 - dynamic-menu-builder-extensions
 - help-agent-port (first AI-using port; per-app AI accounting from 0b kicks in here)
-- GSX window content
+- GSX window content (PARTIALLY LANDED 2026-08-07 as `lite/gsx/` -- ADR-052: scripted GSX window automation with the AI-repair eval loop; remaining: richer seed catalog once real studio selectors are validated, menu entry when product asks)
 - Image / Video / Audio creator categories
 - External bots
 - UI design tools

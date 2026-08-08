@@ -43,6 +43,7 @@ import { DOWNLOADS_EVENTS } from '../../downloads/events.js';
 import { ONBOARDING_EVENTS } from '../../onboarding/events.js';
 import { TOTP_EVENTS } from '../../totp/events.js';
 import { AI_EVENTS } from '../../ai/events.js';
+import { GSX_EVENTS } from '../../gsx/events.js';
 
 const liteRoot = path.resolve(__dirname, '..', '..');
 
@@ -188,6 +189,15 @@ const MODULES: ModuleSpec[] = [
     // emitted from enrich.ts.
     sourceFiles: ['ai/main.ts', 'ai/enrich.ts'],
     events: AI_EVENTS,
+  },
+  {
+    name: 'gsx',
+    // Spans + verdict/learned/invalidated events are emitted through
+    // the store's injected spanEmitter/eventEmitter seams using
+    // GSX_EVENTS constants; events.ts is included so the quoted
+    // catalog literals count as emit sites for the static scan.
+    sourceFiles: ['gsx/store.ts', 'gsx/main.ts', 'gsx/window.ts', 'gsx/events.ts'],
+    events: GSX_EVENTS,
   },
 ];
 
