@@ -1459,3 +1459,93 @@ describe('formatRelativeTime', () => {
     expect(handle().formatRelativeTime('not-a-date')).toBe('not-a-date');
   });
 });
+
+describe('playbook tile v3 — the hero (2026-08-08)', () => {
+  it('parsePlaybookStepsDetailed keeps checkbox done-states', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const steps = mod.parsePlaybookStepsDetailed(
+      '- [x] Ship the gate\n- [ ] Cut the release\n1. Verify the feed'
+    );
+    expect(steps).toEqual([
+      { text: 'Ship the gate', done: true },
+      { text: 'Cut the release', done: false },
+      { text: 'Verify the feed', done: null },
+    ]);
+    // The string[] API stays intact for existing callers.
+    expect(mod.parsePlaybookSteps('- [x] A\n- B')).toEqual(['A', 'B']);
+  });
+
+  it('renders live progress: ratio pill, bar width, done-step ✓ rail', () => {
+    const handle = (window as unknown as {
+      __spacesRendererForTesting?: { buildItemCard(i: unknown, a: boolean): HTMLElement };
+    }).__spacesRendererForTesting;
+    expect(handle).toBeDefined();
+    if (handle === undefined) return;
+    const card = handle.buildItemCard(
+      {
+        id: 'pb-hero-1',
+        title: 'Release playbook',
+        kind: 'playbook',
+        createdAt: '2026-08-08T00:00:00Z',
+        updatedAt: '2026-08-08T00:00:00Z',
+        otherSpaces: [],
+        producedBy: null,
+        description: 'How releases go out',
+        contentHead: '- [x] Gate green\n- [x] Asar sanity\n- [ ] Publish\n- [ ] Verify feed',
+      },
+      false
+    );
+    expect(card.querySelector('.spaces-card-playbook-hero')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-playbook-pill')?.textContent).toBe('2/4');
+    const fill = card.querySelector<HTMLElement>('.spaces-card-playbook-progress-fill');
+    expect(fill?.style.width).toBe('50%');
+    const done = card.querySelectorAll('.spaces-card-playbook-step.is-done');
+    expect(done.length).toBe(2);
+    expect(done[0]?.querySelector('.spaces-card-playbook-step-marker')?.textContent).toBe('✓');
+  });
+
+  it('no checkboxes → step-count pill, NO fake progress bar', () => {
+    const handle = (window as unknown as {
+      __spacesRendererForTesting?: { buildItemCard(i: unknown, a: boolean): HTMLElement };
+    }).__spacesRendererForTesting;
+    if (handle === undefined) return;
+    const card = handle.buildItemCard(
+      {
+        id: 'pb-hero-2',
+        title: 'Plain plan',
+        kind: 'playbook',
+        createdAt: '2026-08-08T00:00:00Z',
+        updatedAt: '2026-08-08T00:00:00Z',
+        otherSpaces: [],
+        producedBy: null,
+        contentHead: '1. First\n2. Second\n3. Third',
+      },
+      false
+    );
+    expect(card.querySelector('.spaces-card-playbook-pill')?.textContent).toBe('3 steps');
+    expect(card.querySelector('.spaces-card-playbook-progress')).toBeNull();
+  });
+
+  it('all boxes checked → pill flips to is-complete', () => {
+    const handle = (window as unknown as {
+      __spacesRendererForTesting?: { buildItemCard(i: unknown, a: boolean): HTMLElement };
+    }).__spacesRendererForTesting;
+    if (handle === undefined) return;
+    const card = handle.buildItemCard(
+      {
+        id: 'pb-hero-3',
+        title: 'Done plan',
+        kind: 'playbook',
+        createdAt: '2026-08-08T00:00:00Z',
+        updatedAt: '2026-08-08T00:00:00Z',
+        otherSpaces: [],
+        producedBy: null,
+        contentHead: '- [x] A\n- [X] B',
+      },
+      false
+    );
+    const pill = card.querySelector('.spaces-card-playbook-pill');
+    expect(pill?.textContent).toBe('2/2');
+    expect(pill?.classList.contains('is-complete')).toBe(true);
+  });
+});

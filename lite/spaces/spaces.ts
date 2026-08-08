@@ -5289,6 +5289,11 @@ function buildPlaybookTilePreview(
   item: RendererItemSummary,
   preview: HTMLElement
 ): void {
+  preview.classList.add('spaces-card-playbook-hero');
+  const detailed = parsePlaybookStepsDetailed(item.contentHead ?? item.excerpt);
+  const withBoxes = detailed.filter((s) => s.done !== null);
+  const doneCount = withBoxes.filter((s) => s.done === true).length;
+
   const head = document.createElement('span');
   head.className = 'spaces-card-playbook-head';
   head.setAttribute('aria-hidden', 'true');
@@ -5300,7 +5305,34 @@ function buildPlaybookTilePreview(
   label.className = 'spaces-card-playbook-label';
   label.textContent = 'PLAYBOOK';
   head.appendChild(label);
+  // Right-aligned pill: live progress when the steps carry checkboxes,
+  // plain step count otherwise. The playbook is the plan that RUNS —
+  // its tile should say how far it has run.
+  if (detailed.length > 0) {
+    const pill = document.createElement('span');
+    pill.className = 'spaces-card-playbook-pill';
+    pill.textContent =
+      withBoxes.length > 0
+        ? `${doneCount}/${withBoxes.length}`
+        : `${detailed.length} step${detailed.length === 1 ? '' : 's'}`;
+    if (withBoxes.length > 0 && doneCount === withBoxes.length) {
+      pill.classList.add('is-complete');
+    }
+    head.appendChild(pill);
+  }
   preview.appendChild(head);
+
+  // Progress bar under the header — only when there is real progress
+  // data (checkboxes). A plan with no boxes shows no fake meter.
+  if (withBoxes.length > 0) {
+    const bar = document.createElement('span');
+    bar.className = 'spaces-card-playbook-progress';
+    const fill = document.createElement('span');
+    fill.className = 'spaces-card-playbook-progress-fill';
+    fill.style.width = `${Math.round((doneCount / withBoxes.length) * 100)}%`;
+    bar.appendChild(fill);
+    preview.appendChild(bar);
+  }
 
   // Description line — the author's one-liner about the plan, marked
   // with the pen glyph so it reads as "written by someone."
@@ -5321,28 +5353,30 @@ function buildPlaybookTilePreview(
 
   // Steps come from the content head when present — `excerpt` prefers
   // the description, and a described playbook must not lose its plan.
-  const steps = parsePlaybookSteps(item.contentHead ?? item.excerpt);
-  if (steps.length > 0) {
+  if (detailed.length > 0) {
     const list = document.createElement('span');
     list.className = 'spaces-card-playbook-steps';
-    const shown = steps.slice(0, 4);
+    const shown = detailed.slice(0, 4);
     for (let i = 0; i < shown.length; i++) {
+      const step = shown[i];
+      if (step === undefined) continue;
       const row = document.createElement('span');
       row.className = 'spaces-card-playbook-step';
+      if (step.done === true) row.classList.add('is-done');
       const marker = document.createElement('span');
       marker.className = 'spaces-card-playbook-step-marker';
-      marker.textContent = String(i + 1);
+      marker.textContent = step.done === true ? '✓' : String(i + 1);
       row.appendChild(marker);
       const text = document.createElement('span');
       text.className = 'spaces-card-playbook-step-text';
-      text.textContent = shown[i] ?? '';
+      text.textContent = step.text;
       row.appendChild(text);
       list.appendChild(row);
     }
-    if (steps.length > shown.length) {
+    if (detailed.length > shown.length) {
       const more = document.createElement('span');
       more.className = 'spaces-card-playbook-more';
-      more.textContent = `+${steps.length - shown.length} more`;
+      more.textContent = `+${detailed.length - shown.length} more`;
       list.appendChild(more);
     }
     preview.appendChild(list);
@@ -5644,21 +5678,33 @@ export function shortStageLabel(stage: string): string {
  * was cut mid-line by the summary's 280-char cap (no trailing
  * terminator), so tiles never show a half word. Exported for tests.
  */
-export function parsePlaybookSteps(excerpt: string | undefined): string[] {
+/** A playbook step with its checkbox state: true/false, null = no box. */
+export interface PlaybookStep {
+  text: string;
+  done: boolean | null;
+}
+
+export function parsePlaybookStepsDetailed(
+  excerpt: string | undefined
+): PlaybookStep[] {
   if (typeof excerpt !== 'string' || excerpt.trim().length === 0) return [];
   // "Cut by the 280-char summary cap" needs BOTH signals: at/near the
   // cap AND no clean terminator — otherwise a short complete list
   // that simply lacks trailing punctuation loses its last step.
   const truncated = excerpt.length >= 278 && !/[\s.!?:;)\]]$/.test(excerpt);
   const lines = excerpt.split(/\r?\n/);
-  const steps: Array<{ text: string; line: number }> = [];
-  const STEP_RE = /^\s*(?:(?:\d+[.)])|(?:[-*•]\s*(?:\[[ xX]\])?)|(?:#{1,4}\s*step\s*\d*[:.]?))\s*(.+)$/i;
+  const steps: Array<{ text: string; done: boolean | null; line: number }> = [];
+  // Checkbox captured separately so the tile can render REAL progress
+  // ("playbook tiles should be very special", 2026-08-08).
+  const STEP_RE = /^\s*(?:(?:\d+[.)])|(?:[-*•]\s*(?:\[([ xX])\])?)|(?:#{1,4}\s*step\s*\d*[:.]?))\s*(.+)$/i;
   for (let i = 0; i < lines.length; i++) {
     const m = STEP_RE.exec(lines[i] ?? '');
     if (m === null) continue;
-    const text = (m[1] ?? '').replace(/\*\*/g, '').trim();
+    const text = (m[2] ?? '').replace(/\*\*/g, '').trim();
     if (text.length === 0) continue;
-    steps.push({ text, line: i });
+    const box = m[1];
+    const done = box === undefined ? null : box.toLowerCase() === 'x';
+    steps.push({ text, done, line: i });
   }
   if (steps.length === 0) return [];
   // Drop a final step that sits on the excerpt's cut-off last line.
@@ -5666,7 +5712,11 @@ export function parsePlaybookSteps(excerpt: string | undefined): string[] {
   if (truncated && last !== undefined && last.line === lines.length - 1) {
     steps.pop();
   }
-  return steps.map((s) => s.text);
+  return steps.map((s) => ({ text: s.text, done: s.done }));
+}
+
+export function parsePlaybookSteps(excerpt: string | undefined): string[] {
+  return parsePlaybookStepsDetailed(excerpt).map((s) => s.text);
 }
 
 /**

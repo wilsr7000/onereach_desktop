@@ -7669,3 +7669,115 @@ body {
 .spaces-grid-hidden-chip:hover {
   background: rgba(123, 167, 255, 0.18);
 }
+
+
+/* ─── Playbook tile v3 — the hero of the grid (2026-08-08) ─────────────
+ * "playbook tiles should be very special." The playbook is the plan
+ * that RUNS a Space, so its tile gets the strongest identity in the
+ * grid: a violet→gold gradient ring with a soft glow, a foil star,
+ * a live progress pill + bar when steps carry checkboxes, and a
+ * stepper rail whose completed steps read ✓.
+ */
+
+.spaces-card-playbook .spaces-card-preview {
+  position: relative;
+  background:
+    radial-gradient(120% 90% at 8% 0%, rgba(139, 92, 246, 0.16), transparent 55%),
+    radial-gradient(120% 90% at 95% 100%, rgba(240, 180, 80, 0.10), transparent 55%),
+    rgba(20, 18, 30, 0.66);
+}
+
+.spaces-card-playbook .spaces-card-preview::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #6d6df0 45%, #e8b34b 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+.spaces-card-playbook:hover .spaces-card-preview::before {
+  opacity: 1;
+}
+
+.spaces-card-playbook:hover .spaces-card-preview {
+  box-shadow:
+    0 0 0 1px rgba(139, 92, 246, 0.25),
+    0 6px 26px rgba(139, 92, 246, 0.22);
+}
+
+.spaces-card-playbook-star {
+  font-size: 13px;
+  background: linear-gradient(135deg, #f5d76e, #e8b34b 60%, #c98f2e);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 0 4px rgba(232, 179, 75, 0.35));
+}
+
+.spaces-card-playbook-pill {
+  margin-left: auto;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  padding: 1.5px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(139, 92, 246, 0.45);
+  color: #c4b0ff;
+  background: rgba(139, 92, 246, 0.12);
+}
+
+.spaces-card-playbook-pill.is-complete {
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
+  background: rgba(52, 211, 153, 0.12);
+}
+
+.spaces-card-playbook-progress {
+  display: block;
+  height: 3px;
+  border-radius: 2px;
+  margin: 4px 10px 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+
+.spaces-card-playbook-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #8b5cf6, #e8b34b);
+  transition: width 400ms ease;
+}
+
+/* Stepper rail: connected circles; done steps flip to ✓ + emerald. */
+.spaces-card-playbook-step {
+  position: relative;
+}
+
+.spaces-card-playbook-step:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 16px;
+  bottom: -3px;
+  width: 1px;
+  background: rgba(139, 92, 246, 0.28);
+}
+
+.spaces-card-playbook-step.is-done .spaces-card-playbook-step-marker {
+  background: rgba(52, 211, 153, 0.18);
+  border-color: rgba(52, 211, 153, 0.6);
+  color: #6ee7b7;
+}
+
+.spaces-card-playbook-step.is-done .spaces-card-playbook-step-text {
+  color: rgba(255, 255, 255, 0.45);
+  text-decoration: line-through;
+  text-decoration-color: rgba(52, 211, 153, 0.4);
+}
