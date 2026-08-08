@@ -245,6 +245,21 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
     if (shown || !readyToShow || !positioned || win.isDestroyed()) return;
     shown = true;
     win.show();
+    // Detach the OS parent-child relationship now that centering is
+    // done. `parent` is used ONLY to center Spaces over the main window
+    // on open (see centerOnParent). But a macOS CHILD window is forced
+    // to float ABOVE its parent forever — so opening an IDW tab in the
+    // main window renders BEHIND the Spaces window and looks like
+    // "nothing happened / a weird modal, not a tab" (2026-08-08 bug
+    // report). Detaching keeps the centered position while letting the
+    // main window raise above Spaces when the user opens an IDW.
+    try {
+      if (config.parent !== null && !win.isDestroyed()) {
+        win.setParentWindow(null);
+      }
+    } catch {
+      // best-effort — worst case Spaces stays glued above the main window
+    }
   };
 
   const markPositioned = (): void => {

@@ -31,6 +31,8 @@ export const MAIN_WINDOW_EVENTS = {
   ACTIVATE_TAB_FAIL: 'main-window.activate-tab.fail',
   // Activity events (instant)
   CHANGED: 'main-window.changed',
+  /** Window brought to the front (e.g. because a tab was opened). */
+  RAISED: 'main-window.raised',
   TAB_NAVIGATED: 'main-window.tab.navigated',
   TAB_LOAD_START: 'main-window.tab.load-start',
   TAB_LOAD_FINISH: 'main-window.tab.load-finish',

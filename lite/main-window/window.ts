@@ -138,6 +138,22 @@ const HOME_FEED_PARTITION = 'persist:lite-idw-browser';
 let mainWindow: BrowserWindow | null = null;
 let unsubscribeStore: (() => void) | null = null;
 /**
+ * Last tab count the store subscriber saw. Used to detect a tab being
+ * ADDED (count increases) so the window can raise itself. Opening an
+ * IDW from the app menu bar (or any non-chrome caller) mutates the tab
+ * store but historically never brought the window forward — so the new
+ * tab attached to a window that stayed buried behind other windows,
+ * and the user saw "nothing happened / a stray view", not a tab
+ * (2026-08-08 bug report: "added ChatGPT, it did not add a tab").
+ * -1 = "not yet initialized" so the first paint (0→N at boot) does not
+ * count as an add.
+ */
+let lastKnownTabCount = -1;
+/** Active tab id the subscriber last saw — pairs with the count to
+ *  distinguish dedupe-focus (active changed, count steady) from a
+ *  close (count dropped). */
+let lastKnownActiveId: string | null = null;
+/**
  * Unsubscribe handle for the auth session-change listener. We attach
  * one listener for the whole window so that whenever the user signs
  * into an env (via the home-view boot-chat OR the chrome "Sign in to
@@ -228,6 +244,10 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     if (mainWindow === win) {
       mainWindow = null;
     }
+    // Re-arm the raise-on-add sentinel so a re-created window's boot
+    // rehydrate (0→N) doesn't count as an add and steal focus.
+    lastKnownTabCount = -1;
+    lastKnownActiveId = null;
     teardownStoreSubscription();
     stopAllAttachedTabWatchers();
     // WebContentsViews are owned by the BrowserWindow; closing the
@@ -243,6 +263,13 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
   unsubscribeStore = api.onTabsChanged((tabs, activeId) => {
     if (mainWindow === null || mainWindow.isDestroyed()) return;
     reconcileViews(mainWindow, tabs, activeId);
+    // A tab was opened or focused (not closed) — bring the window
+    // forward so that tab is actually visible.
+    if (shouldRaiseOnTabChange(lastKnownTabCount, tabs.length, lastKnownActiveId, activeId)) {
+      raiseMainWindow('tab-opened');
+    }
+    lastKnownTabCount = tabs.length;
+    lastKnownActiveId = activeId;
   });
 
   // Subscribe to auth session changes. When a session becomes non-null
@@ -389,6 +416,71 @@ export function closeMainWindow(): void {
 export function getMainWindow(): BrowserWindow | null {
   if (mainWindow === null || mainWindow.isDestroyed()) return null;
   return mainWindow;
+}
+
+/**
+ * Pure decision: should a tab-store change raise the window?
+ *
+ *   - A tab was ADDED (count up) → yes: show the new tab.
+ *   - The ACTIVE tab changed with no close (count steady) → yes: this
+ *     is the dedupe-focus path — clicking a menu entry for an IDW
+ *     that's ALREADY open focuses its existing tab without changing
+ *     the count, and the user still expects the window to come forward
+ *     (the exact 2026-08-08 "it did not add a tab" repro: ChatGPT was
+ *     already open, count stayed 2, so a count-only rule missed it).
+ *   - A tab was CLOSED (count down) → no: a close must never steal
+ *     focus, even though the active tab shifts to a sibling.
+ *   - Same count, same active (URL nav / re-order) → no.
+ *   - The `-1` boot sentinel (0→N rehydrate) → no: ready-to-show
+ *     already handles first paint.
+ *
+ * Exported so the rule is unit-tested without an Electron window.
+ */
+export function shouldRaiseOnTabChange(
+  prevCount: number,
+  nextCount: number,
+  prevActive: string | null,
+  nextActive: string | null
+): boolean {
+  if (prevCount === -1) return false;
+  if (nextCount < prevCount) return false; // a close never raises
+  if (nextCount > prevCount) return true; // a tab was added
+  return nextActive !== null && nextActive !== prevActive; // dedupe-focus
+}
+
+/**
+ * Bring the main window to the front: un-minimize, show, focus. Called
+ * when a tab is opened so the tab is actually visible — opening an IDW
+ * must never drop a tab into a window buried behind others. No-op when
+ * the window is gone (the caller re-creates it in that case).
+ */
+export function raiseMainWindow(reason: string): void {
+  if (mainWindow === null || mainWindow.isDestroyed()) return;
+  // Defer to the next tick. The raise is triggered from the tab-store
+  // subscriber, which fires WHILE the app menu that opened the IDW is
+  // still closing; macOS re-orders windows as the menu dismisses, so a
+  // synchronous raise here gets clobbered and the window stays buried
+  // (verified 2026-08-08 — the raised event fired but the window stayed
+  // behind the Spaces window). Running after the current turn lets the
+  // menu settle first, so the raise sticks.
+  setImmediate(() => {
+    if (mainWindow === null || mainWindow.isDestroyed()) return;
+    try {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      // moveTop() forces z-order above OTHER top-level windows (e.g.
+      // the Spaces window); show()+focus() alone raise only within the
+      // app and don't reliably re-order across sibling windows.
+      mainWindow.moveTop();
+      mainWindow.focus();
+      getLoggingApi().event(MAIN_WINDOW_EVENTS.RAISED, { reason });
+    } catch (err) {
+      getLoggingApi().warn('main-window', 'raiseMainWindow failed', {
+        reason,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
 }
 
 /** Open DevTools for the currently-visible tab WebContentsView, if any. */
