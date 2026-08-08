@@ -1122,7 +1122,7 @@ interface LiteChecklistView {
   name: string;
   mode: 'DO-CONFIRM' | 'READ-DO';
   pausePoint: string;
-  items: Array<{ text: string; killer?: boolean }>;
+  items: Array<{ text: string; killer?: boolean; optional?: boolean; more?: string }>;
   version: number;
 }
 
@@ -1137,13 +1137,22 @@ interface LiteTicketChecklistView {
 }
 
 interface LiteSpacesChecklistsBridge {
+  /** AI-drafted checklist from a prompt — for review in the editor. */
+  draft(prompt: string): Promise<
+    LiteSpacesIpcResult<{
+      name: string;
+      mode: 'DO-CONFIRM' | 'READ-DO';
+      pausePoint: string;
+      items: Array<{ text: string; killer?: boolean; optional?: boolean; more?: string }>;
+    }>
+  >;
   /** ADR-055 addendum: revise — version bumps, ALL run states reset. */
   update(input: {
     id: string;
     name: string;
     mode: 'DO-CONFIRM' | 'READ-DO';
     pausePoint: string;
-    items: Array<{ text: string; killer?: boolean }>;
+    items: Array<{ text: string; killer?: boolean; optional?: boolean; more?: string }>;
   }): Promise<LiteSpacesIpcResult<{ id: string; version: number }>>;
   /** Delete — refused while attached to any ticket. */
   remove(id: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
@@ -1152,7 +1161,7 @@ interface LiteSpacesChecklistsBridge {
     name: string;
     mode: 'DO-CONFIRM' | 'READ-DO';
     pausePoint: string;
-    items: Array<{ text: string; killer?: boolean }>;
+    items: Array<{ text: string; killer?: boolean; optional?: boolean; more?: string }>;
   }): Promise<LiteSpacesIpcResult<LiteChecklistView>>;
   list(spaceId: string): Promise<LiteSpacesIpcResult<LiteChecklistView[]>>;
   attach(input: {

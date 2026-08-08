@@ -1038,6 +1038,22 @@ export interface ChecklistItemSpec {
   text: string;
   /** Killer item: most dangerous to skip, most often skipped. */
   killer?: boolean;
+  /**
+   * Optional item: does NOT count toward completion (the gate passes
+   * when every REQUIRED item is checked). A killer item can never be
+   * optional — killer wins if both are set.
+   */
+  optional?: boolean;
+  /** Longer explanation, shown behind a "more" accordion. ≤500 chars. */
+  more?: string;
+}
+
+/** An AI-drafted checklist, pending human review in the editor. */
+export interface ChecklistDraft {
+  name: string;
+  mode: ChecklistMode;
+  pausePoint: string;
+  items: ChecklistItemSpec[];
 }
 
 /** The `:Checklist` node as read from the graph. */

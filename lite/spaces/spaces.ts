@@ -8713,9 +8713,20 @@ export interface DetailTicketCallbacks {
 /** Progress label: "3/7". */
 export function checklistProgressLabel(link: {
   checkedIndexes: number[];
-  checklist: { items: Array<{ text: string }> };
+  checklist: { items: Array<{ text: string; optional?: boolean }> };
 }): string {
-  return `${link.checkedIndexes.length}/${link.checklist.items.length}`;
+  const items = link.checklist.items;
+  const requiredIdx = items
+    .map((item, i) => (item.optional === true ? -1 : i))
+    .filter((i) => i >= 0);
+  // No optional items → the familiar "3/7".
+  if (requiredIdx.length === items.length) {
+    return `${link.checkedIndexes.length}/${items.length}`;
+  }
+  const checked = new Set(link.checkedIndexes);
+  const requiredDone = requiredIdx.filter((i) => checked.has(i)).length;
+  const optionalDone = link.checkedIndexes.length - requiredDone;
+  return `${requiredDone}/${requiredIdx.length} required · ${optionalDone} optional done`;
 }
 
 /**
@@ -8842,8 +8853,10 @@ function buildChecklistRunCard(
   items.className = 'spaces-checklist-items';
   const checked = new Set(link.checkedIndexes);
   link.checklist.items.forEach((spec, index) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'spaces-checklist-item-wrap';
     const row = document.createElement('label');
-    row.className = `spaces-checklist-item${spec.killer === true ? ' is-killer' : ''}`;
+    row.className = `spaces-checklist-item${spec.killer === true ? ' is-killer' : ''}${spec.optional === true ? ' is-optional' : ''}`;
     const box = document.createElement('input');
     box.type = 'checkbox';
     box.checked = checked.has(index);
@@ -8858,7 +8871,34 @@ function buildChecklistRunCard(
       text.title = 'Killer item — the step most dangerous to skip';
     }
     row.appendChild(text);
-    items.appendChild(row);
+    if (spec.optional === true) {
+      const badge = document.createElement('span');
+      badge.className = 'spaces-checklist-item-optional';
+      badge.textContent = 'optional';
+      badge.title = 'Does not count toward completing this checklist';
+      row.appendChild(badge);
+    }
+    wrap.appendChild(row);
+    if (typeof spec.more === 'string' && spec.more.length > 0) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'spaces-checklist-item-more-toggle';
+      toggle.textContent = 'more ▸';
+      row.appendChild(toggle);
+      const more = document.createElement('p');
+      more.className = 'spaces-checklist-item-more';
+      more.textContent = spec.more;
+      more.hidden = true;
+      wrap.appendChild(more);
+      toggle.addEventListener('click', (ev) => {
+        // Inside a <label>: don't let the accordion toggle the checkbox.
+        ev.preventDefault();
+        ev.stopPropagation();
+        more.hidden = !more.hidden;
+        toggle.textContent = more.hidden ? 'more ▸' : 'more ▾';
+      });
+    }
+    items.appendChild(wrap);
   });
   card.appendChild(items);
   return card;
@@ -9035,7 +9075,32 @@ function buildChecklistLibraryCard(
     const li = document.createElement('li');
     li.className = 'spaces-checklist-card-item';
     li.classList.toggle('is-killer', item.killer === true);
-    li.textContent = item.text;
+    li.classList.toggle('is-optional', item.optional === true);
+    const text = document.createElement('span');
+    text.textContent = item.text;
+    li.appendChild(text);
+    if (item.optional === true) {
+      const badge = document.createElement('span');
+      badge.className = 'spaces-checklist-item-optional';
+      badge.textContent = 'optional';
+      li.appendChild(badge);
+    }
+    if (typeof item.more === 'string' && item.more.length > 0) {
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'spaces-checklist-item-more-toggle';
+      toggle.textContent = 'more ▸';
+      li.appendChild(toggle);
+      const more = document.createElement('p');
+      more.className = 'spaces-checklist-item-more';
+      more.textContent = item.more;
+      more.hidden = true;
+      li.appendChild(more);
+      toggle.addEventListener('click', () => {
+        more.hidden = !more.hidden;
+        toggle.textContent = more.hidden ? 'more ▸' : 'more ▾';
+      });
+    }
     items.appendChild(li);
   }
   card.appendChild(items);
@@ -9108,13 +9173,185 @@ function openChecklistEditorPanel(opts: {
   pauseInput.value = existing?.pausePoint ?? '';
   panel.appendChild(pauseInput);
 
-  const itemsArea = document.createElement('textarea');
-  itemsArea.className = 'spaces-checklist-editor-items';
-  itemsArea.placeholder = 'One item per line. Prefix ! for a killer item. Max 12.';
-  itemsArea.value = (existing?.items ?? [])
-    .map((i) => `${i.killer === true ? '!' : ''}${i.text}`)
-    .join('\n');
-  panel.appendChild(itemsArea);
+  // ── AI draft box: describe it, review the rows it fills in. ──
+  const aiRow = document.createElement('div');
+  aiRow.className = 'spaces-checklist-ai-row';
+  const aiInput = document.createElement('input');
+  aiInput.type = 'text';
+  aiInput.className = 'spaces-checklist-ai-input';
+  aiInput.placeholder = 'Describe it and let AI draft — e.g. "pre-release checks for our Electron app"';
+  aiRow.appendChild(aiInput);
+  const aiBtn = document.createElement('button');
+  aiBtn.type = 'button';
+  aiBtn.className = 'spaces-checklist-ai-btn';
+  aiBtn.textContent = '✦ Draft with AI';
+  aiRow.appendChild(aiBtn);
+  panel.appendChild(aiRow);
+
+  // ── Structured item rows. ──
+  const itemsHost = document.createElement('div');
+  itemsHost.className = 'spaces-checklist-editor-rows';
+  panel.appendChild(itemsHost);
+
+  interface RowRefs {
+    wrap: HTMLElement;
+    text: HTMLInputElement;
+    req: HTMLSelectElement;
+    killer: HTMLInputElement;
+    more: HTMLTextAreaElement;
+  }
+  const rows: RowRefs[] = [];
+
+  const addItemRow = (seed?: {
+    text?: string;
+    killer?: boolean;
+    optional?: boolean;
+    more?: string;
+  }): void => {
+    const wrap = document.createElement('div');
+    wrap.className = 'spaces-checklist-editor-row';
+
+    const line = document.createElement('div');
+    line.className = 'spaces-checklist-editor-row-line';
+
+    const text = document.createElement('input');
+    text.type = 'text';
+    text.className = 'spaces-checklist-editor-row-text';
+    text.placeholder = 'One-line verification…';
+    text.value = seed?.text ?? '';
+    line.appendChild(text);
+
+    const req = document.createElement('select');
+    req.className = 'spaces-share-select spaces-checklist-editor-row-req';
+    for (const [v, l] of [
+      ['required', 'Required'],
+      ['optional', 'Optional'],
+    ] as const) {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = l;
+      req.appendChild(o);
+    }
+    req.value = seed?.optional === true ? 'optional' : 'required';
+    line.appendChild(req);
+
+    const killerLabel = document.createElement('label');
+    killerLabel.className = 'spaces-checklist-editor-row-killer';
+    const killer = document.createElement('input');
+    killer.type = 'checkbox';
+    killer.checked = seed?.killer === true;
+    killerLabel.append(killer, document.createTextNode(' killer'));
+    line.appendChild(killerLabel);
+    // Killer implies required — mirror the SDK rule in the UI.
+    killer.addEventListener('change', () => {
+      if (killer.checked) req.value = 'required';
+    });
+    req.addEventListener('change', () => {
+      if (req.value === 'optional') killer.checked = false;
+    });
+
+    const moreToggle = document.createElement('button');
+    moreToggle.type = 'button';
+    moreToggle.className = 'spaces-checklist-editor-row-moretoggle';
+    moreToggle.textContent = 'more ▸';
+    line.appendChild(moreToggle);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'spaces-checklist-editor-row-remove';
+    removeBtn.setAttribute('aria-label', 'Remove item');
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      const at = rows.findIndex((r) => r.wrap === wrap);
+      if (at >= 0) rows.splice(at, 1);
+      wrap.remove();
+    });
+    line.appendChild(removeBtn);
+
+    wrap.appendChild(line);
+
+    const more = document.createElement('textarea');
+    more.className = 'spaces-checklist-editor-row-more';
+    more.placeholder = 'Optional detail readers can expand — why this matters, how to verify.';
+    more.value = seed?.more ?? '';
+    more.hidden = !(seed?.more !== undefined && seed.more.length > 0);
+    wrap.appendChild(more);
+    moreToggle.addEventListener('click', () => {
+      more.hidden = !more.hidden;
+      moreToggle.textContent = more.hidden ? 'more ▸' : 'more ▾';
+    });
+    if (!more.hidden) moreToggle.textContent = 'more ▾';
+
+    itemsHost.appendChild(wrap);
+    rows.push({ wrap, text, req, killer, more });
+  };
+
+  const setRows = (
+    items: Array<{ text: string; killer?: boolean; optional?: boolean; more?: string }>
+  ): void => {
+    rows.splice(0, rows.length);
+    itemsHost.replaceChildren();
+    for (const item of items) addItemRow(item);
+    if (items.length === 0) addItemRow();
+  };
+
+  setRows(existing?.items ?? []);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'spaces-checklist-editor-add';
+  addBtn.textContent = '+ Add item';
+  addBtn.addEventListener('click', () => addItemRow());
+  panel.appendChild(addBtn);
+
+  const collectItems = (): Array<{
+    text: string;
+    killer?: boolean;
+    optional?: boolean;
+    more?: string;
+  }> =>
+    rows
+      .map((r) => ({
+        text: r.text.value.trim(),
+        ...(r.killer.checked ? { killer: true } : {}),
+        ...(r.req.value === 'optional' && !r.killer.checked ? { optional: true } : {}),
+        ...(r.more.value.trim().length > 0 ? { more: r.more.value.trim() } : {}),
+      }))
+      .filter((item) => item.text.length > 0);
+
+  aiBtn.addEventListener('click', () => {
+    void (async () => {
+      const prompt = aiInput.value.trim();
+      if (prompt.length === 0) {
+        showToast('Describe the checklist first.');
+        return;
+      }
+      aiBtn.disabled = true;
+      aiBtn.textContent = 'Drafting…';
+      try {
+        const envelope = await bridge.checklists.draft(prompt);
+        if (envelope.ok === false) {
+          showToast(envelope.error.message);
+          return;
+        }
+        const draft = envelope.value as {
+          name: string;
+          mode: 'DO-CONFIRM' | 'READ-DO';
+          pausePoint: string;
+          items: Array<{ text: string; killer?: boolean; optional?: boolean; more?: string }>;
+        };
+        // Prefill for review — the human saves, never the model.
+        if (nameInput.value.trim().length === 0) nameInput.value = draft.name;
+        modeSel.value = draft.mode;
+        if (pauseInput.value.trim().length === 0) pauseInput.value = draft.pausePoint;
+        setRows(draft.items);
+        showToast('Draft ready — review and save.');
+      } finally {
+        aiBtn.disabled = false;
+        aiBtn.textContent = '✦ Draft with AI';
+      }
+    })();
+  });
 
   if (existing !== undefined) {
     const warn = document.createElement('p');
@@ -9133,7 +9370,7 @@ function openChecklistEditorPanel(opts: {
   save.addEventListener('click', () => {
     void (async () => {
       save.disabled = true;
-      const items = parseChecklistDraft(itemsArea.value);
+      const items = collectItems();
       const common = {
         name: nameInput.value.trim(),
         mode: modeSel.value === 'READ-DO' ? ('READ-DO' as const) : ('DO-CONFIRM' as const),

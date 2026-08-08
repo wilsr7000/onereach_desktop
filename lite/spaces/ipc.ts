@@ -42,6 +42,7 @@ import type {
   TicketChecklist,
   CreateChecklistInput,
   UpdateChecklistInput,
+  ChecklistDraft,
   AttachChecklistInput,
   SetChecklistItemInput,
   CreateAssetInput,
@@ -108,6 +109,7 @@ export const SPACES_IPC = {
   CHECKLISTS_CREATE: 'lite:spaces:checklists:create',
   CHECKLISTS_LIST: 'lite:spaces:checklists:list',
   CHECKLISTS_UPDATE: 'lite:spaces:checklists:update',
+  CHECKLISTS_DRAFT: 'lite:spaces:checklists:draft',
   CHECKLISTS_REMOVE: 'lite:spaces:checklists:remove',
   CHECKLISTS_ATTACH: 'lite:spaces:checklists:attach',
   CHECKLISTS_FOR_TICKET: 'lite:spaces:checklists:forTicket',
@@ -872,6 +874,22 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
       try {
         const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
         const value = await getSpacesApi().members.list(spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_DRAFT,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { prompt?: unknown }
+    ): Promise<SpacesIpcResult<ChecklistDraft>> => {
+      try {
+        const prompt = typeof payload?.prompt === 'string' ? payload.prompt : '';
+        const value = await getSpacesApi().checklists.draft(prompt);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

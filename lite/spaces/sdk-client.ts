@@ -1688,6 +1688,7 @@ export const CYPHER = {
       pausePoint: $pausePoint,
       items: $itemsJson,
       itemCount: $itemCount,
+      requiredIdx: $requiredIdx,
       version: 1,
       createdAt: $now,
       updatedAt: $now
@@ -1731,6 +1732,7 @@ export const CYPHER = {
         c.pausePoint = $pausePoint,
         c.items = $itemsJson,
         c.itemCount = $itemCount,
+        c.requiredIdx = $requiredIdx,
         c.version = coalesce(c.version, 1) + 1,
         c.revisedAt = $now,
         c.updatedAt = $now
@@ -1866,7 +1868,10 @@ export const CYPHER = {
         r.lastCheckedBy = $actorId,
         r.lastCheckedAt = $now
     WITH r, c,
-         size(r.checkedIdx) = coalesce(c.itemCount, -1) AS nowComplete
+         CASE WHEN c.requiredIdx IS NULL
+              THEN size(r.checkedIdx) = coalesce(c.itemCount, -1)
+              ELSE all(req IN c.requiredIdx WHERE req IN r.checkedIdx)
+         END AS nowComplete
     SET r.completedAt = CASE WHEN nowComplete AND r.completedAt IS NULL THEN $now
                              WHEN NOT nowComplete THEN NULL
                              ELSE r.completedAt END
@@ -1886,7 +1891,10 @@ export const CYPHER = {
         r.lastCheckedBy = $actorId,
         r.lastCheckedAt = $now
     WITH r, c,
-         size(r.checkedIdx) = coalesce(c.itemCount, -1) AS nowComplete
+         CASE WHEN c.requiredIdx IS NULL
+              THEN size(r.checkedIdx) = coalesce(c.itemCount, -1)
+              ELSE all(req IN c.requiredIdx WHERE req IN r.checkedIdx)
+         END AS nowComplete
     SET r.completedAt = CASE WHEN nowComplete AND r.completedAt IS NULL THEN $now
                              WHEN NOT nowComplete THEN NULL
                              ELSE r.completedAt END
@@ -1903,11 +1911,17 @@ export const CYPHER = {
     RETURN coalesce(a.status, 'open') AS currentStatus,
            [x IN collect(DISTINCT CASE WHEN cpre IS NULL THEN NULL ELSE {
               name: cpre.name,
-              complete: size(coalesce(pre.checkedIdx, [])) = coalesce(cpre.itemCount, -1)
+              complete: CASE WHEN cpre.requiredIdx IS NULL
+                             THEN size(coalesce(pre.checkedIdx, [])) = coalesce(cpre.itemCount, -1)
+                             ELSE all(req IN cpre.requiredIdx WHERE req IN coalesce(pre.checkedIdx, []))
+                        END
            } END) WHERE x IS NOT NULL] AS requiredPre,
            [x IN collect(DISTINCT CASE WHEN cpost IS NULL THEN NULL ELSE {
               name: cpost.name,
-              complete: size(coalesce(post.checkedIdx, [])) = coalesce(cpost.itemCount, -1)
+              complete: CASE WHEN cpost.requiredIdx IS NULL
+                             THEN size(coalesce(post.checkedIdx, [])) = coalesce(cpost.itemCount, -1)
+                             ELSE all(req IN cpost.requiredIdx WHERE req IN coalesce(post.checkedIdx, []))
+                        END
            } END) WHERE x IS NOT NULL] AS requiredPost
   `,
 
@@ -3739,6 +3753,7 @@ export class SdkSpacesClient {
         pausePoint,
         itemsJson: JSON.stringify(items),
         itemCount: items.length,
+        requiredIdx: requiredIndexes(items),
         now: this.now(),
         viewerId: this.viewerParam(),
       });
@@ -3787,6 +3802,7 @@ export class SdkSpacesClient {
         pausePoint,
         itemsJson: JSON.stringify(items),
         itemCount: items.length,
+        requiredIdx: requiredIndexes(items),
         now: this.now(),
         viewerId: this.viewerParam(),
       });
@@ -5151,8 +5167,30 @@ export function sanitizeChecklistItems(raw: ReadonlyArray<ChecklistItemSpec>): C
         context: { op: 'checklists.create' },
       });
     }
-    return item?.killer === true ? { text, killer: true } : { text };
+    const more =
+      typeof item?.more === 'string' && item.more.trim().length > 0
+        ? item.more.trim().slice(0, 500)
+        : undefined;
+    const killer = item?.killer === true;
+    // Killer implies required — a "most dangerous to skip" item that
+    // doesn't count toward completion is a contradiction.
+    const optional = !killer && item?.optional === true;
+    return {
+      text,
+      ...(killer ? { killer: true } : {}),
+      ...(optional ? { optional: true } : {}),
+      ...(more !== undefined ? { more } : {}),
+    };
   });
+}
+
+/** Indexes that count toward completion (non-optional items). */
+export function requiredIndexes(items: ReadonlyArray<ChecklistItemSpec>): number[] {
+  const out: number[] = [];
+  items.forEach((item, i) => {
+    if (item.optional !== true) out.push(i);
+  });
+  return out;
 }
 
 function rowToChecklist(r: Record<string, unknown>): Checklist | null {

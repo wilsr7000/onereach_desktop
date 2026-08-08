@@ -400,3 +400,78 @@ describe('ADR-055 addendum — revise + delete (2026-08-08)', () => {
     expect(src.slice(delIdx, delIdx + 4000)).toContain('askToConfirm');
   });
 });
+
+describe('required/optional items + AI drafting + accordions (2026-08-08)', () => {
+  it('sanitizer: killer beats optional; more capped at 500; flags survive', async () => {
+    const { sanitizeChecklistItems } = await import('../../spaces/sdk-client.js');
+    const out = sanitizeChecklistItems([
+      { text: 'a', killer: true, optional: true },
+      { text: 'b', optional: true, more: 'x'.repeat(600) },
+      { text: 'c' },
+    ]);
+    expect(out[0]).toEqual({ text: 'a', killer: true }); // optional dropped
+    expect(out[1]?.optional).toBe(true);
+    expect(out[1]?.more?.length).toBe(500);
+    expect(out[2]).toEqual({ text: 'c' });
+  });
+
+  it('requiredIndexes: non-optional positions only', async () => {
+    const { requiredIndexes } = await import('../../spaces/sdk-client.js');
+    expect(
+      requiredIndexes([
+        { text: 'a' },
+        { text: 'b', optional: true },
+        { text: 'c', killer: true },
+        { text: 'd', optional: true },
+      ])
+    ).toEqual([0, 2]);
+  });
+
+  it('completion is required-aware in ALL FOUR Cypher spots, with a legacy fallback', async () => {
+    const { CYPHER } = await import('../../spaces/sdk-client.js');
+    for (const q of [CYPHER.SET_CHECKLIST_ITEM_PREFLIGHT, CYPHER.SET_CHECKLIST_ITEM_POSTFLIGHT]) {
+      expect(q).toContain('WHEN c.requiredIdx IS NULL');
+      expect(q).toContain('all(req IN c.requiredIdx WHERE req IN r.checkedIdx)');
+    }
+    expect(CYPHER.TICKET_GATE_STATE).toContain('all(req IN cpre.requiredIdx WHERE req IN coalesce(pre.checkedIdx, []))');
+    expect(CYPHER.TICKET_GATE_STATE).toContain('all(req IN cpost.requiredIdx WHERE req IN coalesce(post.checkedIdx, []))');
+    // Create + update persist the denormalized list.
+    expect(CYPHER.CREATE_CHECKLIST).toContain('requiredIdx: $requiredIdx');
+    expect(CYPHER.UPDATE_CHECKLIST).toContain('c.requiredIdx = $requiredIdx');
+  });
+
+  it('the editor is structured rows + AI draft; drafts are reviewed, never auto-saved', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    const src = fs.readFileSync(found as string, 'utf8');
+    const start = src.indexOf('function openChecklistEditorPanel');
+    const body = src.slice(start, start + 12000);
+    expect(body).toContain('checklists.draft(prompt)');
+    expect(body).toContain('Prefill for review — the human saves, never the model.');
+    expect(body).toContain('addItemRow');
+    // Killer implies required, mirrored in the UI.
+    expect(body).toContain("if (killer.checked) req.value = 'required'");
+    // Accordions exist in both surfaces.
+    expect(src).toContain('spaces-checklist-item-more-toggle');
+  });
+
+  it('the AI draft validates through the SAME sanitizer as manual saves', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/main.ts', 'lite/spaces/main.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    const src = fs.readFileSync(found as string, 'utf8');
+    const start = src.indexOf('async draft(prompt: string)');
+    const body = src.slice(start, start + 3200);
+    expect(body).toContain('sanitizeChecklistItems(');
+    expect(body).toContain('jsonMode: true');
+  });
+});

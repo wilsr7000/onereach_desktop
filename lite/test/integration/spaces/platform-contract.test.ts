@@ -249,6 +249,12 @@ function buildStubConsumer(): {
         maybeFail({ id: input.id, name: input.name ?? '' }),
     },
     checklists: {
+      draft: async () => ({
+        name: 'stub',
+        mode: 'DO-CONFIRM' as const,
+        pausePoint: 'before x',
+        items: [{ text: 'one' }],
+      }),
       update: async () => ({ id: 'cl-1', version: 2 }),
       remove: async () => undefined,
       create: async (): Promise<never> => { throw new Error('stub'); },

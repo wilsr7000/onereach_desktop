@@ -418,3 +418,23 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(body).toMatch(/seq !== existingSearchSeq/);
   });
 });
+
+describe('checklist progress label (required-aware)', () => {
+  it('familiar when uniform, required-aware when mixed', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const label = (mod as unknown as {
+      checklistProgressLabel(l: unknown): string;
+    }).checklistProgressLabel;
+    expect(
+      label({ checkedIndexes: [0, 2], checklist: { items: [{ text: 'a' }, { text: 'b' }, { text: 'c' }] } })
+    ).toBe('2/3');
+    expect(
+      label({
+        checkedIndexes: [0, 1],
+        checklist: {
+          items: [{ text: 'a' }, { text: 'b', optional: true }, { text: 'c' }],
+        },
+      })
+    ).toBe('1/2 required · 1 optional done');
+  });
+});

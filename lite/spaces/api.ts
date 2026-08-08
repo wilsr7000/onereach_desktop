@@ -58,6 +58,7 @@ import type {
   TicketChecklist,
   CreateChecklistInput,
   UpdateChecklistInput,
+  ChecklistDraft,
   AttachChecklistInput,
   SetChecklistItemInput,
   CreateAssetInput,
@@ -519,6 +520,9 @@ export interface SpacesChecklistsApi {
   /** List a Space's checklists. Visibility-gated like every read. */
   list(spaceId: string): Promise<Checklist[]>;
 
+  /** AI-drafted checklist from a prompt — reviewed in the GUI, never auto-saved. */
+  draft(prompt: string): Promise<ChecklistDraft>;
+
   /** ADR-055 addendum: revise (version bump; ALL run states reset). */
   update(input: UpdateChecklistInput): Promise<{ id: string; version: number }>;
 
@@ -899,6 +903,10 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async list(_spaceId: string): Promise<Checklist[]> {
       throw notInitialized('checklists.list');
+    },
+
+    async draft(_prompt: string): Promise<ChecklistDraft> {
+      throw notInitialized('checklists.draft');
     },
 
     async update(_input: UpdateChecklistInput): Promise<{ id: string; version: number }> {

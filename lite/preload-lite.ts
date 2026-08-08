@@ -97,6 +97,7 @@ const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 const SPACES_CHECKLISTS_CREATE = 'lite:spaces:checklists:create';
 const SPACES_CHECKLISTS_UPDATE = 'lite:spaces:checklists:update';
+const SPACES_CHECKLISTS_DRAFT = 'lite:spaces:checklists:draft';
 const SPACES_CHECKLISTS_REMOVE = 'lite:spaces:checklists:remove';
 const SPACES_CHECKLISTS_LIST = 'lite:spaces:checklists:list';
 const SPACES_CHECKLISTS_ATTACH = 'lite:spaces:checklists:attach';
@@ -839,6 +840,7 @@ interface SpacesMemberView {
 }
 
 interface SpacesChecklistsBridge {
+  draft(prompt: string): Promise<SpacesIpcResultView<unknown>>;
   update(input: unknown): Promise<SpacesIpcResultView<{ id: string; version: number }>>;
   remove(id: string): Promise<SpacesIpcResultView<{ ok: true }>>;
   create(input: {
@@ -1830,6 +1832,10 @@ const spaces: SpacesBridge = {
   checklists: {
     create: (input) =>
       ipcRenderer.invoke(SPACES_CHECKLISTS_CREATE, { input }) as Promise<SpacesIpcResultView<unknown>>,
+    draft: (prompt: string) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_DRAFT, { prompt }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
     update: (input: unknown) =>
       ipcRenderer.invoke(SPACES_CHECKLISTS_UPDATE, { input }) as Promise<
         SpacesIpcResultView<{ id: string; version: number }>
