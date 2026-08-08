@@ -594,6 +594,15 @@ function wireSidebarSearch(): void {
       input.value = '';
       state.searchQuery = '';
       applySidebarFilter();
+      // Cancel BOTH the debounce timer and any in-flight response —
+      // programmatic value='' fires no input event, so without this
+      // the pending timer painted results for a cleared box
+      // (2026-08-08 review).
+      if (globalSearchTimer !== null) {
+        window.clearTimeout(globalSearchTimer);
+        globalSearchTimer = null;
+      }
+      globalSearchSeq++;
       renderGlobalSearchResults(null);
       event.stopPropagation();
       return;
@@ -722,6 +731,19 @@ function wireSidebarSections(): void {
     if (section === null || name.length === 0) return;
     setSectionCollapsed(name, !section.classList.contains('is-collapsed'));
   });
+  // role="button" rows (Space rows, Recent rows, tree items, search
+  // results) promised keyboard activation but were mouse-only
+  // (2026-08-08 review): synthesize a click on Enter/Space so every
+  // focusable row actually activates.
+  sidebar.addEventListener('keydown', (event: KeyboardEvent): void => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.getAttribute('role') !== 'button') return;
+    if (target instanceof HTMLButtonElement) return; // real buttons work
+    event.preventDefault();
+    target.click();
+  });
 }
 
 function expandAndFocusSearch(): void {
@@ -773,6 +795,23 @@ function wireSidebarToolbar(): void {
 
 const RECENT_SPACES_LIMIT = 5;
 
+/**
+ * Only accept plain CSS color VALUES for graph-controlled colors: hex,
+ * rgb/rgba, hsl/hsla, or a bare color keyword. A shared-graph writer
+ * could otherwise store `url("https://…")` and turn every sidebar
+ * render into a remote beacon (CSP allows img-src https:) —
+ * 2026-08-08 review.
+ */
+export function safeCssColor(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const v = value.trim();
+  if (v.length === 0 || v.length > 64) return null;
+  if (/^#[0-9a-fA-F]{3,8}$/.test(v)) return v;
+  if (/^(rgb|rgba|hsl|hsla)\(\s*[\d.,%\s/]+\)$/.test(v)) return v;
+  if (/^[a-zA-Z]{3,24}$/.test(v)) return v;
+  return null;
+}
+
 /** RECENT trees a user explicitly folded this session (default: open). */
 const collapsedRecentTrees = new Set<string>();
 
@@ -821,8 +860,9 @@ function renderRecentSpaces(): void {
     li.appendChild(expand);
     const dot = document.createElement('span');
     dot.className = 'spaces-row-dot';
-    if (typeof space.color === 'string' && space.color.length > 0) {
-      dot.style.background = space.color;
+    const safeColor = safeCssColor(space.color);
+    if (safeColor !== null) {
+      dot.style.background = safeColor;
     }
     li.appendChild(dot);
     const name = document.createElement('span');
@@ -847,6 +887,10 @@ function scheduleGlobalItemSearch(query: string): void {
   if (globalSearchTimer !== null) window.clearTimeout(globalSearchTimer);
   const trimmed = query.trim();
   if (trimmed.length < 2) {
+    // Kill anything in flight too: a late response for the PREVIOUS
+    // query passed the seq guard and resurrected the cleared panel
+    // (2026-08-08 review).
+    globalSearchSeq++;
     renderGlobalSearchResults(null);
     return;
   }
@@ -960,7 +1004,13 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
   try {
-    const envelope = await bridge.items.list(spaceId, { limit: 30 });
+    // Same call shape as the main grid ON PURPOSE: the per-scope cache
+    // key ignores opts and stores the last caller's fetcher, so a
+    // custom {limit:30} here poisoned the shared entry and the 60s
+    // refresh re-ran it — truncating the OPEN grid to 30 items while
+    // the user watched (2026-08-08 review, HIGH). The tree caps
+    // client-side instead.
+    const envelope = await bridge.items.list(spaceId);
     if (!ul.isConnected) return; // re-render replaced the tree
     ul.replaceChildren();
     if (envelope.ok === false) {
@@ -970,7 +1020,7 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
       ul.appendChild(err);
       return;
     }
-    const items = envelope.value as RendererItemSummary[];
+    const items = (envelope.value as RendererItemSummary[]).slice(0, 30);
     if (items.length === 0) {
       const empty = document.createElement('li');
       empty.className = 'spaces-side-tree-empty';
@@ -1996,6 +2046,7 @@ function setActiveScope(scopeId: string): void {
   state.items = [];
   renderedItemsSignature = null;
   renderedItemsScopeId = null;
+  pendingTileFocusId = null;
   // Sprint 3: clear any active items search on scope switch.
   state.itemsSearchQuery = '';
   state.itemsSearchResults = null;
@@ -2061,7 +2112,31 @@ function applyActiveRow(scopeId: string): void {
 
 // ─── Sidebar rendering ──────────────────────────────────────────────────
 
+/**
+ * Fingerprint of the sidebar AS RENDERED (2026-08-08 review, perf):
+ * every re-render destroyed each expanded tree, painted "Loading…",
+ * and refired one items.list per expanded Space — and the sidebar
+ * re-renders at least every 60s from the cache broadcast. Unchanged
+ * data now skips the rebuild entirely (expansion toggles mutate the
+ * DOM in place, so they never need a repaint and stay OUT of the
+ * signature).
+ */
+let renderedSpacesSignature: string | null = null;
+
+function spacesSidebarSignature(): string {
+  const rows = sortSpaces(state.spaces, state.sortMode)
+    .map(
+      (s) =>
+        `${s.id}:${s.updatedAt ?? ''}:${s.name}:${s.itemCount ?? 0}:${s.visibility ?? ''}:${s.kind ?? ''}`
+    )
+    .join('|');
+  return `${state.sortMode}§${rows}`;
+}
+
 function renderSpaceList(): void {
+  const nextSignature = spacesSidebarSignature();
+  if (nextSignature === renderedSpacesSignature) return;
+  renderedSpacesSignature = nextSignature;
   const list = document.getElementById('spaces-list-spaces');
   if (list === null) return;
   list.replaceChildren();
@@ -2087,6 +2162,9 @@ function renderSpaceList(): void {
     hint.appendChild(cta);
 
     list.appendChild(hint);
+    // RECENT must not keep rows for Spaces that no longer exist
+    // (2026-08-08 review): refresh it on this branch too.
+    renderRecentSpaces();
     return;
   }
   // Sort BEFORE row construction so the DOM order matches state.
@@ -2162,6 +2240,8 @@ function parseTimestamp(iso: string | undefined): number | null {
 }
 
 function renderSpaceListError(message: string): void {
+  // An error paint invalidates the fingerprint so recovery repaints.
+  renderedSpacesSignature = null;
   const list = document.getElementById('spaces-list-spaces');
   if (list === null) return;
   list.replaceChildren();
@@ -2215,7 +2295,7 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   const dot = document.createElement('span');
   dot.className = 'spaces-row-dot';
   if (typeof space.color === 'string' && space.color.length > 0) {
-    dot.style.background = space.color;
+    { const c = safeCssColor(space.color); if (c !== null) dot.style.background = c; }
   }
   li.appendChild(dot);
 
@@ -5588,7 +5668,7 @@ export function buildSpaceChip(chip: RendererSpaceChipRef): HTMLElement {
   const dot = document.createElement('span');
   dot.className = 'spaces-chip-dot';
   if (typeof chip.color === 'string' && chip.color.length > 0) {
-    dot.style.background = chip.color;
+    { const c = safeCssColor(chip.color); if (c !== null) dot.style.background = c; }
   }
   el.appendChild(dot);
 
@@ -5804,7 +5884,7 @@ function buildMembershipRow(
   if (typeof space.color === 'string' && space.color.length > 0) {
     const dot = document.createElement('span');
     dot.className = 'spaces-membership-dot';
-    dot.style.background = space.color;
+    { const c = safeCssColor(space.color); if (c !== null) dot.style.background = c; }
     row.appendChild(dot);
   }
 
@@ -10390,6 +10470,7 @@ function messageFrom(err: unknown): string {
   __spacesRendererForTesting?: unknown;
 }).__spacesRendererForTesting = {
   focusItemTile,
+  safeCssColor,
   buildSpaceRow,
   buildItemCard,
   buildSpaceChip,

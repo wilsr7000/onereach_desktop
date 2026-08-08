@@ -371,6 +371,47 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(body).toMatch(/if \(expanded\) \{\s*\n\s*list\.appendChild\(buildSpaceChildren\(space\.id\)\);/);
   });
 
+  it('sidebar review fixes: cache-safe trees, quiet re-renders, honest search clears', () => {
+    const src = source();
+    // F1 HIGH: the tree must share the grid's exact call shape — a
+    // custom {limit:30} poisoned the shared per-scope cache and
+    // truncated the OPEN grid to 30 items on the next refresh.
+    const tree = bodyOf('async function loadSpaceChildren', 2200);
+    expect(tree).not.toContain('{ limit: 30 }');
+    expect(tree).toContain('.slice(0, 30)');
+    // F2: unchanged space data must not rebuild the sidebar (每 60s the
+    // cache broadcast fired a full teardown + one IPC per expanded tree).
+    expect(src).toMatch(/let renderedSpacesSignature/);
+    const render = bodyOf('function renderSpaceList(): void {', 400);
+    expect(render).toContain('if (nextSignature === renderedSpacesSignature) return;');
+    // F3: both clear paths supersede in-flight searches.
+    const sched = bodyOf('function scheduleGlobalItemSearch', 900);
+    expect(sched).toMatch(/globalSearchSeq\+\+;[\s\S]{0,120}renderGlobalSearchResults\(null\)/);
+    // F4: keyboard activation for role=button rows.
+    expect(src).toContain("if (event.key !== 'Enter' && event.key !== ' ') return;");
+    // Scope switch cancels a stale pending tile focus.
+    expect(bodyOf('function setActiveScope', 1800)).toContain('pendingTileFocusId = null;');
+  });
+
+  it('graph-controlled colors cannot become network beacons', () => {
+    const w = window as unknown as {
+      __spacesRendererForTesting?: { safeCssColor?: (v: unknown) => string | null };
+    };
+    const safe = w.__spacesRendererForTesting?.safeCssColor;
+    expect(safe, 'safeCssColor must be on the test handle').toBeDefined();
+    if (safe === undefined) return;
+    expect(safe('#8b5cf6')).toBe('#8b5cf6');
+    expect(safe('rgb(1, 2, 3)')).toBe('rgb(1, 2, 3)');
+    expect(safe('rebeccapurple')).toBe('rebeccapurple');
+    expect(safe('url("https://attacker.example/beacon")')).toBeNull();
+    expect(safe('red; background-image: url(https://x)')).toBeNull();
+    expect(safe(12)).toBeNull();
+    expect(safe('a'.repeat(80))).toBeNull();
+    // No raw graph-color assignment may remain.
+    const src = source();
+    expect(src).not.toMatch(/style\.background = (space|chip)\.color/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);
