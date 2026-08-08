@@ -1924,3 +1924,27 @@ body {
   color: rgba(255, 255, 255, 0.88);
   font-variant-numeric: tabular-nums;
 }
+
+
+/* About: the cap-chew signature (2026-08-08). */
+.about-sig {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--or-border-subtle, rgba(255,255,255,0.06));
+}
+.about-capchew {
+  display: block;
+  height: 24px;
+  width: auto;
+  opacity: 0.9;
+  filter: contrast(1.05);
+}
+.about-sig-line {
+  font-family: var(--or-font-display, Georgia, serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--or-text-muted, rgba(255,255,255,0.48));
+}

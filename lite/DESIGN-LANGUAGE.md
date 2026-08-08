@@ -1,12 +1,15 @@
-# The Quiet Machine — Onereach.ai Lite design language
+# The Invisible Machine — Onereach.ai Lite design language
 
 > Tufte's honesty × Apple's restraint × Nirvana's soul.
-> The interface disappears so the work can be loved.
+> The best machine is invisible: the interface disappears so the work
+> can be loved.
 
-This is the visual constitution for Lite. Every surface answers to it.
-When a choice is unclear, re-read the three voices and pick the one
-that serves the *content* — a user's Spaces, playbooks, agents — over
-the chrome around it.
+The name is the thesis, borrowed from the house canon — *Age of
+Invisible Machines*. Software at its best gets out of the way; you feel
+the outcome, not the mechanism. This is the visual constitution for
+Lite, and every surface answers to it. When a choice is unclear,
+re-read the three voices and pick the one that serves the *content* — a
+user's Spaces, playbooks, agents — over the chrome around it.
 
 ## The three voices
 
