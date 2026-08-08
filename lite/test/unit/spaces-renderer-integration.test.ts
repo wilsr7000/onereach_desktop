@@ -296,7 +296,9 @@ describe('Uncategorized pulse dot (Phase 1d/1e)', () => {
 // toggling it inserts/removes the item-tree holder as the row's
 // sibling, and tree rows tag items with a kind glyph. The full fetch
 // path is exercised live; these pin the DOM contract a re-render must
-// preserve (expanded trees survive repaints via expandedSpaceTrees).
+// preserve. Default flipped 2026-08-08: trees are OPEN by default
+// (collapsedSpaceTrees records explicit folds), so a fresh id's first
+// toggle COLLAPSES and the second re-expands.
 
 describe('sidebar explorer trees', () => {
   it('buildSpaceRow renders the expand chevron ahead of the dot', async () => {
@@ -310,20 +312,37 @@ describe('sidebar explorer trees', () => {
     expect(row.firstElementChild).toBe(expand);
   });
 
-  it('toggleSpaceTree inserts a children holder after the row, then removes it', async () => {
+  it('toggleSpaceTree folds an open-by-default tree, then re-expands it', async () => {
     const mod = await import('../../spaces/spaces.js');
-    document.body.innerHTML = '<ul><li id="row-a" class="spaces-row spaces-row-space"></li></ul>';
+    document.body.innerHTML = '<ul><li id="row-a" class="spaces-row spaces-row-space is-expanded"></li></ul>';
     const row = document.getElementById('row-a');
     if (row === null) throw new Error('fixture row missing');
 
+    // Fresh id = open by default → first toggle collapses.
+    mod.toggleSpaceTree('sp-tree-1', row);
+    expect(row.nextElementSibling).toBeNull();
+    expect(row.classList.contains('is-expanded')).toBe(false);
+
+    // Second toggle re-expands and inserts the holder.
     mod.toggleSpaceTree('sp-tree-1', row);
     const holder = row.nextElementSibling;
     expect(holder?.classList.contains('spaces-tree-children-holder')).toBe(true);
     expect(row.classList.contains('is-expanded')).toBe(true);
+  });
 
-    mod.toggleSpaceTree('sp-tree-1', row);
-    expect(row.nextElementSibling).toBeNull();
-    expect(row.classList.contains('is-expanded')).toBe(false);
+  it('space trees render OPEN by default on the sidebar paint', async () => {
+    // "why are assets in spaces loading only when clicked?" — the
+    // renderer must append the children holder for every space the
+    // user has NOT explicitly folded.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    const src = fs.readFileSync(found as string, 'utf8');
+    expect(src).toMatch(/if \(!collapsedSpaceTrees\.has\(space\.id\)\) \{\s*\n\s*list\.appendChild\(buildSpaceChildren\(space\.id\)\);/);
   });
 
   it('itemKindGlyph maps known kinds and falls back for unknown ones', async () => {

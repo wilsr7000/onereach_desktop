@@ -982,8 +982,14 @@ function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
 
 // ─── Per-Space item trees — the explorer expansion ─────────────────────
 
-/** Space ids whose item tree is currently expanded (survives re-render). */
-const expandedSpaceTrees = new Set<string>();
+/**
+ * Space ids whose item tree the user explicitly FOLDED this session.
+ * Default flipped 2026-08-08: trees render OPEN ("why are assets in
+ * spaces loading only when clicked?"), so the set records collapses —
+ * the shared grid cache + signature-guarded renders make the default
+ * cheap (one cache-fronted list per Space per paint, no churn after).
+ */
+const collapsedSpaceTrees = new Set<string>();
 
 function buildSpaceChildren(spaceId: string): HTMLLIElement {
   const holder = document.createElement('li');
@@ -1066,9 +1072,9 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
 
 export function toggleSpaceTree(spaceId: string, row: HTMLElement): void {
   const holder = row.nextElementSibling;
-  const isOpen = expandedSpaceTrees.has(spaceId);
+  const isOpen = !collapsedSpaceTrees.has(spaceId);
   if (isOpen) {
-    expandedSpaceTrees.delete(spaceId);
+    collapsedSpaceTrees.add(spaceId);
     row.classList.remove('is-expanded');
     if (
       holder instanceof HTMLElement &&
@@ -1078,7 +1084,7 @@ export function toggleSpaceTree(spaceId: string, row: HTMLElement): void {
     }
     return;
   }
-  expandedSpaceTrees.add(spaceId);
+  collapsedSpaceTrees.delete(spaceId);
   row.classList.add('is-expanded');
   row.insertAdjacentElement('afterend', buildSpaceChildren(spaceId));
 }
@@ -2174,9 +2180,9 @@ function renderSpaceList(): void {
   for (const space of ordered) {
     const row = buildSpaceRow(space, space.id === state.activeScopeId);
     list.appendChild(row);
-    // Re-attach the item tree for Spaces the user had expanded — a
-    // re-render must not silently fold the explorer back up.
-    if (expandedSpaceTrees.has(space.id)) {
+    // Trees render OPEN by default; a re-render must respect only an
+    // explicit fold, never silently collapse the explorer.
+    if (!collapsedSpaceTrees.has(space.id)) {
       list.appendChild(buildSpaceChildren(space.id));
     }
   }
@@ -2285,7 +2291,7 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   expand.className = 'spaces-row-expand';
   expand.setAttribute('aria-label', `Show items in ${space.name}`);
   expand.textContent = '▸';
-  if (expandedSpaceTrees.has(space.id)) li.classList.add('is-expanded');
+  if (!collapsedSpaceTrees.has(space.id)) li.classList.add('is-expanded');
   expand.addEventListener('click', (ev) => {
     ev.stopPropagation();
     toggleSpaceTree(space.id, li);
