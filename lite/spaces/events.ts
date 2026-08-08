@@ -98,6 +98,62 @@ export const SPACES_EVENTS = {
   UNDELETE_START: 'spaces.undelete.start',
   UNDELETE_FINISH: 'spaces.undelete.finish',
   UNDELETE_FAIL: 'spaces.undelete.fail',
+  // ─── setSpaceKind (user <-> shared) ──────────────────────────────────
+  SET_KIND_START: 'spaces.setKind.start',
+  SET_KIND_FINISH: 'spaces.setKind.finish',
+  SET_KIND_FAIL: 'spaces.setKind.fail',
+  // ─── item mutations (2026-08-08 observability pass) ──────────────────
+  // Asset-level CRUD + tag/metadata/space-membership writes. The
+  // `items.setMetadata` span also covers `patchMetadata` /
+  // `removeMetadataKey` (both funnel through `setMetadata`).
+  ITEMS_CREATE_START: 'spaces.items.create.start',
+  ITEMS_CREATE_FINISH: 'spaces.items.create.finish',
+  ITEMS_CREATE_FAIL: 'spaces.items.create.fail',
+  ITEMS_UPDATE_START: 'spaces.items.update.start',
+  ITEMS_UPDATE_FINISH: 'spaces.items.update.finish',
+  ITEMS_UPDATE_FAIL: 'spaces.items.update.fail',
+  ITEMS_DELETE_START: 'spaces.items.delete.start',
+  ITEMS_DELETE_FINISH: 'spaces.items.delete.finish',
+  ITEMS_DELETE_FAIL: 'spaces.items.delete.fail',
+  ITEMS_ADD_TAG_START: 'spaces.items.addTag.start',
+  ITEMS_ADD_TAG_FINISH: 'spaces.items.addTag.finish',
+  ITEMS_ADD_TAG_FAIL: 'spaces.items.addTag.fail',
+  ITEMS_REMOVE_TAG_START: 'spaces.items.removeTag.start',
+  ITEMS_REMOVE_TAG_FINISH: 'spaces.items.removeTag.finish',
+  ITEMS_REMOVE_TAG_FAIL: 'spaces.items.removeTag.fail',
+  ITEMS_SET_METADATA_START: 'spaces.items.setMetadata.start',
+  ITEMS_SET_METADATA_FINISH: 'spaces.items.setMetadata.finish',
+  ITEMS_SET_METADATA_FAIL: 'spaces.items.setMetadata.fail',
+  ITEMS_MOVE_TO_SPACE_START: 'spaces.items.moveToSpace.start',
+  ITEMS_MOVE_TO_SPACE_FINISH: 'spaces.items.moveToSpace.finish',
+  ITEMS_MOVE_TO_SPACE_FAIL: 'spaces.items.moveToSpace.fail',
+  ITEMS_ADD_TO_SPACE_START: 'spaces.items.addToSpace.start',
+  ITEMS_ADD_TO_SPACE_FINISH: 'spaces.items.addToSpace.finish',
+  ITEMS_ADD_TO_SPACE_FAIL: 'spaces.items.addToSpace.fail',
+  ITEMS_REMOVE_FROM_SPACE_START: 'spaces.items.removeFromSpace.start',
+  ITEMS_REMOVE_FROM_SPACE_FINISH: 'spaces.items.removeFromSpace.finish',
+  ITEMS_REMOVE_FROM_SPACE_FAIL: 'spaces.items.removeFromSpace.fail',
+  // ─── ticket mutations ────────────────────────────────────────────────
+  TICKETS_CREATE_START: 'spaces.tickets.create.start',
+  TICKETS_CREATE_FINISH: 'spaces.tickets.create.finish',
+  TICKETS_CREATE_FAIL: 'spaces.tickets.create.fail',
+  TICKETS_UPDATE_START: 'spaces.tickets.update.start',
+  TICKETS_UPDATE_FINISH: 'spaces.tickets.update.finish',
+  TICKETS_UPDATE_FAIL: 'spaces.tickets.update.fail',
+  // ─── agent creation (agents-as-assets) ───────────────────────────────
+  AGENTS_CREATE_START: 'spaces.agents.create.start',
+  AGENTS_CREATE_FINISH: 'spaces.agents.create.finish',
+  AGENTS_CREATE_FAIL: 'spaces.agents.create.fail',
+  AGENTS_CREATE_FROM_LIBRARY_START: 'spaces.agents.createFromLibrary.start',
+  AGENTS_CREATE_FROM_LIBRARY_FINISH: 'spaces.agents.createFromLibrary.finish',
+  AGENTS_CREATE_FROM_LIBRARY_FAIL: 'spaces.agents.createFromLibrary.fail',
+  // ─── membership mutations (sharing) ──────────────────────────────────
+  MEMBERS_ADD_START: 'spaces.members.add.start',
+  MEMBERS_ADD_FINISH: 'spaces.members.add.finish',
+  MEMBERS_ADD_FAIL: 'spaces.members.add.fail',
+  MEMBERS_REMOVE_START: 'spaces.members.remove.start',
+  MEMBERS_REMOVE_FINISH: 'spaces.members.remove.finish',
+  MEMBERS_REMOVE_FAIL: 'spaces.members.remove.fail',
   // ─── GSX migration sweep (ADR-050) ───────────────────────────────────
   GSX_MIGRATE_START: 'spaces.gsxMigrate.start',
   GSX_MIGRATE_FINISH: 'spaces.gsxMigrate.finish',
@@ -141,12 +197,12 @@ interface SpacesCountData {
 
 export interface SpacesListSpacesStartEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.LIST_SPACES_START;
-  level: 'info';
+  level: 'debug';
   data?: Record<string, never>;
 }
 export interface SpacesListSpacesFinishEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.LIST_SPACES_FINISH;
-  level: 'info';
+  level: 'debug';
   durationMs: number;
   data: SpacesCountData;
 }
@@ -161,12 +217,12 @@ export interface SpacesListSpacesFailEvent extends SpacesEventBase {
 
 export interface SpacesItemsListStartEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.ITEMS_LIST_START;
-  level: 'info';
+  level: 'debug';
   data: SpacesScopeData;
 }
 export interface SpacesItemsListFinishEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.ITEMS_LIST_FINISH;
-  level: 'info';
+  level: 'debug';
   durationMs: number;
   data: SpacesScopeData & SpacesCountData;
 }
@@ -181,12 +237,12 @@ export interface SpacesItemsListFailEvent extends SpacesEventBase {
 
 export interface SpacesItemsGetStartEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.ITEMS_GET_START;
-  level: 'info';
+  level: 'debug';
   data: { itemId: string };
 }
 export interface SpacesItemsGetFinishEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.ITEMS_GET_FINISH;
-  level: 'info';
+  level: 'debug';
   durationMs: number;
   data?: Record<string, never>;
 }
@@ -201,12 +257,12 @@ export interface SpacesItemsGetFailEvent extends SpacesEventBase {
 
 export interface SpacesUncategorizedCountStartEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.UNCATEGORIZED_COUNT_START;
-  level: 'info';
+  level: 'debug';
   data?: Record<string, never>;
 }
 export interface SpacesUncategorizedCountFinishEvent extends SpacesEventBase {
   name: typeof SPACES_EVENTS.UNCATEGORIZED_COUNT_FINISH;
-  level: 'info';
+  level: 'debug';
   durationMs: number;
   data: SpacesCountData;
 }

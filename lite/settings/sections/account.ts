@@ -82,6 +82,7 @@ async function renderState(container: HTMLElement): Promise<void> {
     const { session } = await bridge.getSession(ENV);
     renderSession(container, session);
   } catch (err) {
+    window.logging?.warn?.('settings', 'session read failed', { error: (err as Error).message });
     renderError(container, (err as Error).message);
   }
 }
@@ -141,8 +142,10 @@ async function signInFlow(container: HTMLElement, btn: HTMLButtonElement, status
     if (parsed !== null && parsed.code === 'AUTH_CANCELLED') {
       renderSignedOut(container);
     } else if (parsed !== null) {
+      window.logging?.error?.('settings', 'sign-in failed', { code: parsed.code, error: parsed.message });
       setStatus(status, `${parsed.message} ${parsed.remediation}`.trim(), 'error');
     } else {
+      window.logging?.error?.('settings', 'sign-in failed', { error: (err as Error).message });
       setStatus(status, (err as Error).message ?? 'Sign-in failed.', 'error');
     }
   } finally {
@@ -352,6 +355,7 @@ async function signOutFlow(btn: HTMLButtonElement, status: HTMLElement): Promise
     await auth().signOut(ENV);
     // Listener will rerender to signed-out.
   } catch (err) {
+    window.logging?.error?.('settings', 'sign-out failed', { error: (err as Error).message });
     setStatus(status, (err as Error).message ?? 'Sign-out failed.', 'error');
   } finally {
     btn.disabled = false;
@@ -484,7 +488,8 @@ function mountAttributionEmail(host: HTMLElement): void {
         note.textContent = 'Not set.';
       }
     })
-    .catch(() => {
+    .catch((err) => {
+      window.logging?.warn?.('settings', 'privacy setting read failed', { error: (err as Error).message });
       note.textContent = 'Could not read the setting.';
     });
 
@@ -501,7 +506,8 @@ function mountAttributionEmail(host: HTMLElement): void {
           note.textContent = envelope.error.message;
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        window.logging?.error?.('settings', 'privacy setting save failed', { error: (err as Error).message });
         note.textContent = 'Save failed.';
       })
       .finally(() => {

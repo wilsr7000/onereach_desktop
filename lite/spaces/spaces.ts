@@ -528,7 +528,8 @@ async function loadCurrentUser(): Promise<void> {
       name: envelope.value.name.length > 0 ? envelope.value.name : name,
       ...(envelope.value.email !== undefined ? { email: envelope.value.email } : {}),
     };
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'loadCurrentUser failed', { error: messageFrom(err) });
     // Soft failure: keep currentUser null and proceed.
   }
 }
@@ -569,6 +570,7 @@ async function loadSpaces(): Promise<void> {
     renderSpaceList();
     markSpacesBootSucceeded();
   } catch (err) {
+    window.logging?.error?.('spaces', 'loadSpaces failed', { error: messageFrom(err) });
     state.loadingSpaces = false;
     renderSpaceListError(messageFrom(err));
   }
@@ -585,7 +587,8 @@ async function loadUncategorizedCount(): Promise<void> {
     }
     state.uncategorizedCount = envelope.value;
     renderUncategorizedCount(envelope.value);
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'loadUncategorizedCount failed', { error: messageFrom(err) });
     renderUncategorizedCount(null);
   }
 }
@@ -1121,7 +1124,8 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
       });
       ul.appendChild(chip);
     }
-  } catch {
+  } catch (loadErr) {
+    window.logging?.warn?.('spaces', 'sidebar space-children load failed', { error: messageFrom(loadErr) });
     if (!ul.isConnected) return;
     ul.replaceChildren();
     const err = document.createElement('li');
@@ -1640,6 +1644,7 @@ async function loadItems(): Promise<void> {
     renderItemList({});
   } catch (err) {
     if (seq !== loadItemsSeq) return; // superseded by a newer reload
+    window.logging?.error?.('spaces', 'loadItems failed', { scope: state.activeScopeId, error: messageFrom(err) });
     state.loadingItems = false;
     if (state.items.length > 0) {
       showToast(messageFrom(err));
@@ -1690,6 +1695,7 @@ async function loadSpaceEvents(spaceId: string): Promise<void> {
       state.spaceEvents.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'loadSpaceEvents failed', { error: messageFrom(err) });
     state.spaceEvents.error = messageFrom(err);
   } finally {
     state.spaceEvents.loading = false;
@@ -1759,6 +1765,7 @@ async function loadItemDetail(itemId: string): Promise<void> {
     // ADR-057: version history, same lazy/soft-fail posture.
     void loadItemHistory(itemId);
   } catch (err) {
+    window.logging?.error?.('spaces', 'loadItemDetail failed', { itemId, error: messageFrom(err) });
     state.loadingDetail = false;
     renderDetail({ error: messageFrom(err) });
   }
@@ -1786,7 +1793,8 @@ async function loadItemActivity(itemId: string): Promise<void> {
     );
     if (slot === null) return;
     slot.replaceChildren(buildDetailActivity(envelope.value));
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'loadItemActivity failed', { error: messageFrom(err) });
     // Soft failure: activity slot stays empty.
   }
 }
@@ -2224,6 +2232,7 @@ async function resolveAndInjectFileUrl(
       const remoteUrl = urlEnv.ok === true && typeof urlEnv.value === 'string' ? urlEnv.value : null;
       injectPdfViewer(item, dataUrl, remoteUrl);
     } catch (err) {
+      window.logging?.warn?.('spaces', 'detail PDF preview failed', { itemId: item.id, error: messageFrom(err) });
       swapPreviewToUnavailable(item, (err as Error).message);
     }
     return;
@@ -2274,6 +2283,7 @@ async function resolveAndInjectFileUrl(
     }
     injectBinaryPreview(item, url);
   } catch (err) {
+    window.logging?.warn?.('spaces', 'detail file preview failed', { itemId: item.id, error: messageFrom(err) });
     // Soft failure: keep the rail readable, swap the placeholder to
     // the unavailable state so the user knows the attempt happened.
     swapPreviewToUnavailable(item, (err as Error).message);
@@ -3689,6 +3699,7 @@ async function changeMemberAccess(
     if (refresh !== undefined) await refresh();
     else await loadSharedSpaceDashboard(spaceId);
   } catch (err) {
+    window.logging?.error?.('spaces', 'changeMemberAccess failed', { spaceId, memberId: member.id, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -4043,6 +4054,8 @@ async function loadSharedSpaceDashboard(spaceId: string): Promise<void> {
   } catch (err) {
     // Whole-fetch failure (the bridge itself rejected). Keep prior
     // data, flag every section, and repaint so the banners show.
+    // (Merge note: subsumes the observability chip's warn-only catch —
+    // this logs at error AND keeps stale data visible.)
     const message = messageFrom(err);
     window.logging?.error?.('spaces', 'shared-dashboard load threw', { spaceId, message });
     if (state.activeScopeId !== spaceId) return;
@@ -4076,6 +4089,7 @@ async function cycleTicketStatus(ticket: RendererItem): Promise<void> {
       await loadSharedSpaceDashboard(state.activeScopeId);
     }
   } catch (err) {
+    window.logging?.error?.('spaces', 'cycleTicketStatus failed', { ticketId: ticket.id, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -4264,6 +4278,7 @@ async function openCreateTicketPrompt(spaceId: string): Promise<void> {
     showToast(`Created ticket "${trimmed}"`);
     await loadSharedSpaceDashboard(spaceId);
   } catch (err) {
+    window.logging?.error?.('spaces', 'createTicket failed', { spaceId, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -4384,6 +4399,7 @@ async function openAddMemberPrompt(
       if (refresh !== undefined) await refresh();
       else await loadSharedSpaceDashboard(spaceId);
     } catch (err) {
+      window.logging?.error?.('spaces', 'addMember failed', { spaceId, error: messageFrom(err) });
       showToast(messageFrom(err));
     }
   };
@@ -4423,6 +4439,7 @@ async function openAddMemberPrompt(
       }
     } catch (err) {
       if (seq !== searchSeq) return;
+      window.logging?.warn?.('spaces', 'member search failed', { error: messageFrom(err) });
       results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
     }
   };
@@ -4485,6 +4502,7 @@ async function removeMember(
     if (refresh !== undefined) await refresh();
     else await loadSharedSpaceDashboard(spaceId);
   } catch (err) {
+    window.logging?.error?.('spaces', 'removeMember failed', { spaceId, memberId, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -4547,6 +4565,7 @@ async function toggleSpaceVisibility(space: RendererSpace): Promise<void> {
     await loadSpaces();
     await loadItems();
   } catch (err) {
+    window.logging?.error?.('spaces', 'toggleSpaceVisibility failed', { spaceId: space.id, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -4585,7 +4604,8 @@ async function populateVisibilityMembers(
       void openAddMemberPrompt(space.id, refresh);
     });
     strip.appendChild(addBtn);
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'populateVisibilityMembers failed', { error: messageFrom(err) });
     strip.textContent = '';
   }
 }
@@ -4843,6 +4863,7 @@ function enterSpaceObjectiveEdit(
       restorePlain(envelope.value.description ?? next);
       showToast('Objective updated.');
     } catch (err) {
+      window.logging?.error?.('spaces', 'space objective save failed', { error: messageFrom(err) });
       showToast(messageFrom(err));
       textarea.disabled = false;
       saveBtn.disabled = false;
@@ -5094,6 +5115,7 @@ async function performBulkMove(
           succeeded += 1;
         }
       } catch (err) {
+        window.logging?.error?.('spaces', 'bulk move item failed', { error: messageFrom(err) });
         failures.push(messageFrom(err));
       }
     })
@@ -5139,6 +5161,7 @@ async function performBulkDelete(btn: HTMLButtonElement): Promise<void> {
           succeeded += 1;
         }
       } catch (err) {
+        window.logging?.error?.('spaces', 'bulk delete item failed', { error: messageFrom(err) });
         failures.push(messageFrom(err));
       }
     })
@@ -7163,6 +7186,7 @@ async function toggleSpaceMembership(
     void loadSpaces();
     void loadItems();
   } catch (err) {
+    window.logging?.error?.('spaces', 'toggleSpaceMembership failed', { error: messageFrom(err) });
     box.checked = !wantMember;
     showToast(messageFrom(err));
   } finally {
@@ -7242,7 +7266,8 @@ async function loadSpaceSuggestions(
       host.appendChild(buildSuggestionRow(item, space, s.reason));
     }
     host.hidden = host.children.length === 0;
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'space suggestions load failed', { error: messageFrom(err) });
     /* suggestions are optional -- stay silent */
   }
 }
@@ -7305,6 +7330,7 @@ function buildSuggestionRow(
         void loadSpaces();
         void loadItems();
       } catch (err) {
+        window.logging?.error?.('spaces', 'suggestion add failed', { error: messageFrom(err) });
         showToast(messageFrom(err));
         add.disabled = false;
       }
@@ -7417,6 +7443,7 @@ async function performMoveAsset(
     }
     await loadItemDetail(itemId);
   } catch (err) {
+    window.logging?.error?.('spaces', 'moveAsset failed', { itemId, toSpaceId, error: messageFrom(err) });
     showToast(messageFrom(err));
     select.disabled = false;
   }
@@ -7489,6 +7516,7 @@ async function promoteToPlaybook(
       loadSharedSpaceDashboard(spaceId),
     ]);
   } catch (err) {
+    window.logging?.error?.('spaces', 'promoteToPlaybook failed', { spaceId, itemId, error: messageFrom(err) });
     btn.textContent = 'Set as playbook';
     btn.disabled = false;
     showToast(messageFrom(err));
@@ -7657,7 +7685,8 @@ async function autoEnrichOnCreate(
       showToast('✨ Metadata added automatically');
       await loadItems();
     }
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'auto-enrich on create failed', { error: messageFrom(err) });
     // best-effort: a failed auto-enrich never disrupts the create flow.
   }
 }
@@ -8083,7 +8112,8 @@ export function buildDetailMetadata(
         x.addEventListener('click', () => {
           x.disabled = true;
           row.classList.add('is-removing');
-          onRemove(key).catch(() => {
+          onRemove(key).catch((err) => {
+            window.logging?.error?.('spaces', 'metadata remove failed', { key, error: messageFrom(err) });
             x.disabled = false;
             row.classList.remove('is-removing');
           });
@@ -8119,7 +8149,8 @@ function buildAutoFillButton(onAutoFill: () => Promise<void>): HTMLElement {
     const original = button.textContent;
     button.textContent = '✨ Extracting…';
     void onAutoFill()
-      .catch(() => {
+      .catch((err) => {
+        window.logging?.warn?.('spaces', 'metadata auto-fill failed', { error: messageFrom(err) });
         // Errors surface as a toast inside the callback; nothing to do
         // here beyond restoring the button if it's still mounted.
       })
@@ -8199,7 +8230,8 @@ function buildAddMetadataAffordance(
       wrap.classList.add('is-saving');
       try {
         await onAdd(key, value);
-      } catch {
+      } catch (err) {
+        window.logging?.error?.('spaces', 'metadata add failed', { key, error: messageFrom(err) });
         keyInput.disabled = false;
         valueInput.disabled = false;
         wrap.classList.remove('is-saving');
@@ -8267,7 +8299,8 @@ export function buildKindReclassify(
     select.disabled = true;
     wrap.classList.add('is-saving');
     onTypeChange(next)
-      .catch(() => {
+      .catch((err) => {
+        window.logging?.error?.('spaces', 'kind reclassify failed', { itemId: item.id, error: messageFrom(err) });
         // Rollback the select on error so the user sees the prior
         // kind. The state-machine wrapper logs the failure via
         // the bridge's normalized error envelope.
@@ -8333,7 +8366,8 @@ export function buildEditableTitle(
         await onTitleSave(next);
         current = next;
         display.textContent = next;
-      } catch {
+      } catch (err) {
+        window.logging?.error?.('spaces', 'title save failed', { error: messageFrom(err) });
         // Leave the prior value visible and the input populated so
         // the user can retry without retyping.
         input.disabled = false;
@@ -8498,7 +8532,8 @@ export function buildEditableDescription(
       try {
         await onSave!(next);
         restoreDisplay(next);
-      } catch {
+      } catch (err) {
+        window.logging?.error?.('spaces', 'description save failed', { error: messageFrom(err) });
         // Leave the editor open with the typed text intact so the user
         // can retry without retyping. The bridge surface logs the
         // failure via the normalized error envelope.
@@ -8592,7 +8627,8 @@ function enterMetadataValueEdit(
       // The renderer re-paints from the freshly-fetched item; this DOM
       // node is about to be replaced. Leaving the input in place is
       // fine — the parent <dd> goes away on the re-render.
-    } catch {
+    } catch (err) {
+      window.logging?.error?.('spaces', 'metadata value save failed', { error: messageFrom(err) });
       input.disabled = false;
       dd.classList.remove('is-saving');
       // Leave the input populated so the user can retry without
@@ -8700,7 +8736,8 @@ export function buildDetailTags(
       x.addEventListener('click', () => {
         x.disabled = true;
         chip.classList.add('is-removing');
-        cb(tag.trim()).catch(() => {
+        cb(tag.trim()).catch((err) => {
+          window.logging?.error?.('spaces', 'tag remove failed', { error: messageFrom(err) });
           x.disabled = false;
           chip.classList.remove('is-removing');
         });
@@ -8748,7 +8785,8 @@ function buildAddTagAffordance(onAdd: (tag: string) => Promise<void>): HTMLEleme
       wrap.classList.add('is-saving');
       try {
         await onAdd(next);
-      } catch {
+      } catch (err) {
+        window.logging?.error?.('spaces', 'tag add failed', { error: messageFrom(err) });
         input.disabled = false;
         wrap.classList.remove('is-saving');
         return;
@@ -8961,6 +8999,7 @@ function enterContentEditMode(
           exitToRendered(next);
         }
       } catch (err) {
+        window.logging?.error?.('spaces', 'content save failed', { error: messageFrom(err) });
         errorEl.textContent = (err as Error).message;
         errorEl.hidden = false;
         saveBtn.disabled = false;
@@ -9394,7 +9433,8 @@ function buildTicketChecklistsSection(item: RendererItem): HTMLElement {
       for (const link of links) {
         list.appendChild(buildChecklistRunCard(item, link, reload));
       }
-    } catch {
+    } catch (err) {
+      window.logging?.warn?.('spaces', 'ticket checklists load failed', { error: messageFrom(err) });
       /* soft — the ticket pane still works without checklists */
     }
   };
@@ -9535,6 +9575,7 @@ async function toggleChecklistItem(
     }
     await reload();
   } catch (err) {
+    window.logging?.error?.('spaces', 'checklist item toggle failed', { error: messageFrom(err) });
     box.checked = !box.checked;
     showToast(messageFrom(err));
   } finally {
@@ -9595,7 +9636,8 @@ function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
         for (const c of lists) {
           host.appendChild(buildChecklistLibraryCard(space, c, refresh));
         }
-      } catch {
+      } catch (err) {
+        window.logging?.warn?.('spaces', 'checklist library load failed', { error: messageFrom(err) });
         host.textContent = 'Could not load checklists.';
       }
     })();
@@ -10255,7 +10297,8 @@ async function openAttachChecklistPanel(
       row.addEventListener('click', () => void attach(c.id));
       listHost.appendChild(row);
     }
-  } catch {
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'attach-checklist list load failed', { error: messageFrom(err) });
     listHost.textContent = 'Could not load checklists.';
   }
 
@@ -10353,7 +10396,8 @@ export function buildDetailTicketBlock(
       select.disabled = true;
       wrap.classList.add('is-saving');
       onStatusChange(next)
-        .catch(() => {
+        .catch((err) => {
+          window.logging?.error?.('spaces', 'ticket status change failed', { error: messageFrom(err) });
           select.value = status;
         })
         .finally(() => {
@@ -10625,6 +10669,7 @@ export async function refreshCounts(): Promise<void> {
       state.home.counts.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'home counts load failed', { error: messageFrom(err) });
     state.home.counts.error = messageFrom(err);
   } finally {
     state.home.counts.loading = false;
@@ -10647,6 +10692,7 @@ export async function refreshContributors(): Promise<void> {
       state.home.contributors.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'home contributors load failed', { error: messageFrom(err) });
     state.home.contributors.error = messageFrom(err);
   } finally {
     state.home.contributors.loading = false;
@@ -10669,6 +10715,7 @@ export async function refreshAgents(): Promise<void> {
       state.home.agents.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'home agents load failed', { error: messageFrom(err) });
     state.home.agents.error = messageFrom(err);
   } finally {
     state.home.agents.loading = false;
@@ -10691,6 +10738,7 @@ export async function refreshPermission(): Promise<void> {
       state.home.permission.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'home permission load failed', { error: messageFrom(err) });
     state.home.permission.error = messageFrom(err);
   } finally {
     state.home.permission.loading = false;
@@ -10716,6 +10764,7 @@ export async function refreshRecentItems(): Promise<void> {
       state.home.recentItems.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'home recent-items load failed', { error: messageFrom(err) });
     state.home.recentItems.error = messageFrom(err);
   } finally {
     state.home.recentItems.loading = false;
@@ -10738,6 +10787,7 @@ export async function refreshEvents(): Promise<void> {
       state.home.events.fetchedAt = Date.now();
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'home events load failed', { error: messageFrom(err) });
     state.home.events.error = messageFrom(err);
   } finally {
     state.home.events.loading = false;
@@ -11901,6 +11951,7 @@ async function openAgentsModal(): Promise<void> {
       body.appendChild(row);
     }
   } catch (err) {
+    window.logging?.warn?.('spaces', 'agents modal load failed', { error: messageFrom(err) });
     body.replaceChildren();
     body.appendChild(buildCardError(messageFrom(err)));
   }
@@ -12460,6 +12511,7 @@ async function refreshFromGraph(trigger: 'button' | 'focus'): Promise<void> {
     if (state.activeScopeId === HOME_SCOPE_ID) void loadHome();
     else void loadItems();
   } catch (err) {
+    window.logging?.warn?.('spaces', 'refreshFromGraph failed', { trigger, error: messageFrom(err) });
     if (trigger === 'button') showToast(`Couldn't refresh: ${(err as Error).message}`);
   } finally {
     refreshInFlight = false;
@@ -13045,6 +13097,7 @@ async function handleDraftWithAi(): Promise<void> {
     newSpaceWizard.objectives = res.value.objectives.slice(0, MAX_WIZARD_OBJECTIVES);
     renderNewSpaceWizard();
   } catch (err) {
+    window.logging?.error?.('spaces', 'wizard AI draft failed', { error: messageFrom(err) });
     if (newSpaceWizard !== null) {
       newSpaceWizard.busy = false;
       renderNewSpaceWizard();
@@ -13133,7 +13186,8 @@ async function createSpaceFromWizard(): Promise<void> {
           const added = await bridge.members.add(id, upserted.value.id);
           if (added.ok === false) peopleFailed += 1;
           else peopleAdded += 1;
-        } catch {
+        } catch (err) {
+          window.logging?.warn?.('spaces', 'wizard member add failed', { error: messageFrom(err) });
           peopleFailed += 1;
         }
       }
@@ -13155,6 +13209,7 @@ async function createSpaceFromWizard(): Promise<void> {
     showToast(toast);
     setActiveScope(id);
   } catch (err) {
+    window.logging?.error?.('spaces', 'wizard create failed', { error: messageFrom(err) });
     setWizardBusy(false);
     showWizardError(messageFrom(err));
   }
@@ -13324,6 +13379,7 @@ async function commitRename(
     await loadSpaces();
     showToast(`Renamed to "${trimmed}"`);
   } catch (err) {
+    window.logging?.error?.('spaces', 'space rename failed', { error: messageFrom(err) });
     showToast(messageFrom(err));
     cancelRename(inputEl, null, oldName);
   }
@@ -13390,6 +13446,7 @@ async function toggleSpaceKind(spaceId: string): Promise<void> {
       renderItemList({});
     }
   } catch (err) {
+    window.logging?.error?.('spaces', 'toggleSpaceKind failed', { error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -13437,6 +13494,7 @@ async function performSoftDelete(spaceId: string): Promise<void> {
       onUndo: () => void performUndoDelete(spaceId, displayName),
     });
   } catch (err) {
+    window.logging?.error?.('spaces', 'space delete failed', { spaceId, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -13453,6 +13511,7 @@ async function performUndoDelete(spaceId: string, displayName: string): Promise<
     await loadSpaces();
     showToast(`Restored "${displayName}"`);
   } catch (err) {
+    window.logging?.error?.('spaces', 'space undelete failed', { spaceId, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -13562,6 +13621,7 @@ async function runItemsSearch(): Promise<void> {
     state.itemsSearchResults = envelope.value as RendererItemSummary[];
     renderItemList({});
   } catch (err) {
+    window.logging?.warn?.('spaces', 'items search failed', { error: messageFrom(err) });
     state.itemsSearchResults = [];
     renderItemList({ error: messageFrom(err) });
   }
@@ -14162,6 +14222,7 @@ async function runAgentLibrarySearch(q: string): Promise<void> {
     renderAgentLibraryResults(results, envelope.value);
   } catch (err) {
     if (seq !== agentLibrarySearchSeq) return;
+    window.logging?.warn?.('spaces', 'agent library search failed', { error: messageFrom(err) });
     results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
   }
 }
@@ -14269,6 +14330,7 @@ async function runExistingAssetSearch(q: string): Promise<void> {
     }
   } catch (err) {
     if (seq !== existingSearchSeq) return;
+    window.logging?.warn?.('spaces', 'existing-asset search failed', { error: messageFrom(err) });
     results.replaceChildren(buildAgentLibraryStatus(messageFrom(err)));
   }
 }
@@ -14336,6 +14398,7 @@ export function buildExistingAssetRow(
         await loadItems();
       })
       .catch((err) => {
+        window.logging?.error?.('spaces', 'add existing asset failed', { error: messageFrom(err) });
         showToast(messageFrom(err));
         add.disabled = false;
         add.textContent = '+ Add';
@@ -14755,6 +14818,7 @@ async function submitNewAsset(): Promise<void> {
       });
     }
   } catch (err) {
+    window.logging?.error?.('spaces', 'new asset submit failed', { error: messageFrom(err) });
     showDialogError(error, messageFrom(err));
   } finally {
     if (submit instanceof HTMLButtonElement) submit.disabled = false;
@@ -14835,6 +14899,7 @@ async function performAssetSoftDelete(itemId: string, title: string): Promise<vo
       },
     });
   } catch (err) {
+    window.logging?.error?.('spaces', 'asset delete failed', { itemId, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }
@@ -14851,6 +14916,7 @@ async function performAssetRestore(itemId: string, title: string): Promise<void>
     await loadItems();
     showToast(`Restored "${title}"`);
   } catch (err) {
+    window.logging?.error?.('spaces', 'asset restore failed', { itemId, error: messageFrom(err) });
     showToast(messageFrom(err));
   }
 }

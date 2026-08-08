@@ -2336,6 +2336,7 @@ export class SdkSpacesClient {
    * Throws `SPACES_INVALID_INPUT` for missing id or bad shapes.
    */
   async updateItem(id: string, patch: ItemUpdatePatch): Promise<Item> {
+    return this.withSpan('spaces.items.update', async () => {
     if (typeof id !== 'string' || id.length === 0) {
       throw new SpacesError({
         code: 'SPACES_INVALID_INPUT',
@@ -2393,6 +2394,7 @@ export class SdkSpacesClient {
       });
     }
     return updated;
+    });
   }
 
   /**
@@ -2401,24 +2403,26 @@ export class SdkSpacesClient {
    * whitespace-only tags are rejected with `SPACES_INVALID_INPUT`.
    */
   async addTag(id: string, tag: string): Promise<string[]> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'addTag requires a non-empty id',
-        context: { id },
-      });
-    }
-    const normalized = normalizeTag(tag);
-    if (normalized === null) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: `Tag must be 1..${MAX_ITEM_TAG_LENGTH} chars after trim`,
-        context: { tag },
-      });
-    }
-    await this.run(CYPHER.ADD_TAG, { id, tag: normalized });
-    const updated = await this.getItem(id);
-    return updated?.tags ?? [];
+    return this.withSpan('spaces.items.addTag', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'addTag requires a non-empty id',
+          context: { id },
+        });
+      }
+      const normalized = normalizeTag(tag);
+      if (normalized === null) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Tag must be 1..${MAX_ITEM_TAG_LENGTH} chars after trim`,
+          context: { tag },
+        });
+      }
+      await this.run(CYPHER.ADD_TAG, { id, tag: normalized });
+      const updated = await this.getItem(id);
+      return updated?.tags ?? [];
+    });
   }
 
   /**
@@ -2427,24 +2431,26 @@ export class SdkSpacesClient {
    * just returns empty rows). Returns the updated tag list.
    */
   async removeTag(id: string, tag: string): Promise<string[]> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'removeTag requires a non-empty id',
-        context: { id },
-      });
-    }
-    const normalized = normalizeTag(tag);
-    if (normalized === null) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: `Tag must be 1..${MAX_ITEM_TAG_LENGTH} chars after trim`,
-        context: { tag },
-      });
-    }
-    await this.run(CYPHER.REMOVE_TAG, { id, tag: normalized });
-    const updated = await this.getItem(id);
-    return updated?.tags ?? [];
+    return this.withSpan('spaces.items.removeTag', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'removeTag requires a non-empty id',
+          context: { id },
+        });
+      }
+      const normalized = normalizeTag(tag);
+      if (normalized === null) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Tag must be 1..${MAX_ITEM_TAG_LENGTH} chars after trim`,
+          context: { tag },
+        });
+      }
+      await this.run(CYPHER.REMOVE_TAG, { id, tag: normalized });
+      const updated = await this.getItem(id);
+      return updated?.tags ?? [];
+    });
   }
 
   /**
@@ -2814,26 +2820,28 @@ export class SdkSpacesClient {
    *   than 'user' / 'shared'.
    */
   async setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
-    const validId = validateSpaceId(id);
-    if (kind !== 'user' && kind !== 'shared') {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: `kind must be 'user' or 'shared' (got ${String(kind)})`,
-        context: { kind },
-      });
-    }
-    const now = nowIso();
-    const rows = await this.run(CYPHER.SET_SPACE_KIND, { id: validId, kind, now });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${validId} not found`,
-        remediation: 'It may have been deleted. Refresh and try again.',
-        context: { id: validId },
-      });
-    }
-    const next = optString(rows[0] as Record<string, unknown>, 'kind');
-    return next === 'shared' ? 'shared' : 'user';
+    return this.withSpan('spaces.setKind', async () => {
+      const validId = validateSpaceId(id);
+      if (kind !== 'user' && kind !== 'shared') {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `kind must be 'user' or 'shared' (got ${String(kind)})`,
+          context: { kind },
+        });
+      }
+      const now = nowIso();
+      const rows = await this.run(CYPHER.SET_SPACE_KIND, { id: validId, kind, now });
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${validId} not found`,
+          remediation: 'It may have been deleted. Refresh and try again.',
+          context: { id: validId },
+        });
+      }
+      const next = optString(rows[0] as Record<string, unknown>, 'kind');
+      return next === 'shared' ? 'shared' : 'user';
+    });
   }
 
   /**
@@ -2938,54 +2946,56 @@ export class SdkSpacesClient {
    *   Space doesn't exist.
    */
   async createTicket(spaceId: string, input: CreateTicketInput): Promise<Item> {
-    const validSpaceId = validateSpaceId(spaceId);
-    const title = validateTitle(input.title);
-    const description = validateOptionalDescription(input.description ?? '');
-    const status = input.status ?? 'open';
-    if (!(TICKET_STATUS_SET as Set<string>).has(status)) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: `Unknown ticket status ${String(status)}`,
-        context: { status },
+    return this.withSpan('spaces.tickets.create', async () => {
+      const validSpaceId = validateSpaceId(spaceId);
+      const title = validateTitle(input.title);
+      const description = validateOptionalDescription(input.description ?? '');
+      const status = input.status ?? 'open';
+      if (!(TICKET_STATUS_SET as Set<string>).has(status)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Unknown ticket status ${String(status)}`,
+          context: { status },
+        });
+      }
+      const priority = input.priority ?? null;
+      const playbookId = typeof input.playbookId === 'string' && input.playbookId.length > 0
+        ? input.playbookId
+        : null;
+      const assigneeId = typeof input.assigneeId === 'string' && input.assigneeId.length > 0
+        ? input.assigneeId
+        : null;
+      const id = generateTicketId();
+      const now = nowIso();
+      const rows = await this.run(CYPHER.CREATE_TICKET, {
+        spaceId: validSpaceId,
+        id,
+        title,
+        description,
+        status,
+        priority,
+        playbookId,
+        assigneeId,
+        now,
       });
-    }
-    const priority = input.priority ?? null;
-    const playbookId = typeof input.playbookId === 'string' && input.playbookId.length > 0
-      ? input.playbookId
-      : null;
-    const assigneeId = typeof input.assigneeId === 'string' && input.assigneeId.length > 0
-      ? input.assigneeId
-      : null;
-    const id = generateTicketId();
-    const now = nowIso();
-    const rows = await this.run(CYPHER.CREATE_TICKET, {
-      spaceId: validSpaceId,
-      id,
-      title,
-      description,
-      status,
-      priority,
-      playbookId,
-      assigneeId,
-      now,
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${validSpaceId} not found`,
+          remediation: 'Refresh the list and try again.',
+          context: { spaceId: validSpaceId },
+        });
+      }
+      const created = await this.getItemAfterCreate(id);
+      if (created === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Ticket ${id} disappeared after creation`,
+          context: { id },
+        });
+      }
+      return created;
     });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${validSpaceId} not found`,
-        remediation: 'Refresh the list and try again.',
-        context: { spaceId: validSpaceId },
-      });
-    }
-    const created = await this.getItemAfterCreate(id);
-    if (created === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Ticket ${id} disappeared after creation`,
-        context: { id },
-      });
-    }
-    return created;
   }
 
   /**
@@ -2994,75 +3004,77 @@ export class SdkSpacesClient {
    * freshly re-fetched ticket Item.
    */
   async updateTicket(id: string, patch: UpdateTicketPatch): Promise<Item> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'updateTicket requires a non-empty id',
-        context: { id },
-      });
-    }
-    const params: Record<string, unknown> = {
-      id,
-      title: null,
-      description: null,
-      status: null,
-      priority: null,
-      assigneeId: null,
-    };
-    if (typeof patch.title === 'string') {
-      params['title'] = validateTitle(patch.title);
-    }
-    if (typeof patch.description === 'string') {
-      params['description'] = validateOptionalDescription(patch.description);
-    }
-    if (patch.status !== undefined) {
-      if (!(TICKET_STATUS_SET as Set<string>).has(patch.status)) {
+    return this.withSpan('spaces.tickets.update', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
         throw new SpacesError({
           code: 'SPACES_INVALID_INPUT',
-          message: `Unknown ticket status ${String(patch.status)}`,
-          context: { status: patch.status },
+          message: 'updateTicket requires a non-empty id',
+          context: { id },
         });
       }
-      // ADR-055 — required checklists gate transitions BEFORE the write.
-      await this.assertTicketStatusAllowed(id, patch.status);
-      params['status'] = patch.status;
-    }
-    if (patch.priority !== undefined) {
-      if (!(TICKET_PRIORITIES as Set<string>).has(patch.priority)) {
+      const params: Record<string, unknown> = {
+        id,
+        title: null,
+        description: null,
+        status: null,
+        priority: null,
+        assigneeId: null,
+      };
+      if (typeof patch.title === 'string') {
+        params['title'] = validateTitle(patch.title);
+      }
+      if (typeof patch.description === 'string') {
+        params['description'] = validateOptionalDescription(patch.description);
+      }
+      if (patch.status !== undefined) {
+        if (!(TICKET_STATUS_SET as Set<string>).has(patch.status)) {
+          throw new SpacesError({
+            code: 'SPACES_INVALID_INPUT',
+            message: `Unknown ticket status ${String(patch.status)}`,
+            context: { status: patch.status },
+          });
+        }
+        // ADR-055 — required checklists gate transitions BEFORE the write.
+        await this.assertTicketStatusAllowed(id, patch.status);
+        params['status'] = patch.status;
+      }
+      if (patch.priority !== undefined) {
+        if (!(TICKET_PRIORITIES as Set<string>).has(patch.priority)) {
+          throw new SpacesError({
+            code: 'SPACES_INVALID_INPUT',
+            message: `Unknown priority ${String(patch.priority)}`,
+            context: { priority: patch.priority },
+          });
+        }
+        params['priority'] = patch.priority;
+      }
+      if (patch.assigneeId !== undefined) {
+        // null clears the assignment; a non-empty string sets / re-MERGES it.
+        params['assigneeId'] =
+          typeof patch.assigneeId === 'string' && patch.assigneeId.length > 0
+            ? patch.assigneeId
+            : null;
+      }
+      params['now'] = nowIso();
+      const rows = await this.run(CYPHER.UPDATE_TICKET, params);
+      if (rows.length === 0) {
         throw new SpacesError({
-          code: 'SPACES_INVALID_INPUT',
-          message: `Unknown priority ${String(patch.priority)}`,
-          context: { priority: patch.priority },
+          code: 'SPACES_NOT_FOUND',
+          message: `Ticket ${id} not found`,
+          remediation: 'It may have been deleted. Refresh and try again.',
+          context: { id },
         });
       }
-      params['priority'] = patch.priority;
-    }
-    if (patch.assigneeId !== undefined) {
-      // null clears the assignment; a non-empty string sets / re-MERGES it.
-      params['assigneeId'] =
-        typeof patch.assigneeId === 'string' && patch.assigneeId.length > 0
-          ? patch.assigneeId
-          : null;
-    }
-    params['now'] = nowIso();
-    const rows = await this.run(CYPHER.UPDATE_TICKET, params);
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Ticket ${id} not found`,
-        remediation: 'It may have been deleted. Refresh and try again.',
-        context: { id },
-      });
-    }
-    const updated = await this.getItem(id);
-    if (updated === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Ticket ${id} disappeared after update`,
-        context: { id },
-      });
-    }
-    return updated;
+      const updated = await this.getItem(id);
+      if (updated === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Ticket ${id} disappeared after update`,
+          context: { id },
+        });
+      }
+      return updated;
+    });
   }
 
   // ─── Asset CRUD (Sprint 1) ───────────────────────────────────────────
@@ -3079,95 +3091,97 @@ export class SdkSpacesClient {
    *   unknown kind; `SPACES_NOT_FOUND` if the target Space is missing.
    */
   async createAsset(input: CreateAssetInput): Promise<Item> {
-    const title = validateTitle(input.title);
-    const description = validateOptionalDescription(input.description ?? '');
-    const content = typeof input.content === 'string' ? input.content : '';
-    const fileKey =
-      typeof input.fileKey === 'string' && input.fileKey.length > 0
-        ? input.fileKey
-        : null;
-    const mimeType =
-      typeof input.mimeType === 'string' && input.mimeType.length > 0
-        ? input.mimeType
-        : null;
-    const sourceUrl =
-      typeof input.sourceUrl === 'string' && input.sourceUrl.length > 0
-        ? input.sourceUrl
-        : null;
-    const size =
-      typeof input.size === 'number' && Number.isFinite(input.size) && input.size >= 0
-        ? Math.floor(input.size)
-        : null;
-    // Kind inference: if explicit, use it; else infer from payload.
-    let kind: ItemKind;
-    if (input.kind !== undefined && (ITEM_KINDS as Set<string>).has(input.kind)) {
-      kind = input.kind;
-    } else if (fileKey !== null) {
-      kind = 'other';
-    } else if (sourceUrl !== null) {
-      kind = 'url';
-    } else if (content.length > 0) {
-      kind = 'text';
-    } else {
-      kind = 'other';
-    }
-    const creatorId =
-      typeof input.creatorId === 'string' && input.creatorId.length > 0
-        ? input.creatorId
-        : null;
-    const id = generateAssetId();
-    const now = nowIso();
-    const metadata = stringifyMetadata(input.metadata);
-    const params = {
-      id,
-      kind,
-      title,
-      content,
-      description,
-      fileKey,
-      sourceUrl,
-      mimeType,
-      size,
-      metadata,
-      creatorId,
-      now,
-      commitAuthor:
-        typeof input.creatorName === 'string' && input.creatorName.trim().length > 0
-          ? input.creatorName.trim().slice(0, 120)
-          : creatorId,
-      commitHash: generateCommitHash(),
-      commitTimestampMs: Date.now(),
-    };
-    const targetSpaceId =
-      typeof input.spaceId === 'string' && input.spaceId.length > 0
-        ? input.spaceId
-        : null;
-    if (targetSpaceId === null) {
-      // Uncategorized intake path — no [:BELONGS_TO] edge.
-      await this.run(CYPHER.CREATE_ASSET_UNCATEGORIZED, params);
-    } else {
-      const rows = await this.run(CYPHER.CREATE_ASSET, {
-        ...params,
-        spaceId: targetSpaceId,
-      });
-      if (rows.length === 0) {
+    return this.withSpan('spaces.items.create', async () => {
+      const title = validateTitle(input.title);
+      const description = validateOptionalDescription(input.description ?? '');
+      const content = typeof input.content === 'string' ? input.content : '';
+      const fileKey =
+        typeof input.fileKey === 'string' && input.fileKey.length > 0
+          ? input.fileKey
+          : null;
+      const mimeType =
+        typeof input.mimeType === 'string' && input.mimeType.length > 0
+          ? input.mimeType
+          : null;
+      const sourceUrl =
+        typeof input.sourceUrl === 'string' && input.sourceUrl.length > 0
+          ? input.sourceUrl
+          : null;
+      const size =
+        typeof input.size === 'number' && Number.isFinite(input.size) && input.size >= 0
+          ? Math.floor(input.size)
+          : null;
+      // Kind inference: if explicit, use it; else infer from payload.
+      let kind: ItemKind;
+      if (input.kind !== undefined && (ITEM_KINDS as Set<string>).has(input.kind)) {
+        kind = input.kind;
+      } else if (fileKey !== null) {
+        kind = 'other';
+      } else if (sourceUrl !== null) {
+        kind = 'url';
+      } else if (content.length > 0) {
+        kind = 'text';
+      } else {
+        kind = 'other';
+      }
+      const creatorId =
+        typeof input.creatorId === 'string' && input.creatorId.length > 0
+          ? input.creatorId
+          : null;
+      const id = generateAssetId();
+      const now = nowIso();
+      const metadata = stringifyMetadata(input.metadata);
+      const params = {
+        id,
+        kind,
+        title,
+        content,
+        description,
+        fileKey,
+        sourceUrl,
+        mimeType,
+        size,
+        metadata,
+        creatorId,
+        now,
+        commitAuthor:
+          typeof input.creatorName === 'string' && input.creatorName.trim().length > 0
+            ? input.creatorName.trim().slice(0, 120)
+            : creatorId,
+        commitHash: generateCommitHash(),
+        commitTimestampMs: Date.now(),
+      };
+      const targetSpaceId =
+        typeof input.spaceId === 'string' && input.spaceId.length > 0
+          ? input.spaceId
+          : null;
+      if (targetSpaceId === null) {
+        // Uncategorized intake path — no [:BELONGS_TO] edge.
+        await this.run(CYPHER.CREATE_ASSET_UNCATEGORIZED, params);
+      } else {
+        const rows = await this.run(CYPHER.CREATE_ASSET, {
+          ...params,
+          spaceId: targetSpaceId,
+        });
+        if (rows.length === 0) {
+          throw new SpacesError({
+            code: 'SPACES_NOT_FOUND',
+            message: `Space ${targetSpaceId} not found`,
+            remediation: 'Refresh the list and try again.',
+            context: { spaceId: targetSpaceId },
+          });
+        }
+      }
+      const created = await this.getItemAfterCreate(id);
+      if (created === null) {
         throw new SpacesError({
           code: 'SPACES_NOT_FOUND',
-          message: `Space ${targetSpaceId} not found`,
-          remediation: 'Refresh the list and try again.',
-          context: { spaceId: targetSpaceId },
+          message: `Asset ${id} disappeared after creation`,
+          context: { id },
         });
       }
-    }
-    const created = await this.getItemAfterCreate(id);
-    if (created === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} disappeared after creation`,
-        context: { id },
-      });
-    }
-    return created;
+      return created;
+    });
   }
 
   /**
@@ -3180,100 +3194,102 @@ export class SdkSpacesClient {
    *   missing spaceId; `SPACES_NOT_FOUND` if the target Space is missing.
    */
   async createAgent(input: CreateAgentInput): Promise<Item> {
-    const name = validateTitle(input.name);
-    const okf = typeof input.okf === 'string' ? input.okf : '';
-    if (okf.trim().length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'An agent requires OKF definition text.',
-        remediation: 'Paste a URL or text so Lite can convert it to OKF.',
-        context: { op: 'createAgent' },
-      });
-    }
-    const spaceId = typeof input.spaceId === 'string' ? input.spaceId.trim() : '';
-    if (spaceId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'An agent must be added to a Space.',
-        remediation: 'Open a Space first, then add the agent.',
-        context: { op: 'createAgent' },
-      });
-    }
-    const description = validateOptionalDescription(input.description ?? '');
-    const agentType =
-      typeof input.agentType === 'string' && input.agentType.trim().length > 0
-        ? input.agentType.trim()
-        : 'other';
-    const sourceUrl =
-      typeof input.sourceUrl === 'string' && input.sourceUrl.length > 0
-        ? input.sourceUrl
-        : null;
-    const creatorId =
-      typeof input.creatorId === 'string' && input.creatorId.length > 0
-        ? input.creatorId
-        : null;
-    // Reachability endpoints (MCP / API / Skill). Stored as a JSON
-    // property on the asset (cheap read) AND as per-kind child nodes.
-    const endpoints = normalizeAgentEndpoints(input.endpoints);
-    const agentEndpointsJson = endpoints.length > 0 ? JSON.stringify(endpoints) : '';
-    const id = generateAssetId();
-    const agentId = generateAssetId();
-    const typeId = generateAssetId();
-    const now = nowIso();
-    // Dynamic per-type label, strictly sanitized (Cypher can't
-    // parameterize labels; see sanitizeAgentTypeLabel).
-    const cypher = CYPHER.CREATE_AGENT.replace(
-      '__TYPE_LABEL__',
-      sanitizeAgentTypeLabel(agentType)
-    );
-    const rows = await this.run(cypher, {
-      id,
-      agentId,
-      typeId,
-      spaceId,
-      name,
-      okf,
-      description,
-      sourceUrl,
-      agentType,
-      agentEndpointsJson,
-      metadata: stringifyMetadata(undefined),
-      creatorId,
-      now,
-    });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${spaceId} not found`,
-        remediation: 'Refresh the list and try again.',
-        context: { spaceId },
-      });
-    }
-    // Write each reachability endpoint as a per-kind child node
-    // (separate writes: variable count + dynamic per-kind label).
-    for (const ep of endpoints) {
-      const epCypher = CYPHER.CREATE_AGENT_ENDPOINT.replace(
-        '__KIND_LABEL__',
-        sanitizeAgentTypeLabel(ep.kind)
+    return this.withSpan('spaces.agents.create', async () => {
+      const name = validateTitle(input.name);
+      const okf = typeof input.okf === 'string' ? input.okf : '';
+      if (okf.trim().length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'An agent requires OKF definition text.',
+          remediation: 'Paste a URL or text so Lite can convert it to OKF.',
+          context: { op: 'createAgent' },
+        });
+      }
+      const spaceId = typeof input.spaceId === 'string' ? input.spaceId.trim() : '';
+      if (spaceId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'An agent must be added to a Space.',
+          remediation: 'Open a Space first, then add the agent.',
+          context: { op: 'createAgent' },
+        });
+      }
+      const description = validateOptionalDescription(input.description ?? '');
+      const agentType =
+        typeof input.agentType === 'string' && input.agentType.trim().length > 0
+          ? input.agentType.trim()
+          : 'other';
+      const sourceUrl =
+        typeof input.sourceUrl === 'string' && input.sourceUrl.length > 0
+          ? input.sourceUrl
+          : null;
+      const creatorId =
+        typeof input.creatorId === 'string' && input.creatorId.length > 0
+          ? input.creatorId
+          : null;
+      // Reachability endpoints (MCP / API / Skill). Stored as a JSON
+      // property on the asset (cheap read) AND as per-kind child nodes.
+      const endpoints = normalizeAgentEndpoints(input.endpoints);
+      const agentEndpointsJson = endpoints.length > 0 ? JSON.stringify(endpoints) : '';
+      const id = generateAssetId();
+      const agentId = generateAssetId();
+      const typeId = generateAssetId();
+      const now = nowIso();
+      // Dynamic per-type label, strictly sanitized (Cypher can't
+      // parameterize labels; see sanitizeAgentTypeLabel).
+      const cypher = CYPHER.CREATE_AGENT.replace(
+        '__TYPE_LABEL__',
+        sanitizeAgentTypeLabel(agentType)
       );
-      await this.run(epCypher, {
+      const rows = await this.run(cypher, {
+        id,
         agentId,
-        endpointId: generateAssetId(),
-        kind: ep.kind,
-        url: ep.url,
-        channels: ep.channels.join(','),
+        typeId,
+        spaceId,
+        name,
+        okf,
+        description,
+        sourceUrl,
+        agentType,
+        agentEndpointsJson,
+        metadata: stringifyMetadata(undefined),
+        creatorId,
         now,
       });
-    }
-    const created = await this.getItemAfterCreate(id);
-    if (created === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Agent ${id} disappeared after creation`,
-        context: { id },
-      });
-    }
-    return created;
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${spaceId} not found`,
+          remediation: 'Refresh the list and try again.',
+          context: { spaceId },
+        });
+      }
+      // Write each reachability endpoint as a per-kind child node
+      // (separate writes: variable count + dynamic per-kind label).
+      for (const ep of endpoints) {
+        const epCypher = CYPHER.CREATE_AGENT_ENDPOINT.replace(
+          '__KIND_LABEL__',
+          sanitizeAgentTypeLabel(ep.kind)
+        );
+        await this.run(epCypher, {
+          agentId,
+          endpointId: generateAssetId(),
+          kind: ep.kind,
+          url: ep.url,
+          channels: ep.channels.join(','),
+          now,
+        });
+      }
+      const created = await this.getItemAfterCreate(id);
+      if (created === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Agent ${id} disappeared after creation`,
+          context: { id },
+        });
+      }
+      return created;
+    });
   }
 
   /**
@@ -3343,101 +3359,103 @@ export class SdkSpacesClient {
    * EXISTING agent.
    */
   async createAgentFromLibrary(input: CreateAgentFromLibraryInput): Promise<Item> {
-    const spaceId = typeof input.spaceId === 'string' ? input.spaceId.trim() : '';
-    const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : '';
-    if (spaceId.length === 0 || agentId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'Adding a library agent requires a Space and an agent.',
-        remediation: 'Open a Space, then pick an agent from the library.',
-        context: { op: 'createAgentFromLibrary' },
-      });
-    }
-    const creatorId =
-      typeof input.creatorId === 'string' && input.creatorId.length > 0
-        ? input.creatorId
-        : null;
-    const requested = normalizeAgentEndpoints(input.endpoints);
+    return this.withSpan('spaces.agents.createFromLibrary', async () => {
+      const spaceId = typeof input.spaceId === 'string' ? input.spaceId.trim() : '';
+      const agentId = typeof input.agentId === 'string' ? input.agentId.trim() : '';
+      if (spaceId.length === 0 || agentId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'Adding a library agent requires a Space and an agent.',
+          remediation: 'Open a Space, then pick an agent from the library.',
+          context: { op: 'createAgentFromLibrary' },
+        });
+      }
+      const creatorId =
+        typeof input.creatorId === 'string' && input.creatorId.length > 0
+          ? input.creatorId
+          : null;
+      const requested = normalizeAgentEndpoints(input.endpoints);
 
-    // Idempotent: picking the same agent for the same Space again
-    // returns the existing tile instead of creating a twin.
-    const existing = await this.run(CYPHER.FIND_AGENT_ASSET_IN_SPACE, {
-      spaceId,
-      agentId,
-    });
-    const existingId = existing.length > 0 ? optString(existing[0] ?? {}, 'id') : undefined;
-    if (existingId !== undefined) {
-      const found = await this.getItem(existingId);
-      if (found !== null) return found;
-    }
-
-    // Merge the agent's EXISTING reachability with what the adder
-    // typed, so the tile reports full reachability (requested wins on
-    // kind+url collisions; both get deduped).
-    const currentRows = await this.run(CYPHER.GET_AGENT_ENDPOINTS, { agentId });
-    const current: AgentEndpoint[] = [];
-    for (const r of currentRows) {
-      const kind = optString(r, 'kind');
-      const url = optString(r, 'url');
-      if ((kind !== 'mcp' && kind !== 'api' && kind !== 'skill') || url === undefined || url.length === 0) continue;
-      const channelsRaw = optString(r, 'channels') ?? '';
-      current.push({
-        kind,
-        url,
-        channels: channelsRaw.length > 0 ? channelsRaw.split(',') : [],
-      });
-    }
-    const merged: AgentEndpoint[] = [...requested];
-    for (const ep of current) {
-      if (!merged.some((m) => m.kind === ep.kind && m.url === ep.url)) merged.push(ep);
-    }
-    const agentEndpointsJson = merged.length > 0 ? JSON.stringify(merged) : '';
-
-    const id = generateAssetId();
-    const now = nowIso();
-    const rows = await this.run(CYPHER.CREATE_AGENT_FROM_LIBRARY, {
-      id,
-      spaceId,
-      agentId,
-      agentEndpointsJson,
-      metadata: stringifyMetadata(undefined),
-      creatorId,
-      now,
-    });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${spaceId} or agent ${agentId} not found`,
-        remediation: 'Refresh the library and try again.',
-        context: { spaceId, agentId },
-      });
-    }
-    // Register only the ADDER's endpoints on the shared agent —
-    // MERGEd by (kind, url) so repeat registrations never duplicate
-    // the agent's REACHABLE_VIA children.
-    for (const ep of requested) {
-      const epCypher = CYPHER.CREATE_AGENT_ENDPOINT_MERGED.replace(
-        '__KIND_LABEL__',
-        sanitizeAgentTypeLabel(ep.kind)
-      );
-      await this.run(epCypher, {
+      // Idempotent: picking the same agent for the same Space again
+      // returns the existing tile instead of creating a twin.
+      const existing = await this.run(CYPHER.FIND_AGENT_ASSET_IN_SPACE, {
+        spaceId,
         agentId,
-        endpointId: generateAssetId(),
-        kind: ep.kind,
-        url: ep.url,
-        channels: ep.channels.join(','),
+      });
+      const existingId = existing.length > 0 ? optString(existing[0] ?? {}, 'id') : undefined;
+      if (existingId !== undefined) {
+        const found = await this.getItem(existingId);
+        if (found !== null) return found;
+      }
+
+      // Merge the agent's EXISTING reachability with what the adder
+      // typed, so the tile reports full reachability (requested wins on
+      // kind+url collisions; both get deduped).
+      const currentRows = await this.run(CYPHER.GET_AGENT_ENDPOINTS, { agentId });
+      const current: AgentEndpoint[] = [];
+      for (const r of currentRows) {
+        const kind = optString(r, 'kind');
+        const url = optString(r, 'url');
+        if ((kind !== 'mcp' && kind !== 'api' && kind !== 'skill') || url === undefined || url.length === 0) continue;
+        const channelsRaw = optString(r, 'channels') ?? '';
+        current.push({
+          kind,
+          url,
+          channels: channelsRaw.length > 0 ? channelsRaw.split(',') : [],
+        });
+      }
+      const merged: AgentEndpoint[] = [...requested];
+      for (const ep of current) {
+        if (!merged.some((m) => m.kind === ep.kind && m.url === ep.url)) merged.push(ep);
+      }
+      const agentEndpointsJson = merged.length > 0 ? JSON.stringify(merged) : '';
+
+      const id = generateAssetId();
+      const now = nowIso();
+      const rows = await this.run(CYPHER.CREATE_AGENT_FROM_LIBRARY, {
+        id,
+        spaceId,
+        agentId,
+        agentEndpointsJson,
+        metadata: stringifyMetadata(undefined),
+        creatorId,
         now,
       });
-    }
-    const created = await this.getItemAfterCreate(id);
-    if (created === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} disappeared after creation`,
-        context: { id },
-      });
-    }
-    return created;
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Space ${spaceId} or agent ${agentId} not found`,
+          remediation: 'Refresh the library and try again.',
+          context: { spaceId, agentId },
+        });
+      }
+      // Register only the ADDER's endpoints on the shared agent —
+      // MERGEd by (kind, url) so repeat registrations never duplicate
+      // the agent's REACHABLE_VIA children.
+      for (const ep of requested) {
+        const epCypher = CYPHER.CREATE_AGENT_ENDPOINT_MERGED.replace(
+          '__KIND_LABEL__',
+          sanitizeAgentTypeLabel(ep.kind)
+        );
+        await this.run(epCypher, {
+          agentId,
+          endpointId: generateAssetId(),
+          kind: ep.kind,
+          url: ep.url,
+          channels: ep.channels.join(','),
+          now,
+        });
+      }
+      const created = await this.getItemAfterCreate(id);
+      if (created === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} disappeared after creation`,
+          context: { id },
+        });
+      }
+      return created;
+    });
   }
 
   /**
@@ -3451,27 +3469,29 @@ export class SdkSpacesClient {
    *   delete (id missing OR already soft-deleted).
    */
   async deleteAsset(id: string, opts: DeleteAssetOpts = {}): Promise<void> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'deleteAsset requires a non-empty id',
-        context: { id },
-      });
-    }
-    const soft = opts.soft !== false;
-    if (soft) {
-      const now = nowIso();
-      const rows = await this.run(CYPHER.SOFT_DELETE_ASSET, { id, now });
-      if (rows.length === 0) {
+    return this.withSpan('spaces.items.delete', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
         throw new SpacesError({
-          code: 'SPACES_NOT_FOUND',
-          message: `Asset ${id} not found (it may already be deleted)`,
+          code: 'SPACES_INVALID_INPUT',
+          message: 'deleteAsset requires a non-empty id',
           context: { id },
         });
       }
-      return;
-    }
-    await this.run(CYPHER.HARD_DELETE_ASSET, { id });
+      const soft = opts.soft !== false;
+      if (soft) {
+        const now = nowIso();
+        const rows = await this.run(CYPHER.SOFT_DELETE_ASSET, { id, now });
+        if (rows.length === 0) {
+          throw new SpacesError({
+            code: 'SPACES_NOT_FOUND',
+            message: `Asset ${id} not found (it may already be deleted)`,
+            context: { id },
+          });
+        }
+        return;
+      }
+      await this.run(CYPHER.HARD_DELETE_ASSET, { id });
+    });
   }
 
   /**
@@ -3514,36 +3534,40 @@ export class SdkSpacesClient {
    * `{}` to clear. Idempotent.
    */
   async setMetadata(id: string, metadata: ItemMetadata): Promise<Item> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'setMetadata requires a non-empty id',
-        context: { id },
+    // Also covers `patchMetadata` / `removeMetadataKey` — both funnel
+    // their write through here, so one span covers all three surfaces.
+    return this.withSpan('spaces.items.setMetadata', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'setMetadata requires a non-empty id',
+          context: { id },
+        });
+      }
+      const serialized = stringifyMetadata(metadata);
+      const now = nowIso();
+      const rows = await this.run(CYPHER.SET_METADATA, {
+        id,
+        metadata: serialized,
+        now,
       });
-    }
-    const serialized = stringifyMetadata(metadata);
-    const now = nowIso();
-    const rows = await this.run(CYPHER.SET_METADATA, {
-      id,
-      metadata: serialized,
-      now,
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} not found`,
+          context: { id },
+        });
+      }
+      const updated = await this.getItem(id);
+      if (updated === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} disappeared after metadata write`,
+          context: { id },
+        });
+      }
+      return updated;
     });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} not found`,
-        context: { id },
-      });
-    }
-    const updated = await this.getItem(id);
-    if (updated === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} disappeared after metadata write`,
-        context: { id },
-      });
-    }
-    return updated;
   }
 
   /**
@@ -3612,47 +3636,49 @@ export class SdkSpacesClient {
     fromSpaceId: string | null,
     toSpaceId: string
   ): Promise<Item> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'moveAssetToSpace requires a non-empty id',
-        context: { id },
-      });
-    }
-    if (typeof toSpaceId !== 'string' || toSpaceId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'moveAssetToSpace requires a non-empty toSpaceId',
-        context: { toSpaceId },
-      });
-    }
-    const now = nowIso();
-    const params = {
-      id,
-      fromSpaceId:
-        typeof fromSpaceId === 'string' && fromSpaceId.length > 0
-          ? fromSpaceId
-          : null,
-      toSpaceId,
-      now,
-    };
-    const rows = await this.run(CYPHER.MOVE_ASSET_TO_SPACE, params);
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: 'Asset or target space not found',
-        context: { id, toSpaceId },
-      });
-    }
-    const moved = await this.getItem(id);
-    if (moved === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} disappeared after move`,
-        context: { id },
-      });
-    }
-    return moved;
+    return this.withSpan('spaces.items.moveToSpace', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'moveAssetToSpace requires a non-empty id',
+          context: { id },
+        });
+      }
+      if (typeof toSpaceId !== 'string' || toSpaceId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'moveAssetToSpace requires a non-empty toSpaceId',
+          context: { toSpaceId },
+        });
+      }
+      const now = nowIso();
+      const params = {
+        id,
+        fromSpaceId:
+          typeof fromSpaceId === 'string' && fromSpaceId.length > 0
+            ? fromSpaceId
+            : null,
+        toSpaceId,
+        now,
+      };
+      const rows = await this.run(CYPHER.MOVE_ASSET_TO_SPACE, params);
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'Asset or target space not found',
+          context: { id, toSpaceId },
+        });
+      }
+      const moved = await this.getItem(id);
+      if (moved === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} disappeared after move`,
+          context: { id },
+        });
+      }
+      return moved;
+    });
   }
 
   /**
@@ -3661,42 +3687,44 @@ export class SdkSpacesClient {
    * projection.
    */
   async addAssetToSpace(id: string, toSpaceId: string): Promise<Item> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'addAssetToSpace requires a non-empty id',
-        context: { id },
+    return this.withSpan('spaces.items.addToSpace', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'addAssetToSpace requires a non-empty id',
+          context: { id },
+        });
+      }
+      if (typeof toSpaceId !== 'string' || toSpaceId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'addAssetToSpace requires a non-empty toSpaceId',
+          context: { toSpaceId },
+        });
+      }
+      const now = nowIso();
+      const rows = await this.run(CYPHER.ADD_ASSET_TO_SPACE, {
+        id,
+        toSpaceId,
+        now,
       });
-    }
-    if (typeof toSpaceId !== 'string' || toSpaceId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'addAssetToSpace requires a non-empty toSpaceId',
-        context: { toSpaceId },
-      });
-    }
-    const now = nowIso();
-    const rows = await this.run(CYPHER.ADD_ASSET_TO_SPACE, {
-      id,
-      toSpaceId,
-      now,
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'Asset or target space not found',
+          context: { id, toSpaceId },
+        });
+      }
+      const updated = await this.getItem(id);
+      if (updated === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} disappeared after add`,
+          context: { id },
+        });
+      }
+      return updated;
     });
-    if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: 'Asset or target space not found',
-        context: { id, toSpaceId },
-      });
-    }
-    const updated = await this.getItem(id);
-    if (updated === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} disappeared after add`,
-        context: { id },
-      });
-    }
-    return updated;
   }
 
   /**
@@ -3705,31 +3733,33 @@ export class SdkSpacesClient {
    * no other spaces, it lands in Uncategorized.
    */
   async removeAssetFromSpace(id: string, spaceId: string): Promise<Item> {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'removeAssetFromSpace requires a non-empty id',
-        context: { id },
-      });
-    }
-    if (typeof spaceId !== 'string' || spaceId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'removeAssetFromSpace requires a non-empty spaceId',
-        context: { spaceId },
-      });
-    }
-    const now = nowIso();
-    await this.run(CYPHER.REMOVE_ASSET_FROM_SPACE, { id, spaceId, now });
-    const updated = await this.getItem(id);
-    if (updated === null) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Asset ${id} disappeared after remove-from-space`,
-        context: { id },
-      });
-    }
-    return updated;
+    return this.withSpan('spaces.items.removeFromSpace', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'removeAssetFromSpace requires a non-empty id',
+          context: { id },
+        });
+      }
+      if (typeof spaceId !== 'string' || spaceId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'removeAssetFromSpace requires a non-empty spaceId',
+          context: { spaceId },
+        });
+      }
+      const now = nowIso();
+      await this.run(CYPHER.REMOVE_ASSET_FROM_SPACE, { id, spaceId, now });
+      const updated = await this.getItem(id);
+      if (updated === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Asset ${id} disappeared after remove-from-space`,
+          context: { id },
+        });
+      }
+      return updated;
+    });
   }
 
   /**
@@ -3834,47 +3864,49 @@ export class SdkSpacesClient {
     memberId: string,
     opts: AddSpaceMemberOptions = {}
   ): Promise<SpaceMember> {
-    const validSpaceId = validateSpaceId(spaceId);
-    if (typeof memberId !== 'string' || memberId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'addSpaceMember requires a non-empty memberId',
-        context: { memberId },
+    return this.withSpan('spaces.members.add', async () => {
+      const validSpaceId = validateSpaceId(spaceId);
+      if (typeof memberId !== 'string' || memberId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'addSpaceMember requires a non-empty memberId',
+          context: { memberId },
+        });
+      }
+      // Three distinct intents, and conflating them loses access control:
+      //   - `expiresAt` absent      -> leave any existing grant alone
+      //   - `expiresAt: null`       -> make it permanent
+      //   - `expiresAt: <iso>`      -> expire at that instant
+      const writeExpiry = 'expiresAt' in opts;
+      const expiresUnixMs =
+        opts.expiresAt === undefined || opts.expiresAt === null
+          ? null
+          : parseGrantExpiry(opts.expiresAt, this.now());
+      const rows = await this.run(CYPHER.ADD_SPACE_MEMBER, {
+        spaceId: validSpaceId,
+        memberId,
+        writeExpiry,
+        expiresUnixMs,
       });
-    }
-    // Three distinct intents, and conflating them loses access control:
-    //   - `expiresAt` absent      -> leave any existing grant alone
-    //   - `expiresAt: null`       -> make it permanent
-    //   - `expiresAt: <iso>`      -> expire at that instant
-    const writeExpiry = 'expiresAt' in opts;
-    const expiresUnixMs =
-      opts.expiresAt === undefined || opts.expiresAt === null
-        ? null
-        : parseGrantExpiry(opts.expiresAt, this.now());
-    const rows = await this.run(CYPHER.ADD_SPACE_MEMBER, {
-      spaceId: validSpaceId,
-      memberId,
-      writeExpiry,
-      expiresUnixMs,
+      const row = rows[0] as Record<string, unknown> | undefined;
+      if (row === undefined) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'Space or member not found',
+          remediation: 'Verify both ids exist.',
+          context: { spaceId: validSpaceId, memberId },
+        });
+      }
+      const expiry = row['expiresUnixMs'];
+      return {
+        kind: optString(row, 'kind') ?? 'Person',
+        id: requireString(row, 'id'),
+        name: optString(row, 'name') ?? '',
+        ...(typeof expiry === 'number'
+          ? { accessExpiresAt: new Date(expiry).toISOString() }
+          : {}),
+      };
     });
-    const row = rows[0] as Record<string, unknown> | undefined;
-    if (row === undefined) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: 'Space or member not found',
-        remediation: 'Verify both ids exist.',
-        context: { spaceId: validSpaceId, memberId },
-      });
-    }
-    const expiry = row['expiresUnixMs'];
-    return {
-      kind: optString(row, 'kind') ?? 'Person',
-      id: requireString(row, 'id'),
-      name: optString(row, 'name') ?? '',
-      ...(typeof expiry === 'number'
-        ? { accessExpiresAt: new Date(expiry).toISOString() }
-        : {}),
-    };
   }
 
   /**
@@ -3889,18 +3921,19 @@ export class SdkSpacesClient {
    * must never look done.
    */
   async removeSpaceMember(spaceId: string, memberId: string): Promise<void> {
-    const validSpaceId = validateSpaceId(spaceId);
-    if (typeof memberId !== 'string' || memberId.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_INVALID_INPUT',
-        message: 'removeSpaceMember requires a non-empty memberId',
-        context: { memberId },
+    return this.withSpan('spaces.members.remove', async () => {
+      const validSpaceId = validateSpaceId(spaceId);
+      if (typeof memberId !== 'string' || memberId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'removeSpaceMember requires a non-empty memberId',
+          context: { memberId },
+        });
+      }
+      const rows = await this.run(CYPHER.REMOVE_SPACE_MEMBER, {
+        spaceId: validSpaceId,
+        memberId,
       });
-    }
-    const rows = await this.run(CYPHER.REMOVE_SPACE_MEMBER, {
-      spaceId: validSpaceId,
-      memberId,
-    });
     const row = rows[0] as Record<string, unknown> | undefined;
     if (row === undefined) {
       throw new SpacesError({
@@ -3920,6 +3953,7 @@ export class SdkSpacesClient {
         context: { op: 'members.remove', spaceId: validSpaceId, memberId },
       });
     }
+    });
   }
 
   /** @internal -- helper for disambiguating empty mutation results. */

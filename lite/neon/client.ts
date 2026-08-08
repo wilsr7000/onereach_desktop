@@ -60,7 +60,7 @@ export interface NeonClientConfig {
   /** Optional fetch implementation override (for tests). Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** Optional logger -- structured events for diagnostics. */
-  logger?: (level: 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
+  logger?: (level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: unknown) => void;
   /**
    * Optional span emitter -- when provided, every operation
    * (`query` / `ping` / `configure`) wraps its work in a
@@ -115,7 +115,10 @@ export class EdisonNeonClient {
     try {
       const records = await this.runQuery('query', cypher, parameters);
       span?.finish({ recordCount: records.length });
-      this.log('info', 'neon-client: query ok', {
+      // Per-query success is routine traffic — 'debug' keeps the
+      // info-level bug-report log window free for real signals.
+      // Failures throw (and the span emits `.fail` at error).
+      this.log('debug', 'neon-client: query ok', {
         recordCount: records.length,
         cypherPreview: truncated,
       });

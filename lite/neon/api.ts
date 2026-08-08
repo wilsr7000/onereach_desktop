@@ -234,8 +234,16 @@ function buildDefaultApi(): NeonApi {
       log[level]('neon', message, data);
     },
     // ADR-030: every neon op (query/ping) emits start/finish/fail
-    // through the central event log.
-    spanEmitter: (name, data) => getLoggingApi().start(name, data),
+    // through the central event log. query/ping successes run at
+    // 'debug' — they fire on every graph read (including the 60s
+    // spaces cache refresh) and were flooding the 200-line bug-report
+    // window at idle. `.fail` events stay at 'error' regardless.
+    spanEmitter: (name, data) =>
+      getLoggingApi().start(
+        name,
+        data,
+        name === 'neon.query' || name === 'neon.ping' ? { level: 'debug' } : undefined
+      ),
   });
 
   return {

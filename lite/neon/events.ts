@@ -69,14 +69,18 @@ interface NeonQueryFinishData {
   recordCount: number;
 }
 
+// query/ping start+finish run at 'debug' (2026-08-08 observability
+// pass): they fire on every graph read — including the 60s spaces
+// cache refresh — and flooded the info-level bug-report log window at
+// idle. `.fail` stays 'error'.
 export interface NeonQueryStartEvent extends NeonSpanBase {
   name: typeof NEON_EVENTS.QUERY_START;
-  level: 'info';
+  level: 'debug';
   data: NeonQueryStartData;
 }
 export interface NeonQueryFinishEvent extends NeonSpanBase {
   name: typeof NEON_EVENTS.QUERY_FINISH;
-  level: 'info';
+  level: 'debug';
   durationMs: number;
   data: NeonQueryFinishData;
 }
@@ -91,11 +95,11 @@ export interface NeonQueryFailEvent extends NeonSpanBase {
 
 export interface NeonPingStartEvent extends NeonSpanBase {
   name: typeof NEON_EVENTS.PING_START;
-  level: 'info';
+  level: 'debug';
 }
 export interface NeonPingFinishEvent extends NeonSpanBase {
   name: typeof NEON_EVENTS.PING_FINISH;
-  level: 'info';
+  level: 'debug';
   durationMs: number;
   data: { ok: boolean };
 }

@@ -90,10 +90,16 @@ export interface LoggingApi {
    * Start a span. Returns a {@link Span} you finish() or fail(). Auto-emits
    * `<name>.start` now, `<name>.finish` (or `.fail`) when you complete it.
    *
+   * `opts.level` sets the severity of `.start` / `.finish` (default
+   * 'info'). Pass 'debug' for routine high-frequency spans (background
+   * cache refresh, per-query transport) so idle traffic stays out of
+   * the info-level bug-report log window. `.fail` is always 'error'
+   * regardless — failures stay loud.
+   *
    * @throws {LoggingError} `LOGGING_INVALID_EVENT_NAME` if `name` is
    *   empty or contains whitespace.
    */
-  start(name: string, data?: unknown): Span;
+  start(name: string, data?: unknown, opts?: { level?: 'debug' | 'info' }): Span;
 
   /**
    * Subscribe to events whose name matches `pattern` (glob: `kv.*`,
