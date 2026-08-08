@@ -833,6 +833,7 @@ function renderRecentSpaces(): void {
     li.setAttribute('data-scope-id', space.id);
     li.setAttribute('role', 'button');
     li.setAttribute('tabindex', '0');
+    li.addEventListener('contextmenu', (ev) => openSpaceContextMenu(ev, space));
     const expanded = !collapsedRecentTrees.has(space.id);
     if (expanded) li.classList.add('is-expanded');
     const expand = document.createElement('button');
@@ -976,6 +977,11 @@ function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
       setActiveScope(chip?.id ?? UNCATEGORIZED_SPACE_ID);
       void loadItemDetail(item.id);
     });
+    if (chip !== undefined) {
+      li.addEventListener('contextmenu', (ev) =>
+        openItemContextMenu(ev, { id: item.id, title: item.title }, chip.id)
+      );
+    }
     list.appendChild(li);
   }
 }
@@ -1026,8 +1032,12 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
       ul.appendChild(err);
       return;
     }
-    const items = (envelope.value as RendererItemSummary[]).slice(0, 30);
-    if (items.length === 0) {
+    const window30 = (envelope.value as RendererItemSummary[]).slice(0, 30);
+    // "Hide in this space" is a local view preference (no backend) —
+    // filter here and surface a chip so hidden items are recoverable.
+    const items = window30.filter((i) => !isItemHiddenInSpace(spaceId, i.id));
+    const hiddenCount = window30.length - items.length;
+    if (window30.length === 0) {
       const empty = document.createElement('li');
       empty.className = 'spaces-side-tree-empty';
       empty.textContent = 'Empty';
@@ -1058,7 +1068,24 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
           pendingTileFocusId = item.id;
         }
       });
+      li.addEventListener('contextmenu', (ev) =>
+        openItemContextMenu(ev, { id: item.id, title: item.title }, spaceId)
+      );
       ul.appendChild(li);
+    }
+    if (hiddenCount > 0) {
+      const chip = document.createElement('li');
+      chip.className = 'spaces-side-tree-empty spaces-tree-hidden-chip';
+      chip.textContent = `${hiddenCount} hidden — click to show`;
+      chip.setAttribute('role', 'button');
+      chip.setAttribute('tabindex', '0');
+      chip.addEventListener('click', () => {
+        clearHiddenItemsInSpace(spaceId);
+        showToast('Hidden items restored');
+        void loadSpaceChildren(spaceId, ul);
+        if (state.activeScopeId === spaceId) renderItemList({});
+      });
+      ul.appendChild(chip);
     }
   } catch {
     if (!ul.isConnected) return;
@@ -1067,6 +1094,400 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
     err.className = 'spaces-side-tree-empty';
     err.textContent = 'Couldn’t load items';
     ul.appendChild(err);
+  }
+}
+
+// ─── Sidebar context menus (right-click, 2026-08-08) ───────────────────
+//
+// One generic anchored menu serves both targets: Space rows (share /
+// unshare / upload / rename / info / convert) and item tree rows
+// (add-to / move-to / remove-from space, hide). Entries are built as
+// pure descriptors so tests can pin the menu logic without DOM.
+//
+// "Share" and "Unshare" are the ADR-051 visibility axis ('open' ↔
+// 'restricted'); "Convert" is the kind axis (user ↔ shared). They are
+// deliberately separate menu entries — collapsing them into one
+// toggle is how access bugs get invented.
+
+export type CtxEntry =
+  | {
+      type: 'action';
+      label: string;
+      danger?: boolean;
+      disabled?: boolean;
+      checked?: boolean;
+      run: () => void;
+    }
+  | { type: 'submenu'; label: string; children: CtxEntry[] }
+  | { type: 'info'; label: string; value: string }
+  | { type: 'separator' };
+
+/** Hidden-items view preference: spaceId → item ids. Local, per install. */
+const HIDDEN_ITEMS_KEY = 'lite.spaces.hiddenItems';
+
+export function readHiddenItems(): Record<string, string[]> {
+  try {
+    const raw = window.localStorage.getItem(HIDDEN_ITEMS_KEY);
+    if (raw === null) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed === null || typeof parsed !== 'object') return {};
+    return parsed as Record<string, string[]>;
+  } catch {
+    return {};
+  }
+}
+
+export function isItemHiddenInSpace(spaceId: string, itemId: string): boolean {
+  const map = readHiddenItems();
+  return Array.isArray(map[spaceId]) && map[spaceId].includes(itemId);
+}
+
+export function setItemHiddenInSpace(spaceId: string, itemId: string, hidden: boolean): void {
+  const map = readHiddenItems();
+  const current = Array.isArray(map[spaceId]) ? map[spaceId] : [];
+  const next = hidden
+    ? current.includes(itemId)
+      ? current
+      : [...current, itemId]
+    : current.filter((id) => id !== itemId);
+  if (next.length === 0) {
+    delete map[spaceId];
+  } else {
+    map[spaceId] = next;
+  }
+  try {
+    window.localStorage.setItem(HIDDEN_ITEMS_KEY, JSON.stringify(map));
+  } catch {
+    // best-effort view preference
+  }
+}
+
+export function clearHiddenItemsInSpace(spaceId: string): void {
+  const map = readHiddenItems();
+  delete map[spaceId];
+  try {
+    window.localStorage.setItem(HIDDEN_ITEMS_KEY, JSON.stringify(map));
+  } catch {
+    // best-effort
+  }
+}
+
+/** Menu descriptor for a Space row. Pure — pins share/convert states. */
+export function buildSpaceContextEntries(
+  space: RendererSpace,
+  handlers: {
+    share: () => void;
+    unshare: () => void;
+    upload: () => void;
+    rename: () => void;
+    convertShared: () => void;
+    convertUser: () => void;
+  }
+): CtxEntry[] {
+  const isOpen = space.visibility !== 'restricted';
+  const isShared = space.kind === 'shared';
+  return [
+    {
+      type: 'action',
+      label: 'Share — visible to account',
+      checked: isOpen,
+      disabled: isOpen,
+      run: handlers.share,
+    },
+    {
+      type: 'action',
+      label: 'Unshare — members only',
+      checked: !isOpen,
+      disabled: !isOpen,
+      run: handlers.unshare,
+    },
+    { type: 'separator' },
+    { type: 'action', label: 'Upload file…', run: handlers.upload },
+    { type: 'action', label: 'Rename', run: handlers.rename },
+    { type: 'separator' },
+    {
+      type: 'submenu',
+      label: 'Convert',
+      children: [
+        {
+          type: 'action',
+          label: 'Shared space (AI-managed)',
+          checked: isShared,
+          disabled: isShared,
+          run: handlers.convertShared,
+        },
+        {
+          type: 'action',
+          label: 'User-managed space',
+          checked: !isShared,
+          disabled: !isShared,
+          run: handlers.convertUser,
+        },
+      ],
+    },
+    {
+      type: 'submenu',
+      label: 'Info',
+      children: [
+        { type: 'info', label: 'Kind', value: isShared ? 'Shared (AI-managed)' : 'User-managed' },
+        { type: 'info', label: 'Visibility', value: isOpen ? 'Open to account' : 'Members only' },
+        {
+          type: 'info',
+          label: 'Items',
+          value: typeof space.itemCount === 'number' ? String(space.itemCount) : '—',
+        },
+        {
+          type: 'info',
+          label: 'Created',
+          value: space.createdAt !== undefined && space.createdAt.length > 0
+            ? formatRelativeTime(space.createdAt)
+            : '—',
+        },
+      ],
+    },
+    {
+      type: 'info',
+      label: 'Last updated',
+      value: space.updatedAt !== undefined && space.updatedAt.length > 0
+        ? formatRelativeTime(space.updatedAt)
+        : '—',
+    },
+  ];
+}
+
+/** Menu descriptor for an item row inside a Space's tree. Pure. */
+export function buildItemContextEntries(
+  _item: { id: string; title: string },
+  inSpaceId: string,
+  allSpaces: ReadonlyArray<RendererSpace>,
+  handlers: {
+    addTo: (toSpaceId: string) => void;
+    moveTo: (toSpaceId: string) => void;
+    removeFrom: () => void;
+    hide: () => void;
+  }
+): CtxEntry[] {
+  const others = allSpaces.filter((s) => s.id !== inSpaceId);
+  const toEntries = (run: (id: string) => void): CtxEntry[] =>
+    others.length === 0
+      ? [{ type: 'info', label: 'No other spaces', value: '' }]
+      : others.map((s) => ({
+          type: 'action' as const,
+          label: s.name.length > 0 ? s.name : '(unnamed)',
+          run: () => run(s.id),
+        }));
+  return [
+    { type: 'submenu', label: 'Add to space', children: toEntries(handlers.addTo) },
+    { type: 'submenu', label: 'Move to space', children: toEntries(handlers.moveTo) },
+    { type: 'action', label: 'Remove from this space', danger: true, run: handlers.removeFrom },
+    { type: 'separator' },
+    { type: 'action', label: 'Hide in this space', run: handlers.hide },
+  ];
+}
+
+let ctxMenuEl: HTMLDivElement | null = null;
+
+function closeContextMenu(): void {
+  if (ctxMenuEl !== null) {
+    ctxMenuEl.remove();
+    ctxMenuEl = null;
+  }
+}
+
+function buildCtxEntryRows(host: HTMLElement, entries: CtxEntry[]): void {
+  for (const entry of entries) {
+    if (entry.type === 'separator') {
+      const hr = document.createElement('div');
+      hr.className = 'spaces-ctx-separator';
+      host.appendChild(hr);
+      continue;
+    }
+    if (entry.type === 'info') {
+      const row = document.createElement('div');
+      row.className = 'spaces-ctx-info';
+      const label = document.createElement('span');
+      label.className = 'spaces-ctx-info-label';
+      label.textContent = entry.label;
+      row.appendChild(label);
+      const value = document.createElement('span');
+      value.className = 'spaces-ctx-info-value';
+      value.textContent = entry.value;
+      row.appendChild(value);
+      host.appendChild(row);
+      continue;
+    }
+    if (entry.type === 'submenu') {
+      const row = document.createElement('div');
+      row.className = 'spaces-ctx-item spaces-ctx-item-submenu';
+      const label = document.createElement('span');
+      label.textContent = entry.label;
+      row.appendChild(label);
+      const arrow = document.createElement('span');
+      arrow.className = 'spaces-ctx-submenu-arrow';
+      arrow.textContent = '▸';
+      row.appendChild(arrow);
+      const fly = document.createElement('div');
+      fly.className = 'spaces-ctx-flyout';
+      buildCtxEntryRows(fly, entry.children);
+      row.appendChild(fly);
+      host.appendChild(row);
+      continue;
+    }
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'spaces-ctx-item';
+    if (entry.danger === true) row.classList.add('is-danger');
+    if (entry.disabled === true) row.classList.add('is-disabled');
+    const check = document.createElement('span');
+    check.className = 'spaces-ctx-check';
+    check.textContent = entry.checked === true ? '✓' : '';
+    row.appendChild(check);
+    const label = document.createElement('span');
+    label.textContent = entry.label;
+    row.appendChild(label);
+    if (entry.disabled !== true) {
+      const runFn = entry.run;
+      row.addEventListener('click', () => {
+        closeContextMenu();
+        runFn();
+      });
+    }
+    host.appendChild(row);
+  }
+}
+
+export function openContextMenu(x: number, y: number, entries: CtxEntry[]): void {
+  closeContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'spaces-ctx-menu';
+  buildCtxEntryRows(menu, entries);
+  document.body.appendChild(menu);
+  ctxMenuEl = menu;
+  // Clamp into the viewport once measured.
+  const rect = menu.getBoundingClientRect();
+  const left = Math.min(x, window.innerWidth - rect.width - 8);
+  const top = Math.min(y, window.innerHeight - rect.height - 8);
+  menu.style.left = `${Math.max(4, Math.round(left))}px`;
+  menu.style.top = `${Math.max(4, Math.round(top))}px`;
+  window.setTimeout(() => {
+    document.addEventListener('click', closeContextMenu, { once: true });
+    document.addEventListener('contextmenu', closeContextMenu, { once: true });
+  }, 0);
+  document.addEventListener(
+    'keydown',
+    (ev) => {
+      if (ev.key === 'Escape') closeContextMenu();
+    },
+    { once: true }
+  );
+}
+
+function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const bridge = window.lite?.spaces;
+  const entries = buildSpaceContextEntries(space, {
+    share: () => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const envelope = await bridge.updateSpace(space.id, { visibility: 'open' });
+        showToast(
+          envelope.ok
+            ? `"${space.name}" is now visible to the account`
+            : envelope.error.message
+        );
+        if (envelope.ok) await loadSpaces();
+      })();
+    },
+    unshare: () => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const envelope = await bridge.updateSpace(space.id, { visibility: 'restricted' });
+        showToast(
+          envelope.ok
+            ? `"${space.name}" is now members-only (you keep access)`
+            : envelope.error.message
+        );
+        if (envelope.ok) await loadSpaces();
+      })();
+    },
+    upload: () => {
+      setActiveScope(space.id);
+      openNewAssetDialog();
+      switchNewAssetMode('upload');
+    },
+    rename: () => startInlineRename(space.id),
+    convertShared: () => void toggleSpaceKind(space.id),
+    convertUser: () => void toggleSpaceKind(space.id),
+  });
+  openContextMenu(event.clientX, event.clientY, entries);
+}
+
+function openItemContextMenu(
+  event: MouseEvent,
+  item: { id: string; title: string },
+  inSpaceId: string
+): void {
+  event.preventDefault();
+  event.stopPropagation();
+  const bridge = window.lite?.spaces;
+  const entries = buildItemContextEntries(item, inSpaceId, state.spaces, {
+    addTo: (toSpaceId) => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const envelope = await bridge.items.addToSpace(item.id, toSpaceId);
+        showToast(envelope.ok ? `Added "${item.title}"` : envelope.error.message);
+        if (envelope.ok) refreshSpaceTree(toSpaceId);
+      })();
+    },
+    moveTo: (toSpaceId) => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const envelope = await bridge.items.moveToSpace(item.id, inSpaceId, toSpaceId);
+        showToast(envelope.ok ? `Moved "${item.title}"` : envelope.error.message);
+        if (envelope.ok) {
+          refreshSpaceTree(inSpaceId);
+          refreshSpaceTree(toSpaceId);
+          if (state.activeScopeId === inSpaceId) void loadItems();
+        }
+      })();
+    },
+    removeFrom: () => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const envelope = await bridge.items.removeFromSpace(item.id, inSpaceId);
+        showToast(envelope.ok ? `Removed "${item.title}"` : envelope.error.message);
+        if (envelope.ok) {
+          refreshSpaceTree(inSpaceId);
+          if (state.activeScopeId === inSpaceId) void loadItems();
+        }
+      })();
+    },
+    hide: () => {
+      setItemHiddenInSpace(inSpaceId, item.id, true);
+      showToast('Hidden in this space (sidebar + grid) — click the "hidden" chip to undo');
+      refreshSpaceTree(inSpaceId);
+      if (state.activeScopeId === inSpaceId) renderItemList({});
+    },
+  });
+  openContextMenu(event.clientX, event.clientY, entries);
+}
+
+/**
+ * Re-fetch one Space's rendered trees in place. A Space can hold more
+ * than one tree at once — the SPACES section and the RECENT section
+ * each render their own holder — so this refreshes every match, not
+ * querySelector's first (which is RECENT's invisible copy when that
+ * section is collapsed; refreshing only it left the visible tree
+ * stale — 2026-08-08 drive).
+ */
+function refreshSpaceTree(spaceId: string): void {
+  const holders = document.querySelectorAll<HTMLElement>(
+    `.spaces-tree-children-holder[data-parent-space="${spaceId}"]`
+  );
+  for (const holder of Array.from(holders)) {
+    const ul = holder.querySelector('ul');
+    if (ul instanceof HTMLUListElement) void loadSpaceChildren(spaceId, ul);
   }
 }
 
@@ -2298,6 +2719,10 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   });
   li.appendChild(expand);
 
+  // Right-click → space context menu (share / upload / rename / info /
+  // convert). The ⋯ trigger keeps its click menu; this is the fast path.
+  li.addEventListener('contextmenu', (ev) => openSpaceContextMenu(ev, space));
+
   const dot = document.createElement('span');
   dot.className = 'spaces-row-dot';
   if (typeof space.color === 'string' && space.color.length > 0) {
@@ -2448,8 +2873,12 @@ function renderItemList(opts: RenderItemListOpts): void {
   // vs assets." So this view is now an asset-first grid — content-
   // forward tiles built by `buildItemCard`. Events stay on Home,
   // which is the dedicated activity surface.
+  const scopeVisibleItems = state.items.filter(
+    (i) => !isItemHiddenInSpace(state.activeScopeId, i.id)
+  );
+  const gridHiddenCount = state.items.length - scopeVisibleItems.length;
   const filteredItems = filterItemsByHomeFilter(
-    state.items,
+    scopeVisibleItems,
     state.homeFilter,
     Date.now()
   );
@@ -2457,6 +2886,21 @@ function renderItemList(opts: RenderItemListOpts): void {
   if (opts.loading === true && state.items.length === 0) {
     wrap.appendChild(buildTimelineSkeleton(6));
     return;
+  }
+
+  // "Hide in this space" chip — hidden items stay one click away.
+  if (gridHiddenCount > 0) {
+    const hiddenChip = document.createElement('button');
+    hiddenChip.type = 'button';
+    hiddenChip.className = 'spaces-grid-hidden-chip';
+    hiddenChip.textContent = `${gridHiddenCount} hidden — show`;
+    hiddenChip.addEventListener('click', () => {
+      clearHiddenItemsInSpace(state.activeScopeId);
+      showToast('Hidden items restored');
+      renderItemList({});
+      refreshSpaceTree(state.activeScopeId);
+    });
+    wrap.appendChild(hiddenChip);
   }
 
   if (filteredItems.length === 0) {

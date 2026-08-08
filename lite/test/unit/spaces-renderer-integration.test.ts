@@ -352,3 +352,85 @@ describe('sidebar explorer trees', () => {
     expect(mod.itemKindGlyph('never-heard-of-it')).toBe('▪');
   });
 });
+
+// ─── Sidebar context menus (right-click, 2026-08-08) ───────────────────
+//
+// The menu logic is pure descriptors; these pin the load-bearing
+// rules: Share/Unshare mirror ADR-051 visibility (current state is
+// checked AND disabled — the menu tells you where you are, not just
+// where you can go), Convert marks the current kind, the item menu
+// never offers the containing space as an add/move target, and the
+// hidden-items store round-trips per space.
+
+describe('sidebar context menus', () => {
+  it('space menu: share/unshare + convert reflect current visibility and kind', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const noop = (): void => undefined;
+    const handlers = {
+      share: noop, unshare: noop, upload: noop, rename: noop,
+      convertShared: noop, convertUser: noop,
+    };
+    const entries = mod.buildSpaceContextEntries(
+      { id: 's1', name: 'Open user space', visibility: 'open', kind: 'user',
+        itemCount: 3, createdAt: '2026-08-01T00:00:00Z', updatedAt: '2026-08-07T00:00:00Z' } as never,
+      handlers
+    );
+    const share = entries.find((e) => e.type === 'action' && e.label.startsWith('Share'));
+    const unshare = entries.find((e) => e.type === 'action' && e.label.startsWith('Unshare'));
+    if (share?.type !== 'action' || unshare?.type !== 'action') throw new Error('rows missing');
+    expect(share.checked).toBe(true);
+    expect(share.disabled).toBe(true);
+    expect(unshare.checked).toBe(false);
+    expect(unshare.disabled).toBe(false);
+
+    const convert = entries.find((e) => e.type === 'submenu' && e.label === 'Convert');
+    if (convert?.type !== 'submenu') throw new Error('convert submenu missing');
+    const sharedOpt = convert.children.find(
+      (c) => c.type === 'action' && c.label.startsWith('Shared')
+    );
+    if (sharedOpt?.type !== 'action') throw new Error('shared option missing');
+    expect(sharedOpt.checked).toBe(false);
+
+    // The user's explicit ask: "last updated" as a menu entry.
+    const updated = entries.find((e) => e.type === 'info' && e.label === 'Last updated');
+    expect(updated).toBeDefined();
+  });
+
+  it('item menu excludes the containing space from add/move targets', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const noop = (): void => undefined;
+    const spaces = [
+      { id: 'sp-here', name: 'Here' },
+      { id: 'sp-there', name: 'There' },
+    ];
+    const entries = mod.buildItemContextEntries(
+      { id: 'i1', title: 'Doc' }, 'sp-here', spaces as never,
+      { addTo: noop, moveTo: noop, removeFrom: noop, hide: noop }
+    );
+    const addTo = entries.find((e) => e.type === 'submenu' && e.label === 'Add to space');
+    if (addTo?.type !== 'submenu') throw new Error('add-to submenu missing');
+    const labels = addTo.children
+      .filter((c) => c.type === 'action')
+      .map((c) => (c.type === 'action' ? c.label : ''));
+    expect(labels).toEqual(['There']);
+    const remove = entries.find(
+      (e) => e.type === 'action' && e.label === 'Remove from this space'
+    );
+    if (remove?.type !== 'action') throw new Error('remove row missing');
+    expect(remove.danger).toBe(true);
+  });
+
+  it('hidden-items store round-trips per space and clears cleanly', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    window.localStorage.removeItem('lite.spaces.hiddenItems');
+    expect(mod.isItemHiddenInSpace('sp-1', 'i-1')).toBe(false);
+    mod.setItemHiddenInSpace('sp-1', 'i-1', true);
+    mod.setItemHiddenInSpace('sp-2', 'i-9', true);
+    expect(mod.isItemHiddenInSpace('sp-1', 'i-1')).toBe(true);
+    expect(mod.isItemHiddenInSpace('sp-2', 'i-1')).toBe(false);
+    mod.setItemHiddenInSpace('sp-1', 'i-1', false);
+    expect(mod.isItemHiddenInSpace('sp-1', 'i-1')).toBe(false);
+    mod.clearHiddenItemsInSpace('sp-2');
+    expect(mod.isItemHiddenInSpace('sp-2', 'i-9')).toBe(false);
+  });
+});

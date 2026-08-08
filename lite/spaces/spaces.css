@@ -7539,3 +7539,133 @@ body {
 .spaces-row-space .spaces-row-count {
   flex: 0 0 auto;
 }
+
+/* ─── Sidebar context menus (right-click, 2026-08-08) ────────────────────
+   Anchored menu + flyout submenus, mirroring .spaces-row-menu's tokens. */
+
+.spaces-ctx-menu {
+  position: fixed;
+  z-index: 1600;
+  min-width: 200px;
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12.5px;
+}
+
+.spaces-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: #d2d2d6;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  transition: background 70ms ease;
+}
+
+.spaces-ctx-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.spaces-ctx-item.is-danger {
+  color: #ff8a8a;
+}
+
+.spaces-ctx-item.is-disabled {
+  color: #5b6172;
+  cursor: default;
+}
+
+.spaces-ctx-item.is-disabled:hover {
+  background: transparent;
+}
+
+.spaces-ctx-check {
+  width: 12px;
+  flex: 0 0 auto;
+  color: #7ba7ff;
+  font-size: 11px;
+}
+
+.spaces-ctx-separator {
+  height: 1px;
+  margin: 3px 6px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.spaces-ctx-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 8px;
+  font-size: 11px;
+  color: #6f7688;
+}
+
+.spaces-ctx-info-value {
+  color: #9aa1b2;
+}
+
+/* Submenus fly out on hover. Kept as pure CSS so the menu needs no
+   focus bookkeeping; the flyout inherits menu chrome. */
+.spaces-ctx-item-submenu > .spaces-ctx-flyout {
+  display: none;
+  position: absolute;
+  left: calc(100% - 4px);
+  top: -5px;
+  min-width: 180px;
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
+  border-radius: var(--or-radius-sm, 6px);
+  padding: 4px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+  flex-direction: column;
+  gap: 1px;
+}
+
+.spaces-ctx-item-submenu:hover > .spaces-ctx-flyout {
+  display: flex;
+}
+
+.spaces-ctx-submenu-arrow {
+  margin-left: auto;
+  color: #6f7688;
+  font-size: 10px;
+}
+
+.spaces-tree-hidden-chip {
+  cursor: pointer;
+  color: #7ba7ff;
+  font-style: normal;
+}
+
+.spaces-tree-hidden-chip:hover {
+  text-decoration: underline;
+}
+
+.spaces-grid-hidden-chip {
+  align-self: flex-start;
+  margin: 0 0 10px;
+  padding: 3px 10px;
+  background: rgba(123, 167, 255, 0.1);
+  border: 1px solid rgba(123, 167, 255, 0.25);
+  border-radius: 999px;
+  color: #7ba7ff;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.spaces-grid-hidden-chip:hover {
+  background: rgba(123, 167, 255, 0.18);
+}
