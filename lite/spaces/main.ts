@@ -34,7 +34,7 @@ import {
 import { SpacesError } from './errors.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
-import { SdkSpacesClient } from './sdk-client.js';
+import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
 import { getAuthApi } from '../auth/api.js';
@@ -87,6 +87,70 @@ function guessMimeFromKey(key: string): string {
   return 'application/octet-stream';
 }
 
+/**
+ * ADR-057 — async AI change summary for the version that an edit just
+ * created. Best-effort by contract: any failure (AI unconfigured,
+ * timeout, annotate write rejected) is logged and dropped — the edit
+ * and its snapshot already landed. Raced against a hard deadline so a
+ * wedged model call cannot hold resources.
+ */
+async function annotateVersionDiff(
+  client: SdkSpacesClient,
+  assetId: string,
+  before: Item,
+  after: Item
+): Promise<void> {
+  const log = getLoggingApi();
+  try {
+    const oldContent = (before.content ?? '').slice(0, 4000);
+    const newContent = (after.content ?? '').slice(0, 4000);
+    const oldTitle = before.title;
+    const newTitle = after.title;
+    if (oldContent === newContent && oldTitle === newTitle) return; // metadata-only edit
+    const call = getAiApi().chat({
+      system:
+        'You describe document edits for a version-history list. Respond with ' +
+        'ONE sentence (max 140 chars), plain text, no quotes, starting with a ' +
+        'verb. Describe the substantive change between OLD and NEW; if content ' +
+        'was replaced wholesale, say what the new content is about.',
+      messages: [
+        {
+          role: 'user',
+          content:
+            `OLD TITLE: ${oldTitle}\nNEW TITLE: ${newTitle}\n\n` +
+            `OLD CONTENT (truncated):\n${oldContent}\n\n` +
+            `NEW CONTENT (truncated):\n${newContent}`,
+        },
+      ],
+      maxTokens: 100,
+      feature: 'spaces-version-diff',
+    });
+    const timeout = new Promise<never>((_, reject) => {
+      const t = setTimeout(() => reject(new Error('version-diff timeout (45s)')), 45_000);
+      if (typeof t === 'object' && 'unref' in t) t.unref();
+    });
+    const result = await Promise.race([call, timeout]);
+    const summary = result.content.trim().replace(/\s+/g, ' ');
+    if (summary.length === 0) return;
+    // Pin the summary to the exact version this edit created — the
+    // snapshot holds the REPLACED (before) state, so its hash is
+    // before's hash.
+    const prevHash = hashAssetState(
+      before.title,
+      before.description ?? '',
+      before.content ?? '',
+      before.kind
+    );
+    await client.describeVersion(assetId, prevHash, summary);
+    if (activeCache !== null) activeCache.invalidate(() => true);
+  } catch (err) {
+    log.warn('spaces', 'version diff annotation skipped', {
+      assetId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 let activeCache: SpacesCache | null = null;
 /** Live SDK client for background jobs (GSX migration sweep). */
 let activeClient: SdkSpacesClient | null = null;
@@ -130,6 +194,8 @@ import type {
   AddSpaceMemberOptions,
   Checklist,
   ChecklistPhase,
+  AssetVersion,
+  AssetVersionSummary,
   TicketChecklist,
   CreateChecklistInput,
   UpdateChecklistInput,
@@ -434,6 +500,8 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // ADR-055 — register the Checklist entity + relationship types in the
   // graph's (:Schema) registry. Idempotent, best-effort, non-blocking.
   void client.ensureChecklistSchema();
+  // ADR-057 — register AssetVersion + HAS_VERSION the same way.
+  void client.ensureVersionSchema();
 
 
   // In-process cache. Pre-warms the home-view + sidebar reads at boot
@@ -547,8 +615,25 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       }
     },
     async update(id: string, patch: ItemUpdatePatch): Promise<Item> {
+      // ADR-057 — capture the outgoing state so the async AI change
+      // summary can diff old vs new. Soft: a failed pre-read just means
+      // no summary.
+      let beforeForDiff: Item | null = null;
+      if (typeof patch.content === 'string' || typeof patch.title === 'string') {
+        try {
+          beforeForDiff = await client.getItem(id);
+        } catch {
+          beforeForDiff = null;
+        }
+      }
       const result = await client.updateItem(id, patch);
       nukeReadCache();
+      // Fire-and-forget AI annotation. Never blocks or fails the edit;
+      // timeout-raced so a wedged model call can't leak (the
+      // extractAssetMetadata hang lesson, 2026-08-08).
+      if (beforeForDiff !== null) {
+        void annotateVersionDiff(client, id, beforeForDiff, result);
+      }
       return result;
     },
     async addTag(id: string, tag: string): Promise<string[]> {
@@ -634,6 +719,21 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       // Search results depend on the query; don't cache since the
       // user is actively typing/refining.
       return client.searchItems(opts);
+    },
+
+    // ── Asset versioning (ADR-057) ──
+    versions(id: string, limit?: number): Promise<AssetVersionSummary[]> {
+      // History reads are infrequent and must reflect the edit that
+      // just happened — no cache.
+      return client.listItemVersions(id, limit);
+    },
+    getVersion(id: string, seq: number): Promise<AssetVersion | null> {
+      return client.getItemVersion(id, seq);
+    },
+    async restoreVersion(id: string, seq: number, editorId?: string): Promise<Item> {
+      const result = await client.restoreItemVersion(id, seq, editorId);
+      nukeReadCache();
+      return result;
     },
     async setMetadata(id: string, metadata: ItemMetadata): Promise<Item> {
       const result = await client.setMetadata(id, metadata);

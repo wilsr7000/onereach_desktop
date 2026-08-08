@@ -923,7 +923,9 @@ describe('SdkSpacesClient.updateItem', () => {
     // Should re-fetch and return the new Item shape.
     expect(result.title).toBe('New title');
     // Inspect the params on the UPDATE_ITEM call (first call).
-    const update = stub.calls.find((c) => c.cypher.includes('UPDATE')) ?? stub.calls[0];
+    // ADR-057: the first call is now the snapshot pre-read (GET_ITEM);
+    // find the update by its distinctive SET clause.
+    const update = stub.calls.find((c) => c.cypher.includes('SET a.name = coalesce'));
     expect(update?.parameters).toMatchObject({
       id: 'i-1',
       title: 'New title',

@@ -656,6 +656,22 @@ interface LiteSpaceItemProvenance {
   id: string;
 }
 
+/** Asset versioning (ADR-057) — one history row / snapshot. */
+interface LiteAssetVersionView {
+  seq: number;
+  title: string;
+  editedBy?: string;
+  editedAt: string;
+  changeSummary?: string;
+  restoredFromSeq?: number;
+  currentMatchesSeq?: number;
+  hasContent: boolean;
+  description?: string;
+  content?: string;
+  fileKey?: string;
+  mimeType?: string;
+}
+
 interface LiteSpaceItemSummary {
   id: string;
   title: string;
@@ -874,6 +890,16 @@ interface LiteSpacesItemsBridge {
     spaceId?: string;
     limit?: number;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
+  /** Asset versioning (ADR-057) — history list, newest first. */
+  versions(id: string, limit?: number): Promise<LiteSpacesIpcResult<LiteAssetVersionView[]>>;
+  /** One full snapshot for the version viewer. */
+  getVersion(id: string, seq: number): Promise<LiteSpacesIpcResult<LiteAssetVersionView | null>>;
+  /** Restore a prior version (snapshots the present first). */
+  restoreVersion(
+    id: string,
+    seq: number,
+    editorId?: string
+  ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Metadata sprint — replace the whole metadata bag. */
   setMetadata(
     id: string,

@@ -27,6 +27,7 @@
  * @internal -- consumers go through `getSpacesApi()`.
  */
 
+import { createHash } from 'node:crypto';
 import { SpacesError } from './errors.js';
 import type { LearnSignals } from './learn-content.js';
 import type { Span } from '../logging/events.js';
@@ -67,6 +68,8 @@ import type {
   Checklist,
   ChecklistItemSpec,
   TicketChecklist,
+  AssetVersion,
+  AssetVersionSummary,
   CreateChecklistInput,
   AttachChecklistInput,
   SetChecklistItemInput,
@@ -92,7 +95,8 @@ import {
   MAX_ITEM_TAG_LENGTH,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
-import { CHECKLIST_MODES, CHECKLIST_OBLIGATIONS, MAX_CHECKLIST_ITEMS } from './types.js';
+import { CHECKLIST_MODES, CHECKLIST_OBLIGATIONS, MAX_CHECKLIST_ITEMS,
+  MAX_ASSET_VERSIONS } from './types.js';
 import type { UpdateChecklistInput } from './types.js';
 
 /**
@@ -367,8 +371,36 @@ export const CYPHER = {
    * reflect the change. When `$editorId` is empty/null the edge
    * update is skipped (anonymous edit path).
    */
+  /**
+   * ADR-057 — every real edit snapshots the REPLACED state as an
+   * `(:AssetVersion)` before the SETs land, in the same statement (no
+   * lost-snapshot window). `$doSnapshot` is decided client-side from a
+   * pre-read (no-op edits create no version). The resulting state's
+   * hash is compared against older snapshots so "you have seen this
+   * exact state before" is recorded (`currentMatchesSeq`). History is
+   * pruned past MAX_ASSET_VERSIONS, and the edit writes an
+   * `item:edited` Commit so ACTIVITY finally shows edits (2026-08-08
+   * logging review).
+   */
   UPDATE_ITEM: `
     MATCH (a:Asset {id: $id})
+    FOREACH (x IN CASE WHEN $doSnapshot THEN [1] ELSE [] END |
+      CREATE (v:AssetVersion {
+        id: $versionId,
+        assetId: a.id,
+        seq: coalesce(a.version, 0) + 1,
+        title: coalesce(a.name, a.title, ''),
+        description: coalesce(a.description, ''),
+        content: coalesce(a.content, ''),
+        fileKey: coalesce(a.fileKey, a.url, a.fileUrl, ''),
+        mimeType: coalesce(a.mimeType, ''),
+        contentHash: $prevHash,
+        editedBy: coalesce($editorId, ''),
+        editedAt: $now
+      })
+      MERGE (a)-[:HAS_VERSION]->(v)
+      SET a.version = coalesce(a.version, 0) + 1)
+    WITH a
     SET a.name = coalesce($title, a.name),
         a.title = coalesce($title, a.title),
         a.description = coalesce($description, a.description),
@@ -376,13 +408,143 @@ export const CYPHER = {
         a.type = coalesce($type, a.type),
         a.updatedAt = $now
     WITH a
+    OPTIONAL MATCH (a)-[:HAS_VERSION]->(m:AssetVersion)
+      WHERE m.contentHash = $newHash AND m.seq < coalesce(a.version, 0)
+    WITH a, min(m.seq) AS matchSeq
+    OPTIONAL MATCH (a)-[:HAS_VERSION]->(latest:AssetVersion)
+      WHERE latest.seq = coalesce(a.version, 0)
+    FOREACH (x IN CASE WHEN matchSeq IS NOT NULL AND latest IS NOT NULL THEN [1] ELSE [] END |
+      SET latest.currentMatchesSeq = matchSeq)
+    WITH a
+    OPTIONAL MATCH (a)-[:HAS_VERSION]->(old:AssetVersion)
+      WHERE old.seq <= coalesce(a.version, 0) - $maxVersions
+    DETACH DELETE old
+    WITH DISTINCT a
     OPTIONAL MATCH (a)<-[r:LAST_EDITED]-(:Person)
     DELETE r
     WITH a
     OPTIONAL MATCH (p:Person {id: $editorId})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:LAST_EDITED]->(a))
+    WITH a
+    FOREACH (x IN CASE WHEN $doSnapshot AND $editorId IS NOT NULL THEN [1] ELSE [] END |
+      MERGE (c:Commit {hash: $commitHash})
+      ON CREATE SET c.author = $editorId,
+                    c.message = 'item:edited',
+                    c.timestamp = $commitTimestampMs,
+                    c.assetId = a.id
+      MERGE (c)-[:TOUCHED]->(a))
     RETURN a.id AS id
+  `,
+
+  /** ADR-057 — history list, newest first. Summaries only (no content). */
+  LIST_ASSET_VERSIONS: `
+    MATCH (a:Asset {id: $id})-[:HAS_VERSION]->(v:AssetVersion)
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    RETURN v.seq AS seq,
+           coalesce(v.title, '') AS title,
+           coalesce(v.editedBy, '') AS editedBy,
+           coalesce(toString(v.editedAt), '') AS editedAt,
+           v.changeSummary AS changeSummary,
+           v.restoredFromSeq AS restoredFromSeq,
+           v.currentMatchesSeq AS currentMatchesSeq,
+           CASE WHEN coalesce(v.content, '') <> '' THEN true ELSE false END AS hasContent
+    ORDER BY v.seq DESC
+    LIMIT toInteger($limit)
+  `,
+
+  /** ADR-057 — one full snapshot, for the read-only version viewer. */
+  GET_ASSET_VERSION: `
+    MATCH (a:Asset {id: $id})-[:HAS_VERSION]->(v:AssetVersion {seq: $seq})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    RETURN v.seq AS seq,
+           coalesce(v.title, '') AS title,
+           coalesce(v.description, '') AS description,
+           coalesce(v.content, '') AS content,
+           coalesce(v.fileKey, '') AS fileKey,
+           coalesce(v.mimeType, '') AS mimeType,
+           coalesce(v.editedBy, '') AS editedBy,
+           coalesce(toString(v.editedAt), '') AS editedAt,
+           v.changeSummary AS changeSummary,
+           v.restoredFromSeq AS restoredFromSeq,
+           v.currentMatchesSeq AS currentMatchesSeq,
+           CASE WHEN coalesce(v.content, '') <> '' THEN true ELSE false END AS hasContent
+  `,
+
+  /**
+   * ADR-057 — restore: snapshot the CURRENT state first (stamped
+   * `restoredFromSeq` — the edit that replaced it was a restore), then
+   * copy the target snapshot's state onto the asset. History never
+   * rewrites; a restore is an ordinary, itself-restorable edit.
+   */
+  RESTORE_ASSET_VERSION: `
+    MATCH (a:Asset {id: $id})-[:HAS_VERSION]->(v:AssetVersion {seq: $seq})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    CREATE (cur:AssetVersion {
+      id: $versionId,
+      assetId: a.id,
+      seq: coalesce(a.version, 0) + 1,
+      title: coalesce(a.name, a.title, ''),
+      description: coalesce(a.description, ''),
+      content: coalesce(a.content, ''),
+      fileKey: coalesce(a.fileKey, a.url, a.fileUrl, ''),
+      mimeType: coalesce(a.mimeType, ''),
+      contentHash: $prevHash,
+      editedBy: coalesce($editorId, ''),
+      editedAt: $now,
+      restoredFromSeq: $seq
+    })
+    MERGE (a)-[:HAS_VERSION]->(cur)
+    SET a.version = coalesce(a.version, 0) + 1,
+        a.name = CASE WHEN coalesce(v.title, '') <> '' THEN v.title ELSE a.name END,
+        a.title = CASE WHEN coalesce(v.title, '') <> '' THEN v.title ELSE a.title END,
+        a.description = v.description,
+        a.content = v.content,
+        a.updatedAt = $now
+    WITH a
+    OPTIONAL MATCH (a)-[:HAS_VERSION]->(old:AssetVersion)
+      WHERE old.seq <= coalesce(a.version, 0) - $maxVersions
+    DETACH DELETE old
+    WITH DISTINCT a
+    FOREACH (x IN CASE WHEN $editorId IS NOT NULL THEN [1] ELSE [] END |
+      MERGE (c:Commit {hash: $commitHash})
+      ON CREATE SET c.author = $editorId,
+                    c.message = 'item:restored',
+                    c.timestamp = $commitTimestampMs,
+                    c.assetId = a.id
+      MERGE (c)-[:TOUCHED]->(a))
+    RETURN a.id AS id
+  `,
+
+  /**
+   * ADR-057 — async AI annotation. Targets the version by the CONTENT
+   * HASH of the state it snapshotted, not "the latest": the AI call is
+   * slow and fire-and-forget, so by the time it returns another edit
+   * may have minted a newer version — hash-targeting pins the summary
+   * to the edit it actually describes. Newest match wins if the same
+   * state was snapshotted more than once.
+   */
+  ANNOTATE_VERSION_BY_HASH: `
+    MATCH (a:Asset {id: $id})-[:HAS_VERSION]->(v:AssetVersion {contentHash: $prevHash})
+      WHERE ${ASSET_VISIBLE}
+    WITH v ORDER BY v.seq DESC LIMIT 1
+    SET v.changeSummary = $summary
+    RETURN v.seq AS seq
+  `,
+
+  /** ADR-057 — register the AssetVersion entity + HAS_VERSION edge. */
+  ENSURE_VERSION_SCHEMA: `
+    MERGE (e:Schema {entity: 'AssetVersion'})
+    ON CREATE SET e.createdAt = $now
+    SET e.updatedAt = $now,
+        e.doc = $versionDoc,
+        e.props = $versionProps
+    MERGE (r:Schema {entity: '_RelationshipTypes'})
+    SET r.hasVersion = $hasVersionDoc
+    RETURN e.entity AS entity
   `,
 
   /**
@@ -2176,7 +2338,43 @@ export class SdkSpacesClient {
       });
     }
     const params = validateUpdatePatch(patch);
-    await this.run(CYPHER.UPDATE_ITEM, { id, ...params, now: new Date().toISOString() });
+    // ADR-057 — pre-read for the snapshot decision: a no-op edit (the
+    // resulting state hashes identical to the current one) creates no
+    // version. The pre-read is itself ASSET_VISIBLE-gated, so an
+    // invisible asset can't be edited blind either.
+    const before = await this.getItem(id);
+    if (before === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Item ${id} not found`,
+        remediation: 'It may have been deleted or is not visible to this account.',
+        context: { id },
+      });
+    }
+    const nextTitle = params.title ?? before.title;
+    const nextDescription = params.description ?? before.description ?? '';
+    const nextContent = params.content ?? before.content ?? '';
+    const nextType = params.type ?? before.kind;
+    const prevHash = hashAssetState(
+      before.title,
+      before.description ?? '',
+      before.content ?? '',
+      before.kind
+    );
+    const newHash = hashAssetState(nextTitle, nextDescription, nextContent, nextType);
+    const nowMs = this.now();
+    await this.run(CYPHER.UPDATE_ITEM, {
+      id,
+      ...params,
+      now: new Date(nowMs).toISOString(),
+      doSnapshot: newHash !== prevHash,
+      versionId: generateVersionId(),
+      prevHash,
+      newHash,
+      maxVersions: MAX_ASSET_VERSIONS,
+      commitHash: `edit-${id}-${nowMs}-${Math.random().toString(36).slice(2, 8)}`,
+      commitTimestampMs: nowMs,
+    });
     const updated = await this.getItem(id);
     if (updated === null) {
       throw new SpacesError({
@@ -4070,6 +4268,145 @@ export class SdkSpacesClient {
     }
   }
 
+  // ─── Asset versioning (ADR-057) ─────────────────────────────────────
+
+  /** History for one asset, newest first. Summaries only. */
+  async listItemVersions(id: string, limit = 50): Promise<AssetVersionSummary[]> {
+    return this.withSpan('spaces.items.versions.list', async () => {
+      if (typeof id !== 'string' || id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'items.versions requires a non-empty id',
+          context: { id },
+        });
+      }
+      const rows = await this.run(CYPHER.LIST_ASSET_VERSIONS, {
+        id,
+        limit: clampSmallLimit(limit, 50, MAX_ASSET_VERSIONS),
+        viewerId: this.viewerParam(),
+      });
+      return rows
+        .map((r) => rowToVersionSummary(r as Record<string, unknown>))
+        .filter((v): v is AssetVersionSummary => v !== null);
+    });
+  }
+
+  /** One full snapshot (content included) for the version viewer. */
+  async getItemVersion(id: string, seq: number): Promise<AssetVersion | null> {
+    return this.withSpan('spaces.items.versions.get', async () => {
+      const rows = await this.run(CYPHER.GET_ASSET_VERSION, {
+        id,
+        seq,
+        viewerId: this.viewerParam(),
+      });
+      const row = rows[0];
+      if (row === undefined) return null;
+      return rowToVersion(row as Record<string, unknown>);
+    });
+  }
+
+  /**
+   * Restore an asset to a prior version. The pre-restore state is
+   * snapshotted first (stamped `restoredFromSeq`), so restoring is an
+   * ordinary edit — nothing is lost, including the present.
+   */
+  async restoreItemVersion(id: string, seq: number, editorId?: string): Promise<Item> {
+    return this.withSpan('spaces.items.versions.restore', async () => {
+      const before = await this.getItem(id);
+      if (before === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Item ${id} not found`,
+          context: { id },
+        });
+      }
+      const prevHash = hashAssetState(
+        before.title,
+        before.description ?? '',
+        before.content ?? '',
+        before.kind
+      );
+      const nowMs = this.now();
+      const rows = await this.run(CYPHER.RESTORE_ASSET_VERSION, {
+        id,
+        seq,
+        versionId: generateVersionId(),
+        prevHash,
+        editorId: editorId ?? null,
+        now: new Date(nowMs).toISOString(),
+        maxVersions: MAX_ASSET_VERSIONS,
+        commitHash: `restore-${id}-${nowMs}-${Math.random().toString(36).slice(2, 8)}`,
+        commitTimestampMs: nowMs,
+        viewerId: this.viewerParam(),
+      });
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Version ${seq} of ${id} not found`,
+          remediation: 'It may have been pruned, or the asset is not visible.',
+          context: { id, seq },
+        });
+      }
+      const updated = await this.getItem(id);
+      if (updated === null) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'Item disappeared during restore',
+          context: { id },
+        });
+      }
+      return updated;
+    });
+  }
+
+  /**
+   * Best-effort AI change summary onto the version whose snapshot
+   * matches `prevHash` (the state the annotated edit replaced).
+   */
+  async describeVersion(id: string, prevHash: string, summary: string): Promise<void> {
+    await this.withSpan('spaces.items.versions.annotate', async () => {
+      const clipped = summary.trim().slice(0, 300);
+      if (clipped.length === 0) return;
+      await this.run(CYPHER.ANNOTATE_VERSION_BY_HASH, {
+        id,
+        prevHash,
+        summary: clipped,
+        viewerId: this.viewerParam(),
+      });
+    });
+  }
+
+  /** ADR-057 — register AssetVersion + HAS_VERSION in the (:Schema) registry. */
+  async ensureVersionSchema(): Promise<void> {
+    try {
+      await this.run(CYPHER.ENSURE_VERSION_SCHEMA, {
+        now: this.now(),
+        versionDoc:
+          'Immutable snapshot of an Asset state REPLACED by an edit (ADR-057). The asset node holds the current state; versions hang off it via HAS_VERSION, so history follows the asset into every Space it belongs to. Restores snapshot the present first — history never rewrites.',
+        versionProps: JSON.stringify({
+          id: 'string (version-<ts36>-<rand>)',
+          assetId: 'string — owning asset',
+          seq: 'int, 1-based per asset',
+          title: 'string — state before the edit',
+          description: 'string',
+          content: 'string (text kinds)',
+          fileKey: 'string (binary kinds)',
+          mimeType: 'string',
+          contentHash: 'sha1 of title/description/content/type',
+          changeSummary: 'string? — AI one-liner for the replacing edit',
+          restoredFromSeq: 'int? — set when the replacing edit was a restore',
+          currentMatchesSeq: 'int? — resulting state byte-matched this older version',
+          editedBy: 'string?',
+          editedAt: 'datetime',
+        }),
+        hasVersionDoc:
+          'HAS_VERSION: (:Asset)-[:HAS_VERSION]->(:AssetVersion) — snapshot chain, pruned past 50.',
+      });
+    } catch {
+      // best-effort, like ensureChecklistSchema — registry docs only
+    }
+  }
+
   private async run(
     cypher: string,
     parameters?: Record<string, unknown>
@@ -5298,3 +5635,68 @@ function readGateLinks(raw: unknown): Array<{ name: string; complete: boolean }>
   return out;
 }
 
+
+// ─── Asset versioning helpers (ADR-057) ─────────────────────────────────
+
+/**
+ * Canonical fingerprint of an asset's editable state. Field-separated
+ * with NUL so `("ab","c")` never collides with `("a","bc")`. Exported
+ * so tests can pin the no-op-edit rule.
+ */
+export function hashAssetState(
+  title: string,
+  description: string,
+  content: string,
+  type: string
+): string {
+  return createHash('sha1')
+    .update([title, description, content, type].join('\u0000'))
+    .digest('hex');
+}
+
+function generateVersionId(): string {
+  return `version-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function rowToVersionSummary(r: Record<string, unknown>): AssetVersionSummary | null {
+  const seq = typeof r['seq'] === 'number' ? r['seq'] : null;
+  if (seq === null) return null;
+  const summary: AssetVersionSummary = {
+    seq,
+    title: typeof r['title'] === 'string' ? r['title'] : '',
+    editedAt: typeof r['editedAt'] === 'string' ? r['editedAt'] : '',
+    hasContent: r['hasContent'] === true,
+  };
+  if (typeof r['editedBy'] === 'string' && r['editedBy'].length > 0) {
+    summary.editedBy = r['editedBy'];
+  }
+  if (typeof r['changeSummary'] === 'string' && r['changeSummary'].length > 0) {
+    summary.changeSummary = r['changeSummary'];
+  }
+  if (typeof r['restoredFromSeq'] === 'number') {
+    summary.restoredFromSeq = r['restoredFromSeq'];
+  }
+  if (typeof r['currentMatchesSeq'] === 'number') {
+    summary.currentMatchesSeq = r['currentMatchesSeq'];
+  }
+  return summary;
+}
+
+function rowToVersion(r: Record<string, unknown>): AssetVersion | null {
+  const base = rowToVersionSummary(r);
+  if (base === null) return null;
+  const full: AssetVersion = { ...base };
+  if (typeof r['description'] === 'string' && r['description'].length > 0) {
+    full.description = r['description'];
+  }
+  if (typeof r['content'] === 'string' && r['content'].length > 0) {
+    full.content = r['content'];
+  }
+  if (typeof r['fileKey'] === 'string' && r['fileKey'].length > 0) {
+    full.fileKey = r['fileKey'];
+  }
+  if (typeof r['mimeType'] === 'string' && r['mimeType'].length > 0) {
+    full.mimeType = r['mimeType'];
+  }
+  return full;
+}

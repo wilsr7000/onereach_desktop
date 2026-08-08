@@ -44,6 +44,20 @@ export const SPACES_EVENTS = {
   CHECKLISTS_DETACH_FINISH: 'spaces.checklists.detach.finish',
   CHECKLISTS_DETACH_FAIL: 'spaces.checklists.detach.fail',
 
+  // ─── Asset versioning (ADR-057) ─────────────────────────────────────
+  VERSIONS_LIST_START: 'spaces.items.versions.list.start',
+  VERSIONS_LIST_FINISH: 'spaces.items.versions.list.finish',
+  VERSIONS_LIST_FAIL: 'spaces.items.versions.list.fail',
+  VERSIONS_GET_START: 'spaces.items.versions.get.start',
+  VERSIONS_GET_FINISH: 'spaces.items.versions.get.finish',
+  VERSIONS_GET_FAIL: 'spaces.items.versions.get.fail',
+  VERSIONS_RESTORE_START: 'spaces.items.versions.restore.start',
+  VERSIONS_RESTORE_FINISH: 'spaces.items.versions.restore.finish',
+  VERSIONS_RESTORE_FAIL: 'spaces.items.versions.restore.fail',
+  VERSIONS_ANNOTATE_START: 'spaces.items.versions.annotate.start',
+  VERSIONS_ANNOTATE_FINISH: 'spaces.items.versions.annotate.finish',
+  VERSIONS_ANNOTATE_FAIL: 'spaces.items.versions.annotate.fail',
+
   // ─── listSpaces ───────────────────────────────────────────────────────
   LIST_SPACES_START: 'spaces.listSpaces.start',
   LIST_SPACES_FINISH: 'spaces.listSpaces.finish',

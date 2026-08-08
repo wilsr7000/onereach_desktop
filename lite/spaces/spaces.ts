@@ -1851,7 +1851,7 @@ async function loadItemHistory(itemId: string): Promise<void> {
 }
 
 /** History section: current marker + one row per prior snapshot. */
-function buildDetailHistory(
+export function buildDetailHistory(
   itemId: string,
   versions: ReadonlyArray<RendererAssetVersion>
 ): HTMLElement {
@@ -1891,7 +1891,7 @@ function buildDetailHistory(
   return section;
 }
 
-function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLElement {
+export function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLElement {
   const li = document.createElement('li');
   li.className = 'spaces-history-row';
 

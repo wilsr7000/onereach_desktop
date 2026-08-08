@@ -70,6 +70,8 @@ import type {
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
+  AssetVersion,
+  AssetVersionSummary,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -129,6 +131,8 @@ export type {
   ItemMetadata,
   MetadataValue,
   MetadataPrimitive,
+  AssetVersion,
+  AssetVersionSummary,
 } from './types.js';
 export {
   SPACES_MODULE_VERSION,
@@ -403,6 +407,14 @@ export interface SpacesItemsApi {
    * Empty query returns `[]`.
    */
   search(opts: SearchItemsOpts): Promise<ItemSummary[]>;
+
+  // ── Asset versioning (ADR-057) ──
+  /** History for one asset, newest first (summaries — no content). */
+  versions(id: string, limit?: number): Promise<AssetVersionSummary[]>;
+  /** One full snapshot, for the read-only version viewer. */
+  getVersion(id: string, seq: number): Promise<AssetVersion | null>;
+  /** Restore a prior version. Snapshots the present first — undoable. */
+  restoreVersion(id: string, seq: number, editorId?: string): Promise<Item>;
 
   /**
    * Replace the metadata bag on an asset (Metadata sprint). Pass an
@@ -850,6 +862,15 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async search(_opts: SearchItemsOpts): Promise<ItemSummary[]> {
       throw notInitialized('items.search');
+    },
+    async versions(_id: string, _limit?: number): Promise<AssetVersionSummary[]> {
+      throw notInitialized('items.versions');
+    },
+    async getVersion(_id: string, _seq: number): Promise<AssetVersion | null> {
+      throw notInitialized('items.getVersion');
+    },
+    async restoreVersion(_id: string, _seq: number, _editorId?: string): Promise<Item> {
+      throw notInitialized('items.restoreVersion');
     },
     async setMetadata(_id: string, _metadata: ItemMetadata): Promise<Item> {
       throw notInitialized('items.setMetadata');

@@ -434,3 +434,68 @@ describe('sidebar context menus', () => {
     expect(mod.isItemHiddenInSpace('sp-2', 'i-9')).toBe(false);
   });
 });
+
+// ─── Version history UI (ADR-057) ──────────────────────────────────────
+//
+// The History section builders are pure DOM constructors; these pin the
+// structure the live pane renders: a Current marker row, per-version
+// rows with seq/author/summary, the restored/duplicate badges, and the
+// View + Restore actions.
+
+describe('version history section', () => {
+  it('renders Current marker + rows with badges, summary, and actions', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const section = mod.buildDetailHistory('a-1', [
+      {
+        seq: 3,
+        title: 'Doc',
+        editedBy: 'robb@onereach.com',
+        editedAt: '2026-08-08T12:00:00.000Z',
+        restoredFromSeq: 2,
+        hasContent: true,
+      },
+      {
+        seq: 2,
+        title: 'Doc',
+        editedAt: '2026-08-08T11:00:00.000Z',
+        changeSummary: 'Reverted the first line.',
+        currentMatchesSeq: 1,
+        hasContent: true,
+      },
+      {
+        seq: 1,
+        title: 'Doc',
+        editedAt: '2026-08-08T10:00:00.000Z',
+        hasContent: true,
+      },
+    ] as never);
+
+    expect(section.querySelector('.spaces-detail-label')?.textContent).toContain('3 versions');
+    const rows = section.querySelectorAll('.spaces-history-row');
+    expect(rows.length).toBe(4); // Current + 3
+    expect(rows[0]?.classList.contains('is-current')).toBe(true);
+
+    const v3 = rows[1];
+    expect(v3?.querySelector('.spaces-history-seq')?.textContent).toBe('v3');
+    expect(v3?.querySelector('.spaces-history-who')?.textContent).toBe('robb@onereach.com');
+    expect(v3?.querySelector('.spaces-history-badge')?.textContent).toContain('restored v2');
+
+    const v2 = rows[2];
+    expect(v2?.querySelector('.spaces-history-summary')?.textContent).toBe(
+      'Reverted the first line.'
+    );
+    expect(v2?.querySelector('.spaces-history-badge-dupe')?.textContent).toBe('= v1');
+
+    // v1 has no AI summary yet — pending style falls back to the title.
+    const v1 = rows[3];
+    expect(v1?.querySelector('.spaces-history-summary')?.classList.contains('is-pending')).toBe(
+      true
+    );
+
+    // Every version row carries View + Restore.
+    for (const row of [v3, v2, v1]) {
+      const actions = row?.querySelectorAll('.spaces-history-action');
+      expect(actions?.length).toBe(2);
+    }
+  });
+});

@@ -198,6 +198,9 @@ function buildStubConsumer(): {
       setMetadata: async (_id, _metadata) => maybeFail({} as unknown as Item),
       patchMetadata: async (_id, _patch) => maybeFail({} as unknown as Item),
       removeMetadataKey: async (_id, _key) => maybeFail({} as unknown as Item),
+      versions: async (_id, _limit) => maybeFail([]),
+      getVersion: async (_id, _seq) => maybeFail(null),
+      restoreVersion: async (_id, _seq, _editorId) => maybeFail({} as unknown as Item),
     },
     // Home view (chunk 3k + 3o). Stub returns are not exercised by
     // the platform-contract tests below; they're here so the stub

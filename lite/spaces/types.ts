@@ -1148,3 +1148,46 @@ export interface SetChecklistItemInput {
   /** Who is checking — the current viewer id. */
   actorId?: string;
 }
+
+// ─── Asset versioning (ADR-057) ──────────────────────────────────────────
+//
+// Every content-bearing edit snapshots the REPLACED state as an
+// `(:AssetVersion)` node linked `(a)-[:HAS_VERSION]->(v)` — so edits go
+// back in time. The asset node stays the single source of the CURRENT
+// state, which is what makes multi-space membership free: the asset is
+// one node with BELONGS_TO edges, so a new version is instantly what
+// every containing Space sees. Restores are themselves edits (the
+// pre-restore state is snapshotted first), so history never rewrites.
+
+/** Hard cap on retained versions per asset; older snapshots prune. */
+export const MAX_ASSET_VERSIONS = 50 as const;
+
+/** One row in an asset's history list (no content — that ships on demand). */
+export interface AssetVersionSummary {
+  /** 1-based, monotonically increasing per asset. */
+  seq: number;
+  /** Title the asset had BEFORE the edit that created this snapshot. */
+  title: string;
+  /** Person id/email who made the edit that replaced this state. */
+  editedBy?: string;
+  /** ISO timestamp of the replacing edit. */
+  editedAt: string;
+  /** AI one-liner describing what the replacing edit changed. Async
+   *  best-effort — absent until the enricher lands it. */
+  changeSummary?: string;
+  /** Set when this snapshot was created by restoring an older version. */
+  restoredFromSeq?: number;
+  /** Set when the edit's RESULTING content byte-matched an existing
+   *  version — "you've seen this exact state before, as v<seq>". */
+  currentMatchesSeq?: number;
+  /** Whether the snapshot carries inline content (text kinds). */
+  hasContent: boolean;
+}
+
+/** Full snapshot — summary plus the stored state. */
+export interface AssetVersion extends AssetVersionSummary {
+  description?: string;
+  content?: string;
+  fileKey?: string;
+  mimeType?: string;
+}

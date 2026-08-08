@@ -117,6 +117,9 @@ const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
 const SPACES_ITEMS_ADD_TO_SPACE = 'lite:spaces:items:addToSpace';
 const SPACES_ITEMS_REMOVE_FROM_SPACE = 'lite:spaces:items:removeFromSpace';
 const SPACES_ITEMS_SEARCH = 'lite:spaces:items:search';
+const SPACES_ITEMS_VERSIONS = 'lite:spaces:items:versions';
+const SPACES_ITEMS_VERSION_GET = 'lite:spaces:items:versionGet';
+const SPACES_ITEMS_VERSION_RESTORE = 'lite:spaces:items:versionRestore';
 const SPACES_ITEMS_SET_METADATA = 'lite:spaces:items:setMetadata';
 const SPACES_ITEMS_PATCH_METADATA = 'lite:spaces:items:patchMetadata';
 const SPACES_ITEMS_REMOVE_METADATA_KEY = 'lite:spaces:items:removeMetadataKey';
@@ -665,6 +668,14 @@ interface SpacesItemsBridge {
     spaceId?: string;
     limit?: number;
   }): Promise<SpacesIpcResultView<unknown[]>>;
+  /** Asset versioning (ADR-057). */
+  versions(id: string, limit?: number): Promise<SpacesIpcResultView<unknown[]>>;
+  getVersion(id: string, seq: number): Promise<SpacesIpcResultView<unknown>>;
+  restoreVersion(
+    id: string,
+    seq: number,
+    editorId?: string
+  ): Promise<SpacesIpcResultView<unknown>>;
   setMetadata(
     id: string,
     metadata: Record<string, unknown>
@@ -1694,6 +1705,18 @@ const spaces: SpacesBridge = {
     search: (opts) =>
       ipcRenderer.invoke(SPACES_ITEMS_SEARCH, { opts }) as Promise<
         SpacesIpcResultView<unknown[]>
+      >,
+    versions: (id: string, limit?: number) =>
+      ipcRenderer.invoke(SPACES_ITEMS_VERSIONS, { id, limit }) as Promise<
+        SpacesIpcResultView<unknown[]>
+      >,
+    getVersion: (id: string, seq: number) =>
+      ipcRenderer.invoke(SPACES_ITEMS_VERSION_GET, { id, seq }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    restoreVersion: (id: string, seq: number, editorId?: string) =>
+      ipcRenderer.invoke(SPACES_ITEMS_VERSION_RESTORE, { id, seq, editorId }) as Promise<
+        SpacesIpcResultView<unknown>
       >,
     setMetadata: (id, metadata) =>
       ipcRenderer.invoke(SPACES_ITEMS_SET_METADATA, { id, metadata }) as Promise<

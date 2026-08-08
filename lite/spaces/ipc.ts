@@ -17,6 +17,8 @@ import { getLoggingApi } from '../logging/api.js';
 import type { SpacesError } from './errors.js';
 import { resolveSpaceScope } from './scope.js';
 import type {
+  AssetVersion,
+  AssetVersionSummary,
   Item,
   ItemSummary,
   ListOpts,
@@ -128,6 +130,10 @@ export const SPACES_IPC = {
   ITEMS_ADD_TO_SPACE: 'lite:spaces:items:addToSpace',
   ITEMS_REMOVE_FROM_SPACE: 'lite:spaces:items:removeFromSpace',
   ITEMS_SEARCH: 'lite:spaces:items:search',
+  /** Asset versioning (ADR-057). */
+  ITEMS_VERSIONS: 'lite:spaces:items:versions',
+  ITEMS_VERSION_GET: 'lite:spaces:items:versionGet',
+  ITEMS_VERSION_RESTORE: 'lite:spaces:items:versionRestore',
   /** Learning Center (replaces Home, 2026-08-07). */
   LEARN_SIGNALS: 'lite:spaces:learn:signals',
   LEARN_PROGRESS_GET: 'lite:spaces:learn:progressGet',
@@ -1335,6 +1341,63 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? (payload?.opts as SearchItemsOpts)
             : ({ query: '' } as SearchItemsOpts);
         const value = await getSpacesApi().items.search(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ─── Asset versioning (ADR-057) ───────────────────────────────────────
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_VERSIONS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; limit?: unknown }
+    ): Promise<SpacesIpcResult<AssetVersionSummary[]>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const limit = typeof payload?.limit === 'number' ? payload.limit : undefined;
+        const value = await getSpacesApi().items.versions(id, limit);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_VERSION_GET,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; seq?: unknown }
+    ): Promise<SpacesIpcResult<AssetVersion | null>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const seq = typeof payload?.seq === 'number' ? payload.seq : -1;
+        const value = await getSpacesApi().items.getVersion(id, seq);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_VERSION_RESTORE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; seq?: unknown; editorId?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const seq = typeof payload?.seq === 'number' ? payload.seq : -1;
+        const editorId =
+          typeof payload?.editorId === 'string' && payload.editorId.length > 0
+            ? payload.editorId
+            : undefined;
+        const value = await getSpacesApi().items.restoreVersion(id, seq, editorId);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
