@@ -36,9 +36,11 @@ arrives.
 warmth and a barely-there grain, like tape hiss under a great record.
 Copy is human — direct, occasionally wry, never corporate. Empty
 states have a pulse. The seams show, on purpose, tastefully — *come as
-you are*. The ✎ "cap-chew" on a playbook description is the thesis in
-one glyph: a handmade mark on the machine. Wherever the app can be a
-person instead of a form, it is.
+you are*. The **cap-chew** — the chewed-bullet mark from WISER
+Playbooks (`lite/assets/capchewlogo.jpg`, vector `capchew-icon.svg`) —
+is the thesis in one image: a handmade mark on the machine, the melting
+smiley's cousin. Wherever the app can be a person instead of a form, it
+is.
 
 ## Tokens (the law) — `lite/signature.css`
 
@@ -65,15 +67,18 @@ halo, 2px offset. It appears on `:focus-visible`, never on mouse click.
 enters through the accent temperature and the grain, not the base. The
 kind-accents are tuned as a set.
 
-## Fun — the ✎ family
+## Fun — the cap-chew family
 
-The cap-chew is licensed to have relatives. Fun is *earned*, never
-loud, and always removable by `prefers-reduced-motion`:
+The cap-chew (the chewed bullet) is licensed to have relatives — the ✎
+pen-mark in empty states is one, the breathing hexagon another. Fun is
+*earned*, never loud, and always removable by `prefers-reduced-motion`:
 
-- Empty states get a hand-drawn line with a heartbeat, not a shrug.
+- Empty states get a hand-drawn ✎ line with a heartbeat, not a shrug.
 - The hexagon mark breathes, slowly, when idle.
 - "Loading…" gets character (quiet, never jokey on serious surfaces).
-- The playbook star catches light on hover.
+- The playbook step-bullet *is* a bullet — the cap-chew mark, chewing
+  into color as steps complete (its blue+gold already are the app's
+  accent+playbook hues — the logo and the system rhyme).
 - One honest easter egg where it belongs, in the Nirvana spirit.
 
 ## The test

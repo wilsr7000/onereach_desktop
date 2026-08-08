@@ -1943,18 +1943,34 @@ body {
 /* About: the cap-chew signature (2026-08-08). */
 .about-sig {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  margin-top: 28px;
-  padding-top: 18px;
+  gap: 14px;
+  margin-top: 32px;
+  padding-top: 24px;
   border-top: 1px solid var(--or-border-subtle, rgba(255,255,255,0.06));
+  text-align: center;
 }
 .about-capchew {
   display: block;
-  height: 24px;
-  width: auto;
-  opacity: 0.9;
-  filter: contrast(1.05);
+  width: 132px;
+  height: 132px;
+  /* The logo ships on its own near-black field; a hairline ring
+     contains it cleanly against whatever charcoal the pane is, and a
+     soft shadow lifts it a hair off the surface. */
+  border-radius: var(--or-radius-lg, 14px);
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.06),
+    0 10px 34px rgba(0,0,0,0.4);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .about-capchew {
+    transition: transform 0.5s var(--or-ease-spring, cubic-bezier(0.22,1,0.36,1));
+  }
+  /* come as you are — a small, lazy tilt on hover. */
+  .about-capchew:hover {
+    transform: translateY(-2px) rotate(-1.2deg);
+  }
 }
 .about-sig-line {
   font-family: var(--or-font-display, Georgia, serif);
