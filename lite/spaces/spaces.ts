@@ -3009,6 +3009,12 @@ function renderSharedSpaceDashboard(
     buildSharedDashboardTickets(space, cached?.tickets ?? [], busy && cached === undefined)
   );
 
+  // Checklists section (ADR-055 addendum, 2026-08-08): the Space's
+  // checklist LIBRARY — the reusable, versioned team artifacts. Runs
+  // still happen on tickets at their pause points; this is where the
+  // artifacts themselves are created, revised, and retired.
+  body.appendChild(buildSharedDashboardChecklists(space));
+
   wrap.appendChild(body);
 
   // Fire-and-forget refresh.
@@ -8894,6 +8900,268 @@ async function toggleChecklistItem(
 }
 
 /** Attach-or-create panel, in the house inline-panel shell. */
+// ─── Checklist library (Space manager, ADR-055 addendum) ───────────────
+
+/** The Space's checklist library: list, view items, new, edit, delete. */
+function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'spaces-dashboard-section spaces-checklist-library';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-dashboard-section-head';
+  const title = document.createElement('h3');
+  title.className = 'spaces-dashboard-section-title';
+  title.textContent = 'Checklists';
+  head.appendChild(title);
+  const newBtn = document.createElement('button');
+  newBtn.type = 'button';
+  newBtn.className = 'spaces-items-new spaces-checklist-new';
+  newBtn.textContent = '+ New checklist';
+  newBtn.addEventListener('click', () => {
+    openChecklistEditorPanel({ spaceId: space.id, onSaved: () => refresh() });
+  });
+  head.appendChild(newBtn);
+  section.appendChild(head);
+
+  const host = document.createElement('div');
+  host.className = 'spaces-checklist-library-list';
+  host.textContent = 'Loading…';
+  section.appendChild(host);
+
+  const refresh = (): void => {
+    void (async () => {
+      const bridge = window.lite?.spaces;
+      if (bridge?.checklists === undefined) return;
+      try {
+        const envelope = await bridge.checklists.list(space.id);
+        host.replaceChildren();
+        const lists = envelope.ok === true ? envelope.value : [];
+        if (lists.length === 0) {
+          const none = document.createElement('p');
+          none.className = 'spaces-checklist-empty';
+          none.textContent =
+            'No checklists yet. A checklist is a reusable, versioned artifact that runs on tickets at a pause point.';
+          host.appendChild(none);
+          return;
+        }
+        for (const c of lists) {
+          host.appendChild(buildChecklistLibraryCard(space, c, refresh));
+        }
+      } catch {
+        host.textContent = 'Could not load checklists.';
+      }
+    })();
+  };
+  refresh();
+  return section;
+}
+
+function buildChecklistLibraryCard(
+  space: RendererSpace,
+  c: LiteChecklistView,
+  onChanged: () => void
+): HTMLElement {
+  const card = document.createElement('div');
+  card.className = 'spaces-checklist-card';
+
+  const top = document.createElement('div');
+  top.className = 'spaces-checklist-card-top';
+
+  const name = document.createElement('button');
+  name.type = 'button';
+  name.className = 'spaces-checklist-card-name';
+  name.textContent = c.name;
+  name.title = 'Show items';
+  top.appendChild(name);
+
+  const meta = document.createElement('span');
+  meta.className = 'spaces-checklist-card-meta';
+  const killers = c.items.filter((i) => i.killer === true).length;
+  meta.textContent =
+    `${c.mode} · ${c.items.length} item${c.items.length === 1 ? '' : 's'}` +
+    `${killers > 0 ? ` (${killers} killer)` : ''} · v${c.version}` +
+    `${typeof c.usedByCount === 'number' && c.usedByCount > 0 ? ` · on ${c.usedByCount} ticket${c.usedByCount === 1 ? '' : 's'}` : ''}`;
+  top.appendChild(meta);
+
+  const actions = document.createElement('span');
+  actions.className = 'spaces-checklist-card-actions';
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'spaces-checklist-card-btn';
+  edit.textContent = 'Edit';
+  edit.addEventListener('click', () => {
+    openChecklistEditorPanel({ spaceId: space.id, existing: c, onSaved: onChanged });
+  });
+  actions.appendChild(edit);
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'spaces-checklist-card-btn spaces-checklist-card-del';
+  del.textContent = 'Delete';
+  del.addEventListener('click', () => {
+    void (async () => {
+      const ok = await askToConfirm(
+        `Delete "${c.name}"?`,
+        typeof c.usedByCount === 'number' && c.usedByCount > 0
+          ? `It is attached to ${c.usedByCount} ticket${c.usedByCount === 1 ? '' : 's'} — the delete will be refused until it is detached everywhere.`
+          : 'It is not attached to any ticket. This permanently removes the checklist definition.',
+        'Delete'
+      );
+      if (!ok) return;
+      const bridge = window.lite?.spaces;
+      if (bridge?.checklists === undefined) return;
+      const envelope = await bridge.checklists.remove(c.id);
+      if (envelope.ok === false) {
+        showToast(envelope.error.message);
+        return;
+      }
+      showToast(`Deleted "${c.name}"`);
+      onChanged();
+    })();
+  });
+  actions.appendChild(del);
+  top.appendChild(actions);
+  card.appendChild(top);
+
+  const pause = document.createElement('div');
+  pause.className = 'spaces-checklist-card-pause';
+  pause.textContent = `Pause point: ${c.pausePoint}`;
+  card.appendChild(pause);
+
+  // Items expand/collapse (read-only view — running happens on tickets).
+  const items = document.createElement('ol');
+  items.className = 'spaces-checklist-card-items';
+  items.hidden = true;
+  for (const item of c.items) {
+    const li = document.createElement('li');
+    li.className = 'spaces-checklist-card-item';
+    li.classList.toggle('is-killer', item.killer === true);
+    li.textContent = item.text;
+    items.appendChild(li);
+  }
+  card.appendChild(items);
+  name.addEventListener('click', () => {
+    items.hidden = !items.hidden;
+  });
+
+  return card;
+}
+
+/**
+ * One editor for BOTH create and revise. On revise, the panel says so
+ * plainly: saving bumps the version and RESETS every attached ticket's
+ * run state (a check against v1's items says nothing about v2's).
+ */
+function openChecklistEditorPanel(opts: {
+  spaceId: string;
+  existing?: LiteChecklistView;
+  onSaved: () => void;
+}): void {
+  const bridge = window.lite?.spaces;
+  if (bridge?.checklists === undefined) return;
+  const { existing } = opts;
+
+  document.querySelector('.spaces-checklist-editor-backdrop')?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-member-picker-backdrop spaces-checklist-editor-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-member-picker spaces-checklist-editor';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-member-picker-head';
+  const heading = document.createElement('span');
+  heading.textContent = existing === undefined ? 'New checklist' : `Revise "${existing.name}"`;
+  head.appendChild(heading);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'spaces-member-picker-close';
+  close.textContent = '×';
+  close.setAttribute('aria-label', 'Cancel');
+  close.addEventListener('click', () => backdrop.remove());
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  const nameInput = document.createElement('input');
+  nameInput.type = 'text';
+  nameInput.className = 'spaces-checklist-editor-name';
+  nameInput.placeholder = 'Checklist name';
+  nameInput.value = existing?.name ?? '';
+  panel.appendChild(nameInput);
+
+  const modeSel = document.createElement('select');
+  modeSel.className = 'spaces-share-select';
+  for (const [v, l] of [
+    ['DO-CONFIRM', 'DO-CONFIRM — work from memory, pause, confirm'],
+    ['READ-DO', 'READ-DO — read each item and do it'],
+  ] as const) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = l;
+    modeSel.appendChild(o);
+  }
+  modeSel.value = existing?.mode ?? 'DO-CONFIRM';
+  panel.appendChild(modeSel);
+
+  const pauseInput = document.createElement('input');
+  pauseInput.type = 'text';
+  pauseInput.className = 'spaces-checklist-editor-pause';
+  pauseInput.placeholder = 'Pause point — WHEN it runs ("before merge")';
+  pauseInput.value = existing?.pausePoint ?? '';
+  panel.appendChild(pauseInput);
+
+  const itemsArea = document.createElement('textarea');
+  itemsArea.className = 'spaces-checklist-editor-items';
+  itemsArea.placeholder = 'One item per line. Prefix ! for a killer item. Max 12.';
+  itemsArea.value = (existing?.items ?? [])
+    .map((i) => `${i.killer === true ? '!' : ''}${i.text}`)
+    .join('\n');
+  panel.appendChild(itemsArea);
+
+  if (existing !== undefined) {
+    const warn = document.createElement('p');
+    warn.className = 'spaces-checklist-editor-warn';
+    warn.textContent =
+      `Saving creates v${existing.version + 1} and resets the run state on every attached ticket — a revised checklist must be re-run.`;
+    panel.appendChild(warn);
+  }
+
+  const foot = document.createElement('div');
+  foot.className = 'spaces-checklist-editor-foot';
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'spaces-items-new';
+  save.textContent = existing === undefined ? 'Create checklist' : 'Save revision';
+  save.addEventListener('click', () => {
+    void (async () => {
+      save.disabled = true;
+      const items = parseChecklistDraft(itemsArea.value);
+      const common = {
+        name: nameInput.value.trim(),
+        mode: modeSel.value === 'READ-DO' ? ('READ-DO' as const) : ('DO-CONFIRM' as const),
+        pausePoint: pauseInput.value.trim(),
+        items,
+      };
+      const envelope =
+        existing === undefined
+          ? await bridge.checklists.create({ spaceId: opts.spaceId, ...common })
+          : await bridge.checklists.update({ id: existing.id, ...common });
+      save.disabled = false;
+      if (envelope.ok === false) {
+        showToast(envelope.error.message);
+        return;
+      }
+      backdrop.remove();
+      showToast(existing === undefined ? 'Checklist created' : 'Revision saved — runs reset');
+      opts.onSaved();
+    })();
+  });
+  foot.appendChild(save);
+  panel.appendChild(foot);
+
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+  nameInput.focus();
+}
+
 async function openAttachChecklistPanel(
   item: RendererItem,
   onDone: () => Promise<void>

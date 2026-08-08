@@ -132,6 +132,7 @@ import type {
   ChecklistPhase,
   TicketChecklist,
   CreateChecklistInput,
+  UpdateChecklistInput,
   AttachChecklistInput,
   SetChecklistItemInput,
   CreateAssetInput,
@@ -145,6 +146,7 @@ import type {
   ItemMetadata,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
+import { resolveSpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
 import { runGsxMigration } from './gsx-migration.js';
 import { readLearnProgress, writeLearnProgress } from './learn-store.js';
@@ -430,6 +432,130 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // graph's (:Schema) registry. Idempotent, best-effort, non-blocking.
   void client.ensureChecklistSchema();
 
+  // ── TEMP UPLOAD-MATRIX HARNESS (remove before commit) ──────────────
+  // File-triggered so no IPC/preload surface changes: drop a JSON at
+  // TRIGGER ({mode:'upload'|'delete', ...}) and relaunch. Uses the
+  // exact production pipeline (createBinaryAsset → GSX bucket → graph
+  // node; client.deleteAsset) and writes a machine-readable report.
+  void (async () => {
+    const fs = await import('node:fs/promises');
+    const TRIGGER =
+      '/private/tmp/claude-501/-Users-richardwilson-Onereach-app/6a2dee02-f8ec-4d7d-8f37-9e0cf4e4936d/scratchpad/upload-matrix-trigger.json';
+    const REPORT =
+      '/private/tmp/claude-501/-Users-richardwilson-Onereach-app/6a2dee02-f8ec-4d7d-8f37-9e0cf4e4936d/scratchpad/upload-matrix-report.json';
+    await new Promise((r) => setTimeout(r, 6000));
+    let raw: string;
+    try {
+      raw = await fs.readFile(TRIGGER, 'utf8');
+    } catch {
+      return; // no trigger — normal boot
+    }
+    const log = getLoggingApi();
+    const inferKind = (mime: string): string => {
+      if (mime.startsWith('image/')) return 'image';
+      if (mime.startsWith('audio/')) return 'audio';
+      if (mime.startsWith('video/')) return 'video';
+      if (mime === 'application/pdf' || mime.startsWith('text/')) return 'document';
+      return 'other';
+    };
+    try {
+      const trigger = JSON.parse(raw) as {
+        mode: 'upload' | 'delete';
+        spaceId?: string;
+        spaceName?: string;
+        files?: Array<{ path: string; ext: string }>;
+        ids?: string[];
+      };
+      const results: Array<Record<string, unknown>> = [];
+      if (trigger.mode === 'upload') {
+        const space = await client.createSpace({
+          name: trigger.spaceName ?? 'Upload Matrix',
+          description: 'Automated upload/delete matrix across every supported file type.',
+        });
+        for (const f of trigger.files ?? []) {
+          const row: Record<string, unknown> = { ext: f.ext, path: f.path };
+          try {
+            const bytes = await fs.readFile(f.path);
+            const mime = guessMimeFromKey(f.path);
+            const kind = inferKind(mime);
+            const name = f.path.split('/').pop() ?? `file.${f.ext}`;
+            row['srcBytes'] = bytes.byteLength;
+            row['mime'] = mime;
+            row['kindSent'] = kind;
+            const item = await createBinaryAsset(
+              {
+                files: getFilesApi(),
+                createAsset: (assetInput) => client.createAsset(assetInput),
+                assetExistsForFileKey: (fileKey: string) =>
+                  client.assetExistsForFileKey(fileKey),
+                warn: (message, data) => log.warn('spaces', message, data),
+              },
+              {
+                spaceId: space.id,
+                title: `matrix ${f.ext}: ${name}`,
+                kind: kind as never,
+                fileName: name,
+                mimeType: mime,
+                bytes: bytes.buffer.slice(
+                  bytes.byteOffset,
+                  bytes.byteOffset + bytes.byteLength
+                ) as ArrayBuffer,
+              }
+            );
+            row['id'] = item.id;
+            const fetched = await client.getItem(item.id);
+            row['graph'] = {
+              kind: fetched?.kind,
+              fileKey: fetched?.fileKey,
+              byteSize: (fetched as { byteSize?: number } | null)?.byteSize,
+              mimeType: (fetched as { mimeType?: string } | null)?.mimeType,
+              title: fetched?.title,
+            };
+            row['ok'] = true;
+          } catch (err) {
+            row['ok'] = false;
+            row['error'] = err instanceof Error ? err.message : String(err);
+          }
+          results.push(row);
+        }
+        await fs.writeFile(
+          REPORT,
+          JSON.stringify({ mode: 'upload', spaceId: space.id, results }, null, 2)
+        );
+      } else {
+        for (const id of trigger.ids ?? []) {
+          const row: Record<string, unknown> = { id };
+          try {
+            await client.deleteAsset(id);
+            const after = await client.getItem(id);
+            row['deleted'] = true;
+            row['stillReadable'] = after !== null;
+          } catch (err) {
+            row['deleted'] = false;
+            row['error'] = err instanceof Error ? err.message : String(err);
+          }
+          results.push(row);
+        }
+        let listedAfter: number = -1;
+        if (trigger.spaceId !== undefined) {
+          const left = await client.listItems(resolveSpaceScope(trigger.spaceId), {});
+          listedAfter = left.length;
+        }
+        await fs.writeFile(
+          REPORT,
+          JSON.stringify({ mode: 'delete', listedAfter, results }, null, 2)
+        );
+      }
+      await fs.rename(TRIGGER, `${TRIGGER}.done`);
+      log.info('spaces', 'upload-matrix run complete');
+    } catch (err) {
+      await fs.writeFile(
+        REPORT,
+        JSON.stringify({ fatal: err instanceof Error ? err.message : String(err) })
+      );
+    }
+  })();
+
   // In-process cache. Pre-warms the home-view + sidebar reads at boot
   // so the renderer's first paint is instant. Mutations invalidate
   // via `nukeReadCache(...)` below; the background refresh timer
@@ -703,6 +829,15 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     list(spaceId: string): Promise<Checklist[]> {
       return client.listChecklists(spaceId);
+    },
+    async update(input: UpdateChecklistInput): Promise<{ id: string; version: number }> {
+      const result = await client.updateChecklist(input);
+      nukeReadCache();
+      return result;
+    },
+    async remove(id: string): Promise<void> {
+      await client.deleteChecklist(id);
+      nukeReadCache();
     },
     async attach(input: AttachChecklistInput): Promise<void> {
       await client.attachChecklist(input);

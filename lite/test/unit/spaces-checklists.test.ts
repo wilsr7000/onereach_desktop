@@ -298,3 +298,105 @@ describe('checklist Cypher carries the visibility predicates', () => {
     expect(CYPHER.ENSURE_CHECKLIST_SCHEMA).toContain('postflightChecklist');
   });
 });
+
+describe('ADR-055 addendum — revise + delete (2026-08-08)', () => {
+  it('UPDATE bumps the version and RESETS every run state in one statement', async () => {
+    const { CYPHER } = await import('../../spaces/sdk-client.js');
+    const q = CYPHER.UPDATE_CHECKLIST;
+    expect(q).toContain('c.version = coalesce(c.version, 1) + 1');
+    expect(q).toContain('c.revisedAt = $now');
+    // Both edge types reset — a check against v1's items says nothing
+    // about v2's (checkedIdx is positional).
+    expect(q).toContain('[pre:PREFLIGHT_CHECKLIST]->(c)');
+    expect(q).toContain('pre.checkedIdx = []');
+    expect(q).toContain('[post:POSTFLIGHT_CHECKLIST]->(c)');
+    expect(q).toContain('post.checkedIdx = []');
+    // Visibility-gated like every checklist read/write.
+    expect(q).toContain('$viewerId');
+  });
+
+  it('DELETE is refused while attached; the count query sees both edges', async () => {
+    const { CYPHER } = await import('../../spaces/sdk-client.js');
+    expect(CYPHER.COUNT_CHECKLIST_ATTACHMENTS).toContain('PREFLIGHT_CHECKLIST');
+    expect(CYPHER.COUNT_CHECKLIST_ATTACHMENTS).toContain('POSTFLIGHT_CHECKLIST');
+    expect(CYPHER.DELETE_CHECKLIST).toContain('DETACH DELETE c');
+    expect(CYPHER.DELETE_CHECKLIST).toContain('$viewerId');
+
+    const { SdkSpacesClient } = await import('../../spaces/sdk-client.js');
+    const calls: string[] = [];
+    const client = new SdkSpacesClient({
+      query: async (cypher: string) => {
+        calls.push(cypher);
+        if (cypher.includes('attachedCount')) return [{ attachedCount: 2 }];
+        return [];
+      },
+    });
+    await expect(client.deleteChecklist('cl-1')).rejects.toMatchObject({
+      code: 'SPACES_CHECKLIST_ATTACHED',
+    });
+    // The delete itself must never have run.
+    expect(calls.some((c) => c.includes('DETACH DELETE'))).toBe(false);
+  });
+
+  it('delete proceeds when detached everywhere', async () => {
+    const { SdkSpacesClient } = await import('../../spaces/sdk-client.js');
+    const calls: string[] = [];
+    const client = new SdkSpacesClient({
+      query: async (cypher: string) => {
+        calls.push(cypher);
+        if (cypher.includes('attachedCount')) return [{ attachedCount: 0 }];
+        return [];
+      },
+    });
+    await client.deleteChecklist('cl-1');
+    expect(calls.some((c) => c.includes('DETACH DELETE'))).toBe(true);
+  });
+
+  it('update revalidates with the SAME doctrine as create (cap 12, reject)', async () => {
+    const { SdkSpacesClient } = await import('../../spaces/sdk-client.js');
+    const client = new SdkSpacesClient({ query: async () => [] });
+    const thirteen = Array.from({ length: 13 }, (_, i) => ({ text: `item ${i}` }));
+    await expect(
+      client.updateChecklist({
+        id: 'cl-1',
+        name: 'Release',
+        mode: 'DO-CONFIRM',
+        pausePoint: 'before publish',
+        items: thirteen,
+      })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+    await expect(
+      client.updateChecklist({
+        id: 'cl-1',
+        name: 'Release',
+        mode: 'DO-CONFIRM',
+        pausePoint: '',
+        items: [{ text: 'one' }],
+      })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+
+  it('LIST projects usedByCount so the library can warn before delete', async () => {
+    const { CYPHER } = await import('../../spaces/sdk-client.js');
+    expect(CYPHER.LIST_CHECKLISTS_IN_SPACE).toContain('AS usedByCount');
+  });
+
+  it('the Space manager wires the library end to end (source-level)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    expect(found).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    expect(src).toContain('buildSharedDashboardChecklists(space)');
+    expect(src).toContain('function openChecklistEditorPanel');
+    // The revise warning is load-bearing UX: runs reset on save.
+    expect(src).toContain('resets the run state on every attached ticket');
+    // Delete goes through the confirm.
+    const delIdx = src.indexOf('function buildChecklistLibraryCard');
+    expect(src.slice(delIdx, delIdx + 4000)).toContain('askToConfirm');
+  });
+});

@@ -7781,3 +7781,161 @@ body {
   text-decoration: line-through;
   text-decoration-color: rgba(52, 211, 153, 0.4);
 }
+
+
+/* ─── Checklist library (Space manager, ADR-055 addendum) ─────────────── */
+
+.spaces-checklist-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.spaces-checklist-card {
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.spaces-checklist-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.spaces-checklist-card-name {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+  text-align: left;
+}
+
+.spaces-checklist-card-name:hover {
+  text-decoration: underline;
+}
+
+.spaces-checklist-card-meta {
+  flex: 1;
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.5);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.spaces-checklist-card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.spaces-checklist-card-btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 11.5px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.spaces-checklist-card-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.spaces-checklist-card-del:hover {
+  border-color: rgba(255, 107, 107, 0.5);
+  color: #ff8a8a;
+}
+
+.spaces-checklist-card-pause {
+  margin-top: 5px;
+  font-size: 12px;
+  color: rgba(139, 92, 246, 0.85);
+}
+
+.spaces-checklist-card-items {
+  margin: 10px 0 2px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spaces-checklist-card-item {
+  font-size: 12.5px;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.spaces-checklist-card-item.is-killer {
+  color: #ffca92;
+}
+
+.spaces-checklist-card-item.is-killer::after {
+  content: ' — killer item';
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(240, 164, 75, 0.7);
+}
+
+/* Editor panel */
+.spaces-checklist-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(560px, calc(100vw - 48px));
+}
+
+.spaces-checklist-editor-name,
+.spaces-checklist-editor-pause {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  outline: none;
+}
+
+.spaces-checklist-editor-name:focus,
+.spaces-checklist-editor-pause:focus,
+.spaces-checklist-editor-items:focus {
+  border-color: rgba(96, 156, 255, 0.65);
+}
+
+.spaces-checklist-editor-items {
+  width: 100%;
+  min-height: 140px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  outline: none;
+  resize: vertical;
+}
+
+.spaces-checklist-editor-warn {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 11px;
+  border: 1px solid rgba(240, 164, 75, 0.35);
+  border-radius: 8px;
+  background: rgba(240, 164, 75, 0.08);
+  color: #ffca92;
+}
+
+.spaces-checklist-editor-foot {
+  display: flex;
+  justify-content: flex-end;
+}

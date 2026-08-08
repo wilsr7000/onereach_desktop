@@ -41,6 +41,7 @@ import type {
   Checklist,
   TicketChecklist,
   CreateChecklistInput,
+  UpdateChecklistInput,
   AttachChecklistInput,
   SetChecklistItemInput,
   CreateAssetInput,
@@ -106,6 +107,8 @@ export const SPACES_IPC = {
   /** ADR-055 — checklists. */
   CHECKLISTS_CREATE: 'lite:spaces:checklists:create',
   CHECKLISTS_LIST: 'lite:spaces:checklists:list',
+  CHECKLISTS_UPDATE: 'lite:spaces:checklists:update',
+  CHECKLISTS_REMOVE: 'lite:spaces:checklists:remove',
   CHECKLISTS_ATTACH: 'lite:spaces:checklists:attach',
   CHECKLISTS_FOR_TICKET: 'lite:spaces:checklists:forTicket',
   CHECKLISTS_SET_ITEM: 'lite:spaces:checklists:setItem',
@@ -870,6 +873,39 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
         const value = await getSpacesApi().members.list(spaceId);
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_UPDATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { input?: unknown }
+    ): Promise<SpacesIpcResult<{ id: string; version: number }>> => {
+      try {
+        const value = await getSpacesApi().checklists.update(
+          (payload?.input ?? {}) as UpdateChecklistInput
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.CHECKLISTS_REMOVE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        await getSpacesApi().checklists.remove(id);
+        return { ok: true, value: { ok: true } };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

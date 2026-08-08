@@ -93,6 +93,7 @@ import {
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 import { CHECKLIST_MODES, CHECKLIST_OBLIGATIONS, MAX_CHECKLIST_ITEMS } from './types.js';
+import type { UpdateChecklistInput } from './types.js';
 
 /**
  * Narrow callback shape matching `getNeonApi().query` so the SDK
@@ -1707,8 +1708,68 @@ export const CYPHER = {
            coalesce(c.version, 1) AS version,
            toString(c.revisedAt) AS revisedAt,
            toString(c.createdAt) AS createdAt,
-           toString(c.updatedAt) AS updatedAt
+           toString(c.updatedAt) AS updatedAt,
+           size([(t)-[:PREFLIGHT_CHECKLIST]->(c) | t]) +
+             size([(t2)-[:POSTFLIGHT_CHECKLIST]->(c) | t2]) AS usedByCount
     ORDER BY toLower(c.name) ASC
+  `,
+
+  /**
+   * Revise a checklist (ADR-055 addendum, 2026-08-08): a checklist is
+   * a living document — version bumps, revisedAt stamps — and a
+   * REVISED checklist must be RE-RUN: every attached ticket's run
+   * state resets in the same statement, because a check made against
+   * item list v1 says nothing about item list v2 (checkedIdx is
+   * positional). Doctrine over convenience.
+   */
+  UPDATE_CHECKLIST: `
+    MATCH (c:Checklist {id: $id})-[:BELONGS_TO]->(s:Space)
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    SET c.name = $name,
+        c.mode = $mode,
+        c.pausePoint = $pausePoint,
+        c.items = $itemsJson,
+        c.itemCount = $itemCount,
+        c.version = coalesce(c.version, 1) + 1,
+        c.revisedAt = $now,
+        c.updatedAt = $now
+    WITH c
+    OPTIONAL MATCH (tpre)-[pre:PREFLIGHT_CHECKLIST]->(c)
+    SET pre.checkedIdx = [],
+        pre.lastCheckedBy = null,
+        pre.lastCheckedAt = null
+    WITH c
+    OPTIONAL MATCH (tpost)-[post:POSTFLIGHT_CHECKLIST]->(c)
+    SET post.checkedIdx = [],
+        post.lastCheckedBy = null,
+        post.lastCheckedAt = null
+    RETURN DISTINCT c.id AS id, coalesce(c.version, 1) AS version
+  `,
+
+  /**
+   * How many tickets hold this checklist (delete guard). Visibility-
+   * gated like every read: an invisible checklist's attachment count
+   * must not leak through the guard's error message.
+   */
+  COUNT_CHECKLIST_ATTACHMENTS: `
+    MATCH (c:Checklist {id: $id})-[:BELONGS_TO]->(s:Space)
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    RETURN size([(t)-[:PREFLIGHT_CHECKLIST]->(c) | t]) +
+             size([(t2)-[:POSTFLIGHT_CHECKLIST]->(c) | t2]) AS attachedCount
+  `,
+
+  /**
+   * Delete only when detached everywhere — silently unhooking a
+   * REQUIRED gate from live tickets would un-gate them without anyone
+   * choosing that.
+   */
+  DELETE_CHECKLIST: `
+    MATCH (c:Checklist {id: $id})-[:BELONGS_TO]->(s:Space)
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    DETACH DELETE c
   `,
 
   // Attach = MERGE so re-attaching is idempotent (obligation updates in
@@ -3685,6 +3746,104 @@ export class SdkSpacesClient {
     });
   }
 
+  async updateChecklist(input: UpdateChecklistInput): Promise<{ id: string; version: number }> {
+    return this.withSpan('spaces.checklists.update', async () => {
+      const id = typeof input.id === 'string' ? input.id.trim() : '';
+      if (id.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'Checklist id is required',
+          context: { op: 'checklists.update' },
+        });
+      }
+      const name = typeof input.name === 'string' ? input.name.trim() : '';
+      if (name.length === 0 || name.length > 120) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'Checklist name must be 1–120 characters',
+          context: { op: 'checklists.update' },
+        });
+      }
+      if (!(CHECKLIST_MODES as readonly string[]).includes(input.mode)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `Checklist mode must be DO-CONFIRM or READ-DO (got ${String(input.mode)})`,
+          context: { op: 'checklists.update' },
+        });
+      }
+      const pausePoint = typeof input.pausePoint === 'string' ? input.pausePoint.trim() : '';
+      if (pausePoint.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'A checklist needs a pause point — WHEN it runs ("before merge").',
+          context: { op: 'checklists.update' },
+        });
+      }
+      const items = sanitizeChecklistItems(input.items);
+      const rows = await this.run(CYPHER.UPDATE_CHECKLIST, {
+        id,
+        name,
+        mode: input.mode,
+        pausePoint,
+        itemsJson: JSON.stringify(items),
+        itemCount: items.length,
+        now: this.now(),
+        viewerId: this.viewerParam(),
+      });
+      const row = rows[0];
+      if (row === undefined) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Checklist not found: ${id}`,
+          remediation: 'It may have been deleted, or you may not have access to its Space.',
+          context: { op: 'checklists.update', id },
+        });
+      }
+      // Revision resets every attached ticket's run state by design —
+      // a check against v1's items says nothing about v2's.
+      return { id, version: Number(row.version) };
+    });
+  }
+
+  async deleteChecklist(id: string): Promise<void> {
+    return this.withSpan('spaces.checklists.delete', async () => {
+      const validId = typeof id === 'string' ? id.trim() : '';
+      if (validId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'Checklist id is required',
+          context: { op: 'checklists.delete' },
+        });
+      }
+      const counts = await this.run(CYPHER.COUNT_CHECKLIST_ATTACHMENTS, {
+        id: validId,
+        viewerId: this.viewerParam(),
+      });
+      if (counts.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: `Checklist not found: ${validId}`,
+          remediation: 'It may have been deleted, or you may not have access to its Space.',
+          context: { op: 'checklists.delete', id: validId },
+        });
+      }
+      const attached = Number(counts[0]?.attachedCount ?? 0);
+      if (attached > 0) {
+        throw new SpacesError({
+          code: 'SPACES_CHECKLIST_ATTACHED',
+          message: `Checklist is attached to ${attached} ticket${attached === 1 ? '' : 's'}`,
+          remediation:
+            'Detach it from every ticket first. Deleting a checklist out from under a REQUIRED gate would silently un-gate those tickets.',
+          context: { op: 'checklists.delete', id: validId, attached },
+        });
+      }
+      await this.run(CYPHER.DELETE_CHECKLIST, {
+        id: validId,
+        viewerId: this.viewerParam(),
+      });
+    });
+  }
+
   async listChecklists(spaceId: string): Promise<Checklist[]> {
     return this.withSpan('spaces.checklists.list', async () => {
       const validId = validateSpaceId(spaceId);
@@ -5015,6 +5174,7 @@ function rowToChecklist(r: Record<string, unknown>): Checklist | null {
     ...(typeof r['updatedAt'] === 'string' && r['updatedAt'].length > 0
       ? { updatedAt: r['updatedAt'] }
       : {}),
+    ...(typeof r['usedByCount'] === 'number' ? { usedByCount: r['usedByCount'] } : {}),
   };
 }
 

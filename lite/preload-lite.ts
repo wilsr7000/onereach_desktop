@@ -96,6 +96,8 @@ const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
 const SPACES_MEMBERS_REMOVE = 'lite:spaces:members:remove';
 const SPACES_CHECKLISTS_CREATE = 'lite:spaces:checklists:create';
+const SPACES_CHECKLISTS_UPDATE = 'lite:spaces:checklists:update';
+const SPACES_CHECKLISTS_REMOVE = 'lite:spaces:checklists:remove';
 const SPACES_CHECKLISTS_LIST = 'lite:spaces:checklists:list';
 const SPACES_CHECKLISTS_ATTACH = 'lite:spaces:checklists:attach';
 const SPACES_CHECKLISTS_FOR_TICKET = 'lite:spaces:checklists:forTicket';
@@ -837,6 +839,8 @@ interface SpacesMemberView {
 }
 
 interface SpacesChecklistsBridge {
+  update(input: unknown): Promise<SpacesIpcResultView<{ id: string; version: number }>>;
+  remove(id: string): Promise<SpacesIpcResultView<{ ok: true }>>;
   create(input: {
     spaceId: string;
     name: string;
@@ -1826,6 +1830,14 @@ const spaces: SpacesBridge = {
   checklists: {
     create: (input) =>
       ipcRenderer.invoke(SPACES_CHECKLISTS_CREATE, { input }) as Promise<SpacesIpcResultView<unknown>>,
+    update: (input: unknown) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_UPDATE, { input }) as Promise<
+        SpacesIpcResultView<{ id: string; version: number }>
+      >,
+    remove: (id: string) =>
+      ipcRenderer.invoke(SPACES_CHECKLISTS_REMOVE, { id }) as Promise<
+        SpacesIpcResultView<{ ok: true }>
+      >,
     list: (spaceId) =>
       ipcRenderer.invoke(SPACES_CHECKLISTS_LIST, { spaceId }) as Promise<SpacesIpcResultView<unknown[]>>,
     attach: (input) =>
@@ -2404,6 +2416,233 @@ const ai: AiBridge = {
 };
 
 // ---------------------------------------------------------------------------
+// GSX automation bridge — open GSX studio windows (Designer/Flows/...)
+// and drive them with deterministic scripts wrapped in an eval loop.
+// View types structurally mirror lite/gsx/types.ts (the bridge keeps
+// its own copies per file convention -- no cross-boundary imports).
+// ---------------------------------------------------------------------------
+
+const GSX_OPEN_WINDOW = 'lite:gsx:open-window';
+const GSX_CLOSE_WINDOW = 'lite:gsx:close-window';
+const GSX_LIST_WINDOWS = 'lite:gsx:list-windows';
+const GSX_NAVIGATE = 'lite:gsx:navigate';
+const GSX_SNAPSHOT = 'lite:gsx:snapshot';
+const GSX_LIST_SCRIPTS = 'lite:gsx:list-scripts';
+const GSX_GET_SCRIPT = 'lite:gsx:get-script';
+const GSX_SAVE_SCRIPT = 'lite:gsx:save-script';
+const GSX_DELETE_SCRIPT = 'lite:gsx:delete-script';
+const GSX_RUN_SCRIPT = 'lite:gsx:run-script';
+const GSX_LIST_RUNS = 'lite:gsx:list-runs';
+const GSX_GET_RUN = 'lite:gsx:get-run';
+const GSX_GET_STATS = 'lite:gsx:get-stats';
+const GSX_START_RECORDING = 'lite:gsx:start-recording';
+const GSX_STOP_RECORDING = 'lite:gsx:stop-recording';
+const GSX_CANCEL_RECORDING = 'lite:gsx:cancel-recording';
+const GSX_GET_RECORDING = 'lite:gsx:get-recording';
+const GSX_STOP_RECORDING_AS_AGENT = 'lite:gsx:stop-recording-as-agent';
+const GSX_INVOKE_AGENT = 'lite:gsx:invoke-agent';
+const GSX_LIST_AGENTS = 'lite:gsx:list-agents';
+const GSX_GET_AGENT = 'lite:gsx:get-agent';
+const GSX_DELETE_AGENT = 'lite:gsx:delete-agent';
+
+interface GsxWindowInfoView {
+  windowId: string;
+  env: string;
+  url: string;
+  title: string;
+}
+
+interface GsxScriptView {
+  id: string;
+  title: string;
+  description: string;
+  version: number;
+  source: 'seed' | 'learned';
+  params?: string[];
+  steps: Array<Record<string, unknown> & { kind: string }>;
+}
+
+interface GsxStepResultView {
+  index: number;
+  kind: string;
+  ok: boolean;
+  detail?: string;
+  durationMs: number;
+}
+
+interface GsxRunRecordView {
+  runId: string;
+  scriptId: string;
+  scriptVersion: number;
+  source: 'seed' | 'learned';
+  windowId: string;
+  params: Record<string, string>;
+  startedAt: string;
+  finishedAt: string;
+  durationMs: number;
+  verdict: 'pass' | 'fail' | 'error' | 'repaired-pass' | 'repaired-fail';
+  steps: GsxStepResultView[];
+  failure?: string;
+  repair?: {
+    attempted: boolean;
+    learnedVersion?: number;
+    skippedReason?: string;
+    steps?: GsxStepResultView[];
+  };
+}
+
+interface GsxScriptStatsView {
+  scriptId: string;
+  runs: number;
+  passes: number;
+  failures: number;
+  consecutiveFailures: number;
+  lastVerdict?: string;
+  lastRunAt?: string;
+  lastInvalidatedAt?: string;
+}
+
+interface GsxSnapshotView {
+  url: string;
+  title: string;
+  elements: Array<{
+    ref: number;
+    tag: string;
+    text: string;
+    attrs: Record<string, string>;
+  }>;
+}
+
+interface GsxBridge {
+  /** Open a GSX studio window (auth-injected before navigation). */
+  openWindow(opts?: {
+    env?: string;
+    url?: string;
+    title?: string;
+  }): Promise<GsxWindowInfoView>;
+  closeWindow(windowId: string): Promise<{ closed: boolean }>;
+  listWindows(): Promise<GsxWindowInfoView[]>;
+  navigate(windowId: string, url: string): Promise<GsxWindowInfoView>;
+  /** Interactive-element census -- the same picture the repair LLM sees. */
+  snapshot(windowId: string): Promise<GsxSnapshotView>;
+  listScripts(): Promise<GsxScriptView[]>;
+  getScript(id: string): Promise<GsxScriptView>;
+  saveScript(script: GsxScriptView): Promise<GsxScriptView>;
+  deleteScript(id: string): Promise<{ deleted: boolean }>;
+  /** Run + grade a script; failing runs may be AI-repaired (see run.repair). */
+  runScript(opts: {
+    scriptId: string;
+    windowId?: string;
+    env?: string;
+    params?: Record<string, string>;
+    repair?: boolean;
+  }): Promise<GsxRunRecordView>;
+  listRuns(scriptId?: string): Promise<GsxRunRecordView[]>;
+  getRun(runId: string): Promise<GsxRunRecordView>;
+  getStats(scriptId?: string): Promise<GsxScriptStatsView[]>;
+  /** TEACH MODE: record your own navigation, save it as a template. */
+  startRecording(windowId: string): Promise<GsxRecordingStatusView>;
+  /** Stop + save the recording as a learned template. The AI turns the
+   *  concrete walkthrough into a parameterized script ({flowName}, ...)
+   *  unless generalize is false. */
+  stopRecording(
+    windowId: string,
+    opts: {
+      scriptId: string;
+      title: string;
+      description: string;
+      generalize?: boolean;
+    }
+  ): Promise<GsxScriptView>;
+  cancelRecording(windowId: string): Promise<{ cancelled: boolean }>;
+  getRecording(windowId: string): Promise<GsxRecordingStatusView>;
+  /** Finish a recording as a NAMED agent: the system writes its title,
+   *  description, and param docs; publishes to the "GSX Build" Space. */
+  stopRecordingAsAgent(
+    windowId: string,
+    opts: { name: string; hint?: string; publish?: boolean }
+  ): Promise<GsxAgentView>;
+  /** Invoke an agent by name; params are extracted from free-form
+   *  details (or passed structured). */
+  invokeAgent(
+    name: string,
+    opts?: {
+      details?: string;
+      params?: Record<string, string>;
+      windowId?: string;
+      env?: string;
+      repair?: boolean;
+    }
+  ): Promise<GsxInvokeAgentResultView>;
+  listAgents(): Promise<GsxAgentView[]>;
+  getAgent(name: string): Promise<GsxAgentView>;
+  deleteAgent(name: string): Promise<{ deleted: boolean }>;
+}
+
+interface GsxRecordingStatusView {
+  windowId: string;
+  recording: boolean;
+  eventCount: number;
+}
+
+interface GsxAgentView {
+  name: string;
+  title: string;
+  description: string;
+  scriptId: string;
+  params: Array<{ name: string; description: string }>;
+  createdAt: string;
+  updatedAt: string;
+  spaceItemId?: string;
+}
+
+interface GsxInvokeAgentResultView {
+  agent: GsxAgentView;
+  params: Record<string, string>;
+  run: GsxRunRecordView;
+}
+
+const gsx: GsxBridge = {
+  openWindow: (opts) =>
+    ipcRenderer.invoke(GSX_OPEN_WINDOW, opts) as Promise<GsxWindowInfoView>,
+  closeWindow: (windowId) =>
+    ipcRenderer.invoke(GSX_CLOSE_WINDOW, windowId) as Promise<{ closed: boolean }>,
+  listWindows: () => ipcRenderer.invoke(GSX_LIST_WINDOWS) as Promise<GsxWindowInfoView[]>,
+  navigate: (windowId, url) =>
+    ipcRenderer.invoke(GSX_NAVIGATE, windowId, url) as Promise<GsxWindowInfoView>,
+  snapshot: (windowId) =>
+    ipcRenderer.invoke(GSX_SNAPSHOT, windowId) as Promise<GsxSnapshotView>,
+  listScripts: () => ipcRenderer.invoke(GSX_LIST_SCRIPTS) as Promise<GsxScriptView[]>,
+  getScript: (id) => ipcRenderer.invoke(GSX_GET_SCRIPT, id) as Promise<GsxScriptView>,
+  saveScript: (script) =>
+    ipcRenderer.invoke(GSX_SAVE_SCRIPT, script) as Promise<GsxScriptView>,
+  deleteScript: (id) =>
+    ipcRenderer.invoke(GSX_DELETE_SCRIPT, id) as Promise<{ deleted: boolean }>,
+  runScript: (opts) => ipcRenderer.invoke(GSX_RUN_SCRIPT, opts) as Promise<GsxRunRecordView>,
+  listRuns: (scriptId) =>
+    ipcRenderer.invoke(GSX_LIST_RUNS, scriptId) as Promise<GsxRunRecordView[]>,
+  getRun: (runId) => ipcRenderer.invoke(GSX_GET_RUN, runId) as Promise<GsxRunRecordView>,
+  getStats: (scriptId) =>
+    ipcRenderer.invoke(GSX_GET_STATS, scriptId) as Promise<GsxScriptStatsView[]>,
+  startRecording: (windowId) =>
+    ipcRenderer.invoke(GSX_START_RECORDING, windowId) as Promise<GsxRecordingStatusView>,
+  stopRecording: (windowId, opts) =>
+    ipcRenderer.invoke(GSX_STOP_RECORDING, windowId, opts) as Promise<GsxScriptView>,
+  cancelRecording: (windowId) =>
+    ipcRenderer.invoke(GSX_CANCEL_RECORDING, windowId) as Promise<{ cancelled: boolean }>,
+  getRecording: (windowId) =>
+    ipcRenderer.invoke(GSX_GET_RECORDING, windowId) as Promise<GsxRecordingStatusView>,
+  stopRecordingAsAgent: (windowId, opts) =>
+    ipcRenderer.invoke(GSX_STOP_RECORDING_AS_AGENT, windowId, opts) as Promise<GsxAgentView>,
+  invokeAgent: (name, opts) =>
+    ipcRenderer.invoke(GSX_INVOKE_AGENT, name, opts) as Promise<GsxInvokeAgentResultView>,
+  listAgents: () => ipcRenderer.invoke(GSX_LIST_AGENTS) as Promise<GsxAgentView[]>,
+  getAgent: (name) => ipcRenderer.invoke(GSX_GET_AGENT, name) as Promise<GsxAgentView>,
+  deleteAgent: (name) =>
+    ipcRenderer.invoke(GSX_DELETE_AGENT, name) as Promise<{ deleted: boolean }>,
+};
+
+// ---------------------------------------------------------------------------
 // Download picker bridge — consumed by lite/downloads/picker.ts.
 // The renderer reads its bootstrap (file summary + spaces) and resolves
 // with the user's pick (or null on cancel). The main process owns the
@@ -2501,6 +2740,7 @@ contextBridge.exposeInMainWorld('lite', {
   idw,
   tools,
   ai,
+  gsx,
   mainWindow,
   events,
   university,

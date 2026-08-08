@@ -39,6 +39,12 @@ export const SPACES_ERROR_CODES = {
    */
   CHECKLIST_REQUIRED: 'SPACES_CHECKLIST_REQUIRED',
   /**
+   * ADR-055 addendum — delete refused while the checklist is attached
+   * to tickets. Deleting out from under a REQUIRED gate would silently
+   * un-gate those tickets; detach everywhere first.
+   */
+  CHECKLIST_ATTACHED: 'SPACES_CHECKLIST_ATTACHED',
+  /**
    * `create()` or `rename()` collided with an existing Space name in the
    * same account. Names are unique per account; renderers surface this
    * as "A space called 'X' already exists -- try a different name."

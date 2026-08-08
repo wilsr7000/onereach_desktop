@@ -1116,6 +1116,8 @@ interface LiteSpacesMemberView {
 
 /** ADR-055 — a checklist as the renderer sees it. */
 interface LiteChecklistView {
+  /** Tickets currently holding this checklist. */
+  usedByCount?: number;
   id: string;
   name: string;
   mode: 'DO-CONFIRM' | 'READ-DO';
@@ -1135,6 +1137,16 @@ interface LiteTicketChecklistView {
 }
 
 interface LiteSpacesChecklistsBridge {
+  /** ADR-055 addendum: revise — version bumps, ALL run states reset. */
+  update(input: {
+    id: string;
+    name: string;
+    mode: 'DO-CONFIRM' | 'READ-DO';
+    pausePoint: string;
+    items: Array<{ text: string; killer?: boolean }>;
+  }): Promise<LiteSpacesIpcResult<{ id: string; version: number }>>;
+  /** Delete — refused while attached to any ticket. */
+  remove(id: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   create(input: {
     spaceId: string;
     name: string;

@@ -1042,6 +1042,8 @@ export interface ChecklistItemSpec {
 
 /** The `:Checklist` node as read from the graph. */
 export interface Checklist {
+  /** Tickets currently holding this checklist (pre+post edges). */
+  usedByCount?: number;
   id: string;
   name: string;
   mode: ChecklistMode;
@@ -1097,6 +1099,15 @@ export interface TicketChecklist {
 /** Input for `checklists.create(...)`. */
 export interface CreateChecklistInput {
   spaceId: string;
+  name: string;
+  mode: ChecklistMode;
+  pausePoint: string;
+  items: ChecklistItemSpec[];
+}
+
+/** ADR-055 addendum: revise a checklist (version bump; runs reset). */
+export interface UpdateChecklistInput {
+  id: string;
   name: string;
   mode: ChecklistMode;
   pausePoint: string;

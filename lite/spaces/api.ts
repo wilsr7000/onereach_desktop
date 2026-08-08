@@ -57,6 +57,7 @@ import type {
   ChecklistPhase,
   TicketChecklist,
   CreateChecklistInput,
+  UpdateChecklistInput,
   AttachChecklistInput,
   SetChecklistItemInput,
   CreateAssetInput,
@@ -517,6 +518,12 @@ export interface SpacesChecklistsApi {
   create(input: CreateChecklistInput): Promise<Checklist>;
   /** List a Space's checklists. Visibility-gated like every read. */
   list(spaceId: string): Promise<Checklist[]>;
+
+  /** ADR-055 addendum: revise (version bump; ALL run states reset). */
+  update(input: UpdateChecklistInput): Promise<{ id: string; version: number }>;
+
+  /** Delete — refused while attached to any ticket. */
+  remove(id: string): Promise<void>;
   /** Attach to a ticket as pre- or post-flight with an obligation. Idempotent. */
   attach(input: AttachChecklistInput): Promise<void>;
   /** Every checklist attached to a ticket, with per-ticket run state. */
@@ -892,6 +899,14 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async list(_spaceId: string): Promise<Checklist[]> {
       throw notInitialized('checklists.list');
+    },
+
+    async update(_input: UpdateChecklistInput): Promise<{ id: string; version: number }> {
+      throw notInitialized('checklists.update');
+    },
+
+    async remove(_id: string): Promise<void> {
+      throw notInitialized('checklists.remove');
     },
     async attach(_input: AttachChecklistInput): Promise<void> {
       throw notInitialized('checklists.attach');
