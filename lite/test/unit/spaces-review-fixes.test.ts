@@ -412,6 +412,36 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src).not.toMatch(/style\.background = (space|chip)\.color/);
   });
 
+  it('tile excerpts strip markdown noise so tiles read as prose', async () => {
+    // 2026-08-08 sweep, found live: a `**Type:** …` / `# Heading`
+    // asset showed literal ** and # in its tile.
+    const mod = await import('../../spaces/spaces.js') as unknown as {
+      stripMarkdownForExcerpt(t: string): string;
+      tileExcerptText(e: string | undefined): string | null;
+    };
+    expect(mod.stripMarkdownForExcerpt('**Type:** Feature request')).toBe('Type: Feature request');
+    expect(mod.stripMarkdownForExcerpt('# Heading\n- one\n- two')).toBe('Heading one two');
+    expect(mod.stripMarkdownForExcerpt('see `code` and [a link](http://x)')).toBe('see code and a link');
+    // data: stubs still rejected.
+    expect(mod.tileExcerptText('data:image/png;base64,AAAA')).toBeNull();
+    // plain prose passes through unchanged.
+    expect(mod.tileExcerptText('Just a normal note.')).toBe('Just a normal note.');
+  });
+
+  it('the sweep fixes are wired into the renderer', () => {
+    const src = source();
+    // Filtered-empty vs truly-empty are distinct states now.
+    expect(src).toContain('function buildFilteredEmptyState');
+    expect(src).toMatch(/scopeVisibleItems\.length > 0 && state\.homeFilter !== 'all'/);
+    // Checklists library says so instead of spinning forever.
+    expect(src).toContain('Checklists need a newer build of Lite');
+    // Image tiles + detail get an error fallback.
+    expect(src).toMatch(/img\.addEventListener\('error'/);
+    // Sidebar surfaces route titles through the hash-id guard.
+    const tree = bodyOf('async function loadSpaceChildren', 2400);
+    expect(tree).toContain('generateItemTitle(item)');
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

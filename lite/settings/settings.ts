@@ -48,6 +48,7 @@ const ICON_NEON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 
 const ICON_ABOUT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>`;
 
+const ICON_HOME = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M9 21v-6h6v6" /></svg>`;
 const ICON_DEVELOPER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>`;
 
 // Robot/agent icon for the IDWs section.
@@ -60,13 +61,6 @@ const ICON_AI = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 // ---------------------------------------------------------------------------
 // Placeholder mount -- used by sections that ship empty in v1
 // ---------------------------------------------------------------------------
-
-function placeholderMount(message: string): SectionDescriptor['mount'] {
-  return (container) => {
-    container.innerHTML = `<div class="pane-placeholder">${message}</div>`;
-    return undefined;
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Section list
@@ -122,6 +116,7 @@ const SECTIONS: SectionDescriptor[] = [
   {
     id: 'home',
     title: 'Home',
+    icon: ICON_HOME,
     mount: mountHome,
   },
   {
@@ -134,11 +129,45 @@ const SECTIONS: SectionDescriptor[] = [
     id: 'about',
     title: 'About',
     icon: ICON_ABOUT,
-    mount: placeholderMount(
-      'Onereach.ai Lite. A slim Electron kernel that ships independently from the full Onereach.ai app.'
-    ),
+    mount: mountAbout,
   },
 ];
+
+/**
+ * About: a real section, not a dashed placeholder. Shows the running
+ * version + platform (the native macOS About panel does too, but this
+ * is the only About on Windows/Linux) alongside what Lite is.
+ * (2026-08-08 function sweep.)
+ */
+function mountAbout(container: HTMLElement): (() => void) | undefined {
+  const wrap = document.createElement('div');
+  wrap.className = 'about-pane';
+  const intro = document.createElement('p');
+  intro.className = 'pane-intro';
+  intro.textContent =
+    'Onereach.ai Lite is a slim, independently-shipping desktop kernel: it signs you in to Onereach.ai and gives your AIs, Spaces, tutorials, and bug reporting a single home — with everything else loaded on demand or deferred to the full app.';
+  wrap.appendChild(intro);
+
+  const rows: Array<[string, string]> = [
+    ['Version', window.lite?.version ?? 'unknown'],
+    ['Platform', window.lite?.platform ?? navigator.platform],
+    ['Channel', 'Signed, auto-updating (every 6 hours)'],
+  ];
+  const grid = document.createElement('div');
+  grid.className = 'about-grid';
+  for (const [label, value] of rows) {
+    const l = document.createElement('span');
+    l.className = 'about-grid-label';
+    l.textContent = label;
+    const v = document.createElement('span');
+    v.className = 'about-grid-value';
+    v.textContent = value;
+    grid.append(l, v);
+  }
+  wrap.appendChild(grid);
+  container.appendChild(wrap);
+  return (): void => wrap.remove();
+}
 
 // ---------------------------------------------------------------------------
 // State
@@ -233,9 +262,9 @@ function buildSidebarTab(section: SectionDescriptor): HTMLButtonElement {
   label.textContent = section.title;
   btn.appendChild(label);
 
-  // Per-section status dot (e.g. AI section shows a dot when the
-  // OpenAI API key isn't set yet so the user can see the
-  // unfinished-setup signal without entering the section).
+  // Per-section status dot — reserved for a future "needs setup"
+  // signal (e.g. the AI section's Anthropic key not yet set). Created
+  // hidden; nothing un-hides it yet, so it is inert today.
   const dot = document.createElement('span');
   dot.className = 'sidebar-tab-dot';
   dot.dataset['for'] = section.id;

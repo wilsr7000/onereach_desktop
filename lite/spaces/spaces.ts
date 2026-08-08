@@ -989,13 +989,13 @@ function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
     li.appendChild(glyph);
     const title = document.createElement('span');
     title.className = 'spaces-tree-item-title';
-    title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+    title.textContent = generateItemTitle(item);
     li.appendChild(title);
     const chip = item.otherSpaces[0];
     if (chip !== undefined) {
       const where = document.createElement('span');
       where.className = 'spaces-tree-item-where';
-      where.textContent = chip.name;
+      where.textContent = friendlySpaceName(chip.name);
       li.appendChild(where);
     }
     li.addEventListener('click', () => {
@@ -1081,7 +1081,7 @@ async function loadSpaceChildren(spaceId: string, ul: HTMLUListElement): Promise
       li.appendChild(glyph);
       const title = document.createElement('span');
       title.className = 'spaces-tree-item-title';
-      title.textContent = item.title.length > 0 ? item.title : '(untitled)';
+      title.textContent = generateItemTitle(item);
       li.appendChild(title);
       li.addEventListener('click', () => {
         setActiveScope(spaceId);
@@ -1747,6 +1747,8 @@ async function loadItemDetail(itemId: string): Promise<void> {
     // user still sees the asset; we don't surface a banner for a
     // missing-or-failing activity stream.
     void loadItemActivity(itemId);
+    // ADR-057: version history, same lazy/soft-fail posture.
+    void loadItemHistory(itemId);
   } catch (err) {
     state.loadingDetail = false;
     renderDetail({ error: messageFrom(err) });
@@ -1780,6 +1782,293 @@ async function loadItemActivity(itemId: string): Promise<void> {
   }
 }
 
+
+// ─── Version history (ADR-057) ─────────────────────────────────────────
+
+interface RendererAssetVersion {
+  seq: number;
+  title: string;
+  editedBy?: string;
+  editedAt: string;
+  changeSummary?: string;
+  restoredFromSeq?: number;
+  currentMatchesSeq?: number;
+  hasContent: boolean;
+  description?: string;
+  content?: string;
+  fileKey?: string;
+  mimeType?: string;
+}
+
+async function loadItemHistory(itemId: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.items.versions(itemId, 50);
+    if (envelope.ok === false) {
+      window.logging?.warn?.('spaces', 'version history load failed', {
+        itemId,
+        error: envelope.error.message,
+      });
+      return;
+    }
+    if (state.activeItemId !== itemId) return;
+    const slot = document.querySelector<HTMLElement>(
+      `[data-history-slot="${cssEscape(itemId)}"]`
+    );
+    if (slot === null) return;
+    const versions = envelope.value as RendererAssetVersion[];
+    if (versions.length === 0) {
+      slot.replaceChildren(); // no history yet — stay invisible
+      return;
+    }
+    slot.replaceChildren(buildDetailHistory(itemId, versions));
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'version history load threw', {
+      itemId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** History section: current marker + one row per prior snapshot. */
+function buildDetailHistory(
+  itemId: string,
+  versions: ReadonlyArray<RendererAssetVersion>
+): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'spaces-detail-history';
+
+  const label = document.createElement('div');
+  label.className = 'spaces-detail-label';
+  label.textContent = `History · ${versions.length} version${versions.length === 1 ? '' : 's'}`;
+  section.appendChild(label);
+
+  const list = document.createElement('ul');
+  list.className = 'spaces-history-list';
+
+  // "Current" pseudo-row so the newest state reads as the live one.
+  const currentLi = document.createElement('li');
+  currentLi.className = 'spaces-history-row is-current';
+  const curDot = document.createElement('span');
+  curDot.className = 'spaces-history-dot';
+  currentLi.appendChild(curDot);
+  const curBody = document.createElement('div');
+  curBody.className = 'spaces-history-body';
+  const curTop = document.createElement('div');
+  curTop.className = 'spaces-history-top';
+  const curTag = document.createElement('span');
+  curTag.className = 'spaces-history-seq';
+  curTag.textContent = 'Current';
+  curTop.appendChild(curTag);
+  curBody.appendChild(curTop);
+  currentLi.appendChild(curBody);
+  list.appendChild(currentLi);
+
+  for (const v of versions) {
+    list.appendChild(buildHistoryRow(itemId, v));
+  }
+  section.appendChild(list);
+  return section;
+}
+
+function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLElement {
+  const li = document.createElement('li');
+  li.className = 'spaces-history-row';
+
+  const dot = document.createElement('span');
+  dot.className = 'spaces-history-dot';
+  li.appendChild(dot);
+
+  const body = document.createElement('div');
+  body.className = 'spaces-history-body';
+
+  const top = document.createElement('div');
+  top.className = 'spaces-history-top';
+  const seq = document.createElement('span');
+  seq.className = 'spaces-history-seq';
+  seq.textContent = `v${v.seq}`;
+  top.appendChild(seq);
+  if (typeof v.editedBy === 'string' && v.editedBy.length > 0) {
+    const who = document.createElement('span');
+    who.className = 'spaces-history-who';
+    who.textContent = v.editedBy;
+    top.appendChild(who);
+  }
+  if (v.editedAt.length > 0) {
+    const when = document.createElement('span');
+    when.className = 'spaces-history-when';
+    when.textContent = formatRelativeTime(v.editedAt);
+    when.title = v.editedAt;
+    top.appendChild(when);
+  }
+  if (typeof v.restoredFromSeq === 'number') {
+    const badge = document.createElement('span');
+    badge.className = 'spaces-history-badge';
+    badge.textContent = `↩ restored v${v.restoredFromSeq}`;
+    top.appendChild(badge);
+  }
+  if (typeof v.currentMatchesSeq === 'number') {
+    const badge = document.createElement('span');
+    badge.className = 'spaces-history-badge spaces-history-badge-dupe';
+    badge.textContent = `= v${v.currentMatchesSeq}`;
+    badge.title = `The state after this edit matched version ${v.currentMatchesSeq} exactly.`;
+    top.appendChild(badge);
+  }
+  body.appendChild(top);
+
+  // AI change summary (async — may be absent on a just-made version).
+  const summary = document.createElement('div');
+  summary.className = 'spaces-history-summary';
+  if (typeof v.changeSummary === 'string' && v.changeSummary.length > 0) {
+    summary.textContent = v.changeSummary;
+  } else {
+    summary.classList.add('is-pending');
+    summary.textContent =
+      typeof v.title === 'string' && v.title.length > 0 ? `"${v.title}"` : 'Edited';
+  }
+  body.appendChild(summary);
+
+  const actions = document.createElement('div');
+  actions.className = 'spaces-history-actions';
+  const viewBtn = document.createElement('button');
+  viewBtn.type = 'button';
+  viewBtn.className = 'spaces-history-action';
+  viewBtn.textContent = 'View';
+  viewBtn.addEventListener('click', () => void openVersionViewer(itemId, v.seq));
+  actions.appendChild(viewBtn);
+  const restoreBtn = document.createElement('button');
+  restoreBtn.type = 'button';
+  restoreBtn.className = 'spaces-history-action spaces-history-action-restore';
+  restoreBtn.textContent = 'Restore';
+  restoreBtn.addEventListener('click', () => void restoreVersion(itemId, v.seq));
+  actions.appendChild(restoreBtn);
+  body.appendChild(actions);
+
+  li.appendChild(body);
+  return li;
+}
+
+async function openVersionViewer(itemId: string, seq: number): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  let version: RendererAssetVersion | null = null;
+  try {
+    const envelope = await bridge.items.getVersion(itemId, seq);
+    if (envelope.ok === false) {
+      showToast(`Couldn't load version: ${envelope.error.message}`);
+      return;
+    }
+    version = envelope.value as RendererAssetVersion | null;
+  } catch (err) {
+    showToast(`Couldn't load version: ${messageFrom(err)}`);
+    return;
+  }
+  if (version === null) {
+    showToast('That version is no longer available.');
+    return;
+  }
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-version-viewer-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-version-viewer';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-version-viewer-head';
+  const title = document.createElement('div');
+  title.className = 'spaces-version-viewer-title';
+  title.textContent = `v${version.seq} · ${version.title || '(untitled)'}`;
+  head.appendChild(title);
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'spaces-version-viewer-close';
+  closeBtn.textContent = '✕';
+  closeBtn.setAttribute('aria-label', 'Close version viewer');
+  head.appendChild(closeBtn);
+  panel.appendChild(head);
+
+  if (typeof version.changeSummary === 'string' && version.changeSummary.length > 0) {
+    const sum = document.createElement('div');
+    sum.className = 'spaces-version-viewer-summary';
+    sum.textContent = version.changeSummary;
+    panel.appendChild(sum);
+  }
+
+  const bodyEl = document.createElement('div');
+  bodyEl.className = 'spaces-version-viewer-body';
+  const content = version.content ?? version.description ?? '';
+  if (content.length > 0) {
+    const pre = document.createElement('pre');
+    pre.className = 'spaces-version-viewer-content';
+    pre.textContent = content;
+    bodyEl.appendChild(pre);
+  } else {
+    const empty = document.createElement('div');
+    empty.className = 'spaces-version-viewer-empty';
+    empty.textContent = version.hasContent
+      ? 'This version has content that is not inline-viewable.'
+      : 'This version has no text content.';
+    bodyEl.appendChild(empty);
+  }
+  panel.appendChild(bodyEl);
+
+  const foot = document.createElement('div');
+  foot.className = 'spaces-version-viewer-foot';
+  const restoreThis = document.createElement('button');
+  restoreThis.type = 'button';
+  restoreThis.className = 'spaces-version-viewer-restore';
+  restoreThis.textContent = `Restore v${version.seq}`;
+  const seqToRestore = version.seq;
+  restoreThis.addEventListener('click', () => {
+    backdrop.remove();
+    void restoreVersion(itemId, seqToRestore);
+  });
+  foot.appendChild(restoreThis);
+  panel.appendChild(foot);
+
+  const dismiss = (): void => backdrop.remove();
+  closeBtn.addEventListener('click', dismiss);
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) dismiss();
+  });
+  document.addEventListener(
+    'keydown',
+    (ev) => {
+      if (ev.key === 'Escape') dismiss();
+    },
+    { once: true }
+  );
+
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+}
+
+async function restoreVersion(itemId: string, seq: number): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const ok = await askToConfirm(
+    `Restore version ${seq}?`,
+    'This makes that version the current one. Your present state is saved as a new version first, so nothing is lost — you can restore back to it.',
+    `Restore v${seq}`
+  );
+  if (!ok) return;
+  try {
+    const editorId = readCurrentEditorId();
+    const envelope = await bridge.items.restoreVersion(
+      itemId,
+      seq,
+      editorId ?? undefined
+    );
+    if (envelope.ok === false) {
+      showToast(`Restore failed: ${envelope.error.message}`);
+      return;
+    }
+    showToast(`Restored to v${seq}`);
+    await loadItemDetail(itemId);
+  } catch (err) {
+    showToast(`Restore failed: ${messageFrom(err)}`);
+  }
+}
 
 async function resolveAndInjectFileUrl(
   itemId: string,
@@ -2003,10 +2292,17 @@ export function buildBinaryPreview(
   // ── Image ───────────────────────────────────────────────────────────
   if (item.kind === 'image' || mime.startsWith('image/')) {
     const img = document.createElement('img');
-    img.src = url;
     img.alt = item.title.length > 0 ? item.title : 'Item preview';
     img.loading = 'lazy';
     img.className = 'spaces-detail-image';
+    img.addEventListener('error', () => {
+      img.remove();
+      const note = document.createElement('p');
+      note.className = 'spaces-detail-preview-note';
+      note.textContent = 'This image could not be loaded from storage.';
+      wrap.prepend(note);
+    });
+    img.src = url;
     wrap.appendChild(img);
     appendDownloadLink(wrap, url, 'Download');
     return wrap;
@@ -2934,7 +3230,14 @@ function renderItemList(opts: RenderItemListOpts): void {
   }
 
   if (filteredItems.length === 0) {
-    wrap.appendChild(buildEmptyItemsState(state.activeScopeId));
+    // Distinguish "nothing here" from "nothing matches this filter":
+    // a Space with items but a People/Agents/24h chip that excludes
+    // them all must not read "empty / add the first item" (2026-08-08).
+    if (scopeVisibleItems.length > 0 && state.homeFilter !== 'all') {
+      wrap.appendChild(buildFilteredEmptyState());
+    } else {
+      wrap.appendChild(buildEmptyItemsState(state.activeScopeId));
+    }
     return;
   }
 
@@ -3348,13 +3651,14 @@ function buildSharedDashboardPlaybook(
 
   const title = document.createElement('h4');
   title.className = 'spaces-shared-playbook-card-title';
-  title.textContent = playbook.title.length > 0 ? playbook.title : '(untitled)';
+  title.textContent = generateItemTitle(playbook);
   card.appendChild(title);
 
-  if (typeof playbook.excerpt === 'string' && playbook.excerpt.length > 0) {
+  const playbookExcerpt = tileExcerptText(playbook.excerpt);
+  if (playbookExcerpt !== null) {
     const excerpt = document.createElement('p');
     excerpt.className = 'spaces-shared-playbook-card-excerpt';
-    excerpt.textContent = playbook.excerpt;
+    excerpt.textContent = playbookExcerpt;
     card.appendChild(excerpt);
   }
 
@@ -3475,7 +3779,7 @@ function buildTicketCard(ticket: RendererItem): HTMLElement {
   // Title (clickable → detail pane)
   const title = document.createElement('h5');
   title.className = 'spaces-shared-ticket-card-title';
-  title.textContent = ticket.title.length > 0 ? ticket.title : '(untitled)';
+  title.textContent = generateItemTitle(ticket);
   card.appendChild(title);
 
   // Assignee footer (compact)
@@ -5093,9 +5397,20 @@ function swapTilePreviewToImage(preview: HTMLElement, url: string): void {
   preview.replaceChildren();
   const img = document.createElement('img');
   img.className = 'spaces-card-image';
-  img.src = url;
   img.alt = '';
   img.loading = 'lazy';
+  img.addEventListener('error', () => {
+    // A minted URL whose object is gone/expired must not render
+    // Chromium's torn-photo glyph — show a clean placeholder instead.
+    preview.replaceChildren();
+    preview.classList.add('spaces-card-preview-imgfail');
+    const glyph = document.createElement('span');
+    glyph.className = 'spaces-card-imgfail-glyph';
+    glyph.setAttribute('aria-hidden', 'true');
+    glyph.textContent = '⛰';
+    preview.appendChild(glyph);
+  });
+  img.src = url;
   preview.appendChild(img);
 }
 
@@ -5768,10 +6083,11 @@ function buildTicketTilePreview(
   tag.setAttribute('aria-hidden', 'true');
   tag.textContent = '#';
   preview.appendChild(tag);
-  if (typeof item.excerpt === 'string' && item.excerpt.length > 0) {
+  const ticketExcerpt = tileExcerptText(item.excerpt);
+  if (ticketExcerpt !== null) {
     const body = document.createElement('p');
     body.className = 'spaces-card-excerpt';
-    body.textContent = item.excerpt;
+    body.textContent = ticketExcerpt;
     preview.appendChild(body);
   }
 }
@@ -6055,12 +6371,39 @@ function swapTilePreviewToTextExcerpt(preview: HTMLElement, excerpt: string): vo
  * missing/blank excerpts and for legacy base64 data-URL stubs (inline
  * binary content predating ADR-050) so tiles never print base64 soup.
  */
+/**
+ * Strip the loudest markdown syntax so a tile excerpt reads as prose,
+ * not source. Found in the 2026-08-08 function sweep: a text/idea/doc
+ * asset whose content led with `**Type:** …` or `# Heading` showed the
+ * literal `**` / `#` in its tile. Conservative — it unwraps the marks
+ * that look like noise (emphasis, headings, inline code, list bullets,
+ * blockquotes, link syntax) and leaves the words alone.
+ */
+export function stripMarkdownForExcerpt(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')      // fenced code blocks
+    .replace(/`([^`]+)`/g, '$1')           // inline code
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ') // images
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // links → text
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')    // ATX headings
+    .replace(/^\s{0,3}>\s?/gm, '')         // blockquotes
+    .replace(/^\s{0,3}[-*+]\s+(?:\[[ xX]\]\s*)?/gm, '') // list bullets + task boxes
+    .replace(/^\s{0,3}\d+[.)]\s+/gm, '')   // ordered list markers
+    .replace(/\*\*([^*]+)\*\*/g, '$1')     // bold
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2') // italic (single *)
+    .replace(/__([^_]+)__/g, '$1')         // bold underscore
+    .replace(/\s*\n\s*/g, ' ')            // collapse lines
+    .replace(/\s{2,}/g, ' ')               // collapse runs
+    .trim();
+}
+
 export function tileExcerptText(excerpt: string | undefined): string | null {
   if (typeof excerpt !== 'string') return null;
-  const text = excerpt.trim();
-  if (text.length === 0) return null;
-  if (text.startsWith('data:')) return null;
-  return text;
+  const raw = excerpt.trim();
+  if (raw.length === 0) return null;
+  if (raw.startsWith('data:')) return null;
+  const cleaned = stripMarkdownForExcerpt(raw);
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 
@@ -6218,6 +6561,30 @@ export function buildSpaceChip(chip: RendererSpaceChipRef): HTMLElement {
   el.appendChild(label);
 
   return el;
+}
+
+/** Empty state for "items exist, but this FILTER matches none." */
+function buildFilteredEmptyState(): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'spaces-empty-items';
+  const line = document.createElement('p');
+  line.className = 'spaces-empty-items-line';
+  line.textContent = 'No items match this filter.';
+  box.appendChild(line);
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'spaces-empty-items-cta';
+  clear.textContent = 'Show all';
+  clear.addEventListener('click', () => {
+    state.homeFilter = 'all';
+    renderItemList({});
+    const chips = document.querySelectorAll<HTMLElement>('.spaces-filter-chip');
+    for (const chip of Array.from(chips)) {
+      chip.classList.toggle('is-active', chip.getAttribute('data-filter') === 'all');
+    }
+  });
+  box.appendChild(clear);
+  return box;
 }
 
 function buildEmptyItemsState(scopeId: string): HTMLElement {
@@ -7402,6 +7769,13 @@ export function buildDetailPane(
   activitySlot.className = 'spaces-detail-activity-slot';
   activitySlot.setAttribute('data-activity-slot', item.id);
   wrap.appendChild(activitySlot);
+
+  // ── History slot (ADR-057): version list, lazy-loaded. Empty (hidden)
+  //    until the loader confirms the asset actually has snapshots.
+  const historySlot = document.createElement('section');
+  historySlot.className = 'spaces-detail-history-slot';
+  historySlot.setAttribute('data-history-slot', item.id);
+  wrap.appendChild(historySlot);
 
   return wrap;
 }
@@ -9001,7 +9375,12 @@ function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
   const refresh = (): void => {
     void (async () => {
       const bridge = window.lite?.spaces;
-      if (bridge?.checklists === undefined) return;
+      if (bridge?.checklists === undefined) {
+        // The kernel lacks the checklists bridge (older/torn build) —
+        // say so instead of spinning "Loading…" forever (2026-08-08).
+        host.textContent = 'Checklists need a newer build of Lite — update to enable them.';
+        return;
+      }
       try {
         const envelope = await bridge.checklists.list(space.id);
         host.replaceChildren();
@@ -11640,6 +12019,7 @@ function messageFrom(err: unknown): string {
 }).__spacesRendererForTesting = {
   focusItemTile,
   safeCssColor,
+  stripMarkdownForExcerpt,
   buildSpaceRow,
   buildItemCard,
   buildSpaceChip,

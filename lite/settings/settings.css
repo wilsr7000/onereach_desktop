@@ -1908,3 +1908,19 @@ body {
 .attribution-note {
   margin-top: 6px;
 }
+
+
+/* About section — a real grid, not a dashed placeholder (2026-08-08). */
+.about-pane { padding: 4px 2px; }
+.about-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 18px;
+  margin-top: 14px;
+  font-size: 13px;
+}
+.about-grid-label { color: rgba(255, 255, 255, 0.5); }
+.about-grid-value {
+  color: rgba(255, 255, 255, 0.88);
+  font-variant-numeric: tabular-nums;
+}

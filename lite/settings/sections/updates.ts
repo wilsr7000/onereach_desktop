@@ -105,6 +105,14 @@ export function mountUpdates(container: HTMLElement): (() => void) | undefined {
       statusValue.textContent = 'Checking…';
       void updater
         .check({ manual: true })
+        .then((res) => {
+          // A status event drives the normal outcome; but if a check
+          // was already in flight (or timed out) no new terminal event
+          // fires, so recover the line from the call result rather than
+          // leaving it stuck on "Checking…" (2026-08-08 sweep).
+          if (res.inFlight) statusValue.textContent = 'A check is already running…';
+          else if (res.timedOut) statusValue.textContent = 'Check timed out — try again.';
+        })
         .catch(() => {
           statusValue.textContent = 'Update check failed — see logs.';
         })
@@ -131,9 +139,18 @@ export function mountUpdates(container: HTMLElement): (() => void) | undefined {
         attemptBlock.textContent = 'No update install has been attempted on this Mac.';
         return;
       }
+      const when =
+        state.lastAttemptTime !== null
+          ? (() => {
+              const d = new Date(state.lastAttemptTime);
+              return Number.isNaN(d.getTime())
+                ? state.lastAttemptTime
+                : d.toLocaleString();
+            })()
+          : null;
       const lines: string[] = [
         `Last install attempt: v${state.lastAttemptVersion}` +
-          (state.lastAttemptTime !== null ? ` at ${state.lastAttemptTime}` : ''),
+          (when !== null ? ` at ${when}` : ''),
       ];
       if (state.failedAttempts > 0) {
         lines.push(

@@ -156,6 +156,17 @@ function applyFeedbackType(next: 'bug' | 'feature'): void {
     ? 'What happened? Steps to reproduce. Expected vs actual behavior.'
     : 'What should the app do, and what would it help you accomplish?';
   sendBtn.textContent = isBug ? 'Send Bug Report' : 'Send Suggestion';
+  // The window title + subtitle must not contradict the CTA (2026-08-08
+  // sweep: they stayed "Report a Bug" / "already been reported" in
+  // feature mode).
+  const titleEl = document.getElementById('modal-title');
+  if (titleEl !== null) titleEl.textContent = isBug ? 'Report a Bug' : 'Suggest a Feature';
+  const subtitleEl = document.getElementById('modal-subtitle');
+  if (subtitleEl !== null) {
+    subtitleEl.textContent = isBug
+      ? "Check whether it's already been reported. Otherwise, file a new one below."
+      : "Search existing suggestions first. Otherwise, add yours below.";
+  }
 }
 
 typeBugBtn.addEventListener('click', () => applyFeedbackType('bug'));
@@ -203,6 +214,10 @@ async function refreshPreview(): Promise<void> {
     }
   } catch (err) {
     payloadPreview.textContent = `(failed to load preview: ${(err as Error).message})`;
+    // Don't leave the pill stuck on its initial "scanning…" — reflect
+    // that the scan itself failed (2026-08-08 sweep).
+    redactionStatus.textContent = 'redaction check unavailable';
+    redactionStatus.classList.remove('no-redactions', 'has-redactions');
   }
 }
 
