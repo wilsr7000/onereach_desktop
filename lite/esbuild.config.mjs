@@ -29,6 +29,7 @@ const outDir = resolve(rootDir, 'dist-lite/build');
 // bundle as `./bug-report-modal.js` (same directory).
 const ASSETS_TO_COPY = [
   { from: 'lite/signature.css', to: 'signature.css' },
+  { from: 'lite/wiser-header.html', to: 'wiser-header.html' },
   { from: 'lite/placeholder.html', to: 'placeholder.html' },
   { from: 'lite/about.html', to: 'about.html' },
   { from: 'lite/bug-report/modal.html', to: 'modal.html' },

@@ -27,7 +27,7 @@
  * @internal
  */
 
-import { BrowserWindow, screen, shell } from 'electron';
+import { BrowserWindow, WebContentsView, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { getLoggingApi } from './logging/api.js';
 
@@ -47,28 +47,23 @@ const PARTITION = 'persist:lite-wiser-playbooks';
 const TARGET_WIDTH = 1600;
 const TARGET_HEIGHT = 1000;
 
-// Frameless header (macOS): the title bar is hidden and the hosted app's
-// own background becomes the header, so the window chrome always matches
-// the app — charcoal today, Cap Chew paper once the themed build deploys.
-// The app's content is padded down by this many pixels and a transparent
-// draggable strip covers the gap (drag-to-move + double-click-to-zoom).
+// The comp's header, for real: the window's own webContents loads the
+// local `wiser-header.html` strip (paper, wordmark, mini cap-chew,
+// full-width drag region) and the hosted app renders in a sandboxed
+// WebContentsView laid out below it — the same chrome-page + view
+// pattern the main window uses (ADR-038). No CSS is injected into the
+// remote app; its viewport is simply shorter.
 const HEADER_PX = 38;
-const HEADER_CSS = `
-  #root { padding-top: ${HEADER_PX}px; box-sizing: border-box; }
-  /* The app's shell sizes itself with h-screen (viewport units ignore
-     the root padding) — shrink it by the header so nothing scrolls. */
-  #root .h-screen { height: calc(100vh - ${HEADER_PX}px); }
-  body::before {
-    content: "";
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: ${HEADER_PX}px;
-    -webkit-app-region: drag;
-    z-index: 2147483646;
-  }
-`;
 
 let win: BrowserWindow | null = null;
+let view: WebContentsView | null = null;
+
+/** Keep the app view filling the window below the header strip. */
+function layoutView(): void {
+  if (win === null || view === null || win.isDestroyed()) return;
+  const { width, height } = win.getContentBounds();
+  view.setBounds({ x: 0, y: HEADER_PX, width, height: Math.max(0, height - HEADER_PX) });
+}
 
 /**
  * Open (or focus) the WISER Playbooks window. Idempotent: a second call
@@ -94,15 +89,24 @@ export function openWiserPlaybooksWindow(): void {
     height,
     center: true,
     title: 'WISER Playbooks',
-    // Pre-paint shell matches the Cap Chew paper build; the window only
-    // shows on ready-to-show, so this is a fallback, not a flash.
+    // Pre-paint shell matches the header strip (Cap Chew paper).
     backgroundColor: '#f1ede4',
     show: false,
     autoHideMenuBar: true,
-    // macOS: no title bar — the app itself is the header (see HEADER_CSS).
+    // macOS: no title bar — the traffic lights sit inset over the strip.
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset' as const }
       : {}),
+    webPreferences: {
+      // The header page is local, static, and needs no bridge at all.
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+    },
+  });
+  void win.loadFile(join(__dirname, 'wiser-header.html'));
+
+  view = new WebContentsView({
     webPreferences: {
       // Minimal preload: exposes ONLY `window.ai` (a Claude chat proxy
       // backed by the app's keychain key) -- never `window.lite.*` and
@@ -117,32 +121,25 @@ export function openWiserPlaybooksWindow(): void {
       partition: PARTITION,
     },
   });
-
-  void win.loadURL(WISER_PLAYBOOKS_URL);
-
-  // Frameless-header support (macOS): pad the app below the traffic
-  // lights and lay the transparent drag strip. Injected on every load so
-  // in-app navigations keep a draggable window. body::before is free in
-  // the hosted app (its grain overlay uses body::after).
-  if (process.platform === 'darwin') {
-    win.webContents.on('dom-ready', () => {
-      void win?.webContents.insertCSS(HEADER_CSS).catch(() => {
-        // best-effort — a failed injection leaves a working, undraggable-
-        // at-top window rather than a broken one
-      });
-    });
-  }
+  win.contentView.addChildView(view);
+  layoutView();
+  win.on('resize', layoutView);
+  win.on('enter-full-screen', layoutView);
+  win.on('leave-full-screen', layoutView);
+  void view.webContents.loadURL(WISER_PLAYBOOKS_URL);
 
   win.once('ready-to-show', () => {
     if (win !== null && !win.isDestroyed()) win.show();
   });
   win.on('closed', () => {
     win = null;
+    view = null;
   });
 
   // External links route to the OS default browser; deny in-app child
-  // Electron windows.
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  // Electron windows. (Attached to the APP view -- the header page never
+  // opens windows.)
+  view.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) {
       void shell.openExternal(url).catch(() => {
         // best-effort -- openExternal can reject on headless hosts
