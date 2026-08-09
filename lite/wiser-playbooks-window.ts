@@ -47,6 +47,27 @@ const PARTITION = 'persist:lite-wiser-playbooks';
 const TARGET_WIDTH = 1600;
 const TARGET_HEIGHT = 1000;
 
+// Frameless header (macOS): the title bar is hidden and the hosted app's
+// own background becomes the header, so the window chrome always matches
+// the app — charcoal today, Cap Chew paper once the themed build deploys.
+// The app's content is padded down by this many pixels and a transparent
+// draggable strip covers the gap (drag-to-move + double-click-to-zoom).
+const HEADER_PX = 38;
+const HEADER_CSS = `
+  #root { padding-top: ${HEADER_PX}px; box-sizing: border-box; }
+  /* The app's shell sizes itself with h-screen (viewport units ignore
+     the root padding) — shrink it by the header so nothing scrolls. */
+  #root .h-screen { height: calc(100vh - ${HEADER_PX}px); }
+  body::before {
+    content: "";
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: ${HEADER_PX}px;
+    -webkit-app-region: drag;
+    z-index: 2147483646;
+  }
+`;
+
 let win: BrowserWindow | null = null;
 
 /**
@@ -73,9 +94,15 @@ export function openWiserPlaybooksWindow(): void {
     height,
     center: true,
     title: 'WISER Playbooks',
-    backgroundColor: '#1a1a1a',
+    // Pre-paint shell matches the Cap Chew paper build; the window only
+    // shows on ready-to-show, so this is a fallback, not a flash.
+    backgroundColor: '#f1ede4',
     show: false,
     autoHideMenuBar: true,
+    // macOS: no title bar — the app itself is the header (see HEADER_CSS).
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const }
+      : {}),
     webPreferences: {
       // Minimal preload: exposes ONLY `window.ai` (a Claude chat proxy
       // backed by the app's keychain key) -- never `window.lite.*` and
@@ -92,6 +119,19 @@ export function openWiserPlaybooksWindow(): void {
   });
 
   void win.loadURL(WISER_PLAYBOOKS_URL);
+
+  // Frameless-header support (macOS): pad the app below the traffic
+  // lights and lay the transparent drag strip. Injected on every load so
+  // in-app navigations keep a draggable window. body::before is free in
+  // the hosted app (its grain overlay uses body::after).
+  if (process.platform === 'darwin') {
+    win.webContents.on('dom-ready', () => {
+      void win?.webContents.insertCSS(HEADER_CSS).catch(() => {
+        // best-effort — a failed injection leaves a working, undraggable-
+        // at-top window rather than a broken one
+      });
+    });
+  }
 
   win.once('ready-to-show', () => {
     if (win !== null && !win.isDestroyed()) win.show();
