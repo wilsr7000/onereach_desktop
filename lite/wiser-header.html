@@ -17,7 +17,12 @@
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--paper);
-    -webkit-app-region: drag;
+    /* CRITICAL: the body must NOT be a drag region. This page fills the
+       whole window behind the app's WebContentsView, and window drag
+       hit-testing runs before the view sees the mouse — a full-body
+       drag region eats every click and scroll aimed at the app.
+       Drag lives on the 38px bar only. */
+    -webkit-app-region: no-drag;
     user-select: none;
     font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   }
@@ -28,6 +33,7 @@
     /* clear the macOS traffic lights (hiddenInset) */
     padding: 0 14px 0 84px;
     border-bottom: 1px solid var(--rule);
+    -webkit-app-region: drag;
   }
   .wordmark {
     font-size: 11px;
