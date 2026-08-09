@@ -70,11 +70,24 @@ function layoutView(): void {
  * while the window is open focuses the existing one instead of creating
  * another.
  */
-export function openWiserPlaybooksWindow(): void {
+export function openWiserPlaybooksWindow(opts?: { riffId?: string }): void {
+  const target =
+    opts?.riffId !== undefined && opts.riffId.length > 0
+      ? `${WISER_PLAYBOOKS_URL}?riff=${encodeURIComponent(opts.riffId)}`
+      : WISER_PLAYBOOKS_URL;
+
   if (win !== null && !win.isDestroyed()) {
+    // Deep link into the already-open window: point the app view at the
+    // requested playbook (the hosted app consumes ?riff= on load).
+    if (opts?.riffId !== undefined && view !== null) {
+      void view.webContents.loadURL(target);
+    }
     if (win.isMinimized()) win.restore();
     win.focus();
-    getLoggingApi().event('wiser-playbooks.focus', { url: WISER_PLAYBOOKS_URL });
+    getLoggingApi().event('wiser-playbooks.focus', {
+      url: WISER_PLAYBOOKS_URL,
+      deepLink: opts?.riffId !== undefined,
+    });
     return;
   }
 
@@ -126,7 +139,7 @@ export function openWiserPlaybooksWindow(): void {
   win.on('resize', layoutView);
   win.on('enter-full-screen', layoutView);
   win.on('leave-full-screen', layoutView);
-  void view.webContents.loadURL(WISER_PLAYBOOKS_URL);
+  void view.webContents.loadURL(target);
 
   win.once('ready-to-show', () => {
     if (win !== null && !win.isDestroyed()) win.show();
@@ -148,7 +161,10 @@ export function openWiserPlaybooksWindow(): void {
     return { action: 'deny' };
   });
 
-  getLoggingApi().event('wiser-playbooks.opened', { url: WISER_PLAYBOOKS_URL });
+  getLoggingApi().event('wiser-playbooks.opened', {
+    url: WISER_PLAYBOOKS_URL,
+    deepLink: opts?.riffId !== undefined,
+  });
 }
 
 /** Close the WISER Playbooks window if open. Idempotent. */

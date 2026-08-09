@@ -8815,3 +8815,22 @@ body {
   animation: or-breathe 4.5s var(--or-ease-out, ease) infinite;
   transform-origin: center;
 }
+
+/* ── Spaces↔WISER bridge button (playbook detail) ─────────────────── */
+.spaces-detail-wiser {
+  margin: 10px 0 2px;
+}
+.spaces-detail-wiser-btn {
+  appearance: none;
+  border: 1px solid rgba(127, 119, 221, 0.55);
+  background: rgba(127, 119, 221, 0.10);
+  color: var(--or-text, #e6e6e6);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s var(--or-ease-out, ease-out);
+}
+.spaces-detail-wiser-btn:hover {
+  background: rgba(127, 119, 221, 0.2);
+}

@@ -1828,6 +1828,21 @@ type ItemVersioningBridge = {
   restoreVersion?: (id: string, seq: number, editorId?: string) => Promise<{ ok: boolean; value?: unknown; error?: { message: string } }>;
 };
 
+/**
+ * Narrow view of the Spaces↔WISER bridge (`spaces.openWiser`). Same
+ * defensive shape as ItemVersioningBridge: the renderer keeps working
+ * against older preloads that don't expose the method yet.
+ */
+type WiserOpenBridge = {
+  openWiser?: (riffId: string | null) => Promise<{ ok: true }>;
+};
+
+function wiserOpenBridge(): ((riffId: string | null) => Promise<{ ok: true }>) | null {
+  const spaces = window.lite?.spaces as unknown as WiserOpenBridge | undefined;
+  if (spaces === undefined || typeof spaces.openWiser !== 'function') return null;
+  return spaces.openWiser.bind(spaces);
+}
+
 function itemVersioningBridge(): ItemVersioningBridge | null {
   const items = window.lite?.spaces?.items as unknown as ItemVersioningBridge | undefined;
   if (items === undefined || typeof items.versions !== 'function') return null;
@@ -7875,6 +7890,46 @@ export function buildDetailPane(
   header.appendChild(closeBtn);
 
   wrap.appendChild(header);
+
+  // ── Spaces↔WISER bridge (playbooks only) ─────────────────────────
+  // One click from the asset to the instrument. If the asset carries a
+  // riff id in metadata (riffId / wiserRiffId — written by WISER
+  // exports), the window deep-links straight to that playbook via
+  // ?riff=<id>; otherwise it opens the app plainly. Hidden entirely
+  // when the preload doesn't expose the bridge.
+  if (item.kind === 'playbook') {
+    const openWiser = wiserOpenBridge();
+    if (openWiser !== null) {
+      const meta = (item.metadata ?? {}) as Record<string, unknown>;
+      const riffId =
+        typeof meta.riffId === 'string' && meta.riffId.length > 0
+          ? meta.riffId
+          : typeof meta.wiserRiffId === 'string' && meta.wiserRiffId.length > 0
+            ? meta.wiserRiffId
+            : null;
+      const bridgeRow = document.createElement('div');
+      bridgeRow.className = 'spaces-detail-wiser';
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'spaces-detail-wiser-btn';
+      openBtn.textContent =
+        riffId !== null ? 'Open in WISER Playbooks' : 'Open WISER Playbooks';
+      openBtn.title =
+        riffId !== null
+          ? 'Open this playbook in WISER Playbooks'
+          : 'Open WISER Playbooks (this asset has no linked riff id)';
+      openBtn.addEventListener('click', () => {
+        void openWiser(riffId).catch((err: unknown) => {
+          window.logging?.warn?.('spaces', 'openWiser failed', {
+            itemId: item.id,
+            error: messageFrom(err),
+          });
+        });
+      });
+      bridgeRow.appendChild(openBtn);
+      wrap.appendChild(bridgeRow);
+    }
+  }
 
   // ── Title (click-to-edit when callback is present) ───────────────────
   // The displayed value is always `generateItemTitle(item)` so the

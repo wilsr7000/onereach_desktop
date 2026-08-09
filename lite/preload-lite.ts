@@ -68,6 +68,7 @@ const TELEMETRY_SET_CONSENT = 'lite:telemetry:setConsent';
 // renderer-bridge addition with no main-process churn. The renderer
 // surface is bridged once Phase 1 lands real fetches.
 const SPACES_OPEN = 'lite:spaces:open';
+const SPACES_OPEN_WISER = 'lite:spaces:openWiser';
 const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
 const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
@@ -913,6 +914,11 @@ interface SpacesCacheUpdateView {
 interface SpacesBridge {
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
+  /**
+   * Open (or focus) the WISER Playbooks window; with a riffId, deep-link
+   * straight to that playbook (the hosted app consumes ?riff= on load).
+   */
+  openWiser(riffId: string | null): Promise<{ ok: true }>;
   listSpaces(): Promise<SpacesIpcResultView<unknown[]>>;
   /**
    * Drop cached reads and refetch, so Spaces created OUTSIDE this app
@@ -1594,6 +1600,8 @@ const apiDocs: ApiDocsBridge = {
 
 const spaces: SpacesBridge = {
   open: () => ipcRenderer.invoke(SPACES_OPEN) as Promise<{ ok: true }>,
+  openWiser: (riffId: string | null) =>
+    ipcRenderer.invoke(SPACES_OPEN_WISER, { riffId }) as Promise<{ ok: true }>,
   listSpaces: () =>
     ipcRenderer.invoke(SPACES_LIST_SPACES) as Promise<SpacesIpcResultView<unknown[]>>,
   refresh: () =>

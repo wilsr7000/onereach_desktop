@@ -58,10 +58,13 @@ import type {
   ItemMetadata,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
+import { openWiserPlaybooksWindow } from '../wiser-playbooks-window.js';
 import type { DiscoveryResults } from './discovery-format.js';
 
 export const SPACES_IPC = {
   OPEN: 'lite:spaces:open',
+  /** Spaces↔WISER bridge: open the Playbooks window, optionally at a riff. */
+  OPEN_WISER: 'lite:spaces:openWiser',
   LIST_SPACES: 'lite:spaces:listSpaces',
   REFRESH: 'lite:spaces:refresh',
   ITEMS_READ_FILE_DATA: 'lite:spaces:items:readFileData',
@@ -202,6 +205,19 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     opts.onOpen();
     return { ok: true };
   });
+
+  handleSpacesIpc(
+    SPACES_IPC.OPEN_WISER,
+    (_event: IpcMainInvokeEvent, payload: unknown): { ok: true } => {
+      const riffId =
+        typeof (payload as { riffId?: unknown })?.riffId === 'string' &&
+        ((payload as { riffId: string }).riffId).length > 0
+          ? (payload as { riffId: string }).riffId
+          : undefined;
+      openWiserPlaybooksWindow(riffId === undefined ? undefined : { riffId });
+      return { ok: true };
+    }
+  );
 
   handleSpacesIpc(
     SPACES_IPC.ITEMS_READ_FILE_DATA,
