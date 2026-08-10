@@ -70,6 +70,19 @@ export interface VerifyResult {
   dialogResponse?: DialogResponse;
 }
 
+/** Loose semver compare on numeric x.y.z prefixes: true when a > b. */
+function isNewerVersion(a: string, b: string): boolean {
+  const pa = a.split('.').map((n) => Number.parseInt(n, 10));
+  const pb = b.split('.').map((n) => Number.parseInt(n, 10));
+  for (let i = 0; i < 3; i++) {
+    const x = pa[i] ?? 0;
+    const y = pb[i] ?? 0;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+    if (x !== y) return x > y;
+  }
+  return false;
+}
+
 /**
  * Run the boot-time check. Returns synchronously after disk I/O if no
  * dialog is shown; awaits the dialog if there was a failed install.
@@ -87,6 +100,24 @@ export async function verifyUpdateOnStartup(deps: VerifyDeps): Promise<VerifyRes
   if (before.lastAttemptVersion === currentVersion) {
     log.info('updater: startup running expected version -- install succeeded', {
       version: currentVersion,
+    });
+    clearUpdateState(userDataPath);
+    return {
+      outcome: 'install-succeeded',
+      before,
+      after: { ...EMPTY_UPDATE_STATE },
+    };
+  }
+
+  // Out-of-band recovery: the running version is NEWER than the failed
+  // target (a broken 0.0.46 replaced by a manually installed 0.0.47 —
+  // seen live 2026-08-10). The trail is moot; counting it as another
+  // failure re-arms the circuit breaker and tells the user to download
+  // the BROKEN version. Clear it and move on.
+  if (isNewerVersion(currentVersion, before.lastAttemptVersion)) {
+    log.info('updater: running version is newer than the failed target -- trail cleared', {
+      failedTarget: before.lastAttemptVersion,
+      actual: currentVersion,
     });
     clearUpdateState(userDataPath);
     return {

@@ -79,6 +79,34 @@ describe('updater install failure → pre-filled bug report', () => {
     expect(result.outcome).toBe('install-failed');
   });
 
+  it('a manually installed NEWER version clears the trail — no dialog, no recount', async () => {
+    writeUpdateState(dir, {
+      failedAttempts: 4,
+      lastAttemptVersion: '0.0.46',
+      lastAttemptTime: '2026-08-10T03:17:36.107Z',
+      lastFailedVersions: ['0.0.46'],
+    });
+    let dialogShown = false;
+    const result = await verifyUpdateOnStartup({
+      userDataPath: dir,
+      currentVersion: '0.0.47',
+      openReleasesPage: () => {},
+      triggerCheck: () => {},
+      dialogs: {
+        showFailureDialog: async () => {
+          dialogShown = true;
+          return 3;
+        },
+      },
+      logger,
+    });
+    expect(result.outcome).toBe('install-succeeded');
+    expect(result.after.failedAttempts).toBe(0);
+    expect(result.after.lastAttemptVersion).toBeNull();
+    expect(result.after.lastFailedVersions).toEqual([]);
+    expect(dialogShown).toBe(false);
+  });
+
   it('Skip moved to response 3 and still leaves state', async () => {
     writeUpdateState(dir, {
       failedAttempts: 0,
