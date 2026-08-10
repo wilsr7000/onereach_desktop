@@ -80,6 +80,13 @@ export interface NeonStatus {
   hasPassword: boolean;
   /** True when the client can attempt a query (endpoint + uri + password). */
   ready: boolean;
+  /**
+   * Which tier the config came from: 'account' (your OneReach KV),
+   * 'bundle-default' (the temporary baked-in dev default), or 'none'.
+   * Surfaced in Settings so a user (and we) can see whether they are
+   * on real account config or still riding the bundle default.
+   */
+  source: 'account' | 'bundle-default' | 'none';
 }
 
 /**

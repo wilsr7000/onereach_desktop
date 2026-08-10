@@ -258,6 +258,16 @@ shows the previous user's data; kill -9 + relaunch loses no persisted state.*
       playbook detail rail; absent on non-playbook kinds and on preloads
       without the bridge.
 
+### Onboarding & config provenance (2026-08-10)
+- [ ] **Config source is visible** — Settings → OAGI shows "Config
+      source": "Your OneReach account" when your KV has a record,
+      "Bundle default (temporary)" when signed-in but unprovisioned,
+      "Not configured" when neither.
+- [ ] ☠ **Public-build posture** — a build launched with
+      `LITE_NO_BAKED_GRAPH=1` has NO baked graph creds: Settings shows
+      "Not configured" until you sign in + the account is seeded. (This
+      is the switch that retires the plaintext-creds blocker.)
+
 ### Cap Chew identity
 - [ ] **About signs off** — Settings → About shows the real chewed-bullet
       logo (packaged path, not a broken image), "Made with care. Come as

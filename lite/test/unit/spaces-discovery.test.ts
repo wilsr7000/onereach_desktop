@@ -128,6 +128,7 @@ function buildStubNeonApi(
         database: '',
         hasPassword: false,
         ready: true,
+        source: 'account' as const,
       };
     },
     async configure() {

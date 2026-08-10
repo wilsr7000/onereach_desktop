@@ -18,6 +18,7 @@
  */
 export const ONBOARDING_STEP_IDS = [
   'signed-in',
+  'ai-key-saved',
   'two-factor-saved',
   'first-agent-opened',
 ] as const;

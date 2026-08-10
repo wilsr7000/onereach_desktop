@@ -260,6 +260,7 @@ describe('EdisonNeonClient.query error paths', () => {
           user: 'neo4j',
           database: 'neo4j',
           hasPassword: true,
+          source: 'account' as const,
         }),
       write: () => Promise.resolve(),
       invalidate,

@@ -223,6 +223,7 @@ describe('HealthStore.snapshot()', () => {
           database: 'neo4j',
           hasPassword: true,
           ready: true,
+          source: 'account' as const,
         }),
       },
     });

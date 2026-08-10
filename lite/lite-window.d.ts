@@ -200,6 +200,7 @@ interface LiteNeonStatus {
   database: string;
   hasPassword: boolean;
   ready: boolean;
+  source: 'account' | 'bundle-default' | 'none';
 }
 
 interface LiteNeonConfig {

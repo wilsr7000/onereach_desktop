@@ -158,6 +158,7 @@ export class EdisonNeonClient {
         database: 'neo4j',
         hasPassword: false,
         ready: false,
+        source: 'none',
       };
     }
     return {
@@ -167,6 +168,7 @@ export class EdisonNeonClient {
       database: pub.database,
       hasPassword: pub.hasPassword,
       ready: pub.endpoint.length > 0 && pub.uri.length > 0 && pub.hasPassword,
+      source: pub.source,
     };
   }
 

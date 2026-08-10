@@ -15,7 +15,7 @@
  * public surface so a regression in api.ts shows up here.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getNeonApi,
   _resetNeonApiForTesting,
@@ -29,6 +29,8 @@ import {
   type NeonErrorCode,
 } from '../../neon/api.js';
 import { StaticCredentialsProvider } from '../../neon/credentials.js';
+import { _setKVApiForTesting, _resetKVApiForTesting } from '../../kv/api.js';
+import { FakeKV } from '../harness/index.js';
 import { runApiConformanceContract } from '../harness/api-conformance.js';
 import { runErrorConformanceContract } from '../harness/error-conformance.js';
 
@@ -56,6 +58,33 @@ runErrorConformanceContract<NeonError>({
 });
 
 // 3. Module-specific behavior tests.
+
+describe('LITE_NO_BAKED_GRAPH off-switch (public-build posture)', () => {
+  const prev = process.env.LITE_NO_BAKED_GRAPH;
+  beforeEach(() => {
+    _resetNeonApiForTesting();
+    _setKVApiForTesting(new FakeKV()); // empty KV
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.LITE_NO_BAKED_GRAPH;
+    else process.env.LITE_NO_BAKED_GRAPH = prev;
+    _resetNeonApiForTesting();
+    _resetKVApiForTesting();
+  });
+
+  it('unset → the baked default is present (source bundle-default, signed out)', async () => {
+    delete process.env.LITE_NO_BAKED_GRAPH;
+    const status = await getNeonApi().status();
+    expect(status.source).toBe('bundle-default');
+  });
+
+  it('=1 → the baked default is GONE (source none; zero creds in the path)', async () => {
+    process.env.LITE_NO_BAKED_GRAPH = '1';
+    const status = await getNeonApi().status();
+    expect(status.source).toBe('none');
+    expect(status.ready).toBe(false);
+  });
+});
 
 describe('NeonApi (with StaticCredentialsProvider) end-to-end', () => {
   beforeEach(() => {
@@ -203,6 +232,7 @@ describe('_setNeonApiForTesting overrides the singleton', () => {
         database: 'neo4j',
         hasPassword: false,
         ready: false,
+        source: 'account' as const,
       }),
       configure: vi.fn().mockResolvedValue(undefined),
       onEvent: vi.fn().mockReturnValue(() => undefined),

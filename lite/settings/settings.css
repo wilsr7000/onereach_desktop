@@ -1978,3 +1978,12 @@ body {
   font-size: 13px;
   color: var(--or-text-muted, rgba(255,255,255,0.48));
 }
+
+/* OAGI config-source line (2026-08-10) — visibility for the account-vs-bundle
+   provenance that lets us retire the baked-in default safely. */
+.neon-source-row { display: flex; align-items: baseline; gap: 10px; margin: 8px 0 2px; }
+.neon-source-label { font-size: 12px; color: var(--or-text-muted, rgba(255,255,255,0.5)); letter-spacing: 0.02em; }
+.neon-source-value { font-size: 12px; font-weight: 600; }
+.neon-source-value.ok { color: #6ee7b7; }
+.neon-source-value.warn { color: #f0b357; }
+.neon-source-value.muted { color: var(--or-text-muted, rgba(255,255,255,0.45)); }

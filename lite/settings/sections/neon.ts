@@ -84,6 +84,22 @@ async function render(container: HTMLElement): Promise<void> {
 function renderForm(container: HTMLElement, status: LiteNeonStatus): void {
   const ready = status.ready ? 'Connected' : 'Not connected';
   const readyClass = status.ready ? 'neon-status-pill ok' : 'neon-status-pill warn';
+  // Config source (2026-08-10): show whether config came from the
+  // signed-in account or the temporary bundle default. The bundle
+  // default is a dev convenience; seeing it here on a signed-in machine
+  // is the signal that the account hasn't been provisioned yet.
+  const sourceLabel =
+    status.source === 'account'
+      ? 'Your OneReach account'
+      : status.source === 'bundle-default'
+        ? 'Bundle default (temporary)'
+        : 'Not configured';
+  const sourceClass =
+    status.source === 'account'
+      ? 'ok'
+      : status.source === 'bundle-default'
+        ? 'warn'
+        : 'muted';
   const passwordPlaceholder = status.hasPassword
     ? `${STORAGE_PASSWORD_PLACEHOLDER}  (saved -- leave blank to keep)`
     : 'Provided by your OAGI administrator';
@@ -102,6 +118,10 @@ function renderForm(container: HTMLElement, status: LiteNeonStatus): void {
         <span class="neon-status-help">
           Connect Lite to your organization's data fabric.
         </span>
+      </div>
+      <div class="neon-source-row">
+        <span class="neon-source-label">Config source</span>
+        <span class="neon-source-value ${sourceClass}">${escapeHtml(sourceLabel)}</span>
       </div>
 
       <div class="neon-explainer">

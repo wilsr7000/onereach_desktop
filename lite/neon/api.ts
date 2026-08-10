@@ -218,10 +218,16 @@ function buildDefaultApi(): NeonApi {
   // explicitly saves anything in Settings -> OAGI, the persisted KV
   // record wins. See `BAKED_IN_DEFAULT_GRAPH` for the temporary-status
   // notice and removal plan.
+  // The baked-in default is a DEV convenience (plaintext creds in the
+  // bundle). Public builds set LITE_NO_BAKED_GRAPH=1 so the fallback is
+  // omitted entirely: config MUST come from the signed-in account's KV,
+  // and there are zero credentials in the resolution path. See
+  // BAKED_IN_DEFAULT_GRAPH + LITE-PUNCH-LIST.
+  const bakedDisabled = process.env.LITE_NO_BAKED_GRAPH === '1';
   const credentials =
     _credentialsProvider ??
     new KVCredentialsProvider({
-      fallbackRecord: { ...BAKED_IN_DEFAULT_GRAPH },
+      ...(bakedDisabled ? {} : { fallbackRecord: { ...BAKED_IN_DEFAULT_GRAPH } }),
       // Per the lite-kv-via-sdk chunk in lite/PORTING.md, KV writes
       // require a signed-in user. Reads still fall back to the
       // baked-in default so unauth'd graph queries keep working.

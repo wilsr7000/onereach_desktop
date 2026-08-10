@@ -31,6 +31,7 @@ describe('StaticCredentialsProvider', () => {
       user: 'neo4j',
       database: 'neo4j',
       hasPassword: false,
+      source: 'account',
     });
   });
 
@@ -232,6 +233,7 @@ describe('KVCredentialsProvider', () => {
       user: 'neo4j',
       database: 'neo4j',
       hasPassword: false,
+      source: 'account',
     });
   });
 
@@ -275,6 +277,7 @@ describe('KVCredentialsProvider', () => {
       user: fallback.user,
       database: fallback.database,
       hasPassword: true,
+      source: 'bundle-default',
     });
   });
 
@@ -316,5 +319,60 @@ describe('BAKED_IN_DEFAULT_GRAPH', () => {
 
   it('is frozen so callers cannot mutate the shared default', () => {
     expect(Object.isFrozen(BAKED_IN_DEFAULT_GRAPH)).toBe(true);
+  });
+});
+
+describe('config source resolution (2026-08-10 — retires the baked-default blocker)', () => {
+  beforeEach(() => {
+    _resetKVApiForTesting();
+  });
+
+  it("signed-in with an account KV record → source 'account'", async () => {
+    const fake = new FakeKV();
+    _setKVApiForTesting(fake);
+    await fake.set('lite-neon-config', 'default', {
+      endpoint: 'https://ex/neon',
+      uri: 'neo4j+s://x',
+      user: 'neo4j',
+      password: 'pw',
+      database: 'neo4j',
+    });
+    const p = new KVCredentialsProvider({
+      fallbackRecord: { endpoint: 'baked', uri: 'neo4j+s://baked', user: 'neo4j', password: 'bakedpw', database: 'neo4j' },
+      getActiveAccountId: () => 'acct-1',
+    });
+    const pub = await p.readPublic();
+    expect(pub?.source).toBe('account');
+    expect(pub?.endpoint).toBe('https://ex/neon');
+  });
+
+  it("signed-in but KV empty → falls back to bundle-default with source 'bundle-default'", async () => {
+    const fake = new FakeKV();
+    _setKVApiForTesting(fake);
+    const p = new KVCredentialsProvider({
+      fallbackRecord: { endpoint: 'baked', uri: 'neo4j+s://baked', user: 'neo4j', password: 'bakedpw', database: 'neo4j' },
+      getActiveAccountId: () => 'acct-1',
+    });
+    const pub = await p.readPublic();
+    expect(pub?.source).toBe('bundle-default');
+    expect(pub?.endpoint).toBe('baked');
+  });
+
+  it("signed-out uses the bundle default (source 'bundle-default')", async () => {
+    _setKVApiForTesting(new FakeKV());
+    const p = new KVCredentialsProvider({
+      fallbackRecord: { endpoint: 'baked', uri: 'neo4j+s://baked', user: 'neo4j', password: 'bakedpw', database: 'neo4j' },
+      getActiveAccountId: () => null,
+    });
+    expect((await p.readPublic())?.source).toBe('bundle-default');
+  });
+
+  it('NO fallback (public-build posture) → readPublic null, source cannot be bundle-default', async () => {
+    _setKVApiForTesting(new FakeKV());
+    const p = new KVCredentialsProvider({ getActiveAccountId: () => 'acct-1' });
+    // KV empty + no fallbackRecord → nothing resolves; the plaintext
+    // baked creds are simply not in the path.
+    expect(await p.readPublic()).toBeNull();
+    expect(await p.get()).toBeNull();
   });
 });

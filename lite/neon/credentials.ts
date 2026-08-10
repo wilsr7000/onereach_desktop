@@ -95,6 +95,8 @@ export interface CredentialsProvider {
     user: string;
     database: string;
     hasPassword: boolean;
+    /** Which tier answered — see ConfigSource. */
+    source: ConfigSource;
   } | null>;
   /**
    * Persist a partial settings update. Fields omitted from `partial`
@@ -103,6 +105,16 @@ export interface CredentialsProvider {
    */
   write(partial: Partial<NeonSettingsRecord>): Promise<void>;
 }
+
+/**
+ * Where a resolved graph config actually came from — the observability
+ * that makes retiring the baked-in default safe. `account` = the
+ * signed-in user's KV record; `bundle-default` = the plaintext
+ * BAKED_IN_DEFAULT_GRAPH fallback (dev convenience, must not ship to
+ * public — gate it off with LITE_NO_BAKED_GRAPH=1); `none` = nothing
+ * resolved (signed out with no fallback, or empty record).
+ */
+export type ConfigSource = 'account' | 'bundle-default' | 'none';
 
 // ─── KV-backed provider (production default) ──────────────────────────────
 
@@ -238,8 +250,9 @@ export class KVCredentialsProvider implements CredentialsProvider {
     user: string;
     database: string;
     hasPassword: boolean;
+    source: ConfigSource;
   } | null> {
-    const record = await this.readRecord();
+    const { record, source } = await this.resolveRecord();
     if (record === null) return null;
     return {
       endpoint: record.endpoint,
@@ -247,6 +260,7 @@ export class KVCredentialsProvider implements CredentialsProvider {
       user: record.user,
       database: record.database,
       hasPassword: record.password.length > 0,
+      source,
     };
   }
 
@@ -287,25 +301,42 @@ export class KVCredentialsProvider implements CredentialsProvider {
    * already public knowledge); only WRITES are gated.
    */
   private async readRecord(): Promise<NeonSettingsRecord | null> {
+    return (await this.resolveRecord()).record;
+  }
+
+  /**
+   * Resolve the record AND report which tier answered. The preference
+   * order is account KV → bundle default; `source` lets Settings and
+   * diagnostics show whether a user is on real account config or still
+   * riding the (temporary) baked-in default.
+   */
+  private async resolveRecord(): Promise<{
+    record: NeonSettingsRecord | null;
+    source: ConfigSource;
+  }> {
+    const fallback = (): { record: NeonSettingsRecord | null; source: ConfigSource } =>
+      this.fallbackRecord !== null
+        ? { record: { ...this.fallbackRecord }, source: 'bundle-default' }
+        : { record: null, source: 'none' };
     if (!this.isSignedIn()) {
-      return this.fallbackRecord !== null ? { ...this.fallbackRecord } : null;
+      return fallback();
     }
     try {
       const value = await this.kvApi.get(this.collection, this.key);
-      if (value === null || value === undefined) {
-        return this.fallbackRecord !== null ? { ...this.fallbackRecord } : null;
-      }
-      if (typeof value !== 'object') {
-        return this.fallbackRecord !== null ? { ...this.fallbackRecord } : null;
+      if (value === null || value === undefined || typeof value !== 'object') {
+        return fallback();
       }
       const v = value as Partial<NeonSettingsRecord>;
       return {
-        endpoint: typeof v.endpoint === 'string' ? v.endpoint : '',
-        uri: typeof v.uri === 'string' ? v.uri : '',
-        user: typeof v.user === 'string' && v.user.length > 0 ? v.user : 'neo4j',
-        password: typeof v.password === 'string' ? v.password : '',
-        database:
-          typeof v.database === 'string' && v.database.length > 0 ? v.database : 'neo4j',
+        record: {
+          endpoint: typeof v.endpoint === 'string' ? v.endpoint : '',
+          uri: typeof v.uri === 'string' ? v.uri : '',
+          user: typeof v.user === 'string' && v.user.length > 0 ? v.user : 'neo4j',
+          password: typeof v.password === 'string' ? v.password : '',
+          database:
+            typeof v.database === 'string' && v.database.length > 0 ? v.database : 'neo4j',
+        },
+        source: 'account',
       };
     } catch (err) {
       if (err instanceof KVError) {
@@ -354,6 +385,7 @@ export class StaticCredentialsProvider implements CredentialsProvider {
     user: string;
     database: string;
     hasPassword: boolean;
+    source: ConfigSource;
   }> {
     return {
       endpoint: this.record.endpoint,
@@ -361,6 +393,9 @@ export class StaticCredentialsProvider implements CredentialsProvider {
       user: this.record.user,
       database: this.record.database,
       hasPassword: this.record.password.length > 0,
+      // Static = an explicitly supplied record (tests / injected config),
+      // which is the "account-equivalent" tier, not a bundle fallback.
+      source: 'account',
     };
   }
 
