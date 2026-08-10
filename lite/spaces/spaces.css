@@ -8822,15 +8822,44 @@ body {
 }
 .spaces-detail-wiser-btn {
   appearance: none;
-  border: 1px solid rgba(127, 119, 221, 0.55);
-  background: rgba(127, 119, 221, 0.10);
-  color: var(--or-text, #e6e6e6);
+  /* Paper-primary: the button is made of the same material as the
+     instrument it opens. */
+  border: 1px solid #c1922f;
+  background: linear-gradient(180deg, #f7f4ec 0%, #efeadf 100%);
+  color: #1b1712;
+  font-weight: 600;
   border-radius: 8px;
-  padding: 6px 12px;
+  padding: 7px 14px;
   font-size: 12px;
   cursor: pointer;
   transition: background 0.15s var(--or-ease-out, ease-out);
 }
 .spaces-detail-wiser-btn:hover {
-  background: rgba(127, 119, 221, 0.2);
+  background: #faf8f2;
+}
+
+/* ── Playbook tiles are PAPER (2026-08-10, user call: "way more obvious
+   — white or tan"): the instrument's own ivory in the dark grid. The
+   material is the message — paper = playbook = WISER. Inner text flips
+   to ink; the kind chip and rings go gold like the app's accent. ── */
+.spaces-card.spaces-card-playbook {
+  background: linear-gradient(180deg, #f7f4ec 0%, #efeadf 100%);
+  border-color: #cfc7b3;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+}
+.spaces-card.spaces-card-playbook:hover {
+  background: linear-gradient(180deg, #faf8f2 0%, #f1ede4 100%);
+  border-color: #c1922f;
+}
+.spaces-card.spaces-card-playbook.is-active {
+  border-color: #c1922f;
+  box-shadow: 0 0 0 2px rgba(193, 146, 47, 0.35), 0 8px 26px rgba(0, 0, 0, 0.5);
+}
+.spaces-card.spaces-card-playbook .spaces-card-title { color: #1b1712; }
+.spaces-card.spaces-card-playbook .spaces-card-excerpt { color: #4b463c; }
+.spaces-card.spaces-card-playbook .spaces-card-meta { color: #8b8574; }
+.spaces-card.spaces-card-playbook .spaces-card-title-row { color: #1b1712; }
+.spaces-card.spaces-card-playbook .spaces-card-kind-playbook { color: #a8863c; }
+.spaces-card.spaces-card-playbook .spaces-card-preview {
+  background: transparent;
 }

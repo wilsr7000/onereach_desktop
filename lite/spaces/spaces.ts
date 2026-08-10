@@ -1843,6 +1843,40 @@ function wiserOpenBridge(): ((riffId: string | null) => Promise<{ ok: true }>) |
   return spaces.openWiser.bind(spaces);
 }
 
+/**
+ * Open a playbook asset in WISER Playbooks — deep-linked to the actual
+ * playbook when the asset carries a riff id in metadata (riffId /
+ * wiserRiffId, the keys a WISER export writes); the app opens plainly
+ * otherwise. Fire-and-forget: failures log, never block the grid.
+ */
+async function openPlaybookInWiser(itemId: string): Promise<void> {
+  const openWiser = wiserOpenBridge();
+  if (openWiser === null) return;
+  let riffId: string | null = null;
+  try {
+    const envelope = await window.lite?.spaces?.items.get(itemId);
+    if (envelope !== undefined && envelope.ok === true && envelope.value !== null) {
+      const meta = (envelope.value.metadata ?? {}) as Record<string, unknown>;
+      riffId =
+        typeof meta.riffId === 'string' && meta.riffId.length > 0
+          ? meta.riffId
+          : typeof meta.wiserRiffId === 'string' && meta.wiserRiffId.length > 0
+            ? meta.wiserRiffId
+            : null;
+    }
+  } catch {
+    /* metadata lookup is best-effort — open the app plainly */
+  }
+  try {
+    await openWiser(riffId);
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'openPlaybookInWiser failed', {
+      itemId,
+      error: messageFrom(err),
+    });
+  }
+}
+
 function itemVersioningBridge(): ItemVersioningBridge | null {
   const items = window.lite?.spaces?.items as unknown as ItemVersioningBridge | undefined;
   if (items === undefined || typeof items.versions !== 'function') return null;
@@ -5282,6 +5316,14 @@ export function buildItemCard(
   card.setAttribute('data-item-id', item.id);
   card.setAttribute('role', 'button');
   card.setAttribute('tabindex', '0');
+  // Playbooks open in the instrument: double-click jumps straight into
+  // WISER Playbooks (deep-linked when the asset knows its riff id).
+  // Single click keeps the detail-pane behavior below.
+  if (item.kind === 'playbook') {
+    card.addEventListener('dblclick', () => {
+      void openPlaybookInWiser(item.id);
+    });
+  }
   // Accessible name folds in the badge meaning, since the badges
   // themselves live inside the aria-hidden preview.
   const isNew = isNewSinceLastVisit(item);
