@@ -149,6 +149,29 @@ export function openWiserPlaybooksWindow(opts?: { riffId?: string }): void {
     view = null;
   });
 
+  // Containment (0.0.46 review): the view carries the window.ai preload
+  // (Claude on the app's keychain key), so TOP-LEVEL NAVIGATION stays
+  // pinned to the Playbooks origin — a cross-origin destination would
+  // inherit the preload. Anything else opens in the OS browser instead,
+  // the same policy as window.open below.
+  const wiserOrigin = new URL(WISER_PLAYBOOKS_URL).origin;
+  view.webContents.on('will-navigate', (event, url) => {
+    let dest: URL | null = null;
+    try {
+      dest = new URL(url);
+    } catch {
+      dest = null;
+    }
+    if (dest === null || dest.origin !== wiserOrigin) {
+      event.preventDefault();
+      if (dest !== null && /^https?:$/.test(dest.protocol)) {
+        void shell.openExternal(url).catch(() => {
+          // best-effort -- openExternal can reject on headless hosts
+        });
+      }
+    }
+  });
+
   // External links route to the OS default browser; deny in-app child
   // Electron windows. (Attached to the APP view -- the header page never
   // opens windows.)

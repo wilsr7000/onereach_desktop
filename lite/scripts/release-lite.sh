@@ -224,7 +224,7 @@ if [ -z "$ASAR_PATH" ]; then
     exit 1
 fi
 ASAR_LIST=$(npx @electron/asar list "$ASAR_PATH")
-for CRITICAL in "dist-lite/build/main-lite.js" "node_modules/@anthropic-ai/sdk/package.json" "node_modules/standardwebhooks/package.json"; do
+for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/@anthropic-ai/sdk/package.json" "node_modules/standardwebhooks/package.json"; do
     if ! echo "$ASAR_LIST" | grep -q "$CRITICAL"; then
         echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot.${NC}"
         echo -e "${RED}  Run npm install and rebuild before publishing. Aborting.${NC}"

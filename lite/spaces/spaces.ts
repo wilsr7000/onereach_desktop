@@ -2163,18 +2163,21 @@ async function openVersionViewer(itemId: string, seq: number): Promise<void> {
   foot.appendChild(restoreThis);
   panel.appendChild(foot);
 
-  const dismiss = (): void => backdrop.remove();
+  // Escape must survive earlier keydowns ({once:true} was consumed by
+  // the FIRST key of any kind — Tab while reading killed Escape), and
+  // the listener must die with the viewer however it closes.
+  const onKeydown = (ev: KeyboardEvent): void => {
+    if (ev.key === 'Escape') dismiss();
+  };
+  const dismiss = (): void => {
+    document.removeEventListener('keydown', onKeydown);
+    backdrop.remove();
+  };
   closeBtn.addEventListener('click', dismiss);
   backdrop.addEventListener('click', (ev) => {
     if (ev.target === backdrop) dismiss();
   });
-  document.addEventListener(
-    'keydown',
-    (ev) => {
-      if (ev.key === 'Escape') dismiss();
-    },
-    { once: true }
-  );
+  document.addEventListener('keydown', onKeydown);
 
   backdrop.appendChild(panel);
   document.body.appendChild(backdrop);

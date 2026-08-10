@@ -54,8 +54,6 @@ const ASSETS_TO_COPY = [
   { from: 'lite/learn/learn.html', to: 'learn.html' },
   { from: 'lite/learn/learn.css', to: 'learn.css' },
   { from: 'lite/assets/capchewlogo.jpg', to: 'capchewlogo.jpg' },
-  { from: 'lite/assets/capchew-icon.svg', to: 'capchew-icon.svg' },
-  { from: 'lite/assets/capchew.svg', to: 'capchew.svg' },
   { from: 'lite/spaces/spaces.css', to: 'spaces.css' },
   // boot-chat.html / boot-chat.css were retired when the chat surface
   // moved inline into chrome.html — the module source lives at
