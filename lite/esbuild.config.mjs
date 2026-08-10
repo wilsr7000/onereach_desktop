@@ -120,7 +120,12 @@ const mainProcessOptions = {
     'keytar',
     'otplib',
     'jsqr',
-    '@anthropic-ai/sdk',
+    // @anthropic-ai/sdk is BUNDLED (removed from externals, 0.0.47): as
+    // an external it needed node_modules packaging, and electron-builder's
+    // collector dropped its transitive deps (standardwebhooks,
+    // json-schema-to-ts) when a nested duplicate sdk (browser-use's old
+    // 0.74) confused resolution — 0.0.46 crashed at boot on exactly that.
+    // Pure-JS deps belong in the bundle; only natives + electron stay out.
   ],
 };
 

@@ -224,14 +224,16 @@ if [ -z "$ASAR_PATH" ]; then
     exit 1
 fi
 ASAR_LIST=$(npx @electron/asar list "$ASAR_PATH")
-# standardwebhooks + json-schema-to-ts are TRANSITIVE runtime deps of
-# @anthropic-ai/sdk (its resources/beta requires them at module load).
-# They are invisible to a source grep — the 0.0.46 cut removed the
-# standardwebhooks entry as "stale" on that evidence and shipped an
-# app that crashed at require time. Both are now first-class entries
-# in lite/package.json dependencies AND tripwires here. Do not remove
-# either without booting the packaged app.
-for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/@anthropic-ai/sdk/package.json" "node_modules/standardwebhooks/package.json" "node_modules/json-schema-to-ts/package.json"; do
+# 0.0.46 postmortem: @anthropic-ai/sdk was external and its TRANSITIVE
+# deps (standardwebhooks) were dropped by electron-builder's collector
+# (a nested duplicate sdk under browser-use confused resolution) — the
+# shipped app crashed at require time. The sdk is now BUNDLED into
+# main-lite.js (lite/esbuild.config.mjs), so no sdk entries here. The
+# remaining pure-JS externals stay as tripwires; natives (keytar,
+# better-sqlite3) live outside the asar and are covered by the boot
+# smoke below. Do not weaken this list on grep evidence — boot the
+# packaged app.
+for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/electron-updater/package.json" "node_modules/electron-log/package.json" "node_modules/otplib/package.json" "node_modules/jsqr/package.json"; do
     if ! echo "$ASAR_LIST" | grep -q "$CRITICAL"; then
         echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot.${NC}"
         echo -e "${RED}  Run npm install and rebuild before publishing. Aborting.${NC}"
@@ -239,6 +241,40 @@ for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.htm
     fi
 done
 echo -e "${GREEN}✓ Packaged-boot sanity: asar contains the boot-critical modules.${NC}"
+
+# ---------------------------------------------------------------------------
+# Boot smoke (0.0.47): an asar listing proves PRESENCE, not BOOTABILITY —
+# 0.0.46 taught that the hard way. Launch the freshly packaged binary and
+# require its boot banner before anything uploads. SKIP_BOOT_SMOKE=1 to
+# bypass in emergencies — loudly.
+# ---------------------------------------------------------------------------
+if [ "${SKIP_BOOT_SMOKE:-0}" = "1" ]; then
+    echo -e "${YELLOW}⚠ SKIP_BOOT_SMOKE=1 — shipping WITHOUT booting the package.${NC}"
+else
+    APP_BIN=$(find "${MAC_OUT_DIR:-dist-lite/mac-arm64}" -maxdepth 5 -type f -path "*Contents/MacOS/*" 2>/dev/null | head -1)
+    if [ -z "$APP_BIN" ]; then
+        echo -e "${RED}✗ Packaged binary not found — cannot boot-smoke. Aborting.${NC}"
+        exit 1
+    fi
+    BOOT_LOG=$(mktemp)
+    "$APP_BIN" > "$BOOT_LOG" 2>&1 &
+    BOOT_PID=$!
+    BOOTED=0
+    for _ in $(seq 1 25); do
+        if grep -q "\[LITE\] Onereach.ai Lite v" "$BOOT_LOG"; then BOOTED=1; break; fi
+        if ! kill -0 "$BOOT_PID" 2>/dev/null; then break; fi
+        sleep 1
+    done
+    kill "$BOOT_PID" 2>/dev/null || true
+    sleep 1
+    pkill -9 -f "Contents/MacOS/Onereach.ai Lite" 2>/dev/null || true
+    if [ "$BOOTED" != "1" ]; then
+        echo -e "${RED}✗ Boot smoke FAILED — the packaged app never printed its banner:${NC}"
+        tail -20 "$BOOT_LOG"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Boot smoke: the packaged app boots.${NC}"
+fi
 
 # ---------------------------------------------------------------------------
 # Manifest sanity (2026-08-07): the yml is uploaded as-is, so a stale

@@ -10,8 +10,6 @@
     "otplib": "^13.2.1",
     "jsqr": "^1.4.0",
     "keytar": "^7.9.0",
-    "@anthropic-ai/sdk": "^0.100.1",
-    "standardwebhooks": "^1.0.0",
-    "json-schema-to-ts": "^3.1.1"
+    "@anthropic-ai/sdk": "^0.100.1"
   }
 }
