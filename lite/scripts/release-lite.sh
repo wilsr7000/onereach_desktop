@@ -229,11 +229,15 @@ ASAR_LIST=$(npx @electron/asar list "$ASAR_PATH")
 # (a nested duplicate sdk under browser-use confused resolution) — the
 # shipped app crashed at require time. The sdk is now BUNDLED into
 # main-lite.js (lite/esbuild.config.mjs), so no sdk entries here. The
-# remaining pure-JS externals stay as tripwires; natives (keytar,
-# better-sqlite3) live outside the asar and are covered by the boot
-# smoke below. Do not weaken this list on grep evidence — boot the
-# packaged app.
-for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/electron-updater/package.json" "node_modules/electron-log/package.json" "node_modules/otplib/package.json" "node_modules/jsqr/package.json"; do
+# tripwires below are the externals the BUNDLE actually requires
+# (verified: grep require() in dist-lite/build/main-lite.js) — exactly
+# electron-updater, otplib, jsqr, keytar. electron-log and
+# better-sqlite3 are vestigial externals nothing requires; they are
+# correctly absent from the package. Keep this list in lockstep with
+# the bundle's requires, and let the boot smoke below be the final
+# arbiter. Do not weaken it on grep-of-SOURCE evidence — grep the
+# BUILT BUNDLE or boot the packaged app.
+for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/electron-updater/package.json" "node_modules/otplib/package.json" "node_modules/jsqr/package.json" "node_modules/keytar/package.json"; do
     if ! echo "$ASAR_LIST" | grep -q "$CRITICAL"; then
         echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot.${NC}"
         echo -e "${RED}  Run npm install and rebuild before publishing. Aborting.${NC}"
