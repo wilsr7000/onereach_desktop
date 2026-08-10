@@ -219,3 +219,78 @@
 *Cross-cutting invariants worth spot-checking during any pass: dark-mode
 scrollbars everywhere; no white-flash on window open; account switch never
 shows the previous user's data; kill -9 + relaunch loses no persisted state.*
+
+---
+
+## 15. WISER Playbooks & Cap Chew (landed 2026-08-09/10, v0.0.47–49)
+
+> Pause point: before publishing a release, and after any change to the
+> WISER window, the Spaces↔WISER bridge, or the updater. ☠ marks the
+> steps that have actually burned us — most dangerous to skip.
+
+### WISER Playbooks window
+- [ ] **Open** — Planning → WISER Playbooks: window opens with the PAPER
+      header (WISER PLAYBOOKS wordmark + mini cap-chew bullet at right);
+      macOS traffic lights sit inset over paper, not over app content.
+- [ ] ☠ **Input reaches the app** — scroll the plans list, click a plan,
+      type in the editor. (0.0.47 regression: a full-body drag region ate
+      every click/scroll. Drag must work ONLY on the 38px bar.)
+- [ ] **Drag + zoom** — drag the window by the header bar; double-click
+      the bar zooms. Dragging from app content must NOT move the window.
+- [ ] **Containment** — external links open in the OS browser; the app
+      view never navigates off the Playbooks origin (window.ai preload
+      must not leak cross-origin).
+- [ ] **Paper end-to-end** — with the paper riff build deployed, header
+      and app read as one ivory surface.
+
+### Spaces ↔ WISER bridge
+- [ ] **Paper tiles, all three variants** — a playbook renders IVORY in
+      the dark grid: (a) grid card, (b) shared-space dashboard card,
+      (c) hero treatment (violet→gold foil ring ON paper; pills/progress
+      in ink-friendly tints). No dark playbook tile anywhere.
+- [ ] **Double-click opens the instrument** — grid card AND shared
+      dashboard card: double-click opens the WISER window. Single click
+      still opens the detail pane.
+- [ ] **Deep link** — an asset with `metadata.riffId` opens WISER at that
+      playbook (`?riff=`); without one, WISER opens plainly and the
+      detail button's tooltip says so.
+- [ ] **Detail button** — paper-primary "Open in WISER Playbooks" in the
+      playbook detail rail; absent on non-playbook kinds and on preloads
+      without the bridge.
+
+### Cap Chew identity
+- [ ] **About signs off** — Settings → About shows the real chewed-bullet
+      logo (packaged path, not a broken image), "Made with care. Come as
+      you are."
+
+### Updater (the 0.0.46/47 scars)
+- [ ] ☠ **Auto-update lives** — Settings → Updates → Check for Updates
+      finds the feed and downloads/installs. The "Automatic updates are
+      not available in this build" dialog = a DEAD updater (0.0.47 shipped
+      one; transitive deps missing). Release-blocking, always.
+- [ ] **Out-of-band recovery clears the trail** — with a recorded failed
+      attempt on version X, manually installing a NEWER version boots
+      with no failure dialog and an emptied update-state.json.
+- [ ] **Breaker still guards** — repeated failures of the SAME version
+      still escalate to the stop-retrying dialog (bounded retry intact).
+
+### Release pipeline (meta — runs inside release-lite.sh)
+- [ ] **Gate** — typecheck + dep-check + unit + integration green.
+- [ ] ☠ **Asar tripwires** — main-lite.js, wiser-header.html,
+      preload-lite-wiser.js, keytar present. Edit this list ONLY against
+      the BUILT bundle's require()s — never source greps (0.0.46 lesson).
+- [ ] ☠ **Boot smoke** — the freshly packaged binary boots: banner OR
+      the single-instance handoff both pass; a bannerless exit or an
+      "electron-updater not available" log line aborts the cut.
+- [ ] **Manifest sanity** — latest-mac.yml version + artifacts match the
+      tag before anything uploads.
+
+### riff app (companion suite — ~/AI First Notes)
+- [ ] **Theme integrity** — after adding color classes, re-run
+      `node scripts/gen-capchew-theme.mjs`; no dark residue on any screen.
+- [ ] **Welcome line** — "Keep chewing until agents can execute it
+      without failure." on the empty state; onboarding carries the
+      explainer.
+- [ ] **Chew cadence** — capChewVoice tests green (1-in-5, never twice in
+      a row); persona never explains the metaphor in live chat.
+
