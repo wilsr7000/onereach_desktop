@@ -3847,6 +3847,10 @@ function buildSharedDashboardPlaybook(
   card.setAttribute('role', 'button');
   card.setAttribute('tabindex', '0');
   card.addEventListener('click', () => void loadItemDetail(playbook.id));
+  // Parity with grid tiles: double-click opens the instrument.
+  card.addEventListener('dblclick', () => {
+    void openPlaybookInWiser(playbook.id);
+  });
   card.addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter' || ev.key === ' ') {
       ev.preventDefault();

@@ -8863,3 +8863,51 @@ body {
 .spaces-card.spaces-card-playbook .spaces-card-preview {
   background: transparent;
 }
+
+/* ── Paper, everywhere a playbook renders (0.0.49): the shared-space
+   dashboard card and the hero elements join the grid tiles. The hero
+   keeps its violet→gold foil ring — foil ON paper is the identity at
+   full strength — but fields, pills, and rails flip to ink-on-ivory. ── */
+.spaces-shared-playbook-card {
+  background: linear-gradient(180deg, #f7f4ec 0%, #efeadf 100%);
+  border: 1px solid #cfc7b3;
+}
+.spaces-shared-playbook-card:hover {
+  border-color: #c1922f;
+  box-shadow: 0 4px 14px rgba(193, 146, 47, 0.22);
+}
+.spaces-shared-playbook-card-title { color: #1b1712; }
+.spaces-shared-playbook-card-excerpt { color: #4b463c; }
+.spaces-shared-playbook-card-footnote { color: #8b8574; }
+
+.spaces-card.spaces-card-playbook .spaces-card-preview {
+  background:
+    radial-gradient(120% 90% at 8% 0%, rgba(139, 92, 246, 0.08), transparent 55%),
+    radial-gradient(120% 90% at 95% 100%, rgba(193, 146, 47, 0.08), transparent 55%),
+    transparent;
+}
+.spaces-card.spaces-card-playbook:hover .spaces-card-preview {
+  box-shadow:
+    0 0 0 1px rgba(193, 146, 47, 0.28),
+    0 6px 22px rgba(193, 146, 47, 0.18);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-pill {
+  border-color: rgba(111, 102, 184, 0.5);
+  color: #574fa0;
+  background: rgba(111, 102, 184, 0.10);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-pill.is-complete {
+  border-color: rgba(42, 115, 80, 0.5);
+  color: #2a7350;
+  background: rgba(42, 115, 80, 0.10);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-progress {
+  background: rgba(27, 23, 18, 0.10);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step:not(:last-child)::after {
+  background: rgba(111, 102, 184, 0.35);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step.is-done .spaces-card-playbook-step-marker {
+  background: rgba(42, 115, 80, 0.14);
+  border-color: rgba(42, 115, 80, 0.55);
+}

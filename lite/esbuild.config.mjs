@@ -112,20 +112,19 @@ const mainProcessOptions = {
   platform: 'node',
   target: 'node20',
   format: 'cjs',
+  // Externals policy (0.0.49, completing the 0.0.46/0.0.47 postmortems):
+  // ONLY electron + native modules stay external. Every pure-JS dep is
+  // BUNDLED — electron-builder's node_modules collector proved
+  // untrustworthy under this repo's npm tree (nested duplicate packages
+  // make it drop transitive deps): 0.0.46 shipped without the sdk's
+  // standardwebhooks (boot crash), 0.0.47 shipped an electron-updater
+  // whose transitives were missing (dead updater, silent). Bundling is
+  // the fix, not curation.
   external: [
     'electron',
-    'electron-log',
-    'electron-updater',
-    'better-sqlite3',
     'keytar',
-    'otplib',
-    'jsqr',
-    // @anthropic-ai/sdk is BUNDLED (removed from externals, 0.0.47): as
-    // an external it needed node_modules packaging, and electron-builder's
-    // collector dropped its transitive deps (standardwebhooks,
-    // json-schema-to-ts) when a nested duplicate sdk (browser-use's old
-    // 0.74) confused resolution — 0.0.46 crashed at boot on exactly that.
-    // Pure-JS deps belong in the bundle; only natives + electron stay out.
+    'better-sqlite3',
+    'electron-log',
   ],
 };
 
