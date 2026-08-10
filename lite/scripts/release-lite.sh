@@ -282,7 +282,7 @@ else
         grep "electron-updater" "$BOOT_LOG" | head -3
         exit 1
     fi
-    if [ "$BOOTED" != "1" ]; then
+    if [ "$BOOTED" = "0" ]; then
         echo -e "${RED}✗ Boot smoke FAILED — the packaged app never printed its banner:${NC}"
         tail -20 "$BOOT_LOG"
         exit 1
