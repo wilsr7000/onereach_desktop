@@ -266,6 +266,12 @@ else
     BOOTED=0
     for _ in $(seq 1 25); do
         if grep -q "\[LITE\] Onereach.ai Lite v" "$BOOT_LOG"; then BOOTED=1; break; fi
+        # The single-instance exit is ALSO a pass: that line prints from
+        # code that runs only after every top-level require succeeded —
+        # the exact integrity the smoke verifies (0.0.46 died at require
+        # time, before any output). Happens whenever the user's installed
+        # app is running during a cut.
+        if grep -q "Another instance is already running" "$BOOT_LOG"; then BOOTED=2; break; fi
         if ! kill -0 "$BOOT_PID" 2>/dev/null; then break; fi
         sleep 1
     done
@@ -277,7 +283,11 @@ else
         tail -20 "$BOOT_LOG"
         exit 1
     fi
-    echo -e "${GREEN}✓ Boot smoke: the packaged app boots.${NC}"
+    if [ "$BOOTED" = "2" ]; then
+        echo -e "${GREEN}✓ Boot smoke: module load proven via single-instance handoff (installed app is running).${NC}"
+    else
+        echo -e "${GREEN}✓ Boot smoke: the packaged app boots.${NC}"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
