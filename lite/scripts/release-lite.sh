@@ -224,7 +224,14 @@ if [ -z "$ASAR_PATH" ]; then
     exit 1
 fi
 ASAR_LIST=$(npx @electron/asar list "$ASAR_PATH")
-for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/@anthropic-ai/sdk/package.json"; do
+# standardwebhooks + json-schema-to-ts are TRANSITIVE runtime deps of
+# @anthropic-ai/sdk (its resources/beta requires them at module load).
+# They are invisible to a source grep — the 0.0.46 cut removed the
+# standardwebhooks entry as "stale" on that evidence and shipped an
+# app that crashed at require time. Both are now first-class entries
+# in lite/package.json dependencies AND tripwires here. Do not remove
+# either without booting the packaged app.
+for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/@anthropic-ai/sdk/package.json" "node_modules/standardwebhooks/package.json" "node_modules/json-schema-to-ts/package.json"; do
     if ! echo "$ASAR_LIST" | grep -q "$CRITICAL"; then
         echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot.${NC}"
         echo -e "${RED}  Run npm install and rebuild before publishing. Aborting.${NC}"
