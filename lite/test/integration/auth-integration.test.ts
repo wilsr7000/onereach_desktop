@@ -10,7 +10,11 @@
  * driven by an injected fake session, identical to the unit tests.
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import {
+  _setSessionVaultBackendForTesting,
+  _resetSessionVaultBackendForTesting,
+} from '../../auth/session-vault.js';
 
 vi.mock('electron', () => ({
   session: {
@@ -135,6 +139,17 @@ afterAll(async () => {
 beforeEach(() => {
   server.reset();
 });
+
+
+beforeEach(() => {
+  const mem = new Map<string, string>();
+  _setSessionVaultBackendForTesting({
+    setPassword: async (s, a, p) => void mem.set(`${s} ${a}`, p),
+    getPassword: async (s, a) => mem.get(`${s} ${a}`) ?? null,
+    deletePassword: async (s, a) => mem.delete(`${s} ${a}`),
+  });
+});
+afterEach(() => _resetSessionVaultBackendForTesting());
 
 describe('auth integration -- KV wire format', () => {
   it('signIn persists a valid AuthSession to the lite-auth-sessions collection over real HTTP', async () => {

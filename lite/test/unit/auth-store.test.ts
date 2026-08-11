@@ -19,7 +19,7 @@
  *   - Token redaction: captured token never appears in any log call
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock electron BEFORE importing the store. The store has a static
 // `import { session } from 'electron'`; we never use that path because
@@ -300,6 +300,19 @@ function buildStore(opts: {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+
+// Every AuthStore in this file constructs a real SessionVault(); route
+// it to an in-memory keychain so tests never touch the OS keychain.
+beforeEach(() => {
+  const mem = new Map<string, string>();
+  _setSessionVaultBackendForTesting({
+    setPassword: async (s, a, p) => void mem.set(`${s} ${a}`, p),
+    getPassword: async (s, a) => mem.get(`${s} ${a}`) ?? null,
+    deletePassword: async (s, a) => mem.delete(`${s} ${a}`),
+  });
+});
+afterEach(() => _resetSessionVaultBackendForTesting());
 
 describe('AuthStore.signIn -- happy path', () => {
   it('captures mult + or, persists to KV, resolves with session, captures token', async () => {
@@ -1507,5 +1520,87 @@ describe('AuthStore.getSession -- session.read event throttling', () => {
     // the signOut test below; here assert the dedupe key is per-env.
     store.getSession('staging'); // different env -> its own first emit
     expect(reads()).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session vault: sign in ONCE, stay signed in across restarts (2026-08-10).
+// The partition cookie jar loses OneReach's session cookies on quit; the
+// keychain vault restores them on the next hydrate.
+// ---------------------------------------------------------------------------
+import {
+  SessionVault,
+  SESSION_VAULT_SERVICE,
+  _setSessionVaultBackendForTesting,
+  _resetSessionVaultBackendForTesting,
+  type KeychainBackend,
+} from '../../auth/session-vault.js';
+
+class FakeVaultKeychain implements KeychainBackend {
+  readonly m = new Map<string, string>();
+  private k(s: string, a: string): string {
+    return `${s} ${a}`;
+  }
+  async setPassword(s: string, a: string, p: string): Promise<void> {
+    this.m.set(this.k(s, a), p);
+  }
+  async getPassword(s: string, a: string): Promise<string | null> {
+    return this.m.get(this.k(s, a)) ?? null;
+  }
+  async deletePassword(s: string, a: string): Promise<boolean> {
+    return this.m.delete(this.k(s, a));
+  }
+}
+
+describe('AuthStore × SessionVault — persistence across restarts', () => {
+  it('hydrate restores an empty partition from the vault, as PERSISTENT cookies', async () => {
+    const kc = new FakeVaultKeychain();
+    const vault = new SessionVault(kc);
+    // Vault holds the pair captured on a PRIOR run — mult as a SESSION
+    // cookie (no expirationDate), i.e. the eviction case.
+    await vault.save(
+      'edison',
+      { name: 'mult', value: SAMPLE_TOKEN, domain: '.edison.api.onereach.ai', path: '/', secure: true, httpOnly: true } as unknown as Electron.Cookie,
+      { name: 'or', value: buildOrCookieValue({ accountId: SAMPLE_ACCOUNT_ID, email: SAMPLE_EMAIL }), domain: '.edison.onereach.ai', path: '/', secure: true } as unknown as Electron.Cookie
+    );
+
+    const session = new FakeSession(); // empty partition — nothing survived the "restart"
+    const store = new AuthStore({
+      kvApi: new FakeKV(),
+      sessionFromPartition: () => session as unknown as Electron.Session,
+      windowFactory: new FakeWindowFactoryRecorder(() => makeFakeWindow()),
+      sessionVault: vault,
+    });
+
+    expect(store.getSession('edison')).toBeNull(); // before hydrate
+    await store.hydrate();
+
+    // Session recovered purely from the vault → the accountId is back.
+    const restored = store.getSession('edison');
+    expect(restored?.accountId).toBe(SAMPLE_ACCOUNT_ID);
+
+    // And the restored cookies are PERSISTENT (future expiry) so they
+    // survive the NEXT quit too — the mechanism that fixes "every time".
+    const jar = await session.cookies.get({ name: 'mult' });
+    expect(jar.length).toBe(1);
+    expect(jar[0]?.expirationDate ?? 0).toBeGreaterThan(Math.floor(Date.now() / 1000));
+  });
+
+  it('signOut clears the vault so hydrate cannot resurrect the session', async () => {
+    const kc = new FakeVaultKeychain();
+    const vault = new SessionVault(kc);
+    const session = new FakeSession();
+    session.cookies.cookies.push(multCookie(), orCookie());
+    const store = new AuthStore({
+      kvApi: new FakeKV(),
+      sessionFromPartition: () => session as unknown as Electron.Session,
+      windowFactory: new FakeWindowFactoryRecorder(() => makeFakeWindow()),
+      sessionVault: vault,
+    });
+    await store.hydrate(); // captures → vault now holds the session
+    expect(kc.m.get(`${SESSION_VAULT_SERVICE} session-edison`)).toBeDefined();
+
+    await store.signOut('edison');
+    expect(kc.m.get(`${SESSION_VAULT_SERVICE} session-edison`)).toBeUndefined();
   });
 });

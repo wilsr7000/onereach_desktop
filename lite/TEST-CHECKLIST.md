@@ -273,6 +273,21 @@ shows the previous user's data; kill -9 + relaunch loses no persisted state.*
       logo (packaged path, not a broken image), "Made with care. Come as
       you are."
 
+### Auth session persistence (2026-08-10 — "sign in once")
+- [ ] ☠ **Survives restart** — sign in to OneReach once, open an IDW
+      (loads signed-in), then QUIT and reopen Lite: the IDW opens
+      signed-in WITHOUT a login page. (Pre-fix: session cookies were
+      evicted on quit → login every time. The keychain SessionVault
+      restores them on boot.)
+- [ ] **One login covers all IDWs** — after that single sign-in, every
+      new IDW tab opens signed-in (cookies cloned into each partition).
+- [ ] **Sign-out truly signs out** — Settings → Account → Sign out,
+      then reopen: no session is resurrected from the vault (it's
+      cleared on sign-out).
+- [ ] **Expired server session falls through** — if OneReach expires
+      the session server-side, the tab shows the login page (restore
+      doesn't mask a dead session); signing in re-vaults fresh tokens.
+
 ### Updater (the 0.0.46/47 scars)
 - [ ] ☠ **Auto-update lives** — Settings → Updates → Check for Updates
       finds the feed and downloads/installs. The "Automatic updates are

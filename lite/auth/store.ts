@@ -22,6 +22,7 @@
 import { BrowserWindow, session as electronSession, type Cookie, type Session, type Event as ElectronEvent } from 'electron';
 import { LiteError } from '../errors.js';
 import type { LiteErrorOptions } from '../errors.js';
+import { SessionVault, withPersistentExpiry } from './session-vault.js';
 import { getKVApi, KVError } from '../kv/api.js';
 import type { KVApi } from '../kv/api.js';
 import { getLoggingApi } from '../logging/api.js';
@@ -215,6 +216,11 @@ export interface AuthStoreConfig {
    */
   sessionFromPartition?: (partition: string) => Session;
   /**
+   * Optional keychain session vault override — tests inject a fake
+   * backend. Production uses the real keytar-backed SessionVault.
+   */
+  sessionVault?: SessionVault;
+  /**
    * Optional auth-window factory override -- tests inject a fake that
    * never opens a real BrowserWindow.
    */
@@ -327,6 +333,7 @@ interface CaptureBuffer {
 export class AuthStore {
   private readonly kv: KVApi;
   private readonly sessionFromPartition: (partition: string) => Session;
+  private readonly sessionVault: SessionVault;
   private readonly windowFactory: AuthWindowFactory;
   private readonly log: NonNullable<AuthStoreConfig['logger']>;
   private readonly spanEmitter: NonNullable<AuthStoreConfig['spanEmitter']> | null;
@@ -384,6 +391,7 @@ export class AuthStore {
   constructor(config: AuthStoreConfig = {}) {
     this.kv = config.kvApi ?? getKVApi();
     this.sessionFromPartition = config.sessionFromPartition ?? ((p) => electronSession.fromPartition(p));
+    this.sessionVault = config.sessionVault ?? new SessionVault();
     this.windowFactory = config.windowFactory ?? defaultWindowFactory;
     this.log =
       config.logger ??
@@ -492,6 +500,9 @@ export class AuthStore {
     this.cancelSessionExpiryWatch(env);
     this.tokens.delete(env);
     this.tokenBundles.delete(env);
+    // Drop the persisted session too — else the next hydrate would
+    // restore it from the vault and resurrect a signed-out account.
+    void this.sessionVault.clear(env);
 
     // Remove EVERY OneReach-domain cookie from the partition. Just
     // removing `mult` + `or` from the two top-level suffix URLs is
@@ -1105,7 +1116,17 @@ export class AuthStore {
   private async recoverSessionFromAuthPartition(env: Environment): Promise<AuthSession | null> {
     const config = ENVIRONMENT_CONFIGS[env];
     if (config === undefined) return null;
-    const mult = await this.probeAuthPartitionCookie(env, 'mult');
+    let mult = await this.probeAuthPartitionCookie(env, 'mult');
+    if (mult === null) {
+      // The load-bearing cookies were evicted on quit (OneReach sets
+      // `mult`/`or` as SESSION cookies, which Electron never persists).
+      // Restore them from the keychain vault as PERSISTENT cookies so
+      // auto-login survives restarts. The server still validates the
+      // token value, so a truly-expired session just re-logs in.
+      if (await this.restoreSessionFromVault(env)) {
+        mult = await this.probeAuthPartitionCookie(env, 'mult');
+      }
+    }
     if (mult === null) return null;
     // Defense-in-depth: even if a stale `or` survives a botched
     // signOut, an expired `mult` should never re-activate a session.
@@ -1148,7 +1169,46 @@ export class AuthStore {
         ? { accountExpiresAt: Math.floor(or.expirationDate * 1000) }
         : {}),
     });
+    // Mirror the freshest known-good pair into the keychain so the next
+    // boot can restore it even after Electron evicts the session cookies.
+    void this.sessionVault.save(env, mult, or);
     return session;
+  }
+
+  /**
+   * Re-materialize the vaulted `mult`+`or` cookies into the
+   * `persist:lite-auth-<env>` partition, forcing a future expiry so
+   * they persist. Returns false when the vault is empty or the stored
+   * mult's ORIGINAL expiry is already past (a genuinely dead token —
+   * don't loop restoring it). Soft-fails to false on any write error.
+   */
+  private async restoreSessionFromVault(env: Environment): Promise<boolean> {
+    const vaulted = await this.sessionVault.load(env);
+    if (vaulted === null) return false;
+    if (
+      typeof vaulted.mult.expirationDate === 'number' &&
+      vaulted.mult.expirationDate * 1000 < this.now()
+    ) {
+      return false;
+    }
+    const partition = `persist:lite-auth-${env}`;
+    try {
+      const ses = this.sessionFromPartition(partition);
+      const nowMs = this.now();
+      for (const c of [vaulted.mult, vaulted.or]) {
+        await ses.cookies.set(
+          cookieSetDetailsFromSource(withPersistentExpiry(c, nowMs) as unknown as Cookie)
+        );
+      }
+      if (typeof ses.cookies.flushStore === 'function') {
+        await ses.cookies.flushStore().catch(() => undefined);
+      }
+      this.log('info', 'auth: restored session from keychain vault', { env });
+      return true;
+    } catch (err) {
+      this.log('warn', 'auth: vault restore failed', { env, error: (err as Error).message });
+      return false;
+    }
   }
 
   /**
@@ -1490,6 +1550,9 @@ export class AuthStore {
         ? { accountExpiresAt: Math.floor(or.expirationDate * 1000) }
         : {}),
     });
+    // Persist the freshly-captured session to the keychain vault so it
+    // survives restarts (the "sign in once" fix, 2026-08-10).
+    void this.sessionVault.save(buffer.env, mult, or);
 
     // Dual purpose: (a) persist a record of the active session
     // (read by Settings → Account UI + Health snapshot, NOT by
