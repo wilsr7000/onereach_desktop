@@ -898,14 +898,25 @@ export const CYPHER = {
     OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
     WITH c, s
     WHERE s IS NULL OR (s.deletedAt IS NULL AND ${SPACE_VISIBLE})
+    WITH c, s
+    ORDER BY c.timestamp DESC
+    LIMIT toInteger($limit)
+    OPTIONAL MATCH (other:Space)
+      WHERE other.deletedAt IS NULL
+        AND ${OTHER_SPACE_VISIBLE}
+        AND (
+          other.id = c.spaceId
+          OR (c.spaceId IS NULL AND s IS NULL
+              AND EXISTS { MATCH (c)-[:TOUCHED]->()-[:BELONGS_TO]->(other) })
+        )
+    WITH c, s, head(collect(DISTINCT other)) AS resolved
     RETURN c.hash AS id,
            c.author AS author,
            c.message AS kind,
            toString(c.timestamp) AS timestamp,
-           c.spaceId AS spaceId,
-           coalesce(s.name, c.spaceId) AS spaceName
+           coalesce(c.spaceId, resolved.id) AS spaceId,
+           coalesce(s.name, resolved.name, c.spaceId) AS spaceName
     ORDER BY c.timestamp DESC
-    LIMIT toInteger($limit)
   `,
 
   /**

@@ -3847,3 +3847,37 @@ describe('ADR-060: Recent reflects graph-level activity by any writer', () => {
     }
   });
 });
+
+// ─── ADR-060 addendum: every timeline row knows its Space ────────────────
+//
+// Commits written without spaceId (older edit/restore paths) rendered
+// chip-less rows forever — "robb edited an item" with no clue where.
+// The events read now resolves the Space AFTER the LIMIT (cheap) via
+// the commit's TOUCHED asset, gated by the same visibility rule as
+// otherSpaces chips so restricted names never leak.
+describe('ADR-060 addendum: HOME_RECENT_EVENTS space fallback', () => {
+  it('resolves a missing space through the TOUCHED asset, post-LIMIT', () => {
+    const q = CYPHER.HOME_RECENT_EVENTS;
+    expect(q).toContain('EXISTS { MATCH (c)-[:TOUCHED]->()-[:BELONGS_TO]->(other) }');
+    // The fallback expansion must run on the LIMITed rows, not the
+    // full commit scan.
+    expect(q.indexOf('LIMIT toInteger($limit)')).toBeLessThan(
+      q.indexOf('OPTIONAL MATCH (other:Space)')
+    );
+  });
+
+  it('projects coalesced spaceId/spaceName from commit-else-resolved', () => {
+    const q = CYPHER.HOME_RECENT_EVENTS;
+    expect(q).toContain('coalesce(c.spaceId, resolved.id) AS spaceId');
+    expect(q).toContain('coalesce(s.name, resolved.name, c.spaceId) AS spaceName');
+  });
+
+  it('the fallback space is visibility-gated (restricted names never leak)', () => {
+    // OTHER_SPACE_VISIBLE binds alias `other` — the resolved space
+    // must pass the same gate as otherSpaces chips.
+    const q = CYPHER.HOME_RECENT_EVENTS;
+    const gate = q.indexOf("coalesce(other.visibility, 'open') <> 'restricted'");
+    expect(gate).toBeGreaterThan(-1);
+    expect(gate).toBeGreaterThan(q.indexOf('OPTIONAL MATCH (other:Space)'));
+  });
+});

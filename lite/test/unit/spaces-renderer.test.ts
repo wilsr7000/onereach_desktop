@@ -66,6 +66,8 @@ interface TestSpace {
   iconKey?: string;
   itemCount?: number;
   kind?: 'user' | 'shared';
+  /** ADR-060 — graph-level member-activity key. */
+  lastActivity?: string;
 }
 
 interface TestChip {
