@@ -3069,9 +3069,11 @@ describe('CYPHER source strings — Sprint 1 (asset CRUD)', () => {
     expect(CYPHER.CREATE_ASSET_UNCATEGORIZED).not.toMatch(/BELONGS_TO/);
   });
 
-  it('SOFT_DELETE_ASSET sets deletedAt and only matches non-deleted rows', () => {
-    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
-    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/WHERE a\.deletedAt IS NULL/);
+  it('SOFT_DELETE_ASSET sets deletedAt and only matches non-deleted member rows', () => {
+    // ADR-059: delete works on any member kind (Asset/Playbook/Note).
+    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/MATCH \(a \{id: \$id\}\)/);
+    expect(CYPHER.SOFT_DELETE_ASSET).toContain('a:Asset OR a:Playbook OR a:Note');
+    expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/a\.deletedAt IS NULL/);
     expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/SET a\.deletedAt = \$now/);
     expect(CYPHER.SOFT_DELETE_ASSET).toMatch(/a\.updatedAt = \$now/);
   });
@@ -3098,7 +3100,7 @@ describe('SdkSpacesClient.createAsset', () => {
 
   it('infers kind=text from content when not specified', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MERGE (n:Note {id: $id})', [{ id: 'note-stub', spaceName: 'S' }]);
     stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
@@ -3118,8 +3120,9 @@ describe('SdkSpacesClient.createAsset', () => {
       content: 'Hello',
     });
     expect(created.kind).toBe('text');
-    const call = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
-    expect(call?.parameters).toMatchObject({ kind: 'text' });
+    // ADR-059: inferred text in a Space births a universal note citizen.
+    const call = stub.calls.find((c) => c.cypher.includes('MERGE (n:Note {id: $id})'));
+    expect(call?.parameters).toMatchObject({ content: 'Hello', subtype: 'Basic' });
   });
 
   it('infers kind=other when only fileKey is provided', async () => {
@@ -3257,7 +3260,8 @@ describe('SdkSpacesClient.restoreAsset', () => {
 
 describe('CYPHER source strings — Sprint 3 (move / copy / search)', () => {
   it('MOVE_ASSET_TO_SPACE drops old BELONGS_TO and merges new one', () => {
-    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/MATCH \(a:Asset \{id: \$id\}\)/);
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/MATCH \(a \{id: \$id\}\)/);
+    expect(CYPHER.MOVE_ASSET_TO_SPACE).toContain('a:Asset OR a:Playbook OR a:Note');
     expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(/MATCH \(target:Space \{id: \$toSpaceId\}\)/);
     expect(CYPHER.MOVE_ASSET_TO_SPACE).toMatch(
       /OPTIONAL MATCH \(a\)-\[old:BELONGS_TO\]->\(source:Space \{id: \$fromSpaceId\}\)/
@@ -3273,8 +3277,9 @@ describe('CYPHER source strings — Sprint 3 (move / copy / search)', () => {
 
   it('REMOVE_ASSET_FROM_SPACE drops one BELONGS_TO edge', () => {
     expect(CYPHER.REMOVE_ASSET_FROM_SPACE).toMatch(
-      /MATCH \(a:Asset \{id: \$id\}\)-\[r:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/
+      /MATCH \(a \{id: \$id\}\)-\[r:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/
     );
+    expect(CYPHER.REMOVE_ASSET_FROM_SPACE).toContain('a:Asset OR a:Playbook OR a:Note');
     expect(CYPHER.REMOVE_ASSET_FROM_SPACE).toMatch(/DELETE r/);
   });
 
@@ -3718,7 +3723,7 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
 
   it('writes empty string for missing metadata (preserves "absent" semantics)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
+    stub.setResponse('MERGE (n:Note {id: $id})', [{ id: 'note-stub', spaceName: 'S' }]);
     stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
@@ -3737,7 +3742,9 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
       title: 'No meta',
       content: 'x',
     });
-    const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
+    // ADR-059: text-in-space goes down the note-citizen path; the
+    // "absent metadata = empty string" semantic must hold there too.
+    const createCall = stub.calls.find((c) => c.cypher.includes('MERGE (n:Note {id: $id})'));
     expect(createCall?.parameters?.['metadata']).toBe('');
   });
 });

@@ -288,6 +288,27 @@ export interface ItemProvenance {
  * Compact view of an Item -- enough to render a card without fetching
  * full content. Returned by `items.list()`.
  */
+/**
+ * ADR-059 — metadata for items that are universal `:Note` entities
+ * (registry entity `Note` v1.1.0). The body of such a note lives in
+ * the shared Edison KV store at `kvCollection`/`kvRef`; the graph node
+ * is an index + mirrors. `updatedAtMs` is the node's snake_case
+ * `updated_at` (epoch ms) — the newer-wins conflict base every writer
+ * must carry into its guarded update.
+ */
+export interface NoteItemMeta {
+  /** KV collection holding the body (`notes:<account>`), null when graph-only. */
+  kvCollection: string | null;
+  /** KV key of the body (`note:<id>`), null when graph-only. */
+  kvRef: string | null;
+  /** Conflict base: the node's `updated_at` at read time (0 when unset). */
+  updatedAtMs: number;
+  /** Note SUBTYPE per the registry ('Basic', 'Checklist', …) — NOT a Lite kind. */
+  subtype: string;
+  /** True for dual-label `:Asset:Note` items (Lite versioning also applies). */
+  isAsset: boolean;
+}
+
 export interface ItemSummary {
   id: string;
   title: string;
@@ -359,6 +380,14 @@ export type ItemMetadata = Record<string, MetadataValue>;
 export interface Item extends ItemSummary {
   /** Inline text content for text-kind items. */
   content?: string;
+  /**
+   * ADR-059 — present when the node carries the universal `:Note`
+   * label (written by WISER Playbooks / OR-Mobile, agents, or Lite
+   * itself). Carries the shared-KV body pointer plus the newer-wins
+   * conflict base. `isAsset` marks dual-label Lite-born notes that
+   * also run the ADR-057 version machinery.
+   */
+  note?: NoteItemMeta;
   /**
    * Free-form description / abstract / caption / notes. Distinct from
    * `excerpt` (which is a derived preview snippet of `content`):

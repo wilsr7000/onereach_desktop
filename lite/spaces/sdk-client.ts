@@ -28,6 +28,18 @@
  */
 
 import { createHash } from 'node:crypto';
+import {
+  buildNoteKvBody,
+  createNoteCypher,
+  generateNoteId,
+  mergeNoteKvBody,
+  noteKvCollection,
+  noteKvRef,
+  NOTE_SUBTYPE_LABELS,
+  UPDATE_NOTE_GUARDED,
+  type NoteKvPatch,
+  type NoteKvStore,
+} from './note-standard';
 import { SpacesError } from './errors.js';
 import type { LearnSignals } from './learn-content.js';
 import type { Span } from '../logging/events.js';
@@ -36,6 +48,7 @@ import type {
   Item,
   ItemSummary,
   ItemKind,
+  NoteItemMeta,
   ItemProvenance,
   ListOpts,
   SpaceChipRef,
@@ -135,6 +148,19 @@ export interface SdkSpacesClientConfig {
    * means "unknown viewer" and every restricted Space is gated out.
    */
   viewerId?: () => string | null;
+  /**
+   * ADR-059 — the shared Edison KV store where universal note BODIES
+   * live (`notes:<account>` / `note:<id>`). Injected so this module
+   * never imports lite/kv; when absent (tests, legacy callers) note
+   * edits update the graph index only and skip the body write.
+   */
+  noteKv?: NoteKvStore;
+  /**
+   * ADR-059 — account identity for the `notes:<account>` KV
+   * collection of notes born in Lite. Existing notes carry their own
+   * `kv_collection` pointer and never consult this.
+   */
+  noteAccount?: () => string | null;
   /**
    * ADR-052 — clock seam. Injected into every query as `$nowMs` so
    * expiring access grants can be evaluated in Cypher. Tests pin it to
@@ -712,7 +738,13 @@ export const CYPHER = {
                        id: assigneeNode.id }
            END AS ticketAssignee,
            a.agentType AS agentType,
-           a.agentEndpoints AS agentEndpoints
+           a.agentEndpoints AS agentEndpoints,
+           a:Note AS isNote,
+           a:Asset AS isAsset,
+           a.kv_collection AS noteKvCollection,
+           a.kv_ref AS noteKvRef,
+           coalesce(a.updated_at, 0) AS noteUpdatedAtMs,
+           coalesce(a.type, 'Basic') AS noteSubtype
     LIMIT 1
   `,
 
@@ -1713,8 +1745,9 @@ export const CYPHER = {
    * RESTORE_ASSET. Mirrors the Space soft-delete pattern.
    */
   SOFT_DELETE_ASSET: `
-    MATCH (a:Asset {id: $id})
-      WHERE a.deletedAt IS NULL
+    MATCH (a {id: $id})
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
     SET a.deletedAt = $now,
         a.updatedAt = $now
     RETURN a.id AS id
@@ -1754,15 +1787,19 @@ export const CYPHER = {
    * primary-space move, not a "remove from everywhere".
    */
   MOVE_ASSET_TO_SPACE: `
-    MATCH (a:Asset {id: $id})
-      WHERE a.deletedAt IS NULL
+    MATCH (a {id: $id})
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
     OPTIONAL MATCH (a)-[old:BELONGS_TO]->(source:Space {id: $fromSpaceId})
       WHERE source.deletedAt IS NULL
-    DELETE old
+    OPTIONAL MATCH (source)-[oldContains:CONTAINS]->(a)
+    DELETE old, oldContains
     WITH a, target
     MERGE (a)-[:BELONGS_TO]->(target)
+    FOREACH (x IN CASE WHEN a:Note THEN [1] ELSE [] END |
+      MERGE (target)-[:CONTAINS]->(a))
     SET a.updatedAt = $now
     RETURN a.id AS id
   `,
@@ -1773,11 +1810,14 @@ export const CYPHER = {
    * in is a no-op.
    */
   ADD_ASSET_TO_SPACE: `
-    MATCH (a:Asset {id: $id})
-      WHERE a.deletedAt IS NULL
+    MATCH (a {id: $id})
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
     MERGE (a)-[:BELONGS_TO]->(target)
+    FOREACH (x IN CASE WHEN a:Note THEN [1] ELSE [] END |
+      MERGE (target)-[:CONTAINS]->(a))
     SET a.updatedAt = $now
     RETURN a.id AS id
   `,
@@ -1789,9 +1829,11 @@ export const CYPHER = {
    * everywhere.
    */
   REMOVE_ASSET_FROM_SPACE: `
-    MATCH (a:Asset {id: $id})-[r:BELONGS_TO]->(s:Space {id: $spaceId})
-      WHERE a.deletedAt IS NULL
-    DELETE r
+    MATCH (a {id: $id})-[r:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
+    OPTIONAL MATCH (s)-[c:CONTAINS]->(a)
+    DELETE r, c
     SET a.updatedAt = $now
     RETURN a.id AS id
   `,
@@ -2174,6 +2216,10 @@ export class SdkSpacesClient {
   protected readonly queryFn: SpacesQueryFn;
   protected readonly spanEmitter: NonNullable<SdkSpacesClientConfig['spanEmitter']> | null;
   protected readonly getViewerId: (() => string | null) | null;
+  /** ADR-059 — shared-KV store for universal note bodies (null = graph-only). */
+  private readonly noteKv: NoteKvStore | null;
+  /** ADR-059 — account for the `notes:<account>` collection of Lite-born notes. */
+  private readonly getNoteAccount: () => string | null;
   /** ADR-052 — clock for `$nowMs`; overridable so tests can pin it. */
   protected readonly now: () => number;
 
@@ -2181,6 +2227,8 @@ export class SdkSpacesClient {
     this.getAuthEnv = config.getAuthEnv ?? ((): string | null => null);
     this.spanEmitter = config.spanEmitter ?? null;
     this.getViewerId = config.viewerId ?? null;
+    this.noteKv = config.noteKv ?? null;
+    this.getNoteAccount = config.noteAccount ?? ((): string | null => null);
     this.now = config.now ?? ((): number => Date.now());
     this.queryFn =
       config.query ??
@@ -2390,30 +2438,49 @@ export class SdkSpacesClient {
         context: { id },
       });
     }
-    const nextTitle = params.title ?? before.title;
-    const nextDescription = params.description ?? before.description ?? '';
-    const nextContent = params.content ?? before.content ?? '';
-    const nextType = params.type ?? before.kind;
-    const prevHash = hashAssetState(
-      before.title,
-      before.description ?? '',
-      before.content ?? '',
-      before.kind
-    );
-    const newHash = hashAssetState(nextTitle, nextDescription, nextContent, nextType);
     const nowMs = this.now();
-    await this.run(CYPHER.UPDATE_ITEM, {
-      id,
-      ...params,
-      now: new Date(nowMs).toISOString(),
-      doSnapshot: newHash !== prevHash,
-      versionId: generateVersionId(),
-      prevHash,
-      newHash,
-      maxVersions: MAX_ASSET_VERSIONS,
-      commitHash: `edit-${id}-${nowMs}-${Math.random().toString(36).slice(2, 8)}`,
-      commitTimestampMs: nowMs,
-    });
+    // ADR-059 — universal notes. A `:Note` node is a SHARED entity
+    // (WISER Playbooks / OR-Mobile, agents, Lite) governed by the
+    // registry contract: newer-wins conflict gate first, stamps on the
+    // graph index, body merge-written to the shared KV store. Dual-
+    // label `:Asset:Note` items additionally run the ADR-057 version
+    // machinery below — AFTER the gate, so a conflict aborts cleanly
+    // before anything mutates.
+    if (before.note !== undefined) {
+      if (params.type !== null && params.type !== undefined) {
+        throw new SpacesError({
+          code: 'SPACES_NOTE_TYPE_LOCKED',
+          message: 'A note\'s kind cannot be changed — it is a universal :Note shared across apps.',
+          remediation: 'Edit title/description/content instead, or create a new item of the desired kind.',
+          context: { id, requestedType: params.type },
+        });
+      }
+      const guardRows = await this.run(UPDATE_NOTE_GUARDED, {
+        id,
+        baseUpdatedAt: before.note.updatedAtMs,
+        // Pure notes take their content here; dual-label items defer
+        // content to UPDATE_ITEM so the version snapshot captures the
+        // PRE-edit state.
+        setContent: !before.note.isAsset,
+        title: params.title ?? null,
+        content: params.content ?? null,
+        description: params.description ?? null,
+      });
+      if (guardRows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOTE_CONFLICT',
+          message: 'This note changed in another app after you opened it.',
+          remediation: 'Refresh the item to pick up the newer state, then re-apply your edit.',
+          context: { id, baseUpdatedAt: before.note.updatedAtMs },
+        });
+      }
+      if (before.note.isAsset) {
+        await this.runAssetUpdate(id, before, params, nowMs);
+      }
+      await this.writeNoteKvBody(id, before.note, params, nowMs);
+    } else {
+      await this.runAssetUpdate(id, before, params, nowMs);
+    }
     const updated = await this.getItem(id);
     if (updated === null) {
       throw new SpacesError({
@@ -2426,6 +2493,92 @@ export class SdkSpacesClient {
     }
     return updated;
     });
+  }
+
+  /**
+   * ADR-057 asset-update machinery, shared by plain assets and
+   * dual-label `:Asset:Note` items: hashes the before/after state,
+   * snapshots the replaced state when they differ, applies the SETs,
+   * prunes versions, and records the `item:edited` commit.
+   */
+  private async runAssetUpdate(
+    id: string,
+    before: Item,
+    params: ReturnType<typeof validateUpdatePatch>,
+    nowMs: number
+  ): Promise<void> {
+    const nextTitle = params.title ?? before.title;
+    const nextDescription = params.description ?? before.description ?? '';
+    const nextContent = params.content ?? before.content ?? '';
+    const nextType = params.type ?? before.kind;
+    const prevHash = hashAssetState(
+      before.title,
+      before.description ?? '',
+      before.content ?? '',
+      before.kind
+    );
+    const newHash = hashAssetState(nextTitle, nextDescription, nextContent, nextType);
+    await this.run(CYPHER.UPDATE_ITEM, {
+      id,
+      ...params,
+      now: new Date(nowMs).toISOString(),
+      doSnapshot: newHash !== prevHash,
+      versionId: generateVersionId(),
+      prevHash,
+      newHash,
+      maxVersions: MAX_ASSET_VERSIONS,
+      commitHash: `edit-${id}-${nowMs}-${Math.random().toString(36).slice(2, 8)}`,
+      commitTimestampMs: nowMs,
+    });
+  }
+
+  /**
+   * ADR-059 — merge a Lite edit into the note's shared-KV body, the
+   * source of truth every other app reads. The merge re-reads the
+   * body first and preserves every field Lite doesn't own
+   * (`basicNoteData`, provenance, space pointers, future fields);
+   * only the patched fields + `updatedAt` (ISO, KV convention)
+   * change. Runs strictly AFTER the newer-wins gate passed — the
+   * registry conflict rule says a stale writer must skip the KV
+   * write too.
+   *
+   * Failure surfaces as `SPACES_NOTE_KV_WRITE_FAILED` (the graph
+   * index already updated; retrying the edit re-syncs the body).
+   * Notes without a KV pointer (graph-only) skip silently, as does a
+   * client constructed without a `noteKv` store.
+   */
+  private async writeNoteKvBody(
+    id: string,
+    note: NoteItemMeta,
+    params: ReturnType<typeof validateUpdatePatch>,
+    nowMs: number
+  ): Promise<void> {
+    if (this.noteKv === null) return;
+    if (note.kvCollection === null || note.kvRef === null) return;
+    const patch: NoteKvPatch = {};
+    if (params.title !== null && params.title !== undefined) patch.title = params.title;
+    if (params.content !== null && params.content !== undefined) patch.content = params.content;
+    if (params.description !== null && params.description !== undefined) {
+      patch.description = params.description;
+    }
+    try {
+      const existing = await this.noteKv.get(note.kvCollection, note.kvRef);
+      const merged = mergeNoteKvBody(existing, patch, new Date(nowMs).toISOString());
+      await this.noteKv.set(note.kvCollection, note.kvRef, merged);
+    } catch (cause) {
+      throw new SpacesError({
+        code: 'SPACES_NOTE_KV_WRITE_FAILED',
+        message: 'The note updated in the graph but its shared body could not be written.',
+        remediation:
+          'Retry the edit — the merge re-reads the shared body first, so nothing is lost.',
+        context: {
+          id,
+          kvCollection: note.kvCollection,
+          kvRef: note.kvRef,
+          cause: cause instanceof Error ? cause.message : String(cause),
+        },
+      });
+    }
   }
 
   /**
@@ -3186,6 +3339,23 @@ export class SdkSpacesClient {
         typeof input.spaceId === 'string' && input.spaceId.length > 0
           ? input.spaceId
           : null;
+      // ADR-059 — a text note born in a Space is a universal :Note
+      // citizen (dual-label :Asset:Note:BasicNote): WISER Playbooks
+      // and agents see and can edit it, while the :Asset label keeps
+      // every Lite capability (ADR-057 versions, tags, metadata)
+      // working. Uncategorized text stays a plain :Asset draft — the
+      // note standard models notes as Space residents.
+      if (kind === 'text' && targetSpaceId !== null && fileKey === null && sourceUrl === null) {
+        return this.createNoteCitizen({
+          spaceId: targetSpaceId,
+          title,
+          description,
+          content,
+          metadata,
+          creatorId,
+          commitAuthor: params.commitAuthor,
+        });
+      }
       if (targetSpaceId === null) {
         // Uncategorized intake path — no [:BELONGS_TO] edge.
         await this.run(CYPHER.CREATE_ASSET_UNCATEGORIZED, params);
@@ -3213,6 +3383,106 @@ export class SdkSpacesClient {
       }
       return created;
     });
+  }
+
+  /**
+   * ADR-059 — create a Lite-born universal note. Writes the dual-label
+   * `:Asset:Note:BasicNote` graph index (MERGE on `note_<UUID>`, both
+   * membership edges, registry stamps, KV pointer) and then the body
+   * into the shared KV store. When no account identity is available
+   * (signed out) the note is created graph-only — `kv_collection`
+   * stays null and other apps read the graph mirrors.
+   */
+  private async createNoteCitizen(input: {
+    spaceId: string;
+    title: string;
+    description: string;
+    content: string;
+    metadata: string | null;
+    creatorId: string | null;
+    commitAuthor: string | null;
+  }): Promise<Item> {
+    const subtype = 'Basic';
+    const subtypeLabel = NOTE_SUBTYPE_LABELS[subtype];
+    if (subtypeLabel === undefined) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: `Unknown note subtype '${subtype}'`,
+        context: { subtype },
+      });
+    }
+    const id = generateNoteId();
+    const nowMs = this.now();
+    const nowIsoStr = new Date(nowMs).toISOString();
+    const account = this.getNoteAccount();
+    const kvCollection = account !== null && account.length > 0 ? noteKvCollection(account) : null;
+    const kvRef = kvCollection !== null ? noteKvRef(id) : null;
+    const rows = await this.run(createNoteCypher(subtypeLabel), {
+      id,
+      spaceId: input.spaceId,
+      title: input.title,
+      content: input.content,
+      description: input.description,
+      subtype,
+      metadata: input.metadata,
+      kvCollection,
+      kvRef,
+      nowIso: nowIsoStr,
+      creatorId: input.creatorId,
+      commitAuthor: input.commitAuthor,
+      commitHash: generateCommitHash(),
+      commitTimestampMs: nowMs,
+    });
+    if (rows.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${input.spaceId} not found`,
+        remediation: 'Refresh the list and try again.',
+        context: { spaceId: input.spaceId },
+      });
+    }
+    if (kvCollection !== null && kvRef !== null && this.noteKv !== null) {
+      const spaceNameRaw = rows[0]?.['spaceName'];
+      try {
+        await this.noteKv.set(
+          kvCollection,
+          kvRef,
+          buildNoteKvBody({
+            id,
+            title: input.title,
+            content: input.content,
+            ...(input.description.length > 0 ? { description: input.description } : {}),
+            type: subtype,
+            createdBy: account ?? '',
+            spaceId: input.spaceId,
+            spaceName: typeof spaceNameRaw === 'string' ? spaceNameRaw : null,
+            nowIso: nowIsoStr,
+          })
+        );
+      } catch (cause) {
+        throw new SpacesError({
+          code: 'SPACES_NOTE_KV_WRITE_FAILED',
+          message: 'The note was created but its shared body could not be written.',
+          remediation:
+            'Edit the note once connectivity returns — the next save re-syncs the shared body.',
+          context: {
+            id,
+            kvCollection,
+            kvRef,
+            cause: cause instanceof Error ? cause.message : String(cause),
+          },
+        });
+      }
+    }
+    const created = await this.getItemAfterCreate(id);
+    if (created === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Note ${id} disappeared after creation`,
+        context: { id },
+      });
+    }
+    return created;
   }
 
   /**
@@ -4947,6 +5217,21 @@ function toItem(row: Record<string, unknown>): Item {
   if (mime !== undefined) item.mimeType = mime;
   item.tags = toTagList(row['tags']);
   item.lastEditedBy = toProducedBy(row['lastEditedBy']);
+  // ADR-059 — universal-note metadata. Presence of the `:Note` label
+  // routes edits through the registry-conformant note path (shared-KV
+  // body + stamps + newer-wins) instead of the plain asset UPDATE.
+  if (row['isNote'] === true) {
+    const kvCollection = optString(row, 'noteKvCollection');
+    const kvRef = optString(row, 'noteKvRef');
+    const updatedAtMs = optNumber(row, 'noteUpdatedAtMs');
+    item.note = {
+      kvCollection: kvCollection !== undefined && kvCollection.length > 0 ? kvCollection : null,
+      kvRef: kvRef !== undefined && kvRef.length > 0 ? kvRef : null,
+      updatedAtMs: updatedAtMs !== undefined && Number.isFinite(updatedAtMs) ? updatedAtMs : 0,
+      subtype: optString(row, 'noteSubtype') ?? 'Basic',
+      isAsset: row['isAsset'] === true,
+    };
+  }
   // Phase 4 (shared-space) ticket projection. Only populated when the
   // item is itself a ticket; for every other kind the GET_ITEM Cypher
   // returns sentinel values that toTicketStatus/toTicketPriority reject,

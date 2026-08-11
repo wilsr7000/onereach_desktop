@@ -38,6 +38,7 @@ import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
 import { getAuthApi } from '../auth/api.js';
+import { getKVApi } from '../kv/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import {
   SpacesCache,
@@ -517,6 +518,23 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       const session = getAuthApi().getSession('edison');
       if (session === null) return null;
       const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
+      return email.length > 0 ? email : session.accountId;
+    },
+    // ADR-059 — universal notes. Note BODIES live in the shared Edison
+    // KV store (the same store WISER Playbooks / OR-Mobile write);
+    // inject it so :Note edits/creates keep the body in sync. The
+    // account feeds the `notes:<account>` collection for Lite-born
+    // notes — same identity convention as viewerId, but NOT lowercased
+    // (KV collections are case-sensitive and OR-Mobile writes the
+    // session email verbatim).
+    noteKv: {
+      get: (collection, key) => getKVApi().get(collection, key),
+      set: (collection, key, value) => getKVApi().set(collection, key, value),
+    },
+    noteAccount: () => {
+      const session = getAuthApi().getSession('edison');
+      if (session === null) return null;
+      const email = typeof session.email === 'string' ? session.email.trim() : '';
       return email.length > 0 ? email : session.accountId;
     },
   });

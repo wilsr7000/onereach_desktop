@@ -45,6 +45,24 @@ export const SPACES_ERROR_CODES = {
    */
   CHECKLIST_ATTACHED: 'SPACES_CHECKLIST_ATTACHED',
   /**
+   * ADR-059 — the note changed in another app after the state this
+   * edit was based on (newer-wins on `updated_at`). Nothing was
+   * written — graph and KV body are both untouched. Refresh + retry.
+   */
+  NOTE_CONFLICT: 'SPACES_NOTE_CONFLICT',
+  /**
+   * ADR-059 — the graph index updated but the KV body write failed.
+   * A retry of the same edit re-syncs the shared body (the merge
+   * re-reads KV first, so nothing is lost).
+   */
+  NOTE_KV_WRITE_FAILED: 'SPACES_NOTE_KV_WRITE_FAILED',
+  /**
+   * ADR-059 — a note's kind/type is locked: its Lite kind derives
+   * from the `:Note` label and its `type` property is the universal
+   * note SUBTYPE ('Basic', …) shared with WISER/agents.
+   */
+  NOTE_TYPE_LOCKED: 'SPACES_NOTE_TYPE_LOCKED',
+  /**
    * `create()` or `rename()` collided with an existing Space name in the
    * same account. Names are unique per account; renderers surface this
    * as "A space called 'X' already exists -- try a different name."
