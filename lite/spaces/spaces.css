@@ -8911,3 +8911,23 @@ body {
   background: rgba(42, 115, 80, 0.14);
   border-color: rgba(42, 115, 80, 0.55);
 }
+
+/* Universal asset Download in the detail header (2026-08-10). */
+.spaces-detail-download-btn {
+  appearance: none;
+  border: 1px solid var(--rule, #dcd6c8);
+  background: transparent;
+  color: var(--or-text, #cfcfcf);
+  border-radius: 7px;
+  width: 26px; height: 26px;
+  font-size: 15px; line-height: 1;
+  cursor: pointer;
+  margin-left: auto;           /* push it + close to the right edge */
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.spaces-detail-download-btn + .spaces-detail-close { margin-left: 6px; }
+.spaces-detail-download-btn:hover:not(:disabled) {
+  background: rgba(127, 119, 221, 0.12);
+  border-color: #7f77dd;
+}
+.spaces-detail-download-btn:disabled { opacity: 0.5; cursor: progress; }

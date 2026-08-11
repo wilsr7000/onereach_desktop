@@ -7900,6 +7900,129 @@ const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'other', label: 'Other' },
 ];
 
+/**
+ * A safe, extension-bearing filename for downloading an item. Uses the
+ * friendly title, strips filesystem-hostile chars, and appends an
+ * extension inferred from mimeType (preferred) or kind.
+ */
+export function downloadFilenameForItem(item: RendererItem): string {
+  const base =
+    generateItemTitle(item)
+      .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120) || 'asset';
+  const mime = typeof item.mimeType === 'string' ? item.mimeType.toLowerCase() : '';
+  const byMime: Record<string, string> = {
+    'text/markdown': 'md',
+    'text/plain': 'txt',
+    'text/html': 'html',
+    'application/json': 'json',
+    'text/csv': 'csv',
+    'application/pdf': 'pdf',
+  };
+  let ext = byMime[mime] ?? '';
+  if (ext === '' && mime.includes('/')) ext = mime.split('/')[1]?.split(';')[0] ?? '';
+  if (ext === '') {
+    // Inline knowledge/playbook/transcript/text render as markdown.
+    ext = ['knowledge', 'playbook', 'transcript', 'journey'].includes(item.kind)
+      ? 'md'
+      : 'txt';
+  }
+  return /\.[a-z0-9]{1,8}$/i.test(base) ? base : `${base}.${ext}`;
+}
+
+/** Trigger a browser download of a Blob/URL as `filename`. */
+function triggerDownload(href: string, filename: string, revoke: boolean): void {
+  const a = document.createElement('a');
+  a.href = href;
+  a.download = filename;
+  a.rel = 'noopener noreferrer';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  if (revoke) setTimeout(() => URL.revokeObjectURL(href), 4000);
+}
+
+/**
+ * Build the detail-header Download button, or null when there is
+ * genuinely nothing to download (no inline content AND no file). Inline
+ * content saves client-side; binary items resolve the signed URL.
+ */
+export function buildDetailDownloadButton(item: RendererItem): HTMLButtonElement | null {
+  const hasInline = typeof item.content === 'string' && item.content.length > 0;
+  const hasFile = typeof item.fileKey === 'string' && item.fileKey.length > 0;
+  if (!hasInline && !hasFile) return null;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'spaces-detail-download-btn';
+  btn.setAttribute('aria-label', 'Download this asset');
+  btn.title = 'Download';
+  btn.textContent = '⤓';
+
+  btn.addEventListener('click', () => {
+    // Prefer real file bytes when this is a binary asset; else save the
+    // inline content the pane is showing.
+    if (hasFile) {
+      void downloadBinaryItem(item, btn);
+      return;
+    }
+    try {
+      const mime =
+        typeof item.mimeType === 'string' && item.mimeType.length > 0
+          ? item.mimeType
+          : 'text/markdown';
+      const blob = new Blob([item.content ?? ''], { type: mime });
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, downloadFilenameForItem(item), true);
+    } catch (err) {
+      window.logging?.warn?.('spaces', 'inline download failed', {
+        itemId: item.id,
+        error: messageFrom(err),
+      });
+    }
+  });
+  return btn;
+}
+
+/** Resolve a binary item's signed URL and save it. Soft-fails to inline. */
+async function downloadBinaryItem(item: RendererItem, btn: HTMLButtonElement): Promise<void> {
+  const bridge = window.lite?.spaces;
+  const key = item.fileKey;
+  if (bridge === undefined || typeof key !== 'string' || key.length === 0) return;
+  // Already an absolute URL (some producers store the URL as the key).
+  if (/^https?:\/\//i.test(key)) {
+    triggerDownload(key, downloadFilenameForItem(item), false);
+    return;
+  }
+  const prev = btn.textContent;
+  btn.textContent = '…';
+  btn.disabled = true;
+  try {
+    const envelope = await bridge.items.resolveFileUrl(key);
+    if (envelope.ok === true && typeof envelope.value === 'string' && envelope.value.length > 0) {
+      triggerDownload(envelope.value, downloadFilenameForItem(item), false);
+    } else if (typeof item.content === 'string' && item.content.length > 0) {
+      // Fall back to the inline content if the signed URL can't mint.
+      const blob = new Blob([item.content], { type: item.mimeType ?? 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      triggerDownload(url, downloadFilenameForItem(item), true);
+    } else {
+      window.logging?.warn?.('spaces', 'download: no signed url', { itemId: item.id });
+    }
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'binary download failed', {
+      itemId: item.id,
+      error: messageFrom(err),
+    });
+  } finally {
+    btn.textContent = prev;
+    btn.disabled = false;
+  }
+}
+
 export function buildDetailPane(
   item: RendererItem,
   onClose: () => void,
@@ -7933,6 +8056,14 @@ export function buildDetailPane(
     mime.title = item.mimeType;
     header.appendChild(mime);
   }
+
+  // Universal download: EVERY asset can be saved. Inline-content items
+  // (text / markdown / knowledge / playbook / transcript) download
+  // client-side as a file; binary items resolve their signed URL. This
+  // is the header's job so it's discoverable on every kind, not buried
+  // in a preview (2026-08-10 — "no way to download an asset").
+  const dlBtn = buildDetailDownloadButton(item);
+  if (dlBtn !== null) header.appendChild(dlBtn);
 
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
