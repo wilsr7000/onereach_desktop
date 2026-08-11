@@ -123,7 +123,8 @@ describe('CYPHER source strings', () => {
   });
 
   it('list-items-uncategorized matches :Asset with no :Space membership + non-deleted', () => {
-    expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/MATCH \(a:Asset\)/);
+    // ADR-058: matches members by label set (Asset/Playbook/Note), not (a:Asset).
+    expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/a:Asset OR a:Playbook OR a:Note/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/a\.deletedAt IS NULL/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(
       /MATCH \(a\)-\[:BELONGS_TO\]->\(live:Space\)/
@@ -189,18 +190,19 @@ describe('CYPHER source strings', () => {
   });
 
   it('list-items-in-space takes a spaceId param and filters otherSpaces', () => {
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\(a\)-\[:BELONGS_TO\]->\(s:Space \{id: \$spaceId\}\)/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/other\.id <> s\.id/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/\[x IN otherSpacesRaw WHERE x\.id IS NOT NULL\] AS otherSpaces/);
     // Soft-deleted Spaces (target Space OR a multi-Space chip
     // target) MUST be filtered so the user never sees an item
     // attributed to a Space they just deleted.
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/WHERE s\.deletedAt IS NULL/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/s\.deletedAt IS NULL/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/other\.deletedAt IS NULL/);
   });
 
-  it('getItem uses :Asset id parameter and LIMIT 1', () => {
-    expect(CYPHER.GET_ITEM).toMatch(/\(a:Asset \{id: \$id\}\)/);
+  it('getItem looks up a member node by id (ADR-058) and LIMITs 1', () => {
+    expect(CYPHER.GET_ITEM).toMatch(/MATCH \(a \{id: \$id\}\)/);
+    expect(CYPHER.GET_ITEM).toMatch(/a:Asset OR a:Playbook OR a:Note/);
     expect(CYPHER.GET_ITEM).toMatch(/LIMIT 1$/m);
     expect(CYPHER.GET_ITEM).toMatch(/coalesce\(a\.content, ''\) AS content/);
     // Metadata sprint: `a.metadata` is projected as the JSON string.
@@ -215,7 +217,10 @@ describe('CYPHER source strings', () => {
     // coalesce so existing data still renders.
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
     expect(CYPHER.LIST_ITEMS_UNCATEGORIZED).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.type, a\.assetType, 'other'\) AS kind/);
+    // ADR-058: kind is label-aware (Playbook/Note derive from the label);
+    // typed Assets still fall back to type/assetType.
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/WHEN a:Playbook THEN 'playbook'/);
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.type, a\.assetType, 'other'\)\s*\n\s*END AS kind/);
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toMatch(/coalesce\(a\.url, a\.fileUrl\) AS fileKey/);
   });
 
@@ -584,7 +589,7 @@ describe('SdkSpacesClient.listItems (space)', () => {
 
   it('emits LIST_ITEMS_IN_SPACE with the spaceId parameter', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset)-[:BELONGS_TO]->(s:Space', []);
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(s:Space', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'space', spaceId: 'sp-77' }, { limit: 20 });
     const call = stub.calls[stub.calls.length - 1];
@@ -593,7 +598,7 @@ describe('SdkSpacesClient.listItems (space)', () => {
 
   it('keeps non-null otherSpaces chips and drops empty entries', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset)-[:BELONGS_TO]->(s:Space', [
+    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(s:Space', [
       {
         id: 'i-9',
         title: 'Cross-space item',
@@ -623,14 +628,14 @@ describe('SdkSpacesClient.listItems (space)', () => {
 describe('SdkSpacesClient.getItem', () => {
   it('returns null when no rows come back', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     expect(await client.getItem('missing')).toBeNull();
   });
 
   it('maps the full Item including content + metadata', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-100',
         title: 'Spec doc',
@@ -667,7 +672,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('drops malformed metadata silently (returns the rest of the Item)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-101',
         title: 'No meta',
@@ -687,7 +692,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('maps size + mimeType when present (Phase A2)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-200',
         title: 'A PDF',
@@ -708,7 +713,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('drops size when non-positive or non-finite', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-201',
         title: 'A',
@@ -727,7 +732,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('floors fractional size values to an integer', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-202',
         title: 'A',
@@ -746,7 +751,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('normalizes tags into a clean string[] (drops empty / non-string entries)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-203',
         title: 'Tagged',
@@ -765,7 +770,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('defaults tags to [] when missing or non-array', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-204',
         title: 'No tags',
@@ -783,7 +788,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('maps lastEditedBy when projection is non-null', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-205',
         title: 'Edited',
@@ -806,7 +811,7 @@ describe('SdkSpacesClient.getItem', () => {
 
   it('returns null lastEditedBy when projection is null (schema lacks the edge)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', [
+    stub.setResponse('MATCH (a {id: $id})', [
       {
         id: 'i-206',
         title: 'No editor',
@@ -902,7 +907,7 @@ describe('SdkSpacesClient.updateItem', () => {
   it('forwards trimmed fields to the Cypher params and re-fetches', async () => {
     const stub = buildStubQuery();
     stub.setResponse('UPDATE (?:.*)\\bMATCH \\(a:Asset \\{id: \\$id\\}\\)', []);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 'New title',
@@ -938,7 +943,7 @@ describe('SdkSpacesClient.updateItem', () => {
 
   it('omits unchanged fields from params (collapses to null)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-2',
         title: 't',
@@ -963,7 +968,7 @@ describe('SdkSpacesClient.updateItem', () => {
 
   it('throws SPACES_NOT_FOUND when the item disappears between update and re-fetch', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', []);
+    stub.setResponse("coalesce(a.content, '') AS content", []);
     const client = makeClient(stub);
     await expect(
       client.updateItem('vanished', { title: 'whatever' })
@@ -999,7 +1004,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
   it('addTag trims the tag + re-fetches the updated tag list', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (t:Tag {name: $tag})', [{ id: 'i-1', tag: 'q3' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -1038,7 +1043,7 @@ describe('SdkSpacesClient.addTag / removeTag', () => {
       'MATCH (a:Asset {id: $id})-[r:TAGGED_AS]->(t:Tag {name: $tag})',
       []
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -1143,8 +1148,8 @@ describe('CYPHER source strings — Home view', () => {
     );
   });
 
-  it('HOME_RECENT_ITEMS uses :Asset label and ItemSummary projection', () => {
-    expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/MATCH \(a:Asset\)/);
+  it('HOME_RECENT_ITEMS surfaces all member kinds (ADR-058) with ItemSummary projection', () => {
+    expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/a:Asset OR a:Playbook OR a:Note/);
     expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/coalesce\(a\.name, a\.title, a\.id\) AS title/);
     expect(CYPHER.HOME_RECENT_ITEMS).toMatch(/LIMIT toInteger\(\$limit\)/);
     // The Space chip projection must skip deleted Spaces so a
@@ -1265,7 +1270,7 @@ describe('SdkSpacesClient.getEntityCounts', () => {
 describe('SdkSpacesClient.listRecentItems', () => {
   it('emits HOME_RECENT_ITEMS with the limit parameter', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset)', []);
+    stub.setResponse('firstSpace', []);
     const client = makeClient(stub);
     await client.listRecentItems({ limit: 5 });
     const call = stub.calls[stub.calls.length - 1];
@@ -1274,7 +1279,7 @@ describe('SdkSpacesClient.listRecentItems', () => {
 
   it('clamps limit to default 3 when not provided', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset)', []);
+    stub.setResponse('firstSpace', []);
     const client = makeClient(stub);
     await client.listRecentItems();
     const call = stub.calls[stub.calls.length - 1];
@@ -1283,7 +1288,7 @@ describe('SdkSpacesClient.listRecentItems', () => {
 
   it('caps limit at 50 (Home card max-row context)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset)', []);
+    stub.setResponse('firstSpace', []);
     const client = makeClient(stub);
     await client.listRecentItems({ limit: 999 });
     const call = stub.calls[stub.calls.length - 1];
@@ -1292,7 +1297,7 @@ describe('SdkSpacesClient.listRecentItems', () => {
 
   it('maps rows to ItemSummary with single-Space chip', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset)', [
+    stub.setResponse('firstSpace', [
       {
         id: 'a-1',
         title: 'Conversation transcript',
@@ -2052,7 +2057,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
 
   it('defaults limit to 20 and leaves since as null', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     await client.itemRecentCommits('asset-1');
     const call = stub.calls[stub.calls.length - 1];
@@ -2061,7 +2066,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
 
   it('caps limit at 100', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     await client.itemRecentCommits('asset-1', { limit: 9999 });
     const call = stub.calls[stub.calls.length - 1];
@@ -2070,7 +2075,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
 
   it('rejects zero / negative limit by falling back to default (20)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     await client.itemRecentCommits('asset-1', { limit: -10 });
     const call = stub.calls[stub.calls.length - 1];
@@ -2079,7 +2084,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
 
   it('forwards a numeric since cutoff', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     await client.itemRecentCommits('asset-1', { since: 1_700_000_000_000 });
     const call = stub.calls[stub.calls.length - 1];
@@ -2088,7 +2093,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
 
   it('treats negative / NaN since as null (defensive)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     await client.itemRecentCommits('asset-1', { since: -1 });
     const call = stub.calls[stub.calls.length - 1];
@@ -2129,7 +2134,7 @@ describe('SdkSpacesClient.itemRecentCommits', () => {
 
   it('returns [] when the asset has no commits (OPTIONAL MATCH absorbs not-found)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})', []);
+    stub.setResponse('MATCH (a {id: $id})', []);
     const client = makeClient(stub);
     const events = await client.itemRecentCommits('ghost-asset');
     expect(events).toEqual([]);
@@ -2269,7 +2274,7 @@ describe('SdkSpacesClient.getCurrentPlaybook', () => {
   it('re-fetches the playbook via getItem when one is set', async () => {
     const stub = buildStubQuery();
     stub.setResponse('OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]', [{ playbookId: 'pb-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'pb-1',
         title: 'Q1 plan',
@@ -2303,7 +2308,7 @@ describe('SdkSpacesClient.setCurrentPlaybook', () => {
     stub.setResponse('MERGE (s)-[:CURRENT_PLAYBOOK]', [
       { playbookId: 'pb-1', ticketCount: 4 },
     ]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'pb-1',
         title: 'Q1 plan',
@@ -2417,7 +2422,7 @@ describe('SdkSpacesClient.createTicket', () => {
   it('defaults status to open, generates an id, returns the re-fetched Item', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'ticket-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'ticket-stub',
         title: 'Write tests',
@@ -2687,7 +2692,7 @@ describe('SdkSpacesClient.updateTicket', () => {
       "WHERE coalesce(a.type, a.assetType) = 'ticket'",
       [{ id: 't-1' }]
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 't-1',
         title: 't',
@@ -2723,7 +2728,7 @@ describe('SdkSpacesClient.updateTicket', () => {
       "WHERE coalesce(a.type, a.assetType) = 'ticket'",
       [{ id: 't-1' }]
     );
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 't-1',
         title: 'ticket',
@@ -2778,7 +2783,7 @@ describe('toItem ticket projection', () => {
 
   it('toItem skips ticket sub-shape for non-ticket items', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'doc-1',
         title: 'Whitepaper',
@@ -2801,7 +2806,7 @@ describe('toItem ticket projection', () => {
 
   it('toItem assembles ticket sub-shape with status default + assignee + playbookId', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 't-1',
         title: 'Write tests',
@@ -3094,7 +3099,7 @@ describe('SdkSpacesClient.createAsset', () => {
   it('infers kind=text from content when not specified', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
         title: 'Note',
@@ -3120,7 +3125,7 @@ describe('SdkSpacesClient.createAsset', () => {
   it('infers kind=other when only fileKey is provided', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
         title: 'Doc',
@@ -3145,7 +3150,7 @@ describe('SdkSpacesClient.createAsset', () => {
   it('uses CREATE_ASSET_UNCATEGORIZED when spaceId is empty', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
         title: 'Intake',
@@ -3230,7 +3235,7 @@ describe('SdkSpacesClient.restoreAsset', () => {
   it('returns the re-fetched Item on success', async () => {
     const stub = buildStubQuery();
     stub.setResponse('SET a.deletedAt = null', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 'Back',
@@ -3312,7 +3317,7 @@ describe('SdkSpacesClient.moveAssetToSpace', () => {
   it('passes fromSpaceId=null when empty, or the provided id otherwise', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 'x',
@@ -3352,7 +3357,7 @@ describe('SdkSpacesClient.addAssetToSpace', () => {
   it('returns the updated Item on success', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 'x',
@@ -3374,7 +3379,7 @@ describe('SdkSpacesClient.removeAssetFromSpace', () => {
   it('forwards spaceId + id as Cypher params', async () => {
     const stub = buildStubQuery();
     stub.setResponse('-[r:BELONGS_TO]->(s:Space {id: $spaceId})', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 'x',
@@ -3473,7 +3478,7 @@ describe('CYPHER source strings — metadata sprint', () => {
 describe('toItem metadata projection', () => {
   it('parses a JSON string from the graph into an object', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 'meta-thing',
@@ -3497,7 +3502,7 @@ describe('toItem metadata projection', () => {
 
   it('tolerates a legacy object-form metadata projection', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3517,7 +3522,7 @@ describe('toItem metadata projection', () => {
 
   it('drops invalid metadata silently (malformed JSON / wrong shape)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3537,7 +3542,7 @@ describe('toItem metadata projection', () => {
 
   it('drops nested-object values inside arrays (primitive-only enforcement)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3570,7 +3575,7 @@ describe('SdkSpacesClient.setMetadata', () => {
   it('serializes the metadata bag as a JSON string before writing', async () => {
     const stub = buildStubQuery();
     stub.setResponse('SET a.metadata = $metadata', [{ id: 'i-1' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3603,7 +3608,7 @@ describe('SdkSpacesClient.patchMetadata', () => {
   it('shallow-merges the patch with existing metadata', async () => {
     const stub = buildStubQuery();
     // First getItem returns existing metadata.
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3626,7 +3631,7 @@ describe('SdkSpacesClient.patchMetadata', () => {
 
   it('null in the patch removes the key', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3660,7 +3665,7 @@ describe('SdkSpacesClient.removeMetadataKey', () => {
 
   it('round-trips through patchMetadata with a null value', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'i-1',
         title: 't',
@@ -3687,7 +3692,7 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
   it('serializes the metadata bag to JSON when present in the input', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
         title: 'X',
@@ -3714,7 +3719,7 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
   it('writes empty string for missing metadata (preserves "absent" semantics)', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', [{ id: 'asset-stub' }]);
-    stub.setResponse('MATCH (a:Asset {id: $id})\n      WHERE a.deletedAt IS NULL\n        AND (', [
+    stub.setResponse("coalesce(a.content, '') AS content", [
       {
         id: 'asset-stub',
         title: 'No meta',
@@ -3734,5 +3739,42 @@ describe('SdkSpacesClient.createAsset with metadata', () => {
     });
     const createCall = stub.calls.find((c) => c.cypher.includes('CREATE (a:Asset'));
     expect(createCall?.parameters?.['metadata']).toBe('');
+  });
+});
+
+// ─── ADR-058: read all space members, not just :Asset ────────────────────
+//
+// WISER Playbooks writes :Playbook and :Note nodes; agents write their
+// own. All hang off a Space via BELONGS_TO but lack the :Asset label,
+// so the old (a:Asset) filter hid them (a user's email :Note + 234
+// WISER playbooks invisible). Content reads now match the member label
+// set and derive kind from the label.
+describe('ADR-058: space-content reads render all member kinds', () => {
+  it('LIST_ITEMS_IN_SPACE, GET_ITEM, HOME_RECENT_ITEMS, SEARCH_ITEMS, LIST_ITEMS_UNCATEGORIZED all use the member label set', () => {
+    for (const q of [
+      CYPHER.LIST_ITEMS_IN_SPACE,
+      CYPHER.GET_ITEM,
+      CYPHER.HOME_RECENT_ITEMS,
+      CYPHER.SEARCH_ITEMS,
+      CYPHER.LIST_ITEMS_UNCATEGORIZED,
+    ]) {
+      expect(q).toContain('a:Asset OR a:Playbook OR a:Note');
+    }
+  });
+
+  it('the managed :Checklist node is NOT in the member set (own library, not the grid)', () => {
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).not.toContain(':Checklist');
+  });
+
+  it('kind derives from the label: Playbook->playbook, Note->text, else type/assetType', () => {
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain("WHEN a:Playbook THEN 'playbook'");
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain("WHEN a:Note THEN 'text'");
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain("ELSE coalesce(a.type, a.assetType, 'other')");
+  });
+
+  it('member reads stay ADR-051 visibility-gated ($viewerId present)', () => {
+    for (const q of [CYPHER.LIST_ITEMS_IN_SPACE, CYPHER.GET_ITEM, CYPHER.HOME_RECENT_ITEMS, CYPHER.SEARCH_ITEMS]) {
+      expect(q).toContain('$viewerId');
+    }
   });
 });

@@ -232,6 +232,32 @@ const ASSET_VISIBLE = `(
         }
       )`;
 
+/**
+ * ADR-058 — renderable space members. The graph is written by more than
+ * Lite: WISER Playbooks writes `:Playbook` and `:Note` nodes, agents
+ * write their own. All of them hang off a Space via `BELONGS_TO` but do
+ * NOT carry the `:Asset` label, so the historical `(a:Asset)` filter
+ * hid every one of them (234 playbooks + notes invisible, 2026-08-08
+ * bug report). Content reads now match members by this label set —
+ * `:Asset` (Lite's own) plus `:Playbook`/`:Note` — and exclude the
+ * managed `:Checklist` node (surfaced in its own library, not the grid)
+ * and graph plumbing (`:Space`/`:Person`/`:Commit`/`:AgentType`/…).
+ */
+const SPACE_MEMBER = `(a:Asset OR a:Playbook OR a:Note)`;
+
+/**
+ * ADR-058 — kind from the label when the node isn't a typed `:Asset`.
+ * A `:Playbook` renders as a playbook tile; a `:Note` renders as text
+ * (its `type` is a note SUBtype like 'Basic', not a Lite ItemKind, so
+ * it must not leak through as the kind). Typed `:Asset` nodes keep
+ * their `type`/`assetType`.
+ */
+const MEMBER_KIND = `CASE
+             WHEN a:Playbook THEN 'playbook'
+             WHEN a:Note THEN 'text'
+             ELSE coalesce(a.type, a.assetType, 'other')
+           END`;
+
 export const CYPHER = {
   LIST_SPACES: `
     MATCH (s:Space)
@@ -261,8 +287,9 @@ export const CYPHER = {
     RETURN count(a) AS count
   `,
   LIST_ITEMS_UNCATEGORIZED: `
-    MATCH (a:Asset)
-    WHERE a.deletedAt IS NULL
+    MATCH (a)
+    WHERE ${SPACE_MEMBER}
+      AND a.deletedAt IS NULL
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
@@ -271,7 +298,7 @@ export const CYPHER = {
     WITH a, head(collect(creator)) AS producer
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
-           coalesce(a.type, a.assetType, 'other') AS kind,
+           ${MEMBER_KIND} AS kind,
            coalesce(a.url, a.fileUrl) AS fileKey,
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
@@ -307,8 +334,9 @@ export const CYPHER = {
     LIMIT toInteger($limit)
   `,
   LIST_ITEMS_IN_SPACE: `
-    MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
-      WHERE s.deletedAt IS NULL
+    MATCH (a)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE ${SPACE_MEMBER}
+        AND s.deletedAt IS NULL
         AND a.deletedAt IS NULL
         AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
@@ -324,7 +352,7 @@ export const CYPHER = {
          head(collect(creator)) AS producer
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
-           coalesce(a.type, a.assetType, 'other') AS kind,
+           ${MEMBER_KIND} AS kind,
            coalesce(a.url, a.fileUrl) AS fileKey,
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
@@ -608,8 +636,9 @@ export const CYPHER = {
   `,
 
   GET_ITEM: `
-    MATCH (a:Asset {id: $id})
-      WHERE a.deletedAt IS NULL
+    MATCH (a {id: $id})
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
         AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
@@ -632,7 +661,7 @@ export const CYPHER = {
          head(collect(pb)) AS sourcePlaybook
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
-           coalesce(a.type, a.assetType, 'other') AS kind,
+           ${MEMBER_KIND} AS kind,
            coalesce(a.url, a.fileUrl) AS fileKey,
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
@@ -720,14 +749,15 @@ export const CYPHER = {
    * renderer reuses the existing item-card builder (Card 5).
    */
   HOME_RECENT_ITEMS: `
-    MATCH (a:Asset)
-      WHERE ${ASSET_VISIBLE}
+    MATCH (a)
+      WHERE ${SPACE_MEMBER}
+        AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
     WITH a, head(collect(s)) AS firstSpace
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
-           coalesce(a.type, a.assetType, 'other') AS kind,
+           ${MEMBER_KIND} AS kind,
            coalesce(a.url, a.fileUrl) AS fileKey,
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
@@ -1788,8 +1818,9 @@ export const CYPHER = {
    * the existing item-row builder.
    */
   SEARCH_ITEMS: `
-    MATCH (a:Asset)
-      WHERE a.deletedAt IS NULL
+    MATCH (a)
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
         AND (
           toLower(coalesce(a.name, a.title, '')) CONTAINS toLower($query)
           OR toLower(coalesce(a.description, '')) CONTAINS toLower($query)
@@ -1810,7 +1841,7 @@ export const CYPHER = {
          head(collect(creator)) AS producer
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
-           coalesce(a.type, a.assetType, 'other') AS kind,
+           ${MEMBER_KIND} AS kind,
            coalesce(a.url, a.fileUrl) AS fileKey,
            coalesce(a.sourceUrl, a.source) AS sourceUrl,
            coalesce(toString(a.createdAt), toString(a.created_at), '') AS createdAt,
