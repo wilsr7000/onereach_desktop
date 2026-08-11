@@ -284,13 +284,44 @@ const MEMBER_KIND = `CASE
              ELSE coalesce(a.type, a.assetType, 'other')
            END`;
 
+/**
+ * ADR-060 — cross-writer recency. The graph's timestamps come in every
+ * shape its writers use: Lite historically wrote ISO strings, WISER /
+ * GSX / the note standard write epoch milliseconds (and some legacy
+ * rows carry epoch seconds). String-ordering a mix silently pins one
+ * population above the other ('2026…' vs '17864…'), so "somebody else
+ * edited this recently" could never surface. This macro folds ANY of
+ * those shapes into an epoch-ms integer with a TOTAL expression — every
+ * branch is regex-gated and the fallback is 0, because a single
+ * malformed row must degrade to "old", never throw (the Edison flow
+ * maps Cypher errors to empty 200s, which would blank the whole list).
+ */
+function tsMs(expr: string): string {
+  return `CASE
+      WHEN ${expr} IS NULL THEN 0
+      WHEN toString(${expr}) =~ '^\\d{10}$' THEN toInteger(toString(${expr})) * 1000
+      WHEN toString(${expr}) =~ '^\\d+$' THEN toInteger(toString(${expr}))
+      WHEN toString(${expr}) =~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}.*' THEN datetime(toString(${expr})).epochMillis
+      ELSE 0 END`;
+}
+
+/** ADR-060 — a member node's latest touch (edit beats create when newer). */
+const MEMBER_ACTIVITY_MS = tsMs('coalesce(a.updatedAt, a.updated_at, a.createdAt, a.created_at)');
+
 export const CYPHER = {
   LIST_SPACES: `
     MATCH (s:Space)
       WHERE s.deletedAt IS NULL
         AND ${SPACE_VISIBLE}
-    OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
-    WITH s, count(a) AS itemCount
+    OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
+    WITH s, count(a) AS itemCount,
+         max(${MEMBER_ACTIVITY_MS}) AS memberActivityMs
+    WITH s, itemCount,
+         CASE WHEN coalesce(memberActivityMs, 0) > ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')}
+              THEN memberActivityMs
+              ELSE ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')} END AS lastActivityMs
     RETURN s.id AS id,
            coalesce(s.name, s.id) AS name,
            coalesce(s.description, '') AS description,
@@ -300,12 +331,14 @@ export const CYPHER = {
            coalesce(s.visibility, 'open') AS visibility,
            itemCount AS itemCount,
            coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
-           coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt
+           coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt,
+           lastActivityMs AS lastActivityMs
     ORDER BY toLower(coalesce(s.name, s.id, '')) ASC
   `,
   UNCATEGORIZED_COUNT: `
-    MATCH (a:Asset)
-    WHERE a.deletedAt IS NULL
+    MATCH (a)
+    WHERE ${SPACE_MEMBER}
+      AND a.deletedAt IS NULL
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
@@ -784,9 +817,10 @@ export const CYPHER = {
     MATCH (a)
       WHERE ${SPACE_MEMBER}
         AND ${ASSET_VISIBLE}
+    WITH a, ${MEMBER_ACTIVITY_MS} AS activityMs
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
-    WITH a, head(collect(s)) AS firstSpace
+    WITH a, activityMs, head(collect(s)) AS firstSpace
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS title,
            ${MEMBER_KIND} AS kind,
@@ -820,9 +854,9 @@ export const CYPHER = {
                         color: firstSpace.color,
                         iconKey: coalesce(firstSpace.iconKey, firstSpace.icon) }]
            END AS otherSpaces,
-           null AS producedBy
-    ORDER BY coalesce(toString(a.updatedAt), toString(a.updated_at),
-                      toString(a.createdAt), toString(a.created_at), '') DESC
+           null AS producedBy,
+           activityMs AS activityMs
+    ORDER BY activityMs DESC
     LIMIT toInteger($limit)
   `,
 
@@ -1165,7 +1199,9 @@ export const CYPHER = {
 
   SPACE_ITEM_COUNT: `
     MATCH (s:Space {id: $id})
-    OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
+    OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
     RETURN count(a) AS count
   `,
 
@@ -1211,7 +1247,9 @@ export const CYPHER = {
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NOT NULL
         AND ${SPACE_VISIBLE}
-    OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)
+    OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
     WITH s, count(a) AS itemCount
     SET s.deletedAt = null,
         s.updatedAt = $now
@@ -5127,6 +5165,13 @@ function toSpace(row: Record<string, unknown>): Space {
   if (createdAt !== undefined) space.createdAt = createdAt;
   const updatedAt = normalizeGraphTimestamp(optString(row, 'updatedAt'));
   if (updatedAt !== undefined) space.updatedAt = updatedAt;
+  // ADR-060 — cross-writer recency key (epoch ms from the Cypher macro;
+  // 0 means "no timestamped activity anywhere", which stays unset).
+  const lastActivityMs = optNumber(row, 'lastActivityMs');
+  if (lastActivityMs !== undefined && lastActivityMs > 0) {
+    const iso = normalizeGraphTimestamp(lastActivityMs);
+    if (iso !== undefined) space.lastActivity = iso;
+  }
   const kind = optString(row, 'kind');
   if (kind === 'shared' || kind === 'user') space.kind = kind;
   const visibility = optString(row, 'visibility');

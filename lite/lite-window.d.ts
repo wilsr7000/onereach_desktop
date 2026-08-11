@@ -638,6 +638,12 @@ interface LiteSpace {
   itemCount?: number;
   createdAt?: string;
   updatedAt?: string;
+  /**
+   * ADR-060 — newest create/edit across every live member by ANY
+   * writer (Lite, WISER, agents), or the Space node itself. Drives
+   * the sidebar RECENT ranking.
+   */
+  lastActivity?: string;
   /** 'user' (default) or 'shared' (AI-managed). */
   kind?: LiteSpaceKind;
   /** ADR-051 — 'open' (default) or 'restricted' (members-only). */

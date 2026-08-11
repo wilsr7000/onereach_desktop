@@ -3136,8 +3136,12 @@ export function sortSpaces(
   const copy = [...spaces];
   if (mode === 'recent') {
     copy.sort((a, b) => {
-      const ta = parseTimestamp(a.updatedAt ?? a.createdAt);
-      const tb = parseTimestamp(b.updatedAt ?? b.createdAt);
+      // ADR-060: prefer the graph-level activity key (newest member
+      // create/edit by ANY writer) so another app's or person's change
+      // floats the Space; fall back to the node's own stamps for rows
+      // from older SDKs.
+      const ta = parseTimestamp(a.lastActivity ?? a.updatedAt ?? a.createdAt);
+      const tb = parseTimestamp(b.lastActivity ?? b.updatedAt ?? b.createdAt);
       if (ta === null && tb === null) return 0;
       if (ta === null) return 1;
       if (tb === null) return -1;

@@ -99,9 +99,12 @@ describe('CYPHER source strings', () => {
     }
   });
 
-  it('listSpaces query matches :Space + itemCount via :Asset/:BELONGS_TO', () => {
+  it('listSpaces query matches :Space + itemCount via member labels (ADR-060)', () => {
     expect(CYPHER.LIST_SPACES).toMatch(/MATCH \(s:Space\)/);
-    expect(CYPHER.LIST_SPACES).toMatch(/\(a:Asset\)-\[:BELONGS_TO\]->\(s\)/);
+    // ADR-060: count what the grid renders — every member kind, live only.
+    expect(CYPHER.LIST_SPACES).toMatch(/\(a\)-\[:BELONGS_TO\]->\(s\)/);
+    expect(CYPHER.LIST_SPACES).toContain('a:Asset OR a:Playbook OR a:Note');
+    expect(CYPHER.LIST_SPACES).toMatch(/a\.deletedAt IS NULL/);
     // Soft-deleted Spaces (deletedAt set) MUST be filtered out.
     // Without this WHERE, a deleted Space stays visible in the
     // sidebar after `deleteSpace()` even though the mutation
@@ -281,7 +284,7 @@ describe('deleting a Space must not strand its assets', () => {
 
   it('the non-empty hard-delete refusal no longer claims the wrong recovery path', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', [{ count: 3 }]);
+    stub.setResponse('OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)', [{ count: 3 }]);
     const client = new SdkSpacesClient({ query: stub.fn });
     await expect(client.deleteSpace('space-1', { soft: false })).rejects.toThrow(
       /still contains 3 item/
@@ -1593,9 +1596,8 @@ describe('CYPHER source strings — mutations (Phase 3a)', () => {
 
   it('SPACE_ITEM_COUNT measures BELONGS_TO assets for hard-delete pre-flight', () => {
     expect(CYPHER.SPACE_ITEM_COUNT).toMatch(/MATCH \(s:Space \{id: \$id\}\)/);
-    expect(CYPHER.SPACE_ITEM_COUNT).toMatch(
-      /OPTIONAL MATCH \(a:Asset\)-\[:BELONGS_TO\]->\(s\)/
-    );
+    // ADR-060: the pre-flight counts every member kind, live only.
+    expect(CYPHER.SPACE_ITEM_COUNT).toMatch(/OPTIONAL MATCH \(a\)-\[:BELONGS_TO\]->\(s\)/);
     expect(CYPHER.SPACE_ITEM_COUNT).toMatch(/RETURN count\(a\) AS count/);
   });
 
@@ -1951,7 +1953,7 @@ describe('SdkSpacesClient.deleteSpace', () => {
 
   it('hard delete refuses with SPACES_DELETE_NON_EMPTY when items remain', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', [{ count: 7 }]);
+    stub.setResponse('OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)', [{ count: 7 }]);
     const client = makeClient(stub);
     await expect(client.deleteSpace('sp-1', { soft: false })).rejects.toMatchObject({
       code: 'SPACES_DELETE_NON_EMPTY',
@@ -1962,7 +1964,7 @@ describe('SdkSpacesClient.deleteSpace', () => {
 
   it('hard delete proceeds when item count is 0', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', [{ count: 0 }]);
+    stub.setResponse('OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)', [{ count: 0 }]);
     stub.setResponse('DELETE s', []);
     const client = makeClient(stub);
     await client.deleteSpace('sp-1', { soft: false });
@@ -1972,7 +1974,7 @@ describe('SdkSpacesClient.deleteSpace', () => {
   it('hard delete throws SPACES_NOT_FOUND when the space does not exist', async () => {
     const stub = buildStubQuery();
     // SPACE_ITEM_COUNT returns no rows because MATCH didn't bind.
-    stub.setResponse('OPTIONAL MATCH (a:Asset)-[:BELONGS_TO]->(s)', []);
+    stub.setResponse('OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)', []);
     const client = makeClient(stub);
     await expect(client.deleteSpace('missing', { soft: false })).rejects.toMatchObject({
       code: 'SPACES_NOT_FOUND',
@@ -3782,6 +3784,66 @@ describe('ADR-058: space-content reads render all member kinds', () => {
   it('member reads stay ADR-051 visibility-gated ($viewerId present)', () => {
     for (const q of [CYPHER.LIST_ITEMS_IN_SPACE, CYPHER.GET_ITEM, CYPHER.HOME_RECENT_ITEMS, CYPHER.SEARCH_ITEMS]) {
       expect(q).toContain('$viewerId');
+    }
+  });
+});
+
+// ─── ADR-060: cross-writer recency at the graph level ────────────────────
+//
+// The graph's timestamps arrive in every shape its writers use (Lite:
+// ISO strings; WISER/GSX/notes: epoch ms; legacy: epoch seconds).
+// String-ordering a mix pins one population above the other, so
+// "somebody else edited this recently" could never surface in Recent.
+// Both recency reads now fold every shape into an epoch-ms key with a
+// TOTAL Cypher expression — regex-gated branches, fallback 0 — because
+// one malformed row must degrade to "old", never throw (Edison maps
+// Cypher errors to empty 200s, which would blank the whole list).
+describe('ADR-060: Recent reflects graph-level activity by any writer', () => {
+  it('LIST_SPACES and HOME_RECENT_ITEMS normalize every timestamp shape', () => {
+    for (const q of [CYPHER.LIST_SPACES, CYPHER.HOME_RECENT_ITEMS]) {
+      expect(q).toContain("=~ '^\\d{10}$'");
+      expect(q).toContain('* 1000');
+      expect(q).toContain("=~ '^\\d+$'");
+      expect(q).toContain('.epochMillis');
+      expect(q).toContain('ELSE 0 END');
+    }
+  });
+
+  it('HOME_RECENT_ITEMS orders by the normalized activity key, not string coalesce', () => {
+    expect(CYPHER.HOME_RECENT_ITEMS).toContain('ORDER BY activityMs DESC');
+    expect(CYPHER.HOME_RECENT_ITEMS).not.toMatch(/ORDER BY coalesce\(toString/);
+  });
+
+  it('LIST_SPACES projects lastActivityMs as max(member activity, space self)', () => {
+    expect(CYPHER.LIST_SPACES).toContain('max(');
+    expect(CYPHER.LIST_SPACES).toContain('lastActivityMs AS lastActivityMs');
+  });
+
+  it('toSpace maps a positive lastActivityMs to ISO lastActivity and leaves 0 unset', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)', [
+      {
+        id: 'sp-act',
+        name: 'Active',
+        itemCount: 3,
+        createdAt: '',
+        updatedAt: '',
+        lastActivityMs: 1786417450242,
+      },
+      { id: 'sp-idle', name: 'Idle', itemCount: 0, createdAt: '', updatedAt: '', lastActivityMs: 0 },
+    ]);
+    const client = makeClient(stub);
+    const spaces = await client.listSpaces();
+    const active = spaces.find((s) => s.id === 'sp-act');
+    const idle = spaces.find((s) => s.id === 'sp-idle');
+    expect(active?.lastActivity).toBe('2026-08-11T03:04:10.242Z');
+    expect(idle?.lastActivity).toBeUndefined();
+  });
+
+  it('every space count matches what the grid renders: member labels + live only', () => {
+    for (const q of [CYPHER.SPACE_ITEM_COUNT, CYPHER.UNDELETE_SPACE, CYPHER.UNCATEGORIZED_COUNT]) {
+      expect(q).toContain('a:Asset OR a:Playbook OR a:Note');
+      expect(q).toMatch(/a\.deletedAt IS NULL/);
     }
   });
 });

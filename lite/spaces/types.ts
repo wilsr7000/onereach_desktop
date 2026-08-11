@@ -77,6 +77,14 @@ export interface Space {
   /** ISO timestamp of last update. */
   updatedAt?: string;
   /**
+   * ADR-060 — ISO timestamp of the latest GRAPH-LEVEL activity in this
+   * Space: the newest create/edit across every live member (by ANY
+   * writer — Lite, WISER, agents) or the Space node itself, whichever
+   * is newer. Drives the sidebar RECENT ranking so someone else's add
+   * or edit surfaces without the local user touching anything.
+   */
+  lastActivity?: string;
+  /**
    * Curation model. Defaults to `'user'` for existing Spaces (the SDK
    * coalesces `s.kind` so rows written before this property existed
    * still parse). `'shared'` flips the renderer into the AI-managed

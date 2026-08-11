@@ -1389,6 +1389,26 @@ describe('sortSpaces', () => {
     expect(out.map((s) => s.id)).toEqual(['b', 'a', 'c']); // 01-10, 01-05, 01-01
   });
 
+  it('ADR-060: lastActivity (graph-level member activity) outranks the node own updatedAt', () => {
+    // Space "quiet" was renamed recently (own updatedAt fresh) but has
+    // no member activity; space "busy" is old itself but SOMEBODY ELSE
+    // just added an item (lastActivity fresh). Busy must rank first —
+    // that is the whole point of graph-level Recent.
+    const out = handle().sortSpaces(
+      [
+        { id: 'quiet', name: 'Quiet', updatedAt: '2026-08-10T00:00:00Z' },
+        {
+          id: 'busy',
+          name: 'Busy',
+          updatedAt: '2026-01-01T00:00:00Z',
+          lastActivity: '2026-08-11T05:00:00Z',
+        },
+      ],
+      'recent'
+    );
+    expect(out.map((s) => s.id)).toEqual(['busy', 'quiet']);
+  });
+
   it('falls back to createdAt when updatedAt is missing', () => {
     const out = handle().sortSpaces(
       [
