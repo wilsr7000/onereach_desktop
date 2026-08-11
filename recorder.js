@@ -875,6 +875,29 @@ class Recorder {
           metadata: { status: 'completed' },
         });
 
+        // ADR-061 — mirror the completed meeting into the SHARED account
+        // graph so it appears in Lite Spaces. Fire-and-forget by
+        // contract: the bridge never throws, and a graph outage must
+        // never block meeting completion.
+        try {
+          const { pushMeetingToSharedGraph } = require('./lib/meeting-graph-bridge');
+          let transcriptText = (meeting.during?.transcript?.live || []).join('\n');
+          if (!transcriptText && meeting.post?.transcriptItemId) {
+            try {
+              const tItem = await api.items.get(spaceId, meeting.post.transcriptItemId);
+              if (tItem?.content) transcriptText = tItem.content;
+            } catch {}
+          }
+          void pushMeetingToSharedGraph({
+            meeting,
+            transcriptText,
+            recordingItemIds: meeting.post?.recordingItemIds,
+            log,
+          });
+        } catch (bridgeError) {
+          log.warn('recorder', 'meeting graph bridge unavailable', { error: bridgeError.message });
+        }
+
         log.info('recorder', 'Meeting completed', { meetingId, duration: meeting.during.actualDuration });
         return { success: true, meeting };
       } catch (error) {
@@ -954,6 +977,21 @@ Respond with JSON:
             content: JSON.stringify(meeting, null, 2),
             metadata: { status: 'completed', analyzed: true },
           });
+
+          // ADR-061 — re-push to the shared graph now that the summary /
+          // action items / decisions exist; every bridge write is an
+          // id-keyed MERGE, so this only enriches the same nodes.
+          try {
+            const { pushMeetingToSharedGraph } = require('./lib/meeting-graph-bridge');
+            void pushMeetingToSharedGraph({
+              meeting,
+              transcriptText: fullTranscript,
+              recordingItemIds: meeting.post?.recordingItemIds,
+              log,
+            });
+          } catch (bridgeError) {
+            log.warn('recorder', 'meeting graph bridge unavailable', { error: bridgeError.message });
+          }
 
           log.info('recorder', 'Post-meeting analysis complete', {
             meetingId,

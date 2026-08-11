@@ -1,0 +1,218 @@
+/**
+ * ADR-061 — meeting-graph bridge: completed WISER meetings mirror into
+ * the SHARED account graph in exactly the shape Lite's ADR-058/059/060
+ * read paths expect. These tests pin the wire contract (Edison neon
+ * proxy body), the node/edge/commit shapes, idempotency-by-MERGE, the
+ * transcript gates, and the never-throws contract.
+ */
+import { describe, it, expect } from 'vitest';
+
+import {
+  pushMeetingToSharedGraph,
+  buildMeetingContent,
+  meetingTitle,
+  MEETINGS_SPACE,
+  SHARED_GRAPH,
+  MAX_TRANSCRIPT_CHARS,
+} from '../../lib/meeting-graph-bridge.js';
+
+/** Capture every proxy POST; script per-call responses by cypher substring. */
+function buildFetchStub(responders = []) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    for (const [needle, rows] of responders) {
+      if (body.cypher.includes(needle)) {
+        return { ok: true, json: async () => ({ records: rows }) };
+      }
+    }
+    return { ok: true, json: async () => ({ records: [] }) };
+  };
+  return { calls, fetchImpl };
+}
+
+function meetingFixture(overrides = {}) {
+  return {
+    id: 'MTG-1',
+    calendar: { vevent: { summary: 'Weekly Sync' } },
+    contacts: [{ displayName: 'Robb' }, { displayName: 'Ada' }],
+    during: { actualDuration: 42 },
+    post: {
+      summary: 'We aligned on the launch.',
+      decisions: ['Ship Tier 2 first'],
+      actionItems: [{ text: 'Cut the release', assignee: 'Robb' }],
+    },
+    ...overrides,
+  };
+}
+
+const NOW = 1786500000000;
+
+describe('meeting-graph bridge wire contract', () => {
+  it('POSTs to the shared neon proxy with in-body credentials', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await pushMeetingToSharedGraph({ meeting: meetingFixture(), fetchImpl, nowMs: NOW });
+    expect(calls.length).toBeGreaterThan(0);
+    const first = calls[0];
+    expect(first.url).toBe(SHARED_GRAPH.endpoint);
+    expect(first.body).toMatchObject({
+      neonUri: SHARED_GRAPH.uri,
+      neonUser: SHARED_GRAPH.user,
+      neonPassword: SHARED_GRAPH.password,
+      database: SHARED_GRAPH.database,
+    });
+  });
+
+  it('reuses an existing live Space named "WISER Meetings" instead of MERGEing its own', async () => {
+    const { calls, fetchImpl } = buildFetchStub([
+      ['toLower(coalesce(s.name', [{ id: 'user-made-space' }]],
+    ]);
+    await pushMeetingToSharedGraph({ meeting: meetingFixture(), fetchImpl, nowMs: NOW });
+    expect(calls.some((c) => c.body.cypher.includes('MERGE (s:Space {id: $id})'))).toBe(false);
+    const meetingCall = calls.find((c) => c.body.cypher.includes('SET a:Meeting'));
+    expect(meetingCall?.body.parameters).toMatchObject({ spaceId: 'user-made-space' });
+  });
+
+  it('creates the deterministic landing Space when none exists', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await pushMeetingToSharedGraph({ meeting: meetingFixture(), fetchImpl, nowMs: NOW });
+    const ensure = calls.find((c) => c.body.cypher.includes('MERGE (s:Space {id: $id})'));
+    expect(ensure?.body.parameters).toMatchObject({
+      id: MEETINGS_SPACE.id,
+      name: MEETINGS_SPACE.name,
+    });
+  });
+});
+
+describe('meeting node shape (what Lite renders)', () => {
+  async function meetingCall(transcriptText) {
+    const { calls, fetchImpl } = buildFetchStub();
+    await pushMeetingToSharedGraph({
+      meeting: meetingFixture(),
+      transcriptText,
+      fetchImpl,
+      nowMs: NOW,
+    });
+    return { calls, call: calls.find((c) => c.body.cypher.includes('SET a:Meeting')) };
+  }
+
+  it('MERGEs a dual-label :Asset:Meeting with both membership edges and dual-convention stamps', async () => {
+    const { call } = await meetingCall();
+    expect(call).toBeDefined();
+    const q = call.body.cypher;
+    expect(q).toContain('MERGE (a:Asset {id: $id})');
+    expect(q).toContain('SET a:Meeting');
+    expect(q).toContain('MERGE (a)-[:BELONGS_TO]->(s)');
+    expect(q).toContain('MERGE (s)-[:CONTAINS]->(a)');
+    expect(q).toContain('a.updatedAt = $nowMs');
+    expect(q).toContain('a.updated_at = $nowMs');
+    expect(call.body.parameters).toMatchObject({
+      id: 'meeting_MTG-1',
+      title: 'Weekly Sync',
+      kind: 'text',
+      nowMs: NOW,
+    });
+  });
+
+  it('announces via an idempotent item:added Commit (deterministic hash)', async () => {
+    const { call } = await meetingCall();
+    expect(call.body.cypher).toContain("c.message = 'item:added'");
+    expect(call.body.parameters['commitHash']).toBe('meeting-add-meeting_MTG-1');
+  });
+
+  it('meeting content carries summary, decisions, and action items', () => {
+    const md = buildMeetingContent(meetingFixture(), 'Weekly Sync');
+    expect(md).toContain('## Summary');
+    expect(md).toContain('We aligned on the launch.');
+    expect(md).toContain('- Ship Tier 2 first');
+    expect(md).toContain('- [ ] Cut the release — Robb');
+    expect(md).toContain('**Participants:** Robb, Ada');
+  });
+
+  it('falls back to a dated title when the calendar has none', () => {
+    expect(meetingTitle({}, NOW)).toBe(`Meeting ${new Date(NOW).toISOString().slice(0, 10)}`);
+  });
+});
+
+describe('transcript + recording artifacts', () => {
+  it('pushes the transcript as :Asset:Transcript linked via HAS_TRANSCRIPT', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await pushMeetingToSharedGraph({
+      meeting: meetingFixture(),
+      transcriptText: 'line one\n'.repeat(20),
+      fetchImpl,
+      nowMs: NOW,
+    });
+    const t = calls.find((c) => c.body.cypher.includes('SET a:Transcript'));
+    expect(t).toBeDefined();
+    expect(t.body.cypher).toContain('MERGE (m)-[:HAS_TRANSCRIPT]->(a)');
+    expect(t.body.parameters).toMatchObject({
+      id: 'transcript_MTG-1',
+      kind: 'transcript',
+      meetingNodeId: 'meeting_MTG-1',
+    });
+  });
+
+  it('skips transcripts under the minimum length', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const result = await pushMeetingToSharedGraph({
+      meeting: meetingFixture(),
+      transcriptText: 'too short',
+      fetchImpl,
+      nowMs: NOW,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.pushed.transcript).toBeNull();
+    expect(calls.some((c) => c.body.cypher.includes('SET a:Transcript'))).toBe(false);
+  });
+
+  it('caps marathon transcripts at MAX_TRANSCRIPT_CHARS', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await pushMeetingToSharedGraph({
+      meeting: meetingFixture(),
+      transcriptText: 'x'.repeat(MAX_TRANSCRIPT_CHARS + 5000),
+      fetchImpl,
+      nowMs: NOW,
+    });
+    const t = calls.find((c) => c.body.cypher.includes('SET a:Transcript'));
+    expect(String(t.body.parameters['content']).length).toBe(MAX_TRANSCRIPT_CHARS);
+  });
+
+  it('recording stubs link via HAS_RECORDING without a feed commit', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const result = await pushMeetingToSharedGraph({
+      meeting: meetingFixture(),
+      recordingItemIds: ['rec-item-9'],
+      fetchImpl,
+      nowMs: NOW,
+    });
+    const r = calls.find((c) => c.body.cypher.includes('SET a:Recording'));
+    expect(r).toBeDefined();
+    expect(r.body.cypher).toContain('MERGE (m)-[:HAS_RECORDING]->(a)');
+    expect(r.body.cypher).not.toContain('item:added');
+    expect(r.body.parameters['commitHash']).toBeUndefined();
+    expect(result.pushed.recordings).toEqual(['recording_rec-item-9']);
+  });
+});
+
+describe('resilience contract', () => {
+  it('never throws — a proxy outage returns {ok:false} instead', async () => {
+    const failing = async () => {
+      throw new Error('network down');
+    };
+    const result = await pushMeetingToSharedGraph({
+      meeting: meetingFixture(),
+      fetchImpl: failing,
+      nowMs: NOW,
+    });
+    expect(result).toMatchObject({ ok: false, error: 'network down' });
+  });
+
+  it('rejects a meeting without an id (no writes attempted)', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const result = await pushMeetingToSharedGraph({ meeting: {}, fetchImpl, nowMs: NOW });
+    expect(result.ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+});
