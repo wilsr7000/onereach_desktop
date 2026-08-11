@@ -124,6 +124,14 @@ function makeStubApi(): AuthApi & {
         ? { injected: true }
         : { injected: false, reason: 'no-token' };
     },
+    revalidateSession: async (env) => {
+      calls.push({ method: 'revalidateSession', args: [env] });
+      return sessions.has(env) ? ('alive' as const) : ('no-session' as const);
+    },
+    startSessionKeepAlive: () => {
+      calls.push({ method: 'startSessionKeepAlive', args: [] });
+      return () => undefined;
+    },
     hasValidSession: (env) => {
       calls.push({ method: 'hasValidSession', args: [env] });
       const s = sessions.get(env);

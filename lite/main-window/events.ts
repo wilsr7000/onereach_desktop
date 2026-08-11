@@ -54,6 +54,8 @@ export const MAIN_WINDOW_EVENTS = {
   // Login-verifier self-heal: re-inject cookies + reload a tab that
   // timed out on a recoverable login state before instructing the user.
   LOGIN_RECOVERY: 'main-window.tab.login-recovery',
+  /** Server-verdict step that now precedes every login recovery (2026-08-11). */
+  LOGIN_RECOVERY_VALIDATED: 'main-window.tab.login-recovery-validated',
   // Session-changed tab reload: re-inject cookies + reload tabs stuck
   // on a OneReach login interstitial after sign-in completes.
   SESSION_RELOAD_FIRING: 'main-window.session-reload.firing',

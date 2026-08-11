@@ -48,6 +48,7 @@ export const SUPPORTED_ENVIRONMENTS: readonly Environment[] = [
   'edison',
   'staging',
   'dev',
+  'production',
 ] as const;
 
 /**
@@ -100,6 +101,17 @@ export const ENVIRONMENT_CONFIGS: Readonly<Partial<Record<Environment, Environme
     cookieDomainSuffixes: ['.dev.onereach.ai', '.dev.api.onereach.ai'] as const,
     authHostnamePrefix: 'auth.',
     discoveryUrl: 'https://discovery.dev.api.onereach.ai',
+  },
+  // Multi-env support (2026-08-11). Domain shape grounded in the
+  // store's env-from-domain parser (edison|staging|production|dev
+  // .onereach.ai / .api.onereach.ai) — same uniform pattern as the
+  // other three. Flagged for live verification on first production
+  // sign-in.
+  production: {
+    studioUrl: 'https://studio.production.onereach.ai',
+    cookieDomainSuffixes: ['.production.onereach.ai', '.production.api.onereach.ai'] as const,
+    authHostnamePrefix: 'auth.',
+    discoveryUrl: 'https://discovery.production.api.onereach.ai',
   },
 };
 

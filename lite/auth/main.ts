@@ -88,6 +88,11 @@ export function initAuth(opts: InitAuthOptions = {}): AuthHandle {
       if (typeof maybeHydrate === 'function') {
         await maybeHydrate.call(auth);
       }
+      // Session keep-alive (2026-08-11): revalidate every held session
+      // against its server every 10 min — an activity touch that
+      // extends sliding inactivity windows AND catches server-side
+      // expiry within minutes instead of at the next IDW open.
+      auth.startSessionKeepAlive();
     } catch (err) {
       log.warn('hydrate failed at init (continuing)', {
         error: (err as Error).message,

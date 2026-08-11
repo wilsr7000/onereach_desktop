@@ -583,7 +583,7 @@ describe('GsxStore guardrails', () => {
   it('rejects unsupported environments', async () => {
     const f = makeFixture();
     await expect(
-      f.store.openWindow({ env: 'production' as never })
+      f.store.openWindow({ env: 'mars' as never })
     ).rejects.toMatchObject({ code: GSX_ERROR_CODES.UNSUPPORTED_ENV });
   });
 

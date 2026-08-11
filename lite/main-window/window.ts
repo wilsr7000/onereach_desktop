@@ -722,6 +722,16 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
       const live = extractAccountIdFromUrl(safeWebContentsUrl(view.webContents));
       return live ?? initialAccountId;
     },
+    getTargetEmail: () => {
+      // Fallback matcher for the account picker (2026-08-11): the
+      // list-users page renders emails, not account ids. Same env
+      // resolution order as the accountId above.
+      const env =
+        getEnvironmentForUrl(safeWebContentsUrl(view.webContents)) ??
+        getEnvironmentForUrl(tab.url);
+      if (env === null) return null;
+      return getAuthApi().getSession(env)?.email ?? null;
+    },
     onAccountPickerDetected: (payload) => {
       getLoggingApi().event('main-window.tab.account-picker-detected', {
         id: tab.id,
@@ -786,6 +796,22 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
           // already present and the reload is the fix).
           attemptRecovery: async (cause) => {
             try {
+              if (view.webContents.isDestroyed()) return false;
+              // 2026-08-11: ask the SERVER first. A session the server
+              // has expired re-injects as a corpse — observed live: the
+              // recovery "succeeded" (injected: true), reloaded, and
+              // landed right back on the auth bounce. revalidateSession
+              // reaps a dead session (memory + vault + cookies), so the
+              // inject below then reports 'no-cookies' and routes to
+              // the real sign-in path instead of the dead loop.
+              // 'unreachable' (offline) deliberately changes nothing.
+              const serverVerdict = await getAuthApi().revalidateSession(verifierEnv);
+              getLoggingApi().event(MAIN_WINDOW_EVENTS.LOGIN_RECOVERY_VALIDATED, {
+                id: tab.id,
+                env: verifierEnv,
+                cause,
+                serverVerdict,
+              });
               if (view.webContents.isDestroyed()) return false;
               const inj = await getAuthApi().injectTokenIntoPartition(verifierEnv, tab.partition);
               getLoggingApi().event(MAIN_WINDOW_EVENTS.LOGIN_RECOVERY, {

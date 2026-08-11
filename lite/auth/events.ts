@@ -36,6 +36,8 @@ export const AUTH_EVENTS = {
   // passes (timer armed at capture/hydrate), instead of waiting for the
   // user to trip over a dead KV op or login-bounced tab.
   SESSION_EXPIRED: 'auth.session.expired',
+  /** The SERVER stopped honoring a session the client still held (2026-08-11). */
+  SESSION_SERVER_EXPIRED: 'auth.session.server-expired',
   // Sign-in window lifecycle -- granular trace events so the event
   // stream tells the whole story of an auth attempt: which URL is
   // opened, every redirect/navigation the user goes through, the

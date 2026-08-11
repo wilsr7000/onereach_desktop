@@ -128,6 +128,16 @@ interface StartOptions {
    */
   getTargetAccountId?: () => string | null;
   /**
+   * Optional resolver for the signed-in user's EMAIL — the account-
+   * picker fallback matcher (2026-08-11). OneReach's real
+   * `multi-user/list-users` page renders account NAMES/emails but not
+   * account ids, so the id-based wait/select can time out on a page
+   * where the right row is plainly visible. When the id match fails,
+   * the watcher retries by email text, then by the only-one-account
+   * heuristic. `null` disables the fallback.
+   */
+  getTargetEmail?: () => string | null;
+  /**
    * Called once per detected account-picker frame, BEFORE the
    * auto-select script runs. Used for diagnostics. The watcher still
    * executes the auto-select either way.
@@ -148,6 +158,8 @@ interface RuntimeState {
   cleanups: Array<() => void>;
   /** Whether `onTwoFactorNeedsSetup` has fired -- gates to one notification per watcher. */
   needsSetupNotified: boolean;
+  /** Email resolver for the account-picker fallback (2026-08-11). */
+  getTargetEmail?: () => string | null;
 }
 
 export interface TwoFactorDetectedPayload {
@@ -190,6 +202,7 @@ export function startTotpAutofill(handle: AuthWindowHandle, opts: StartOptions =
   }
 
   const state = createRuntimeState();
+  if (opts.getTargetEmail !== undefined) state.getTargetEmail = opts.getTargetEmail;
   const source = opts.source ?? 'auth-window';
   const authScripts = opts.authScripts ?? loadAuthScripts();
   const getCurrentCode =
@@ -227,6 +240,7 @@ export function startTotpAutofillForWebContents(
   opts: StartOptions = {}
 ): () => void {
   const state = createRuntimeState();
+  if (opts.getTargetEmail !== undefined) state.getTargetEmail = opts.getTargetEmail;
   const source = opts.source ?? 'webcontents';
   const authScripts = opts.authScripts ?? loadAuthScripts();
   const getCurrentCode = opts.getCurrentCode ?? (async () => getTotpApi().getCurrentCode());
@@ -697,19 +711,33 @@ async function awaitAccountPickerThenSelect(
     }
   }
 
+  // Email for the fallback matcher (2026-08-11). Resolved up front so
+  // both the wait script and the fallback select can use it.
+  let targetEmail: string | null = null;
+  try {
+    targetEmail = state.getTargetEmail?.() ?? null;
+  } catch {
+    targetEmail = null;
+  }
+
   // 1. Wait for the matching row to render (MutationObserver-backed,
-  //    short timeout because the picker page renders fast).
+  //    short timeout because the picker page renders fast). An id miss
+  //    is NOT a dead end anymore: the real list-users page renders
+  //    emails, not account ids, so we fall through to the email /
+  //    single-account fallback select below.
+  let waitType: string | null = null;
   try {
     const wait = (await frame.executeJavaScript(
-      buildWaitForAccountPickerScript(targetAccountId, 8_000)
+      buildWaitForAccountPickerScript(targetAccountId, 8_000, targetEmail)
     )) as { found?: boolean; reason?: string; type?: string };
-    if (wait.found !== true) {
+    if (wait.found === true) {
+      waitType = typeof wait.type === 'string' ? wait.type : 'unknown';
+    } else {
       logger?.('warn', 'auth-totp-autofill: account picker wait did not find target', {
         source: target.source,
         frameUrl,
         reason: wait.reason,
       });
-      return;
     }
   } catch (err) {
     logger?.('info', 'auth-totp-autofill: account picker wait threw', {
@@ -732,11 +760,30 @@ async function awaitAccountPickerThenSelect(
     return;
   }
   try {
-    const result = (await frame.executeJavaScript(buildSelect(targetAccountId))) as {
-      success?: boolean;
-      method?: string;
-      reason?: string;
-    };
+    // Id-based select only helps when the id is actually in the DOM
+    // (waitType link/data/body). On an email-only match or a wait
+    // miss, go straight to the fallback.
+    let result: { success?: boolean; method?: string; reason?: string } =
+      waitType !== null && waitType !== 'email'
+        ? ((await frame.executeJavaScript(buildSelect(targetAccountId))) as {
+            success?: boolean;
+            method?: string;
+            reason?: string;
+          })
+        : { success: false, reason: 'id_not_in_dom' };
+    if (result.success !== true && (targetEmail !== null || waitType !== null)) {
+      const fb = (await frame.executeJavaScript(
+        buildFallbackSelectAccountScript(targetEmail)
+      )) as { success?: boolean; method?: string; reason?: string };
+      logger?.('info', 'auth-totp-autofill: fallback account select attempted', {
+        source: target.source,
+        frameUrl,
+        idReason: result.reason,
+        ...(fb.method !== undefined ? { method: fb.method } : {}),
+        ...(fb.reason !== undefined ? { reason: fb.reason } : {}),
+      });
+      if (fb.success === true) result = fb;
+    }
     if (result.success === true) {
       logger?.('info', 'auth-totp-autofill: account auto-selected', {
         source: target.source,
@@ -899,11 +946,19 @@ function isAccountPickerUrl(url: string): boolean {
   );
 }
 
-function buildWaitForAccountPickerScript(targetAccountId: string, timeoutMs: number): string {
+export function buildWaitForAccountPickerScript(
+  targetAccountId: string,
+  timeoutMs: number,
+  targetEmail?: string | null
+): string {
   const targetJson = JSON.stringify(targetAccountId);
+  const emailJson = JSON.stringify(
+    typeof targetEmail === 'string' && targetEmail.length > 0 ? targetEmail.toLowerCase() : ''
+  );
   return `
     new Promise(function(resolve) {
       var TARGET = ${targetJson};
+      var EMAIL = ${emailJson};
       function check() {
         if (!TARGET) return null;
         var anchors = document.querySelectorAll('a[href*="accountId"], a[href*="' + TARGET + '"]');
@@ -918,6 +973,12 @@ function buildWaitForAccountPickerScript(targetAccountId: string, timeoutMs: num
         }
         var bodyHtml = (document.body && document.body.innerHTML) || '';
         if (bodyHtml.indexOf(TARGET) >= 0) return { found: true, type: 'body' };
+        // Email fallback (2026-08-11): the real list-users page renders
+        // emails, not account ids.
+        if (EMAIL) {
+          var bodyText = ((document.body && (document.body.innerText || document.body.textContent)) || '').toLowerCase();
+          if (bodyText.indexOf(EMAIL) >= 0) return { found: true, type: 'email' };
+        }
         return null;
       }
       var existing = check();
@@ -937,6 +998,50 @@ function buildWaitForAccountPickerScript(targetAccountId: string, timeoutMs: num
         resolve({ found: false, reason: 'observer_timeout' });
       }, ${timeoutMs});
     })`;
+}
+
+/**
+ * Fallback account-picker click (2026-08-11): by EMAIL text, then by
+ * the only-one-account heuristic. Runs only after the id-based select
+ * fails (`no_matching_account`) or the id wait times out — the id is
+ * simply not in the real page's DOM. Conservative click targeting:
+ * the innermost clickable ancestor of the matching text node.
+ */
+export function buildFallbackSelectAccountScript(targetEmail: string | null): string {
+  const emailJson = JSON.stringify(
+    typeof targetEmail === 'string' && targetEmail.length > 0 ? targetEmail.toLowerCase() : ''
+  );
+  return `(function() {
+    var EMAIL = ${emailJson};
+    var CLICKABLE = 'a, button, [role="button"], li, tr, [class*="account" i], [class*="user" i]';
+    function rows() {
+      var els = document.querySelectorAll(CLICKABLE);
+      var out = [];
+      for (var i = 0; i < els.length && i < 400; i++) {
+        var t = ((els[i].innerText || els[i].textContent) || '').trim();
+        if (t.indexOf('@') >= 0 && t.length < 200) out.push(els[i]);
+      }
+      // Innermost only: drop any candidate that CONTAINS another candidate.
+      return out.filter(function(el) {
+        return !out.some(function(other) { return other !== el && el.contains(other); });
+      });
+    }
+    var candidates = rows();
+    if (EMAIL) {
+      for (var i = 0; i < candidates.length; i++) {
+        var text = ((candidates[i].innerText || candidates[i].textContent) || '').toLowerCase();
+        if (text.indexOf(EMAIL) >= 0) {
+          candidates[i].click();
+          return { success: true, method: 'email-text' };
+        }
+      }
+    }
+    if (candidates.length === 1) {
+      candidates[0].click();
+      return { success: true, method: 'single-account' };
+    }
+    return { success: false, reason: EMAIL ? 'email_not_found' : 'no_email_multiple_accounts' };
+  })()`;
 }
 
 function buildWaitFor2FAOnlyScript(authScripts: AuthScriptsLike, timeoutMs: number): string {

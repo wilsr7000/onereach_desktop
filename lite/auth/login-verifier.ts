@@ -103,6 +103,24 @@ export function classifyLoginState(
 ): { verdict: IdwLoginVerdict; onAuthUrl: boolean; loginSignals: string[] } {
   const onAuthUrl = isOneReachAuthOrLoginUrl(url);
   const loginSignals = signals.filter((x) => LOGIN_SIGNALS.has(x));
+  // URL-derived picker detection (2026-08-11): OneReach's real
+  // `multi-user/list-users` page renders NONE of the DOM markers the
+  // probe script looks for, so every probe reported `signals: []` and
+  // the cause fell through to 'no-session' — which is RECOVERABLE, so
+  // the watcher "recovered" by re-injecting the same dead cookies at
+  // the picker. The URL is the reliable signal: classify it as
+  // account-picker so the cause is non-recoverable and the user gets
+  // the right instruction immediately.
+  if (onAuthUrl && !loginSignals.includes('account-picker')) {
+    try {
+      const path = new URL(url).pathname.toLowerCase();
+      if (path.includes('/multi-user') || path.includes('/list-users')) {
+        loginSignals.push('account-picker');
+      }
+    } catch {
+      /* unparseable URL — DOM signals stand alone */
+    }
+  }
   const looksLikeLogin = onAuthUrl || loginSignals.length > 0;
   let verdict: IdwLoginVerdict;
   if (looksLikeLogin) verdict = 'stuck-on-login';

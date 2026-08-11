@@ -452,3 +452,71 @@ describe('startLoginVerifier -- broken pages must not read as logged in', () => 
     expect(names(h)).toContain(AUTH_EVENTS.IDW_LOGIN_STUCK);
   });
 });
+
+// ── URL-derived account-picker classification (2026-08-11) ───────────
+//
+// Live 2026-08-10 22:59: OneReach's real multi-user/list-users page
+// renders NONE of the DOM markers, every probe said `signals: []`, the
+// cause fell to 'no-session' (recoverable) and recovery re-injected the
+// same server-dead cookies at the picker. The URL itself is the signal.
+
+describe('classifyLoginState — picker URL detection', () => {
+  it('flags auth multi-user/list-users URLs as account-picker even with no DOM signals', () => {
+    const { verdict, loginSignals } = classifyLoginState(
+      'https://auth.edison.onereach.ai/multi-user/list-users',
+      []
+    );
+    expect(verdict).toBe('stuck-on-login');
+    expect(loginSignals).toContain('account-picker');
+  });
+
+  it('derives the account-picker cause from the URL-only signal', () => {
+    const { loginSignals, onAuthUrl } = classifyLoginState(
+      'https://auth.staging.onereach.ai/multi-user/list-users?x=1',
+      []
+    );
+    expect(deriveLoginCause(loginSignals, onAuthUrl)).toBe('account-picker');
+  });
+
+  it('does not double-add when the DOM already reported the picker', () => {
+    const { loginSignals } = classifyLoginState(
+      'https://auth.edison.onereach.ai/multi-user/list-users',
+      ['account-picker']
+    );
+    expect(loginSignals.filter((s) => s === 'account-picker')).toHaveLength(1);
+  });
+
+  it('leaves ordinary auth login URLs alone (still no-session)', () => {
+    const { loginSignals, onAuthUrl } = classifyLoginState(
+      'https://auth.edison.onereach.ai/login?sso=true',
+      []
+    );
+    expect(loginSignals).not.toContain('account-picker');
+    expect(deriveLoginCause(loginSignals, onAuthUrl)).toBe('no-session');
+  });
+});
+
+describe('startLoginVerifier — picker pages must NOT trigger dead-cookie recovery', () => {
+  it('times out on the picker WITHOUT calling attemptRecovery, instructing the user instead', async () => {
+    let recoveryCalls = 0;
+    const h = makeHarness(
+      {
+        url: () => 'https://auth.edison.onereach.ai/multi-user/list-users',
+        signals: () => [], // exactly what the live page reported
+      },
+      {
+        attemptRecovery: async () => {
+          recoveryCalls += 1;
+          return true;
+        },
+      }
+    );
+    startLoginVerifier({ tabId: 't1', env: 'edison', timeoutMs: 20000, intervalMs: 1500 }, h.deps);
+    for (let i = 0; i < 20 && h.hasPending(); i++) await h.advance();
+
+    expect(recoveryCalls).toBe(0); // the 22:59 bug: this was 1 (dead re-inject)
+    expect(h.userActions).toHaveLength(1);
+    expect(h.userActions[0]?.likelyCause).toBe('account-picker');
+    expect(h.outcomes[0]?.verdict).toBe('stuck-on-login');
+  });
+});

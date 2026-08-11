@@ -258,6 +258,25 @@ shows the previous user's data; kill -9 + relaunch loses no persisted state.*
       playbook detail rail; absent on non-playbook kinds and on preloads
       without the bridge.
 
+### Session expiry handling (2026-08-11 — the "login broken AGAIN" fix)
+- [ ] ☠ **Server-dead session never re-injects** — with a stale session,
+      opening an IDW goes to ONE clean sign-in (no 20s probe storm, no
+      session-expired bounce loop). Log shows auth.session.server-expired
+      then the normal sign-in path.
+- [ ] **Boot validation** — start the app with a server-expired session:
+      within seconds the app flips to signed-out (log: server session
+      validation verdict=dead) instead of pretending hasSession.
+- [ ] **Keep-alive** — leave the app running >10 min signed in; log shows
+      periodic "server session validation verdict=alive" per env.
+- [ ] ☠ **Offline ≠ signed out** — disconnect the network, restart: the
+      session survives (verdict=unreachable changes nothing).
+- [ ] **Account picker auto-select** — when the picker appears, Lite
+      clicks your account row by EMAIL (or the only row) automatically;
+      verdict account-picker (not no-session) if it must wait for you.
+- [ ] **Multi-env** — sign-in works per env (edison/staging/dev/
+      production); sessions, vault entries, and keep-alive are
+      independent per env. Production URLs need live verification.
+
 ### Asset view audit trail (2026-08-10 — who looked at what, when)
 - [ ] **Opening an asset records a view** — open an asset's detail
       pane while signed in; a (:Person)-[:VIEWED]->(:Asset) edge is

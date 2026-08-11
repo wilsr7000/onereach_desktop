@@ -40,6 +40,7 @@ vi.mock('electron', () => ({
   shell: { openExternal: () => Promise.resolve() },
 }));
 
+import { SUPPORTED_ENVIRONMENTS } from '../../auth/types.js';
 import { AuthStore, AUTH_ERROR_CODES, AuthError, decodeOrCookie } from '../../auth/store.js';
 import type { AuthWindowFactory } from '../../auth/store.js';
 import type { AuthWindowHandle } from '../../auth/window.js';
@@ -561,10 +562,10 @@ describe('AuthStore.signIn -- failure modes', () => {
     const handle = makeFakeWindow();
     const { store } = buildStore({ windowHandle: handle });
 
-    // Production is the only env still missing — bare onereach.ai
-    // requires extracted-env regex changes scheduled separately.
-    await expect(store.signIn('production')).rejects.toMatchObject({ code: AUTH_ERROR_CODES.UNSUPPORTED_ENV });
-    // Unknown env strings (TS-cast for runtime defense) also reject.
+    // 2026-08-11: production joined SUPPORTED_ENVIRONMENTS (multi-env
+    // support) — it must NOT reject anymore.
+    expect(SUPPORTED_ENVIRONMENTS).toContain('production');
+    // Unknown env strings (TS-cast for runtime defense) still reject.
     await expect(
       store.signIn('mystery' as unknown as 'edison')
     ).rejects.toMatchObject({ code: AUTH_ERROR_CODES.UNSUPPORTED_ENV });

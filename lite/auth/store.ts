@@ -221,6 +221,19 @@ export interface AuthStoreConfig {
    */
   sessionVault?: SessionVault;
   /**
+   * Optional server-session probe override (for tests). Production
+   * fetches the env's `studioUrl` through the auth partition's cookie
+   * jar with `redirect: 'manual'` and reports the status + redirect
+   * Location, so the store can tell a LIVE server session (studio
+   * serves/redirects internally) from a DEAD one (redirect to
+   * `auth.<env>...`). See {@link AuthStore.validateSessionWithServer}.
+   */
+  sessionProbe?: (args: {
+    env: Environment;
+    partition: string;
+    studioUrl: string;
+  }) => Promise<{ status: number; location?: string }>;
+  /**
    * Optional auth-window factory override -- tests inject a fake that
    * never opens a real BrowserWindow.
    */
@@ -334,6 +347,13 @@ export class AuthStore {
   private readonly kv: KVApi;
   private readonly sessionFromPartition: (partition: string) => Session;
   private readonly sessionVault: SessionVault;
+  private readonly sessionProbe: (args: {
+    env: Environment;
+    partition: string;
+    studioUrl: string;
+  }) => Promise<{ status: number; location?: string }>;
+  /** Keep-alive interval canceller (null when not running). */
+  private stopKeepAlive: (() => void) | null = null;
   private readonly windowFactory: AuthWindowFactory;
   private readonly log: NonNullable<AuthStoreConfig['logger']>;
   private readonly spanEmitter: NonNullable<AuthStoreConfig['spanEmitter']> | null;
@@ -392,6 +412,20 @@ export class AuthStore {
     this.kv = config.kvApi ?? getKVApi();
     this.sessionFromPartition = config.sessionFromPartition ?? ((p) => electronSession.fromPartition(p));
     this.sessionVault = config.sessionVault ?? new SessionVault();
+    this.sessionProbe =
+      config.sessionProbe ??
+      (async ({ partition, studioUrl }) => {
+        // Electron ≥28: Session.fetch routes through the partition's
+        // cookie jar, so this request carries the env's mult/or pair.
+        const ses = this.sessionFromPartition(partition);
+        const res = await ses.fetch(studioUrl, {
+          method: 'GET',
+          redirect: 'manual',
+          cache: 'no-store',
+        });
+        const location = res.headers.get('location') ?? undefined;
+        return { status: res.status, ...(location !== undefined ? { location } : {}) };
+      });
     this.windowFactory = config.windowFactory ?? defaultWindowFactory;
     this.log =
       config.logger ??
@@ -428,7 +462,7 @@ export class AuthStore {
           code: AUTH_ERROR_CODES.UNSUPPORTED_ENV,
           message: `Environment "${env}" is not supported in v1.`,
           context: { env, supported: [...SUPPORTED_ENVIRONMENTS] },
-          remediation: 'v1 supports edison only. Other environments will be added in a follow-up port.',
+          remediation: `Supported environments: ${SUPPORTED_ENVIRONMENTS.join(', ')}.`,
         })
       );
     }
@@ -1098,6 +1132,16 @@ export class AuthStore {
     for (const [env, session] of rehydrated) {
       this.notify(env, session);
     }
+    // Boot-time SERVER check (2026-08-11): cookie presence only proves
+    // the client kept its copy — the server may have expired the
+    // session while the app was closed. Validate each recovered env in
+    // the background; a definitive 'dead' reaps the client session so
+    // the first IDW open goes straight to a clean sign-in instead of a
+    // session-expired bounce + probe storm. 'unreachable' (offline)
+    // changes nothing.
+    for (const [env] of rehydrated) {
+      void this.revalidateSession(env).catch(() => undefined);
+    }
   }
 
   /**
@@ -1209,6 +1253,155 @@ export class AuthStore {
       this.log('warn', 'auth: vault restore failed', { env, error: (err as Error).message });
       return false;
     }
+  }
+
+  // ─── Server-side session validation (2026-08-11) ────────────────────
+  //
+  // THE GAP this closes: the client can hold a perfectly-persisted
+  // cookie pair (vault + partition) that the OneReach SERVER has
+  // already expired. Cookie presence said "signed in"; the first IDW
+  // open then bounced through auth.<env>/session-expired, a probe
+  // storm, and a recovery that re-injected the SAME dead cookies.
+  // Observed live 2026-08-10 22:59 (see TEST-CHECKLIST §15).
+
+  /**
+   * Ask the SERVER whether this env's session is still honored.
+   * Fetches the env's studioUrl through the auth partition's cookie
+   * jar without following redirects:
+   *
+   *   - 2xx                                  → 'alive' (studio served)
+   *   - 3xx to a host on `auth.<env>...`     → 'dead'  (bounced to login)
+   *   - 3xx anywhere else                    → 'alive' (internal redirect)
+   *   - 401 / 403                            → 'dead'
+   *   - anything else / network error        → 'unreachable'
+   *
+   * 'unreachable' is deliberately distinct from 'dead': OFFLINE MUST
+   * NEVER SIGN THE USER OUT. Callers only reap on 'dead'.
+   */
+  async validateSessionWithServer(
+    env: Environment
+  ): Promise<'alive' | 'dead' | 'unreachable' | 'no-session'> {
+    const config = ENVIRONMENT_CONFIGS[env];
+    if (config === undefined) return 'no-session';
+    if (!this.sessions.has(env)) return 'no-session';
+    const partition = `persist:lite-auth-${env}`;
+    let probe: { status: number; location?: string };
+    try {
+      probe = await this.sessionProbe({ env, partition, studioUrl: config.studioUrl });
+    } catch {
+      return 'unreachable';
+    }
+    const { status, location } = probe;
+    if (status >= 200 && status < 300) return 'alive';
+    if (status === 401 || status === 403) return 'dead';
+    if (status >= 300 && status < 400) {
+      if (typeof location !== 'string' || location.length === 0) return 'unreachable';
+      try {
+        const host = new URL(location, config.studioUrl).hostname.toLowerCase();
+        // Redirect to the env's auth host = the server wants a login.
+        if (host.startsWith(config.authHostnamePrefix) && isOneReachDomain(host)) {
+          return 'dead';
+        }
+        return 'alive';
+      } catch {
+        return 'unreachable';
+      }
+    }
+    return 'unreachable';
+  }
+
+  /**
+   * Validate against the server and — ONLY on a definitive 'dead' —
+   * reap the client-side session (memory + vault + partition cookies)
+   * so nothing keeps re-injecting a corpse. Returns the verdict so
+   * callers (boot check, keep-alive, IDW login recovery) can route:
+   * 'dead' → the normal signed-out machinery takes over (auto sign-in
+   * window / re-sign-in prompter); 'unreachable' → change nothing.
+   */
+  async revalidateSession(
+    env: Environment
+  ): Promise<'alive' | 'dead' | 'unreachable' | 'no-session'> {
+    const verdict = await this.validateSessionWithServer(env);
+    this.log('info', 'auth: server session validation', { env, verdict });
+    if (verdict === 'dead') {
+      await this.reapServerDeadSession(env);
+    }
+    return verdict;
+  }
+
+  /**
+   * The server no longer honors this session: clear every client copy
+   * (in-memory, keychain vault, partition cookies) and broadcast
+   * signed-out. Narrower than signOut(): no KV cleanup, and a distinct
+   * event so "server expired you" is distinguishable from "you clicked
+   * sign out" in the log feed.
+   */
+  private async reapServerDeadSession(env: Environment): Promise<void> {
+    this.eventEmitter?.(AUTH_EVENTS.SESSION_SERVER_EXPIRED, { env }, 'warn');
+    this.log('warn', 'auth: server-side session expired — clearing client session', { env });
+    this.sessions.delete(env);
+    this.cancelSessionExpiryWatch(env);
+    this.tokens.delete(env);
+    this.tokenBundles.delete(env);
+    void this.sessionVault.clear(env);
+    // Sweep the partition cookies (same completeness rationale as
+    // signOut: subdomain cookies would resurrect the session on the
+    // next hydrate).
+    try {
+      const ses = this.sessionFromPartition(`persist:lite-auth-${env}`);
+      const cookies = await this.collectAuthPartitionCookies(env);
+      for (const c of cookies) {
+        const cookieDomain = typeof c.domain === 'string' ? c.domain : '';
+        const host = cookieDomain.replace(/^\./, '');
+        if (host.length === 0) continue;
+        const cookiePath = typeof c.path === 'string' && c.path.length > 0 ? c.path : '/';
+        const scheme = c.secure === true ? 'https' : 'http';
+        try {
+          await ses.cookies.remove(`${scheme}://${host}${cookiePath}`, c.name);
+        } catch {
+          /* best-effort; the re-probe below is the guard */
+        }
+      }
+      if (typeof ses.cookies.flushStore === 'function') {
+        await ses.cookies.flushStore().catch(() => undefined);
+      }
+    } catch (err) {
+      this.log('warn', 'auth: dead-session cookie sweep failed', {
+        env,
+        error: (err as Error).message,
+      });
+    }
+    this.notify(env, null);
+  }
+
+  /**
+   * Start the per-env session keep-alive loop. Every `intervalMs`
+   * (default 10 min) each env holding a session is revalidated against
+   * its server — which doubles as an activity touch that extends
+   * sliding inactivity windows, and catches server-side expiry within
+   * minutes instead of at the next IDW open. Idempotent; returns a
+   * stopper (also stored for repeat-start protection).
+   */
+  startSessionKeepAlive(intervalMs = 10 * 60 * 1000): () => void {
+    if (this.stopKeepAlive !== null) return this.stopKeepAlive;
+    let cancelled = false;
+    let cancelTimer: (() => void) | null = null;
+    const tick = (): void => {
+      if (cancelled) return;
+      for (const env of SUPPORTED_ENVIRONMENTS) {
+        if (this.sessions.has(env)) {
+          void this.revalidateSession(env).catch(() => undefined);
+        }
+      }
+      cancelTimer = this.scheduleTimer(tick, intervalMs);
+    };
+    cancelTimer = this.scheduleTimer(tick, intervalMs);
+    this.stopKeepAlive = (): void => {
+      cancelled = true;
+      if (cancelTimer !== null) cancelTimer();
+      this.stopKeepAlive = null;
+    };
+    return this.stopKeepAlive;
   }
 
   /**

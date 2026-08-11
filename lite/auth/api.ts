@@ -227,6 +227,23 @@ export interface AuthApi {
   hasValidSession(env: Environment): boolean;
 
   /**
+   * Ask the SERVER whether this env's session is still honored, and —
+   * only on a definitive 'dead' — clear every client copy (memory,
+   * keychain vault, partition cookies) so nothing re-injects a corpse.
+   * 'unreachable' (offline / transient) changes nothing: offline must
+   * never sign the user out. (2026-08-11 session-expiry fix.)
+   */
+  revalidateSession(
+    env: Environment
+  ): Promise<'alive' | 'dead' | 'unreachable' | 'no-session'>;
+
+  /**
+   * Start the 10-min per-env keep-alive loop (validate + activity
+   * touch). Idempotent; returns a stopper.
+   */
+  startSessionKeepAlive(intervalMs?: number): () => void;
+
+  /**
    * Subscribe to session changes. Fires whenever a sign-in completes
    * or a sign-out happens. Returns an unsubscribe function.
    *
