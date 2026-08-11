@@ -98,6 +98,7 @@ import type {
   ItemMetadata,
   MetadataValue,
   MetadataPrimitive,
+  AssetViewer,
 } from './types.js';
 import {
   MAX_SPACE_NAME_LENGTH,
@@ -691,6 +692,41 @@ export const CYPHER = {
            c.spaceId AS spaceId,
            coalesce(s.name, c.spaceId) AS spaceName
     ORDER BY c.timestamp DESC
+    LIMIT toInteger($limit)
+  `,
+
+  /**
+   * Audit trail (2026-08-10): record that the current viewer looked at
+   * an asset, as a (:Person)-[:VIEWED {firstAt,lastAt,count}]->(:Asset)
+   * edge that is UPDATED on each view. Visibility-gated (MATCH fails →
+   * no write) and no-ops when signed out ($viewerId=''). $viewerId +
+   * $nowMs are injected by run().
+   */
+  RECORD_ASSET_VIEW: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    FOREACH (_ignore IN CASE WHEN $viewerId <> '' THEN [1] ELSE [] END |
+      MERGE (p:Person {id: $viewerId})
+      MERGE (p)-[v:VIEWED]->(a)
+        ON CREATE SET v.firstAt = $nowMs, v.lastAt = $nowMs, v.count = 1
+        ON MATCH  SET v.lastAt = $nowMs, v.count = coalesce(v.count, 0) + 1)
+    RETURN a.id AS id
+  `,
+
+  /** The asset's viewers, most-recent first. Visibility-gated. */
+  GET_ASSET_VIEWERS: `
+    MATCH (a:Asset {id: $id})
+      WHERE a.deletedAt IS NULL
+        AND ${ASSET_VISIBLE}
+    MATCH (a)<-[v:VIEWED]-(p:Person)
+    RETURN p.id AS viewerId,
+           coalesce(p.name, p.displayName, p.email, p.id) AS name,
+           coalesce(p.email, '') AS email,
+           toString(v.firstAt) AS firstAt,
+           toString(v.lastAt) AS lastAt,
+           coalesce(v.count, 0) AS count
+    ORDER BY v.lastAt DESC
     LIMIT toInteger($limit)
   `,
 
@@ -2717,6 +2753,31 @@ export class SdkSpacesClient {
         : null;
     const rows = await this.run(CYPHER.ITEM_RECENT_COMMITS, { id, limit, since });
     return rows.map(toEvent).filter((e): e is Event => e !== null);
+  }
+
+  /**
+   * Record that the current viewer opened an asset. Fire-and-forget
+   * audit write: a (:Person {$viewerId})-[:VIEWED]->(:Asset) edge,
+   * updated each view (firstAt / lastAt / count). No-op when signed
+   * out or the asset isn't visible to the viewer.
+   */
+  async recordAssetView(id: string): Promise<void> {
+    if (typeof id !== 'string' || id.length === 0) return;
+    await this.run(CYPHER.RECORD_ASSET_VIEW, { id });
+  }
+
+  /** Read an asset's viewers (who looked, when, how many times). */
+  async getAssetViewers(id: string, limit = 100): Promise<AssetViewer[]> {
+    if (typeof id !== 'string' || id.length === 0) {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'getAssetViewers requires a non-empty id',
+        context: { id },
+      });
+    }
+    const capped = clampSmallLimit(limit, 100, 500);
+    const rows = await this.run(CYPHER.GET_ASSET_VIEWERS, { id, limit: capped });
+    return rows.map(toAssetViewer).filter((v): v is AssetViewer => v !== null);
   }
 
   // ─── Home view methods (chunk 3k) ──────────────────────────────────────
@@ -5736,6 +5797,26 @@ function toContributor(row: Record<string, unknown>): Contributor | null {
  * Map one row of `HOME_RECENT_EVENTS` into an `Event`. Returns `null`
  * for malformed rows so callers can `.filter` them out.
  */
+function toAssetViewer(row: Record<string, unknown>): AssetViewer | null {
+  const viewerId = optString(row, 'viewerId');
+  if (viewerId === undefined || viewerId.length === 0) return null;
+  const parseMs = (k: string): number | null => {
+    const v = optString(row, k);
+    if (v === undefined) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const countRaw = row['count'];
+  return {
+    viewerId,
+    name: optString(row, 'name') ?? viewerId,
+    email: optString(row, 'email') ?? '',
+    firstAt: parseMs('firstAt'),
+    lastAt: parseMs('lastAt'),
+    count: typeof countRaw === 'number' ? countRaw : Number(countRaw ?? 0) || 0,
+  };
+}
+
 function toEvent(row: Record<string, unknown>): Event | null {
   const id = optString(row, 'id');
   const author = optString(row, 'author') ?? '';

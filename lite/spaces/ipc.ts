@@ -56,6 +56,7 @@ import type {
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
+  AssetViewer,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import { openWiserPlaybooksWindow } from '../wiser-playbooks-window.js';
@@ -80,6 +81,9 @@ export const SPACES_IPC = {
   ITEMS_REMOVE_TAG: 'lite:spaces:items:removeTag',
   /** Per-asset activity log (Phase 3c). */
   ITEMS_RECENT_COMMITS: 'lite:spaces:items:recentCommits',
+  /** Audit trail — record/read who viewed an asset. */
+  ITEMS_RECORD_VIEW: 'lite:spaces:items:recordView',
+  ITEMS_VIEWERS: 'lite:spaces:items:viewers',
   /** Phase 0.5: run the Q1-Q4 verification queries. */
   DISCOVERY_RUN: 'lite:spaces:discovery:run',
   /** Home view (chunk 3k + 3o). See `lite/spaces/HOME-V1.md`. */
@@ -521,6 +525,41 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           opts.since = payload?.since as number;
         }
         const value = await getSpacesApi().items.recentCommits(id, opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // Audit trail — fire-and-forget "viewed" write + the viewers read.
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_RECORD_VIEW,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const id =
+          payload !== undefined && typeof payload.id === 'string' ? payload.id : '';
+        if (id.length > 0) await getSpacesApi().items.recordView(id);
+        return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_VIEWERS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown }
+    ): Promise<SpacesIpcResult<AssetViewer[]>> => {
+      try {
+        const id =
+          payload !== undefined && typeof payload.id === 'string' ? payload.id : '';
+        const value = await getSpacesApi().items.viewers(id);
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

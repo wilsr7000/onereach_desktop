@@ -213,6 +213,7 @@ import type {
   DeleteAssetOpts,
   SearchItemsOpts,
   ItemMetadata,
+  AssetViewer,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
@@ -692,6 +693,13 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       // Activity log is small + scrolls in the detail rail; skip
       // caching so it always reflects the latest commit history.
       return client.itemRecentCommits(id, opts ?? {});
+    },
+    recordView(id: string): Promise<void> {
+      // Fire-and-forget audit write; never cached.
+      return client.recordAssetView(id);
+    },
+    viewers(id: string): Promise<AssetViewer[]> {
+      return client.getAssetViewers(id);
     },
     async create(input: CreateAssetInput): Promise<Item> {
       const result = await client.createAsset(input);

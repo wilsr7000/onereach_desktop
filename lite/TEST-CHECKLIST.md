@@ -258,6 +258,18 @@ shows the previous user's data; kill -9 + relaunch loses no persisted state.*
       playbook detail rail; absent on non-playbook kinds and on preloads
       without the bridge.
 
+### Asset view audit trail (2026-08-10 — who looked at what, when)
+- [ ] **Opening an asset records a view** — open an asset's detail
+      pane while signed in; a (:Person)-[:VIEWED]->(:Asset) edge is
+      written/updated in the graph (firstAt/lastAt/count).
+- [ ] **"Viewed by" shows in the detail pane** — the pane lists who
+      has viewed the asset, most-recent first, with a ×N count for
+      repeat views. Empty (nothing) when no one has viewed it yet.
+- [ ] **Deduped** — rapidly re-rendering the same asset does not
+      inflate the count (60s per-asset window).
+- [ ] **Signed-out / invisible = no write** — the write no-ops when
+      signed out ($viewerId='') or the asset isn't visible to you.
+
 ### Onboarding & config provenance (2026-08-10)
 - [ ] **Config source is visible** — Settings → OAGI shows "Config
       source": "Your OneReach account" when your KV has a record,

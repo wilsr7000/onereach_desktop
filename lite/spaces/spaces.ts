@@ -1725,6 +1725,28 @@ function eventsSignature(events: ReadonlyArray<RendererEvent> | null): string {
 /** Events signature currently reflected on screen. */
 let renderedEventsSignature = '';
 
+// ─── Asset view audit (2026-08-10) ─────────────────────────────────────
+// Record "who viewed what, when" to the graph on asset open, deduped so
+// a burst of re-renders is one view. window.lite.spaces.items.recordView
+// writes a (:Person)-[:VIEWED]->(:Asset) edge server-side.
+const RECORD_VIEW_DEDUPE_MS = 60_000;
+const recentlyRecordedViews = new Map<string, number>();
+function recordAssetViewOnce(itemId: string): void {
+  if (typeof itemId !== 'string' || itemId.length === 0) return;
+  const now = Date.now();
+  const last = recentlyRecordedViews.get(itemId) ?? 0;
+  if (now - last < RECORD_VIEW_DEDUPE_MS) return;
+  recentlyRecordedViews.set(itemId, now);
+  const record = window.lite?.spaces?.items?.recordView;
+  if (typeof record !== 'function') return;
+  void record(itemId).catch((err: unknown) => {
+    window.logging?.warn?.('spaces', 'recordView failed', {
+      itemId,
+      error: messageFrom(err),
+    });
+  });
+}
+
 async function loadItemDetail(itemId: string): Promise<void> {
   state.loadingDetail = true;
   state.activeItemId = itemId;
@@ -1757,11 +1779,17 @@ async function loadItemDetail(itemId: string): Promise<void> {
     if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
       void resolveAndInjectFileUrl(itemId, item);
     }
+    // Audit trail (2026-08-10): record who looked at this asset, when,
+    // in the graph. Deduped per asset within a short window so
+    // re-renders don't inflate the count; fire-and-forget, never blocks.
+    recordAssetViewOnce(itemId);
     // Phase 3c: per-asset activity log. Loads in the background and
     // populates the activity slot. Failures degrade silently — the
     // user still sees the asset; we don't surface a banner for a
     // missing-or-failing activity stream.
     void loadItemActivity(itemId);
+    // Audit trail: who has viewed this asset (2026-08-10).
+    void loadItemViewers(itemId);
     // ADR-057: version history, same lazy/soft-fail posture.
     void loadItemHistory(itemId);
   } catch (err) {
@@ -1797,6 +1825,72 @@ async function loadItemActivity(itemId: string): Promise<void> {
     window.logging?.warn?.('spaces', 'loadItemActivity failed', { error: messageFrom(err) });
     // Soft failure: activity slot stays empty.
   }
+}
+
+/**
+ * Load an asset's viewers (audit trail) into its detail-pane slot.
+ * Same lazy / soft-fail posture as the activity log — a missing or
+ * failing viewers stream just leaves the slot empty.
+ */
+async function loadItemViewers(itemId: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  const fn = bridge?.items?.viewers;
+  if (bridge === undefined || typeof fn !== 'function') return;
+  try {
+    const envelope = await fn(itemId);
+    if (envelope.ok === false) return;
+    if (state.activeItemId !== itemId) return;
+    const slot = document.querySelector<HTMLElement>(
+      `[data-viewers-slot="${cssEscape(itemId)}"]`
+    );
+    if (slot === null) return;
+    const rows = Array.isArray(envelope.value) ? (envelope.value as RendererAssetViewer[]) : [];
+    slot.replaceChildren(buildDetailViewers(rows));
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'loadItemViewers failed', { error: messageFrom(err) });
+  }
+}
+
+interface RendererAssetViewer {
+  viewerId: string;
+  name: string;
+  email: string;
+  firstAt: number | null;
+  lastAt: number | null;
+  count: number;
+}
+
+/** Render the "Viewed by" list. Empty input renders nothing. */
+export function buildDetailViewers(rows: ReadonlyArray<RendererAssetViewer>): HTMLElement {
+  const section = document.createElement('section');
+  section.className = 'spaces-detail-viewers';
+  if (rows.length === 0) return section; // nothing viewed yet → render empty
+
+  const heading = document.createElement('div');
+  heading.className = 'spaces-detail-viewers-heading';
+  heading.textContent = `Viewed by ${rows.length}`;
+  section.appendChild(heading);
+
+  const list = document.createElement('ul');
+  list.className = 'spaces-detail-viewers-list';
+  for (const v of rows.slice(0, 50)) {
+    const li = document.createElement('li');
+    li.className = 'spaces-detail-viewers-row';
+    const name = document.createElement('span');
+    name.className = 'spaces-detail-viewers-name';
+    name.textContent = v.name.length > 0 ? v.name : v.viewerId;
+    const when = document.createElement('span');
+    when.className = 'spaces-detail-viewers-when';
+    const last = typeof v.lastAt === 'number' ? new Date(v.lastAt) : null;
+    const whenText =
+      last !== null && !Number.isNaN(last.getTime()) ? last.toLocaleString() : '';
+    when.textContent =
+      v.count > 1 ? `${whenText} · ${v.count}×` : whenText;
+    li.append(name, when);
+    list.appendChild(li);
+  }
+  section.appendChild(list);
+  return section;
 }
 
 
@@ -8246,6 +8340,13 @@ export function buildDetailPane(
   activitySlot.className = 'spaces-detail-activity-slot';
   activitySlot.setAttribute('data-activity-slot', item.id);
   wrap.appendChild(activitySlot);
+
+  // ── Viewed-by slot (2026-08-10): who has looked at this asset, from
+  //    the graph audit trail. Empty until `loadItemViewers` fills it.
+  const viewersSlot = document.createElement('section');
+  viewersSlot.className = 'spaces-detail-viewers-slot';
+  viewersSlot.setAttribute('data-viewers-slot', item.id);
+  wrap.appendChild(viewersSlot);
 
   // ── History slot (ADR-057): version list, lazy-loaded. Empty (hidden)
   //    until the loader confirms the asset actually has snapshots.

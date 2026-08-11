@@ -72,3 +72,28 @@ describe('downloadFilenameForItem — safe, extension-bearing', () => {
     expect(/\.[a-z0-9]{1,8}$/i.test(name)).toBe(true);
   });
 });
+
+// ── Viewed-by list (asset audit trail, 2026-08-10) ───────────────────
+import { buildDetailViewers } from '../../spaces/spaces.js';
+
+describe('buildDetailViewers — the "Viewed by" list', () => {
+  it('renders nothing for zero viewers', () => {
+    const el = buildDetailViewers([]);
+    expect(el.querySelector('.spaces-detail-viewers-heading')).toBeNull();
+    expect(el.textContent).toBe('');
+  });
+
+  it('renders a heading with the count and one row per viewer', () => {
+    const el = buildDetailViewers([
+      { viewerId: 'u1', name: 'Ada', email: '', firstAt: 1000, lastAt: 2000, count: 3 },
+      { viewerId: 'u2', name: '', email: '', firstAt: null, lastAt: 5000, count: 1 },
+    ]);
+    expect(el.querySelector('.spaces-detail-viewers-heading')?.textContent).toBe('Viewed by 2');
+    const rows = el.querySelectorAll('.spaces-detail-viewers-row');
+    expect(rows.length).toBe(2);
+    // falls back to viewerId when name is empty
+    expect(rows[1]?.querySelector('.spaces-detail-viewers-name')?.textContent).toBe('u2');
+    // multi-view shows the count suffix
+    expect(rows[0]?.querySelector('.spaces-detail-viewers-when')?.textContent).toContain('3×');
+  });
+});

@@ -790,6 +790,8 @@ interface LiteSpacesItemsBridge {
     id: string,
     opts?: { limit?: number; since?: number }
   ): Promise<LiteSpacesIpcResult<LiteSpacesEventView[]>>;
+  recordView(id: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  viewers(id: string): Promise<LiteSpacesIpcResult<unknown[]>>;
   /**
    * Sprint 1 — create a new asset in a Space. Either `content`
    * (text body) or `fileKey` (already uploaded via files.upload)

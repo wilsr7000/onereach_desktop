@@ -646,6 +646,25 @@ export interface Event {
 }
 
 /**
+ * One viewer of an asset (audit trail, 2026-08-10). Backed by a
+ * (:Person)-[:VIEWED {firstAt,lastAt,count}]->(:Asset) edge.
+ */
+export interface AssetViewer {
+  /** The viewer's `:Person.id` (account id). */
+  viewerId: string;
+  /** Display name (name → displayName → email → id). */
+  name: string;
+  /** Email when known, else ''. */
+  email: string;
+  /** ms epoch of the first recorded view, or null. */
+  firstAt: number | null;
+  /** ms epoch of the most recent view, or null. */
+  lastAt: number | null;
+  /** Total recorded views by this person. */
+  count: number;
+}
+
+/**
  * One row in the "Agents in your account" card. Powers Card 3 of Home;
  * v1 surfaces a sample (the first N alphabetically) plus a "+ X more"
  * link to a modal listing all agents.

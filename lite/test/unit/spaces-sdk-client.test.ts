@@ -3881,3 +3881,48 @@ describe('ADR-060 addendum: HOME_RECENT_EVENTS space fallback', () => {
     expect(gate).toBeGreaterThan(q.indexOf('OPTIONAL MATCH (other:Space)'));
   });
 });
+
+describe('SdkSpacesClient — asset view audit trail (2026-08-10)', () => {
+  it('recordAssetView no-ops on empty id (no query)', async () => {
+    const stub = buildStubQuery();
+    const client = makeClient(stub);
+    await client.recordAssetView('');
+    expect(stub.calls.length).toBe(0);
+  });
+
+  it('recordAssetView writes the VIEWED edge (viewerId + nowMs injected by run)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MERGE (p)-[v:VIEWED]->(a)', [{ id: 'asset-1' }]);
+    const client = makeClient(stub);
+    await client.recordAssetView('asset-1');
+    const call = stub.calls[stub.calls.length - 1];
+    expect(call?.cypher).toContain('MERGE (p)-[v:VIEWED]->(a)');
+    expect(call?.cypher).toContain('ON CREATE SET v.firstAt = $nowMs');
+    expect(call?.cypher).toContain('coalesce(v.count, 0) + 1');
+    // id is bound; viewerId + nowMs are injected centrally by run().
+    expect(call?.parameters).toMatchObject({ id: 'asset-1' });
+    expect(call?.parameters).toHaveProperty('viewerId');
+    // $nowMs is injected by run() and interpolated in the query text.
+  });
+
+  it('getAssetViewers rejects empty id', async () => {
+    const client = makeClient(buildStubQuery());
+    await expect(client.getAssetViewers('')).rejects.toMatchObject({
+      code: 'SPACES_INVALID_INPUT',
+    });
+  });
+
+  it('getAssetViewers maps rows (string timestamps → numbers, count coerced)', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (a)<-[v:VIEWED]-(p:Person)', [
+      { viewerId: 'u1', name: 'Ada', email: 'ada@x', firstAt: '1000', lastAt: '2000', count: 3 },
+      { viewerId: 'u2', name: '', email: '', firstAt: null, lastAt: '5000', count: 1 },
+    ]);
+    const client = makeClient(stub);
+    const viewers = await client.getAssetViewers('asset-1');
+    expect(viewers).toEqual([
+      { viewerId: 'u1', name: 'Ada', email: 'ada@x', firstAt: 1000, lastAt: 2000, count: 3 },
+      { viewerId: 'u2', name: 'u2', email: '', firstAt: null, lastAt: 5000, count: 1 },
+    ]);
+  });
+});

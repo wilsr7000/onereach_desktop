@@ -83,6 +83,8 @@ const SPACES_ITEMS_UPDATE = 'lite:spaces:items:update';
 const SPACES_ITEMS_ADD_TAG = 'lite:spaces:items:addTag';
 const SPACES_ITEMS_REMOVE_TAG = 'lite:spaces:items:removeTag';
 const SPACES_ITEMS_RECENT_COMMITS = 'lite:spaces:items:recentCommits';
+const SPACES_ITEMS_RECORD_VIEW = 'lite:spaces:items:recordView';
+const SPACES_ITEMS_VIEWERS = 'lite:spaces:items:viewers';
 const SPACES_SET_SPACE_KIND = 'lite:spaces:setKind';
 const SPACES_PLAYBOOKS_CURRENT = 'lite:spaces:playbooks:current';
 const SPACES_PLAYBOOKS_SET = 'lite:spaces:playbooks:set';
@@ -610,6 +612,10 @@ interface SpacesItemsBridge {
     id: string,
     opts?: { limit?: number; since?: number }
   ): Promise<SpacesIpcResultView<unknown[]>>;
+  /** Audit trail — record that the viewer opened this asset. */
+  recordView(id: string): Promise<SpacesIpcResultView<{ ok: true }>>;
+  /** Audit trail — who has viewed this asset (most recent first). */
+  viewers(id: string): Promise<SpacesIpcResultView<unknown[]>>;
   create(input: {
     spaceId: string;
     title: string;
@@ -1662,6 +1668,14 @@ const spaces: SpacesBridge = {
         ...(opts?.limit !== undefined ? { limit: opts.limit } : {}),
         ...(opts?.since !== undefined ? { since: opts.since } : {}),
       }) as Promise<SpacesIpcResultView<unknown[]>>,
+    recordView: (id) =>
+      ipcRenderer.invoke(SPACES_ITEMS_RECORD_VIEW, { id }) as Promise<
+        SpacesIpcResultView<{ ok: true }>
+      >,
+    viewers: (id) =>
+      ipcRenderer.invoke(SPACES_ITEMS_VIEWERS, { id }) as Promise<
+        SpacesIpcResultView<unknown[]>
+      >,
     create: (input) =>
       ipcRenderer.invoke(SPACES_ITEMS_CREATE, { input }) as Promise<
         SpacesIpcResultView<unknown>

@@ -72,6 +72,7 @@ import type {
   ItemMetadata,
   AssetVersion,
   AssetVersionSummary,
+  AssetViewer,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -308,6 +309,15 @@ export interface SpacesItemsApi {
    *   crash on a freshly-deleted asset.
    */
   recentCommits(id: string, opts?: RecentCommitsOpts): Promise<Event[]>;
+
+  /**
+   * Audit trail (2026-08-10): record that the current viewer opened
+   * this asset (fire-and-forget graph write), and read who has viewed
+   * it. Backed by a (:Person)-[:VIEWED {firstAt,lastAt,count}]->(:Asset)
+   * edge, updated per view.
+   */
+  recordView(id: string): Promise<void>;
+  viewers(id: string): Promise<AssetViewer[]>;
 
   /**
    * Create a new asset (Sprint 1). Either `content` (text body) or
@@ -829,6 +839,12 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async recentCommits(_id: string, _opts?: RecentCommitsOpts): Promise<Event[]> {
       throw notInitialized('items.recentCommits');
+    },
+    async recordView(_id: string): Promise<void> {
+      throw notInitialized('items.recordView');
+    },
+    async viewers(_id: string): Promise<AssetViewer[]> {
+      throw notInitialized('items.viewers');
     },
     async create(_input: CreateAssetInput): Promise<Item> {
       throw notInitialized('items.create');
