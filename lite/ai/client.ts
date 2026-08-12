@@ -26,6 +26,13 @@ import type { SpaceAssistInput, SpaceAssistResult } from './types.js';
 const MAX_TOKENS = 2048;
 /** Upper bound on objectives we keep, regardless of what the model returns. */
 const MAX_OBJECTIVES = 5;
+
+/**
+ * Hard clamp for AI-drafted space descriptions — headroom under the
+ * server cap (MAX_SPACE_DESC_LENGTH = 3000 in lite/spaces/types.ts;
+ * pinned equal-or-below by test) so a drafted Space always saves.
+ */
+const AI_DESCRIPTION_MAX = 2800;
 const BODY_PREVIEW_CHARS = 200;
 
 /** Default host for minting the per-account FLOW token (matches KV). */
@@ -39,7 +46,7 @@ export const FLOW_TOKEN_BASE_URL = 'https://em.edison.api.onereach.ai';
 export const SPACE_ASSIST_SYSTEM_PROMPT = [
   'You are a workspace-setup assistant for Onereach.ai "Spaces" -- collaborative data rooms where people and AI agents organize work around a shared purpose.',
   'Given a short, possibly rough note about what a Space is for, produce:',
-  "- description: one or two clear, polished sentences stating the Space's purpose, in plain text (no markdown, no surrounding quotes).",
+  "- description: one or two clear, polished sentences stating the Space's purpose, in plain text (no markdown, no surrounding quotes). Never exceed 2500 characters.",
   '- objectives: 3 to 5 concise, high-level objectives. Each is a short imperative phrase (for example "Centralize vendor contracts"), with no numbering and no trailing punctuation.',
   'Respond with ONLY a JSON object of the form {"description": string, "objectives": string[]}. Do not include any prose, explanation, or markdown code fences.',
 ].join('\n');
@@ -403,9 +410,19 @@ export function validateSpaceAssistShape(value: unknown, provider: string): Spac
   }
   const obj = value as Record<string, unknown>;
 
-  const description = typeof obj['description'] === 'string' ? obj['description'].trim() : '';
+  let description = typeof obj['description'] === 'string' ? obj['description'].trim() : '';
   if (description.length === 0) {
     throw bad('The AI response was missing a description.');
+  }
+  // The model must never write more than the destination field can
+  // hold (2026-08-12 user rule). Space descriptions cap at
+  // MAX_SPACE_DESC_LENGTH (3000, lite/spaces/types.ts); clamp with
+  // headroom at a sentence boundary so an over-eager draft degrades
+  // to a clean cut instead of a downstream validation error.
+  if (description.length > AI_DESCRIPTION_MAX) {
+    const cut = description.slice(0, AI_DESCRIPTION_MAX);
+    const lastStop = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('.\n'));
+    description = lastStop > AI_DESCRIPTION_MAX * 0.6 ? cut.slice(0, lastStop + 1) : cut;
   }
 
   const rawObjectives = obj['objectives'];

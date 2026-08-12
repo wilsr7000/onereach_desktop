@@ -72,6 +72,14 @@ const HOME_SCOPE_ID = '__home__';
 /** Cache window for Home SDK responses. Per Q-Home-3 default (60s). */
 const HOME_CACHE_TTL_MS = 60_000;
 
+/**
+ * Space-objective length cap — MUST equal `MAX_SPACE_DESC_LENGTH` in
+ * lite/spaces/types.ts (the server-side validator). Pinned equal by a
+ * renderer test so the two can never drift. Raised 400 -> 3000
+ * (2026-08-12): real pasted briefs are longer than a tweet.
+ */
+export const SPACE_OBJECTIVE_MAX = 3000;
+
 // ─── Domain shapes ───────────────────────────────────────────────────────
 //
 // `LiteSpace`, `LiteSpaceChipRef`, `LiteSpaceItemSummary`, `LiteSpaceItem`
@@ -4941,13 +4949,24 @@ function enterSpaceObjectiveEdit(
   textarea.value = startingValue;
   textarea.placeholder =
     'What is this space for? (e.g. "Weekly UX research findings for the redesign.")';
-  textarea.rows = 2;
-  // The Cypher caps at MAX_SPACE_DESC_LENGTH server-side; mirror the
-  // client cap so the user gets immediate feedback rather than a
-  // round-trip error.
-  textarea.maxLength = 400;
+  // Room for a real pasted brief, not two cramped lines.
+  textarea.rows = 5;
+  // NO maxLength attribute: it silently truncated large pastes
+  // mid-sentence, which read as "it won't let me edit it" (2026-08-12
+  // bug report). Over-limit text stays intact in the editor; the live
+  // counter + the commit guard below give honest feedback instead.
   textarea.spellcheck = true;
   editor.appendChild(textarea);
+
+  const counter = document.createElement('span');
+  counter.className = 'spaces-view-header-objective-counter';
+  const renderCount = (): void => {
+    const len = textarea.value.trim().length;
+    counter.textContent = `${len.toLocaleString()} / ${SPACE_OBJECTIVE_MAX.toLocaleString()}`;
+    counter.style.color = len > SPACE_OBJECTIVE_MAX ? '#f87171' : '';
+  };
+  renderCount();
+  textarea.addEventListener('input', renderCount);
 
   const actions = document.createElement('div');
   actions.className = 'spaces-view-header-objective-actions';
@@ -4968,6 +4987,7 @@ function enterSpaceObjectiveEdit(
   hint.className = 'spaces-view-header-objective-hint';
   hint.textContent = '⌘↵ Save · Esc Cancel';
   actions.appendChild(hint);
+  actions.appendChild(counter);
 
   editor.appendChild(actions);
 
@@ -5003,8 +5023,10 @@ function enterSpaceObjectiveEdit(
       cancelEdit();
       return;
     }
-    if (next.length > 400) {
-      showToast('Objective is too long (max 400 chars).');
+    if (next.length > SPACE_OBJECTIVE_MAX) {
+      showToast(
+        `Objective is too long (${next.length.toLocaleString()} chars; max ${SPACE_OBJECTIVE_MAX.toLocaleString()}). Your text is untouched — trim and save again.`
+      );
       return;
     }
     const bridge = window.lite?.spaces;

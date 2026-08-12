@@ -599,7 +599,7 @@ export interface DeleteSpaceOpts {
 /** Max display-name length enforced client-side and in the Cypher pattern. */
 export const MAX_SPACE_NAME_LENGTH = 80 as const;
 /** Max description length enforced client-side. */
-export const MAX_SPACE_DESC_LENGTH = 400 as const;
+export const MAX_SPACE_DESC_LENGTH = 3000 as const;
 
 // ─── Home view (chunk 3k + 3o) ──────────────────────────────────────────
 //

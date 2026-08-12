@@ -1374,6 +1374,18 @@ describe('buildItemsToolbar', () => {
   });
 });
 
+// Drift-proofing: the renderer's objective editor and the server-side
+// validator must agree on the cap, or the un-editable-description trap
+// (2026-08-12) comes back.
+import { SPACE_OBJECTIVE_MAX } from '../../spaces/spaces.js';
+import { MAX_SPACE_DESC_LENGTH } from '../../spaces/types.js';
+
+describe('space objective cap drift-proofing', () => {
+  it('renderer editor cap === server validator cap', () => {
+    expect(SPACE_OBJECTIVE_MAX).toBe(MAX_SPACE_DESC_LENGTH);
+  });
+});
+
 describe('sortSpaces', () => {
   const fixture = [
     { id: 'a', name: 'Engineering', updatedAt: '2026-01-05T00:00:00Z' },

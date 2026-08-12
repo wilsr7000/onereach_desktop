@@ -1893,7 +1893,7 @@ describe('SdkSpacesClient.updateSpace', () => {
   it('rejects oversized description with SPACES_INVALID_INPUT (client-side)', async () => {
     const stub = buildStubQuery();
     const client = makeClient(stub);
-    const tooLong = 'x'.repeat(500);
+    const tooLong = 'x'.repeat(3001);
     await expect(
       client.updateSpace('sp-1', { description: tooLong })
     ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
@@ -4023,5 +4023,25 @@ describe('LIST_LIVE_MEETINGS — space context (2026-08-12)', () => {
     const rows = await client.listLiveMeetings();
     expect(rows[0]?.spaceName).toBe('Design');
     expect(rows[1]?.spaceName).toBeNull();
+  });
+});
+
+// ─── Space description cap (2026-08-12: 400 → 3000) ─────────────────────
+//
+// A real pasted brief is longer than a tweet. The renderer's editor
+// constant must equal this server cap (no silent-truncate maxLength —
+// that read as "it won't let me edit it"), and the AI drafter clamps
+// below it so a drafted Space always saves.
+describe('space description cap', () => {
+  it('accepts 3000 chars and rejects 3001 with the honest error', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (s:Space {id: $id})', [
+      { id: 'sp-1', name: 'S', description: 'x'.repeat(3000), createdAt: '', updatedAt: '' },
+    ]);
+    const client = makeClient(stub);
+    await client.updateSpace('sp-1', { description: 'x'.repeat(3000) });
+    await expect(
+      client.updateSpace('sp-1', { description: 'x'.repeat(3001) })
+    ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
   });
 });

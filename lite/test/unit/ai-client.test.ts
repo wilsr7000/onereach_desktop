@@ -434,3 +434,26 @@ describe('makeClaudeMessageCreator is time-bounded (source + constants)', () => 
     expect(src).toMatch(/withClaudeDeadline\(\s*client\.messages\.create/);
   });
 });
+
+// ─── 2026-08-12: the AI must never write more than the field holds ──────
+describe('AI description clamp', () => {
+  it('clamps an over-long drafted description below the space cap, at a sentence boundary when possible', () => {
+    const sentence = 'This is a complete sentence about the space. ';
+    const long = sentence.repeat(120); // ~5400 chars
+    const result = parseSpaceAssistResult(
+      JSON.stringify({ description: long, objectives: ['a'] }),
+      'claude'
+    );
+    expect(result.description.length).toBeLessThanOrEqual(2800);
+    // Sentence-boundary cut: ends with a period, not mid-word.
+    expect(result.description.endsWith('.')).toBe(true);
+  });
+
+  it('leaves normal-length descriptions untouched', () => {
+    const result = parseSpaceAssistResult(
+      JSON.stringify({ description: 'Short and sweet.', objectives: ['a'] }),
+      'claude'
+    );
+    expect(result.description).toBe('Short and sweet.');
+  });
+});

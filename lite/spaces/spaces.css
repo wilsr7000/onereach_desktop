@@ -606,6 +606,14 @@ body {
   letter-spacing: 0.2px;
 }
 
+.spaces-view-header-objective-counter {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--spaces-muted, #8b8e9c);
+  font-variant-numeric: tabular-nums;
+}
+
+
 /* Actions row: search + + New + Refresh. Right-aligned, wraps to a
  * second line on narrow widths so buttons stay legible. */
 .spaces-view-header-actions {
