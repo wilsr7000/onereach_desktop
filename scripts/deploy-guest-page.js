@@ -30,7 +30,7 @@ app.setPath('userData', path.join(app.getPath('appData'), APP_NAME));
 
 const { getSettingsManager } = require('../settings-manager');
 const { getGSXFileSync } = require('../gsx-file-sync');
-const { buildGuestPageHTML, GUEST_PAGE_VERSION } = require('../lib/capture-guest-page');
+const { buildGuestPageHTML, GUEST_PAGE_VERSION } = require('../lib/meeting/capture-guest-page');
 const { _reconcileGsxAccount: reconcileGsxAccount } = require('../recorder');
 
 const FILES_BASE = 'https://files.edison.api.onereach.ai/public';

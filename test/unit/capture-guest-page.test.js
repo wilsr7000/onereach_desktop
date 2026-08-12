@@ -24,7 +24,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-const { buildGuestPageHTML, GUEST_PAGE_VERSION } = require('../../lib/capture-guest-page');
+const { buildGuestPageHTML, GUEST_PAGE_VERSION } = require('../../lib/meeting/capture-guest-page');
 
 // Pull every <script>...</script> body out of an HTML string. Handles both
 // classic and type="module" scripts. Skips src="..."-only scripts because

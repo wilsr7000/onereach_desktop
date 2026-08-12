@@ -22,7 +22,7 @@
 
 const { test, expect } = require('@playwright/test');
 const path = require('path');
-const { buildGuestPageHTML } = require('../../lib/capture-guest-page');
+const { buildGuestPageHTML } = require('../../lib/meeting/capture-guest-page');
 
 const SHOT_DIR = path.join(__dirname, '../../test-results/screenshare');
 

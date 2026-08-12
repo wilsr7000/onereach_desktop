@@ -60,7 +60,7 @@ global.settingsManager = {
   set: (key, value) => mockSettings.set(key, value),
 };
 
-const livekit = require('../../lib/livekit-service');
+const livekit = require('../../lib/meeting/livekit-service');
 livekit._setAuthTokenProviderForTests(() => mintMocks.authToken);
 
 function seedLocalCreds() {

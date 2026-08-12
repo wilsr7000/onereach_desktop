@@ -22,7 +22,7 @@ const {
   toICS,
   toSpaceItem,
   fromSpaceItem,
-} = require('../../lib/meeting-schema');
+} = require('../../lib/meeting/meeting-schema');
 
 const {
   BUILT_IN_TEMPLATES,
@@ -33,7 +33,7 @@ const {
   customTemplateToSpaceItem,
   customTemplateFromSpaceItem,
   mergeTemplates,
-} = require('../../lib/meeting-templates');
+} = require('../../lib/meeting/meeting-templates');
 
 // ─── Meeting Object Creation ───────────────────────────────────────────────────
 

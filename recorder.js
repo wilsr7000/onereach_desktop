@@ -665,8 +665,8 @@ class Recorder {
 
     ipcMain.handle('recorder:create-meeting', async (event, { spaceId, templateId, options }) => {
       try {
-        const { createFromTemplate, createMeetingObject, toSpaceItem, validate } = require('./lib/meeting-schema');
-        const { getTemplate } = require('./lib/meeting-templates');
+        const { createFromTemplate, createMeetingObject, toSpaceItem, validate } = require('./lib/meeting/meeting-schema');
+        const { getTemplate } = require('./lib/meeting/meeting-templates');
 
         let meeting;
         if (templateId) {
@@ -701,7 +701,7 @@ class Recorder {
       try {
         const { getSpacesAPI } = require('./spaces-api');
         const api = getSpacesAPI();
-        const { fromSpaceItem } = require('./lib/meeting-schema');
+        const { fromSpaceItem } = require('./lib/meeting/meeting-schema');
 
         const items = await api.items.list(spaceId, {
           tags: ['wiser-meeting'],
@@ -746,7 +746,7 @@ class Recorder {
 
     ipcMain.handle('recorder:get-templates', async (event, { spaceId } = {}) => {
       try {
-        const { getAllTemplates, mergeTemplates } = require('./lib/meeting-templates');
+        const { getAllTemplates, mergeTemplates } = require('./lib/meeting/meeting-templates');
 
         let customTemplates = [];
         let suggestedIds = [];
@@ -758,7 +758,7 @@ class Recorder {
 
           // Load custom templates from this space
           try {
-            const { customTemplateFromSpaceItem } = require('./lib/meeting-templates');
+            const { customTemplateFromSpaceItem } = require('./lib/meeting/meeting-templates');
             const tplItems = await api.items.list(spaceId, {
               tags: ['wiser-template'],
               includeContent: true,
@@ -785,7 +785,7 @@ class Recorder {
             const pastTemplateIds = [];
             for (const mi of meetingItems) {
               try {
-                const { fromSpaceItem } = require('./lib/meeting-schema');
+                const { fromSpaceItem } = require('./lib/meeting/meeting-schema');
                 const m = fromSpaceItem(mi);
                 if (m?.templateId) pastTemplateIds.push(m.templateId);
                 if (m?.contacts) {
@@ -849,7 +849,7 @@ class Recorder {
       try {
         const { getSpacesAPI } = require('./spaces-api');
         const api = getSpacesAPI();
-        const { fromSpaceItem, completeMeeting } = require('./lib/meeting-schema');
+        const { fromSpaceItem, completeMeeting } = require('./lib/meeting/meeting-schema');
 
         const item = await api.items.get(spaceId, itemId);
         if (!item) {
@@ -880,7 +880,7 @@ class Recorder {
         // contract: the bridge never throws, and a graph outage must
         // never block meeting completion.
         try {
-          const { pushMeetingToSharedGraph } = require('./lib/meeting-graph-bridge');
+          const { pushMeetingToSharedGraph } = require('./lib/meeting/meeting-graph-bridge');
           let transcriptText = (meeting.during?.transcript?.live || []).join('\n');
           if (!transcriptText && meeting.post?.transcriptItemId) {
             try {
@@ -910,7 +910,7 @@ class Recorder {
       try {
         const { getSpacesAPI } = require('./spaces-api');
         const api = getSpacesAPI();
-        const { fromSpaceItem } = require('./lib/meeting-schema');
+        const { fromSpaceItem } = require('./lib/meeting/meeting-schema');
 
         const item = await api.items.get(spaceId, itemId);
         if (!item) return { success: false, error: 'Meeting not found' };
@@ -982,7 +982,7 @@ Respond with JSON:
           // action items / decisions exist; every bridge write is an
           // id-keyed MERGE, so this only enriches the same nodes.
           try {
-            const { pushMeetingToSharedGraph } = require('./lib/meeting-graph-bridge');
+            const { pushMeetingToSharedGraph } = require('./lib/meeting/meeting-graph-bridge');
             void pushMeetingToSharedGraph({
               meeting,
               transcriptText: fullTranscript,
@@ -1009,7 +1009,7 @@ Respond with JSON:
 
     ipcMain.handle('recorder:save-custom-template', async (event, { spaceId, meeting, name, description, scope }) => {
       try {
-        const { createCustomTemplate, customTemplateToSpaceItem } = require('./lib/meeting-templates');
+        const { createCustomTemplate, customTemplateToSpaceItem } = require('./lib/meeting/meeting-templates');
 
         const template = createCustomTemplate({ meeting, name, description, scope });
         const spaceItem = customTemplateToSpaceItem(template, spaceId);
@@ -1273,7 +1273,7 @@ Respond with JSON:
     // Host: create a LiveKit room and generate tokens
     ipcMain.handle('recorder:livekit-create-room', async (event, roomName) => {
       try {
-        const livekitService = require('./lib/livekit-service');
+        const livekitService = require('./lib/meeting/livekit-service');
         const result = await livekitService.createRoom(roomName);
 
         // Resize window wider for split-view
@@ -1313,7 +1313,7 @@ Respond with JSON:
     // AND it was published to the currently signed-in GSX account)
     ipcMain.handle('recorder:get-guest-page-url', async () => {
       try {
-        const { GUEST_PAGE_VERSION } = require('./lib/capture-guest-page');
+        const { GUEST_PAGE_VERSION } = require('./lib/meeting/capture-guest-page');
         const url = global.settingsManager?.get('captureGuestPageUrl') || '';
         const storedVersion = global.settingsManager?.get('captureGuestPageVersion') || 0;
         if (url && storedVersion >= GUEST_PAGE_VERSION) {
@@ -1378,7 +1378,7 @@ Respond with JSON:
         }
 
         // 2. Build static HTML with KV endpoint embedded
-        const { buildGuestPageHTML } = require('./lib/capture-guest-page');
+        const { buildGuestPageHTML } = require('./lib/meeting/capture-guest-page');
         const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
         const html = buildGuestPageHTML({ kvUrl });
 
@@ -1413,7 +1413,7 @@ Respond with JSON:
         const filesBase = 'https://files.edison.api.onereach.ai/public';
         const publicUrl = `${filesBase}/${accountId}/${remoteDir}/join.html`;
         settings.set('captureGuestPageUrl', publicUrl);
-        const { GUEST_PAGE_VERSION } = require('./lib/capture-guest-page');
+        const { GUEST_PAGE_VERSION } = require('./lib/meeting/capture-guest-page');
         settings.set('captureGuestPageVersion', GUEST_PAGE_VERSION);
 
         log.info('recorder', 'Guest page published to GSX Files', { publicUrl, version: GUEST_PAGE_VERSION });
@@ -1461,7 +1461,7 @@ Respond with JSON:
         const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
 
-        const linkKeys = require('./lib/meeting-link-keys');
+        const linkKeys = require('./lib/meeting/meeting-link-keys');
         const payload = JSON.stringify({
           v: 2,
           roomName,
@@ -1498,7 +1498,7 @@ Respond with JSON:
     // Safe to hand out: holders can verify payloads, never forge them.
     ipcMain.handle('recorder:get-meeting-link-key', async () => {
       try {
-        const joinKey = await require('./lib/meeting-link-keys').getPublicKeyB64u();
+        const joinKey = await require('./lib/meeting/meeting-link-keys').getPublicKeyB64u();
         return { success: true, joinKey };
       } catch (error) {
         log.error('recorder', 'Failed to get meeting link key', { error: error.message });

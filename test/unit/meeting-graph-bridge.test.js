@@ -14,7 +14,7 @@ import {
   MEETINGS_SPACE,
   SHARED_GRAPH,
   MAX_TRANSCRIPT_CHARS,
-} from '../../lib/meeting-graph-bridge.js';
+} from '../../lib/meeting/meeting-graph-bridge.js';
 
 /** Capture every proxy POST; script per-call responses by cypher substring. */
 function buildFetchStub(responders = []) {

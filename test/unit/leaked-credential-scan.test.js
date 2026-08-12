@@ -2,7 +2,7 @@
  * Leaked-credential containment scan
  *
  * A LiveKit Cloud API key + secret has shipped hardcoded in
- * lib/livekit-service.js, so the pair must be treated as public. By
+ * lib/meeting/livekit-service.js, so the pair must be treated as public. By
  * explicit decision (2026-06-10) it is RETAINED there as the
  * legacy-shared fallback so meeting hosting keeps working with zero
  * configuration until the credential is rotated
@@ -37,7 +37,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../');
 
 // The single place the legacy pair is allowed to live (empty this after rotation).
-const ALLOWED_FILES = new Set(['lib/livekit-service.js']);
+const ALLOWED_FILES = new Set(['lib/meeting/livekit-service.js']);
 
 // Assembled from halves: the scan must find these only as whole literals.
 const LEAKED_API_KEY = 'APIMtjf' + 'Tgxua3e8';
@@ -114,7 +114,7 @@ describe('leaked LiveKit credential containment', () => {
   });
 
   it('the sanctioned site is labeled as the legacy fallback and documented', () => {
-    const source = contents.get('lib/livekit-service.js');
+    const source = contents.get('lib/meeting/livekit-service.js');
     expect(source).toBeTruthy();
     if (!source.includes(LEAKED_API_KEY)) {
       // Post-rotation state: pair removed. ALLOWED_FILES should be emptied

@@ -28,8 +28,8 @@ const { test, expect, chromium } = require('@playwright/test');
 const path = require('path');
 const http = require('http');
 const { AccessToken } = require('livekit-server-sdk');
-const livekitService = require('../../lib/livekit-service');
-const { buildGuestPageHTML } = require('../../lib/capture-guest-page');
+const livekitService = require('../../lib/meeting/livekit-service');
+const { buildGuestPageHTML } = require('../../lib/meeting/capture-guest-page');
 
 const LOCAL_UMD = path.join(__dirname, '../../node_modules/livekit-client/dist/livekit-client.umd.js');
 

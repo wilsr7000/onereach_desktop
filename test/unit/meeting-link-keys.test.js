@@ -33,7 +33,7 @@ global.settingsManager = {
 // The module caches the keypair in module scope; resetKeyPair() is the
 // public way to drop both the cache and the persisted record, so tests
 // use it for isolation instead of relying on module-registry resets.
-const keys = require('../../lib/meeting-link-keys');
+const keys = require('../../lib/meeting/meeting-link-keys');
 
 const fromB64u = (s) => Uint8Array.from(Buffer.from(s, 'base64url'));
 

@@ -23,7 +23,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 const { JSDOM } = require('jsdom');
 
-const { buildGuestPageHTML } = require('../../lib/capture-guest-page');
+const { buildGuestPageHTML } = require('../../lib/meeting/capture-guest-page');
 
 // Same extractor the sibling suite uses: pull inline <script> bodies.
 function extractInlineScripts(html) {
