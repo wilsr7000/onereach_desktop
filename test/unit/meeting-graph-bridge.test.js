@@ -216,3 +216,66 @@ describe('resilience contract', () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+// ─── ADR-062: the meeting ring signal ────────────────────────────────────
+
+import {
+  announceMeetingLive,
+  endMeetingLive,
+  prettyRoomTitle,
+} from '../../lib/meeting/meeting-graph-bridge.js';
+
+describe('ADR-062 ring signal', () => {
+  it('announce MERGEs an ephemeral :MeetingLive (no :Asset, no membership) and sweeps stale ones', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const r = await announceMeetingLive({
+      roomName: 'weekly-sync-a1b2c3',
+      joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
+      host: 'Robb',
+      fetchImpl,
+      nowMs: NOW,
+    });
+    expect(r.ok).toBe(true);
+    const call = calls.find((c) => c.body.cypher.includes('MERGE (m:MeetingLive'));
+    expect(call).toBeDefined();
+    const q = call.body.cypher;
+    expect(q).not.toContain(':Asset');
+    expect(q).not.toContain('BELONGS_TO');
+    expect(q).toContain('m.startedAt = coalesce(m.startedAt, $nowMs)');
+    expect(q).toContain('DETACH DELETE old');
+    expect(call.body.parameters).toMatchObject({
+      id: 'live_weekly-sync-a1b2c3',
+      title: 'Weekly Sync',
+      host: 'Robb',
+    });
+  });
+
+  it('re-announcing preserves startedAt semantics via coalesce (idempotent MERGE on id)', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await announceMeetingLive({ roomName: 'r-1', fetchImpl, nowMs: NOW });
+    await announceMeetingLive({ roomName: 'r-1', fetchImpl, nowMs: NOW + 1000 });
+    const merges = calls.filter((c) => c.body.cypher.includes('MERGE (m:MeetingLive'));
+    expect(merges).toHaveLength(2);
+    expect(merges[0].body.parameters['id']).toBe(merges[1].body.parameters['id']);
+  });
+
+  it('end deletes the signal; both paths never throw on outage', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const r = await endMeetingLive('weekly-sync-a1b2c3', { fetchImpl });
+    expect(r.ok).toBe(true);
+    const del = calls.find((c) => c.body.cypher.includes('DETACH DELETE m'));
+    expect(del?.body.parameters).toMatchObject({ id: 'live_weekly-sync-a1b2c3' });
+    const failing = async () => {
+      throw new Error('down');
+    };
+    expect((await announceMeetingLive({ roomName: 'x', fetchImpl: failing })).ok).toBe(false);
+    expect((await endMeetingLive('x', { fetchImpl: failing })).ok).toBe(false);
+  });
+
+  it('prettyRoomTitle strips the space-hash salt and title-cases', () => {
+    expect(prettyRoomTitle('weekly-sync-a1b2c3')).toBe('Weekly Sync');
+    expect(prettyRoomTitle('design_review-9f8e7d6c')).toBe('Design Review');
+    expect(prettyRoomTitle('')).toBe('Meeting');
+    expect(prettyRoomTitle(undefined)).toBe('Meeting');
+  });
+});

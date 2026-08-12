@@ -1276,6 +1276,35 @@ Respond with JSON:
         const livekitService = require('./lib/meeting/livekit-service');
         const result = await livekitService.createRoom(roomName);
 
+        // ADR-062 — announce the live meeting as an ephemeral ring
+        // signal in the shared graph so Lite clients ring with a Join
+        // link. Fire-and-forget: a graph outage must never block the
+        // room. The join URL is composed main-side from the published
+        // guest page + this install's link-signing public key — the
+        // same pieces the renderer's "copy room link" uses.
+        void (async () => {
+          try {
+            const bridge = require('./lib/meeting/meeting-graph-bridge');
+            const guestUrl = global.settingsManager?.get('captureGuestPageUrl') || '';
+            let joinUrl = null;
+            if (guestUrl) {
+              const { getPublicKeyB64u } = require('./lib/meeting/meeting-link-keys');
+              const pub = await getPublicKeyB64u().catch(() => null);
+              joinUrl = `${guestUrl}?room=${encodeURIComponent(roomName)}${pub ? `#k=${pub}` : ''}`;
+            }
+            this._lastLiveRoomName = roomName;
+            await bridge.announceMeetingLive({
+              roomName,
+              joinUrl,
+              title: bridge.prettyRoomTitle(roomName),
+              host: global.settingsManager?.get('userDisplayName') || null,
+              log,
+            });
+          } catch (ringError) {
+            log.warn('recorder', 'meeting ring announce unavailable', { error: ringError.message });
+          }
+        })();
+
         // Resize window wider for split-view
         if (this.window) {
           const [width, height] = this.window.getSize();
@@ -1294,6 +1323,18 @@ Respond with JSON:
     // End session (window resize only -- LiveKit cleanup happens client-side)
     ipcMain.handle('recorder:session-end', async () => {
       try {
+        // ADR-062 — tear the ring signal down eagerly (TTL is the
+        // backstop for crashed hosts). Fire-and-forget.
+        if (this._lastLiveRoomName) {
+          const room = this._lastLiveRoomName;
+          this._lastLiveRoomName = null;
+          try {
+            const { endMeetingLive } = require('./lib/meeting/meeting-graph-bridge');
+            void endMeetingLive(room, { log });
+          } catch (ringError) {
+            log.warn('recorder', 'meeting ring teardown unavailable', { error: ringError.message });
+          }
+        }
         // Resize window back to normal
         if (this.window) {
           this.window.setSize(800, 700, true);
