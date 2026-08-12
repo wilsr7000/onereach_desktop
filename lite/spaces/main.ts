@@ -297,6 +297,7 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
           htmlPath: initOptions.htmlPath,
           preloadPath: initOptions.preloadPath,
         });
+        presenceBeat({ tool: 'spaces' });
         log.info('spaces window opened', {});
       } catch (err) {
         log.error('failed to open spaces window', { error: (err as Error).message });
@@ -326,6 +327,7 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
     // (zero new timers) + window focus (instant when the user arrives).
     ringCacheUnsubscribe = activeCache.onUpdate(() => {
       void checkLiveMeetings(activeClient, 'cache-refresh');
+      presenceBeat();
     });
     ringFocusHandler = (): void => {
       void checkLiveMeetings(activeClient, 'focus');
@@ -609,12 +611,131 @@ async function joinLiveMeeting(meeting: LiveMeeting): Promise<void> {
       url: meeting.joinUrl,
       label: label.slice(0, 48),
     });
+    presenceBeat({
+      tool: 'meeting',
+      meetingRoom: meeting.id.replace(/^live_/, ''),
+      lastAction: `opened meeting “${title.slice(0, 60)}”`,
+    });
   } catch (err) {
     log.warn('spaces', 'ring join failed', {
       id: meeting.id,
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+// ─── ADR-064: presence beacon ────────────────────────────────────────────
+//
+// Lite announces "robb is in Lite, doing X" to the shared graph so the
+// main app's Live Activity page can show it. Same doctrine as the
+// ring: no new timers (heartbeats ride the cache-refresh stream),
+// identity is the session email or nothing, writes never throw, the
+// graph holds only the TTL'd now-snapshot + a pointer — the temporal
+// trail appends to the shared KV log (`presence:logs`).
+
+const PRESENCE_APP_ID = 'onereach-lite';
+const PRESENCE_APP_NAME = 'Onereach.ai Lite';
+const PRESENCE_HEARTBEAT_MIN_MS = 60_000;
+const PRESENCE_LOG_COLLECTION = 'presence:logs';
+const PRESENCE_LOG_MAX_ENTRIES = 200;
+const PRESENCE_LOG_MAX_AGE_MS = 24 * 60 * 60_000;
+let lastPresenceBeatMs = 0;
+
+/** Same MERGE contract as lib/presence-beacon.js (pinned by its tests). */
+const PRESENCE_BEAT_CYPHER = `
+    MERGE (pr:Presence {id: $id})
+    ON CREATE SET pr.startedAt = $nowMs
+    SET pr.personId = $personId,
+        pr.appId = $appId,
+        pr.appName = $appName,
+        pr.kv_collection = $kvCollection,
+        pr.kv_ref = $kvRef,
+        pr.lastSeenAt = $nowMs
+    SET pr += $facets
+    WITH pr
+    MERGE (p:Person {id: $personId})
+    MERGE (pr)-[:PRESENCE_OF]->(p)
+    WITH pr
+    OPTIONAL MATCH (stale:Presence)
+      WHERE stale.id <> pr.id
+        AND coalesce(stale.lastSeenAt, 0) < $nowMs - $sweepMs
+    DETACH DELETE stale
+    RETURN pr.id AS id`;
+
+function presenceIdentity(): string | null {
+  try {
+    const session = getAuthApi().getSession('edison');
+    if (session === null) return null;
+    // Same identity convention as ADR-051 viewerId: session email,
+    // else accountId (some sign-in flows never put an email in the
+    // cookie — verified live on this install; the view-audit already
+    // MERGEs Persons under this exact convention).
+    const email = typeof session.email === 'string' ? session.email.trim() : '';
+    if (email.length > 0) return email;
+    return typeof session.accountId === 'string' && session.accountId.length > 0
+      ? session.accountId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fire one presence beat. `facets` keys merge onto the node (null
+ * clears); meaningful beats also append to the temporal KV log.
+ */
+function presenceBeat(facets: Record<string, string | null> = {}): void {
+  void (async (): Promise<void> => {
+    try {
+      const personId = presenceIdentity();
+      if (personId === null) return;
+      const nowMs = Date.now();
+      const meaningful = Object.keys(facets).length > 0;
+      if (!meaningful && nowMs - lastPresenceBeatMs < PRESENCE_HEARTBEAT_MIN_MS) return;
+      lastPresenceBeatMs = nowMs;
+      const kvRef = `log:${personId}_${PRESENCE_APP_ID}`;
+      const stamped: Record<string, string | number | null> = { ...facets };
+      if (typeof stamped['lastAction'] === 'string') stamped['lastActionAt'] = nowMs;
+      await getNeonApi().query(PRESENCE_BEAT_CYPHER, {
+        id: `presence_${personId}_${PRESENCE_APP_ID}`,
+        personId,
+        appId: PRESENCE_APP_ID,
+        appName: PRESENCE_APP_NAME,
+        kvCollection: PRESENCE_LOG_COLLECTION,
+        kvRef,
+        facets: stamped,
+        nowMs,
+        sweepMs: 24 * 60 * 60_000,
+      });
+      if (meaningful) {
+        try {
+          const kv = getKVApi();
+          const existing = (await kv.get(PRESENCE_LOG_COLLECTION, kvRef)) as {
+            entries?: Array<{ at: number }>;
+          } | null;
+          const entries = Array.isArray(existing?.entries) ? existing.entries : [];
+          entries.push({ at: nowMs, ...stamped } as { at: number });
+          const cutoff = nowMs - PRESENCE_LOG_MAX_AGE_MS;
+          const pruned = entries
+            .filter((e) => e !== null && typeof e === 'object' && typeof e.at === 'number' && e.at >= cutoff)
+            .slice(-PRESENCE_LOG_MAX_ENTRIES);
+          await kv.set(PRESENCE_LOG_COLLECTION, kvRef, {
+            personId,
+            appId: PRESENCE_APP_ID,
+            entries: pruned,
+          });
+        } catch {
+          /* the trail is garnish on garnish */
+        }
+      }
+    } catch (err) {
+      // Presence never breaks the app — but a broken beat must be
+      // VISIBLE in logs (a silent catch cost a debug round on day one).
+      getLoggingApi().warn('spaces', 'presence beat failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  })();
 }
 
 const QUIET_READ_SPANS = new Set<string>([
@@ -812,6 +933,7 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       if (beforeForDiff !== null) {
         void annotateVersionDiff(client, id, beforeForDiff, result);
       }
+      presenceBeat({ lastAction: `edited “${result.title.slice(0, 80)}”` });
       return result;
     },
     async addTag(id: string, tag: string): Promise<string[]> {
@@ -839,6 +961,7 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     async create(input: CreateAssetInput): Promise<Item> {
       const result = await client.createAsset(input);
       nukeReadCache();
+      presenceBeat({ lastAction: `added “${result.title.slice(0, 80)}”` });
       return result;
     },
     async createBinary(input: CreateBinaryAssetInput): Promise<Item> {
