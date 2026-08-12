@@ -1298,6 +1298,8 @@ Respond with JSON:
               joinUrl,
               title: bridge.prettyRoomTitle(roomName),
               host: global.settingsManager?.get('userDisplayName') || null,
+              // Lets ring surfaces (Lite tab label) lead with the space.
+              spaceId: this.targetSpace || null,
               log,
             });
           } catch (ringError) {
@@ -1474,6 +1476,77 @@ Respond with JSON:
     // payloads that verify against the public key carried in the join link
     // (#k=...). An attacker overwriting the KV entry can deny a join, but
     // can no longer redirect guests' camera/mic streams to their own SFU.
+    /**
+     * Build, sign, and PUT the wiser-room KV payload. `expiresAt` must
+     * stay the ORIGINAL value across roster republishes — the roster
+     * must never extend a meeting link's life. Returns the joinKey.
+     */
+    this._writeSignedRoomPayload = async ({ kvUrl, roomName, guestTokens, livekitUrl, expiresAt, participants }) => {
+      const linkKeys = require('./lib/meeting/meeting-link-keys');
+      const key = `wiser-room:${roomName}`;
+      const payload = JSON.stringify({
+        v: 2,
+        roomName,
+        tokens: guestTokens,
+        livekitUrl,
+        issuedAt: Date.now(),
+        // Guest page must refuse rooms whose host is long gone
+        expiresAt,
+        // Lobby roster (v17): who is in the room right now, names only.
+        participants: Array.isArray(participants)
+          ? participants.map((n) => String(n).slice(0, 60)).slice(0, 24)
+          : [],
+      });
+      const sig = await linkKeys.signPayload(payload);
+      const joinKey = await linkKeys.getPublicKeyB64u();
+      const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: KV_COLLECTION,
+          key,
+          itemValue: JSON.stringify({ v: 2, payload, sig }),
+        }),
+      });
+      if (!resp.ok) throw new Error(`KV PUT failed: ${resp.status}`);
+      return joinKey;
+    };
+
+    /** roomName -> interval handle for the roster republish loop. */
+    this._rosterLoops = this._rosterLoops || new Map();
+
+    this._stopRosterRepublish = (roomName) => {
+      const t = this._rosterLoops.get(roomName);
+      if (t) { clearInterval(t); this._rosterLoops.delete(roomName); }
+    };
+
+    this._startRosterRepublish = ({ kvUrl, roomName, guestTokens, livekitUrl, expiresAt }) => {
+      this._stopRosterRepublish(roomName);
+      let lastRoster = '';
+      const timer = setInterval(() => {
+        void (async () => {
+          try {
+            if (Date.now() > expiresAt) { this._stopRosterRepublish(roomName); return; }
+            const livekitService = require('./lib/meeting/livekit-service');
+            const parts = await livekitService.listParticipants(roomName);
+            if (parts === null) return; // quiet skip — roster is garnish
+            const names = parts.map((p) => p.name || p.identity).filter((n) => n.length > 0);
+            const fingerprint = names.slice().sort().join('|');
+            if (fingerprint === lastRoster) return; // no churn, no rewrite
+            lastRoster = fingerprint;
+            await this._writeSignedRoomPayload({
+              kvUrl, roomName, guestTokens, livekitUrl, expiresAt, participants: names,
+            });
+            log.info('recorder', 'Roster republished to KV', { roomName, count: names.length });
+          } catch (err) {
+            log.warn('recorder', 'Roster republish skipped', { roomName, error: err.message });
+          }
+        })();
+      }, 8000);
+      if (typeof timer.unref === 'function') timer.unref();
+      this._rosterLoops.set(roomName, timer);
+    };
+
     ipcMain.handle('recorder:store-meeting-tokens', async (event, { roomName, guestTokens, livekitUrl } = {}) => {
       try {
         if (typeof roomName !== 'string' || !ROOM_NAME_RE.test(roomName)) {
@@ -1502,30 +1575,16 @@ Respond with JSON:
         const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue');
         const key = `wiser-room:${roomName}`;
 
-        const linkKeys = require('./lib/meeting/meeting-link-keys');
-        const payload = JSON.stringify({
-          v: 2,
-          roomName,
-          tokens: guestTokens,
-          livekitUrl,
-          issuedAt: Date.now(),
-          // Guest page must refuse rooms whose host is long gone
-          expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+        const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
+        const joinKey = await this._writeSignedRoomPayload({
+          kvUrl, roomName, guestTokens, livekitUrl, expiresAt, participants: [],
         });
-        const sig = await linkKeys.signPayload(payload);
-        const joinKey = await linkKeys.getPublicKeyB64u();
-
-        const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: KV_COLLECTION,
-            key,
-            itemValue: JSON.stringify({ v: 2, payload, sig }),
-          }),
-        });
-        if (!resp.ok) throw new Error(`KV PUT failed: ${resp.status}`);
         this._activeKvRooms.add(roomName);
+        // Lobby roster (guest page v17): republish the signed payload
+        // with the CURRENT participant list so guests see who's in the
+        // room BEFORE joining. Server API is the truth; loop is quiet
+        // best-effort and stops on clear-meeting-tokens / quit.
+        this._startRosterRepublish({ kvUrl, roomName, guestTokens, livekitUrl, expiresAt });
         log.info('recorder', 'Meeting tokens stored in KV (signed)', { roomName, tokenCount: guestTokens.length });
         return { success: true, joinKey };
       } catch (error) {
@@ -1571,6 +1630,7 @@ Respond with JSON:
           method: 'DELETE',
         });
         this._activeKvRooms.delete(roomName);
+        this._stopRosterRepublish(roomName);
         const respStatus = resp.status;
         let _respBody = '';
         try {
