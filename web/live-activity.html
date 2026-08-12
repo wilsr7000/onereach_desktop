@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Live Activity — OneReach</title>
+<style>
+  :root {
+    --bg: #101116; --panel: #17181f; --panel2: #1d1f28; --line: #262833;
+    --text: #e6e7ec; --muted: #8b8e9c; --green: #4ade80; --amber: #fbbf24;
+    --accent: #8b5cf6;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body {
+    font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column;
+  }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: #2c2e3a; border-radius: 5px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3d4d; }
+
+  header {
+    display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+    padding: 18px 22px 14px; border-bottom: 1px solid var(--line);
+  }
+  header h1 { font-size: 17px; font-weight: 650; letter-spacing: .2px; }
+  header .sub { color: var(--muted); font-size: 12.5px; }
+  header .refresh { margin-left: auto; color: var(--muted); font-size: 12px; }
+
+  main { flex: 1; display: flex; min-height: 0; }
+  #people { flex: 1.4; overflow-y: auto; padding: 16px 18px; }
+  #rail {
+    flex: 1; overflow-y: auto; padding: 16px 18px;
+    border-left: 1px solid var(--line); background: var(--panel);
+  }
+  @media (max-width: 760px) {
+    main { flex-direction: column; overflow-y: auto; }
+    #people, #rail { flex: none; overflow: visible; border-left: none; }
+  }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 4px 0 12px; }
+
+  .person { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; }
+  .person .who { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .dot.active { background: var(--green); box-shadow: 0 0 6px rgba(74,222,128,.6); }
+  .dot.idle { background: var(--amber); }
+  .name { font-weight: 620; font-size: 14.5px; word-break: break-all; }
+  .apps { display: flex; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+  .app-badge {
+    font-size: 11px; color: var(--muted); border: 1px solid var(--line);
+    border-radius: 20px; padding: 2px 9px; background: var(--panel2); white-space: nowrap;
+  }
+  .facets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    font-size: 12px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 3px 8px; color: var(--text);
+  }
+  .chip b { color: var(--muted); font-weight: 500; margin-right: 5px; font-size: 11px; }
+  .chip.meeting { border-color: rgba(139,92,246,.55); }
+  .last { margin-top: 9px; color: var(--muted); font-size: 12.5px; }
+  .last .act { color: var(--text); }
+  .trail-toggle { margin-top: 8px; font-size: 12px; color: var(--accent); cursor: pointer; user-select: none; }
+  .trail { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; display: none; }
+  .trail.open { display: block; }
+  .trail .t-row { display: flex; gap: 10px; font-size: 12px; padding: 3px 0; color: var(--muted); }
+  .trail .t-when { flex: none; width: 62px; }
+  .trail .t-what { color: var(--text); }
+
+  .entry { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 12.5px; }
+  .entry .meta { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+  .empty { color: var(--muted); padding: 30px 10px; text-align: center; font-size: 13px; }
+  .err { color: #f87171; padding: 10px 0; font-size: 12.5px; display: none; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Live Activity</h1>
+    <span class="sub">who's doing what across the account — presence expires on its own</span>
+    <span class="refresh" id="refreshed"></span>
+  </header>
+  <main>
+    <section id="people">
+      <h2>Present now</h2>
+      <div class="err" id="err"></div>
+      <div id="people-list"><div class="empty">Loading…</div></div>
+    </section>
+    <aside id="rail"><h2>Recent activity</h2><div id="rail-list"></div></aside>
+  </main>
+<script>
+  // Shared dev-account access (same baked credential debt as the apps,
+  // punch-listed for rotation). This page is read-only.
+  const NEON = 'https://em.edison.api.onereach.ai/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon';
+  const NEON_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon';
+  const KV_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue';
+  const CREDS = {
+    neonUri: 'neo4j+s://40c812ef.databases.neo4j.io',
+    neonUser: 'neo4j',
+    neonPassword: 'oCLF5bxkj66qivVDh1biePK7Byo9U1NUvFLJrHnQjzo',
+    database: 'neo4j',
+  };
+  const ACTIVE_MS = 3 * 60 * 1000, IDLE_MS = 30 * 60 * 1000;
+
+  async function cypher(q, parameters) {
+    const res = await fetch(NEON_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cypher: q, parameters, ...CREDS }),
+    });
+    if (!res.ok) throw new Error('graph HTTP ' + res.status);
+    const body = await res.json().catch(() => null);
+    if (Array.isArray(body)) return body;
+    if (body && Array.isArray(body.records)) return body.records;
+    if (body && body.result && Array.isArray(body.result.records)) return body.result.records;
+    if (body && Array.isArray(body.result)) return body.result;
+    return [];
+  }
+
+  async function kvGet(collection, key) {
+    const res = await fetch(KV_URL + '?id=' + encodeURIComponent(collection) + '&key=' + encodeURIComponent(key));
+    if (!res.ok) return null;
+    const text = await res.text();
+    if (!text.trim()) return null;
+    try {
+      const outer = JSON.parse(text);
+      return outer && typeof outer === 'object' && 'value' in outer ? JSON.parse(outer.value) : outer;
+    } catch { return null; }
+  }
+
+  function status(lastSeenAt, now) {
+    const age = now - (Number(lastSeenAt) || 0);
+    return age <= ACTIVE_MS ? 'active' : age <= IDLE_MS ? 'idle' : 'gone';
+  }
+  function rel(ms) {
+    if (!Number.isFinite(ms) || ms <= 0) return '';
+    const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+    if (s < 50) return 'just now';
+    const m = Math.round(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.round(m / 60);
+    return h < 24 ? h + 'h ago' : Math.round(h / 24) + 'd ago';
+  }
+  function el(tag, cls, text) {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text !== undefined) n.textContent = text;
+    return n;
+  }
+  function chip(label, value, extraClass) {
+    const c = el('span', 'chip' + (extraClass ? ' ' + extraClass : ''));
+    c.appendChild(el('b', null, label));
+    c.appendChild(document.createTextNode(value));
+    return c;
+  }
+
+  const VERB = { 'item:added': 'added', 'item:edited': 'edited', 'item:restored': 'restored', 'item:viewed': 'viewed' };
+  const openTrails = new Set();
+
+  async function fetchData() {
+    const now = Date.now();
+    const [presence, activity] = await Promise.all([
+      cypher(
+        `MATCH (pr:Presence)
+           WHERE coalesce(pr.lastSeenAt, 0) > $nowMs - $windowMs
+         OPTIONAL MATCH (pr)-[:PRESENCE_OF]->(p:Person)
+         RETURN pr.id AS id, pr.personId AS personId,
+                coalesce(p.name, p.displayName, pr.personId) AS personName,
+                pr.appId AS appId, pr.appName AS appName,
+                pr.lastSeenAt AS lastSeenAt, pr.tool AS tool,
+                pr.spaceId AS spaceId, pr.spaceName AS spaceName,
+                pr.playbookId AS playbookId, pr.playbookTitle AS playbookTitle,
+                pr.meetingRoom AS meetingRoom, pr.idwName AS idwName,
+                pr.lastAction AS lastAction, pr.lastActionAt AS lastActionAt
+         ORDER BY pr.lastSeenAt DESC LIMIT 100`,
+        { nowMs: now, windowMs: IDLE_MS }
+      ),
+      cypher(
+        `MATCH (c:Commit)
+           WHERE coalesce(c.timestamp, 0) > $nowMs - $windowMs
+         OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
+         OPTIONAL MATCH (c)-[:TOUCHED]->(a)
+         RETURN c.author AS author, c.message AS message, c.timestamp AS timestamp,
+                coalesce(s.name, c.spaceId) AS spaceName,
+                coalesce(a.name, a.title) AS itemTitle
+         ORDER BY c.timestamp DESC LIMIT 60`,
+        { nowMs: now, windowMs: 24 * 60 * 60 * 1000 }
+      ),
+    ]);
+    return { presence: presence.map((r) => ({ ...r, status: status(r.lastSeenAt, now) })), activity };
+  }
+
+  async function render() {
+    let data;
+    try {
+      data = await fetchData();
+      document.getElementById('err').style.display = 'none';
+    } catch (e) {
+      const err = document.getElementById('err');
+      err.textContent = 'Could not reach the graph (' + e.message + ') — retrying…';
+      err.style.display = 'block';
+      return;
+    }
+    const byPerson = new Map();
+    for (const p of data.presence) {
+      const key = p.personId || '?';
+      if (!byPerson.has(key)) byPerson.set(key, []);
+      byPerson.get(key).push(p);
+    }
+    const list = document.getElementById('people-list');
+    list.replaceChildren();
+    if (byPerson.size === 0) {
+      list.appendChild(el('div', 'empty', 'Nobody is active right now. Presence appears within a minute of someone using an app.'));
+    }
+    for (const [personId, beacons] of byPerson) {
+      beacons.sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
+      const primary = beacons[0];
+      const card = el('div', 'person');
+      const who = el('div', 'who');
+      who.appendChild(el('span', 'dot ' + (beacons.some((b) => b.status === 'active') ? 'active' : 'idle')));
+      who.appendChild(el('span', 'name', primary.personName || personId));
+      const apps = el('span', 'apps');
+      for (const b of beacons) apps.appendChild(el('span', 'app-badge', (b.appName || b.appId) + ' · ' + rel(Number(b.lastSeenAt))));
+      who.appendChild(apps);
+      card.appendChild(who);
+
+      const facets = el('div', 'facets');
+      for (const b of beacons) {
+        if (b.tool) facets.appendChild(chip('tool', b.tool));
+        if (b.spaceName || b.spaceId) facets.appendChild(chip('space', b.spaceName || b.spaceId));
+        if (b.playbookTitle || b.playbookId) facets.appendChild(chip('playbook', b.playbookTitle || b.playbookId));
+        if (b.meetingRoom) facets.appendChild(chip('meeting', b.meetingRoom, 'meeting'));
+        if (b.idwName) facets.appendChild(chip('IDW', b.idwName));
+      }
+      if (facets.children.length > 0) card.appendChild(facets);
+
+      const withAction = beacons.filter((b) => b.lastAction).sort((a, b) => (b.lastActionAt || 0) - (a.lastActionAt || 0))[0];
+      if (withAction) {
+        const last = el('div', 'last');
+        last.appendChild(document.createTextNode('last: '));
+        last.appendChild(el('span', 'act', withAction.lastAction));
+        last.appendChild(document.createTextNode(' · ' + rel(Number(withAction.lastActionAt))));
+        card.appendChild(last);
+      }
+
+      const trailKey = personId + '|' + primary.appId;
+      const toggle = el('div', 'trail-toggle', openTrails.has(trailKey) ? 'Hide trail ▴' : 'Show trail ▾');
+      const trail = el('div', 'trail' + (openTrails.has(trailKey) ? ' open' : ''));
+      toggle.addEventListener('click', async () => {
+        if (openTrails.has(trailKey)) {
+          openTrails.delete(trailKey); trail.classList.remove('open'); toggle.textContent = 'Show trail ▾'; return;
+        }
+        openTrails.add(trailKey); toggle.textContent = 'Hide trail ▴'; trail.classList.add('open');
+        trail.replaceChildren(el('div', 't-row', 'loading…'));
+        try {
+          const blob = await kvGet('presence:logs', 'log:' + personId + '_' + primary.appId);
+          const entries = (blob && Array.isArray(blob.entries) ? blob.entries : []).slice().reverse();
+          trail.replaceChildren();
+          if (entries.length === 0) trail.appendChild(el('div', 't-row', 'no trail yet'));
+          for (const e of entries.slice(0, 25)) {
+            const row = el('div', 't-row');
+            row.appendChild(el('span', 't-when', rel(Number(e.at))));
+            const what = Object.entries(e).filter(([k]) => k !== 'at' && k !== 'lastActionAt')
+              .map(([k, v]) => (v === null ? k + ' cleared' : (k === 'lastAction' ? v : k + ': ' + v))).join(' · ');
+            row.appendChild(el('span', 't-what', what || 'heartbeat'));
+            trail.appendChild(row);
+          }
+        } catch { trail.replaceChildren(el('div', 't-row', 'trail unavailable')); }
+      });
+      card.appendChild(toggle);
+      card.appendChild(trail);
+      list.appendChild(card);
+    }
+
+    const rail = document.getElementById('rail-list');
+    rail.replaceChildren();
+    if (data.activity.length === 0) rail.appendChild(el('div', 'empty', 'No activity in the last 24h.'));
+    for (const a of data.activity) {
+      const entry = el('div', 'entry');
+      const verb = VERB[a.message] || a.message || 'did something';
+      entry.appendChild(document.createTextNode((a.author || 'Someone') + ' ' + verb + (a.itemTitle ? ' “' + a.itemTitle + '”' : ' an item')));
+      entry.appendChild(el('div', 'meta', (a.spaceName ? 'in ' + a.spaceName + ' · ' : '') + rel(Number(a.timestamp))));
+      rail.appendChild(entry);
+    }
+    document.getElementById('refreshed').textContent = 'updated ' + new Date().toLocaleTimeString();
+  }
+
+  render();
+  setInterval(render, 15000);
+</script>
+</body>
+</html>
