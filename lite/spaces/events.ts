@@ -70,6 +70,10 @@ export const SPACES_EVENTS = {
   ITEMS_GET_START: 'spaces.items.get.start',
   ITEMS_GET_FINISH: 'spaces.items.get.finish',
   ITEMS_GET_FAIL: 'spaces.items.get.fail',
+  // ─── meetings.live (ADR-061 live-meeting banner) ─────────────────────
+  MEETINGS_LIVE_START: 'spaces.meetings.live.start',
+  MEETINGS_LIVE_FINISH: 'spaces.meetings.live.finish',
+  MEETINGS_LIVE_FAIL: 'spaces.meetings.live.fail',
   // ─── getUncategorizedCount ───────────────────────────────────────────
   UNCATEGORIZED_COUNT_START: 'spaces.uncategorizedCount.start',
   UNCATEGORIZED_COUNT_FINISH: 'spaces.uncategorizedCount.finish',
