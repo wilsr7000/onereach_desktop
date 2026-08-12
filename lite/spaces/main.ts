@@ -18,7 +18,7 @@
  *     `SPACES_NOT_INITIALIZED` -- they're wired in Phase 1
  */
 
-import { BrowserWindow } from 'electron';
+import { app, dialog, shell, BrowserWindow, Notification } from 'electron';
 import { registry } from '../menu/registry.js';
 import {
   _setSpacesApiForTesting,
@@ -39,6 +39,7 @@ import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
 import { getAuthApi } from '../auth/api.js';
 import { getKVApi } from '../kv/api.js';
+import { getMainWindowApi } from '../main-window/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import {
   SpacesCache,
@@ -166,6 +167,7 @@ let cacheUnsubscribe: (() => void) | null = null;
  */
 let authUnsubscribe: (() => void) | null = null;
 import type {
+  LiveMeeting,
   Item,
   ItemSummary,
   ListOpts,
@@ -320,6 +322,15 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
         log.warn('spaces-cache: broadcast failed', { error: (err as Error).message });
       }
     });
+    // ADR-062 — piggyback the meeting-ring check on the refresh stream
+    // (zero new timers) + window focus (instant when the user arrives).
+    ringCacheUnsubscribe = activeCache.onUpdate(() => {
+      void checkLiveMeetings(activeClient, 'cache-refresh');
+    });
+    ringFocusHandler = (): void => {
+      void checkLiveMeetings(activeClient, 'focus');
+    };
+    app.on('browser-window-focus', ringFocusHandler);
     activeCache.startRefreshTimer();
   }
 
@@ -431,6 +442,22 @@ function teardownInternal(): void {
     }
     authUnsubscribe = null;
   }
+  if (ringCacheUnsubscribe !== null) {
+    try {
+      ringCacheUnsubscribe();
+    } catch {
+      /* best-effort */
+    }
+    ringCacheUnsubscribe = null;
+  }
+  if (ringFocusHandler !== null) {
+    try {
+      app.removeListener('browser-window-focus', ringFocusHandler);
+    } catch {
+      /* best-effort */
+    }
+    ringFocusHandler = null;
+  }
   if (activeCache !== null) {
     try {
       activeCache.stopRefreshTimer();
@@ -483,7 +510,110 @@ export function _isDirectDownloadUrlForTesting(key: string): boolean {
  * log window without carrying signal. Mutation spans stay 'info';
  * `.fail` events are 'error' for every span, quiet or not.
  */
+// ─── ADR-062: the meeting ring ───────────────────────────────────────────
+//
+// A live meeting rings Lite through the shared graph: the host's
+// recorder announces an ephemeral (:MeetingLive) signal; we check for
+// unseen signals on EXISTING app events only — the spaces cache's
+// refresh stream and window focus. No timers of our own, no push
+// service. Rung ids are remembered per app-run (a still-live meeting
+// SHOULD ring again after a relaunch), and the read-side TTL keeps a
+// crashed host from ringing anyone forever.
+
+const RING_TTL_MS = 30 * 60_000;
+/** Floor between checks — the cache stream can emit many events per tick. */
+const RING_CHECK_MIN_INTERVAL_MS = 20_000;
+const rungMeetingIds = new Set<string>();
+let lastRingCheckMs = 0;
+let ringDialogOpen = false;
+let ringCacheUnsubscribe: (() => void) | null = null;
+let ringFocusHandler: (() => void) | null = null;
+
+async function checkLiveMeetings(client: SdkSpacesClient | null, reason: string): Promise<void> {
+  if (client === null) return;
+  const now = Date.now();
+  if (now - lastRingCheckMs < RING_CHECK_MIN_INTERVAL_MS) return;
+  lastRingCheckMs = now;
+  let meetings: LiveMeeting[];
+  try {
+    meetings = await client.listLiveMeetings({ ttlMs: RING_TTL_MS });
+  } catch {
+    return; // ring is best-effort; the next event retries
+  }
+  for (const meeting of meetings) {
+    if (rungMeetingIds.has(meeting.id)) continue;
+    rungMeetingIds.add(meeting.id);
+    void ringForMeeting(meeting, reason);
+  }
+}
+
+async function ringForMeeting(meeting: LiveMeeting, reason: string): Promise<void> {
+  const log = getLoggingApi();
+  log.info('spaces', 'meeting ring', { id: meeting.id, title: meeting.title, reason });
+  const ageMin =
+    meeting.startedAtMs > 0
+      ? Math.max(0, Math.round((Date.now() - meeting.startedAtMs) / 60_000))
+      : 0;
+  const started = ageMin < 1 ? 'just now' : `${ageMin} min ago`;
+  const body =
+    meeting.host !== null && meeting.host.length > 0
+      ? `${meeting.host} started “${meeting.title}” ${started}`
+      : `“${meeting.title}” started ${started}`;
+  // OS notification when Lite is in the background — click joins.
+  try {
+    if (Notification.isSupported() && BrowserWindow.getFocusedWindow() === null) {
+      const n = new Notification({ title: 'Meeting ringing', body });
+      n.on('click', () => {
+        void joinLiveMeeting(meeting);
+      });
+      n.show();
+    }
+  } catch {
+    /* notification is garnish; the dialog is the ring */
+  }
+  if (ringDialogOpen) return;
+  ringDialogOpen = true;
+  try {
+    shell.beep();
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      title: 'Meeting ringing',
+      message: `🎥 ${meeting.title}`,
+      detail: `${body}. Join opens the meeting in a Lite tab.`,
+      buttons: ['Join', 'Dismiss'],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+    });
+    if (response === 0) await joinLiveMeeting(meeting);
+  } finally {
+    ringDialogOpen = false;
+  }
+}
+
+async function joinLiveMeeting(meeting: LiveMeeting): Promise<void> {
+  const log = getLoggingApi();
+  if (meeting.joinUrl === null) {
+    log.warn('spaces', 'ring join skipped — host published no guest page', { id: meeting.id });
+    return;
+  }
+  try {
+    // openTab raises the main window via the a8f1bfa raise-on-tab-open
+    // machinery, so the meeting is front-and-center after one click.
+    await getMainWindowApi().openTab({
+      url: meeting.joinUrl,
+      label: meeting.title.slice(0, 40) || 'Meeting',
+    });
+  } catch (err) {
+    log.warn('spaces', 'ring join failed', {
+      id: meeting.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 const QUIET_READ_SPANS = new Set<string>([
+  'spaces.meetings.live',
   'spaces.listSpaces',
   'spaces.uncategorizedCount',
   'spaces.items.list',

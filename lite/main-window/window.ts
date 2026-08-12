@@ -29,6 +29,7 @@ import {
   WebContentsView,
   session as electronSession,
   Notification,
+  desktopCapturer,
   shell,
 } from 'electron';
 import type { Rectangle } from 'electron';
@@ -680,6 +681,43 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
   }
 }
 
+/**
+ * ADR-062 — sessions that already carry the screen-share handler.
+ * WeakSet so torn-down sessions never pin memory, and re-attaching a
+ * tab to the same partition doesn't stack handlers.
+ */
+const displayMediaSessions = new WeakSet<Electron.Session>();
+
+/**
+ * ADR-062 — meeting tabs (the WISER guest page) call getDisplayMedia
+ * for screen share, which Electron rejects unless a display-media
+ * handler exists. On macOS 15+ `useSystemPicker` hands the choice to
+ * the native screens-and-windows picker; the handler body is the
+ * fallback for older systems (primary screen). Applies to every tab
+ * session — sharing is user-initiated per site, and mic/cam keep
+ * their normal OS-level TCC prompts.
+ */
+function ensureDisplayMediaHandler(ses: Electron.Session): void {
+  if (displayMediaSessions.has(ses)) return;
+  displayMediaSessions.add(ses);
+  ses.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      desktopCapturer
+        .getSources({ types: ['screen'] })
+        .then((sources) => {
+          const primary = sources[0];
+          if (primary !== undefined) {
+            callback({ video: primary });
+          } else {
+            callback({});
+          }
+        })
+        .catch(() => callback({}));
+    },
+    { useSystemPicker: true }
+  );
+}
+
 function attachTab(win: BrowserWindow, tab: Tab): void {
   const view = new WebContentsView({
     webPreferences: {
@@ -692,6 +730,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
       partition: tab.partition,
     },
   });
+  ensureDisplayMediaHandler(view.webContents.session);
   // Capture accountId from the IDW URL so the watcher can auto-select
   // it on the OneReach account-picker page (`/multi-user/list-users`).
   // OneReach drops the `?accountId=...` query when redirecting through
