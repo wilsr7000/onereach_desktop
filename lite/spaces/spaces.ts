@@ -1224,6 +1224,7 @@ export function buildSpaceContextEntries(
   handlers: {
     share: () => void;
     unshare: () => void;
+    addPeople: () => void;
     upload: () => void;
     rename: () => void;
     convertShared: () => void;
@@ -1248,6 +1249,9 @@ export function buildSpaceContextEntries(
       run: handlers.unshare,
     },
     { type: 'separator' },
+    // The graph-backed member picker — the answer to "how do I add
+    // somebody to an existing space" (2026-08-12 user report).
+    { type: 'action', label: 'Add people…', run: handlers.addPeople },
     { type: 'action', label: 'Upload file…', run: handlers.upload },
     { type: 'action', label: 'Rename', run: handlers.rename },
     { type: 'separator' },
@@ -1456,6 +1460,11 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
         );
         if (envelope.ok) await loadSpaces();
       })();
+    },
+    addPeople: () => {
+      void openAddMemberPrompt(space.id, async () => {
+        await loadSpaces();
+      });
     },
     upload: () => {
       setActiveScope(space.id);

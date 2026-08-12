@@ -367,7 +367,7 @@ describe('sidebar context menus', () => {
     const mod = await import('../../spaces/spaces.js');
     const noop = (): void => undefined;
     const handlers = {
-      share: noop, unshare: noop, upload: noop, rename: noop,
+      share: noop, unshare: noop, addPeople: noop, upload: noop, rename: noop,
       convertShared: noop, convertUser: noop,
     };
     const entries = mod.buildSpaceContextEntries(
@@ -512,5 +512,31 @@ describe('version history section', () => {
       const actions = row?.querySelectorAll('.spaces-history-action');
       expect(actions?.length).toBe(2);
     }
+  });
+});
+
+// 2026-08-12: "not sure how to add somebody to an existing one" — the
+// graph-backed member picker is now one right-click away on EVERY space.
+describe('space context menu — Add people', () => {
+  it('every space menu carries Add people… right after the share section', async () => {
+    const mod = await import('../../spaces/spaces.js');
+    const noop = (): void => {};
+    const entries = mod.buildSpaceContextEntries(
+      { id: 's1', name: 'S', visibility: 'open' } as never,
+      {
+        share: noop,
+        addPeople: noop,
+        unshare: noop,
+        upload: noop,
+        rename: noop,
+        convertShared: noop,
+        convertUser: noop,
+      }
+    );
+    const labels = entries
+      .map((e) => ('label' in e ? (e as { label: string }).label : ''))
+      .filter((l) => l.length > 0);
+    expect(labels).toContain('Add people…');
+    expect(labels.indexOf('Add people…')).toBeLessThan(labels.indexOf('Upload file…'));
   });
 });
