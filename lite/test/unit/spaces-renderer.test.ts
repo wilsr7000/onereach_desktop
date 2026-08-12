@@ -1583,3 +1583,18 @@ describe('playbook tile v3 — the hero (2026-08-08)', () => {
     expect(pill?.classList.contains('is-complete')).toBe(true);
   });
 });
+
+// ─── 2026-08-12: add-person dropdown populates from the graph ────────────
+import { personTypeaheadEntries } from '../../spaces/spaces.js';
+
+describe('personTypeaheadEntries — wizard people dropdown', () => {
+  it('keeps Persons only (agents stay out of the people step) and dedupes by id', () => {
+    const out = personTypeaheadEntries([
+      { kind: 'Person', id: 'robb@onereach.com', name: 'Robb', email: 'robb@onereach.com' },
+      { kind: 'Agent', id: 'agent-1', name: 'Risk Analyst', email: '' },
+      { kind: 'Person', id: 'ROBB@onereach.com', name: 'Robb dupe', email: '' },
+      { kind: 'Person', id: 'ada@x.y', name: 'Ada', email: 'ada@x.y' },
+    ]);
+    expect(out.map((p) => p.id)).toEqual(['robb@onereach.com', 'ada@x.y']);
+  });
+});

@@ -3990,6 +3990,38 @@ body {
   flex: 1 1 60%;
 }
 
+/* Graph-backed person typeahead (wizard people step). The row is the
+ * positioned host; the panel floats under the focused input. */
+.spaces-wizard-row { position: relative; }
+.spaces-wizard-typeahead {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 34px;
+  z-index: 40;
+  background: #1d1f28;
+  border: 1px solid #2c2e3a;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.spaces-wizard-typeahead-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  color: #e6e7ec;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.spaces-wizard-typeahead-row:hover { background: #262833; }
+.spaces-wizard-typeahead-name { font-weight: 550; }
+.spaces-wizard-typeahead-email { color: #8b8e9c; font-size: 12px; }
+
 .spaces-wizard-row-remove {
   flex: 0 0 auto;
   width: 30px;

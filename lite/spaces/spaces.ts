@@ -13382,6 +13382,105 @@ function buildWizardStepPeople(w: NewSpaceWizardState): HTMLElement {
   return step;
 }
 
+/**
+ * People-only view of the member library for the wizard typeahead:
+ * agents don't belong in the "add people" step. Exported for tests.
+ */
+export function personTypeaheadEntries(
+  entries: ReadonlyArray<{ kind: string; id: string; name: string; email: string }>
+): Array<{ id: string; name: string; email: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ id: string; name: string; email: string }> = [];
+  for (const e of entries) {
+    if (e.kind !== 'Person') continue;
+    const key = e.id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ id: e.id, name: e.name, email: e.email });
+  }
+  return out;
+}
+
+/**
+ * Graph-backed typeahead for a wizard person input: focus shows the
+ * account's people immediately (empty query returns the library
+ * head), typing filters, clicking fills the row. Free text remains
+ * valid — the dropdown assists, it never gates.
+ */
+function attachPersonTypeahead(
+  input: HTMLInputElement,
+  host: HTMLElement,
+  onPick: (person: { id: string; name: string; email: string }) => void
+): void {
+  let panel: HTMLDivElement | null = null;
+  let seq = 0;
+  let debounce: number | null = null;
+
+  const closePanel = (): void => {
+    panel?.remove();
+    panel = null;
+  };
+
+  const renderPanel = (people: Array<{ id: string; name: string; email: string }>): void => {
+    closePanel();
+    if (people.length === 0) return;
+    panel = document.createElement('div');
+    panel.className = 'spaces-wizard-typeahead';
+    for (const person of people) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'spaces-wizard-typeahead-row';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'spaces-wizard-typeahead-name';
+      nameEl.textContent = person.name;
+      row.appendChild(nameEl);
+      if (person.email.length > 0 && person.email !== person.name) {
+        const emailEl = document.createElement('span');
+        emailEl.className = 'spaces-wizard-typeahead-email';
+        emailEl.textContent = person.email;
+        row.appendChild(emailEl);
+      }
+      // mousedown, not click: it fires before the input's blur.
+      row.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        closePanel();
+        onPick(person);
+      });
+      panel.appendChild(row);
+    }
+    host.appendChild(panel);
+  };
+
+  const search = (q: string): void => {
+    const bridge = window.lite?.spaces;
+    if (bridge === undefined) return;
+    const mySeq = ++seq;
+    void (async (): Promise<void> => {
+      try {
+        const envelope = await bridge.members.searchLibrary(q, 8);
+        if (mySeq !== seq) return;
+        if (envelope.ok !== true) return;
+        renderPanel(personTypeaheadEntries(envelope.value));
+      } catch {
+        /* typeahead is assistance; silence is fine */
+      }
+    })();
+  };
+
+  input.addEventListener('focus', () => search(input.value.trim()));
+  input.addEventListener('input', () => {
+    if (debounce !== null) window.clearTimeout(debounce);
+    debounce = window.setTimeout(() => search(input.value.trim()), 180);
+  });
+  input.addEventListener('blur', () => {
+    // Delay so a mousedown pick on the panel lands first.
+    window.setTimeout(closePanel, 150);
+  });
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') closePanel();
+  });
+}
+
 function buildPersonRow(p: WizardPerson, index: number): HTMLElement {
   const row = wizEl('div', 'spaces-wizard-row');
   const name = wizEl('input', 'spaces-modal-input spaces-wizard-person-name');
@@ -13405,6 +13504,19 @@ function buildPersonRow(p: WizardPerson, index: number): HTMLElement {
     renderNewSpaceWizard();
   });
   row.append(name, email, remove);
+  // Graph-backed dropdown: focus either field to see the account's
+  // people; picking one fills both fields (2026-08-12 user request).
+  const pick = (person: { id: string; name: string; email: string }): void => {
+    captureNewSpaceStep();
+    if (newSpaceWizard === null) return;
+    const entry = newSpaceWizard.people[index];
+    if (entry === undefined) return;
+    entry.name = person.name;
+    entry.email = person.email.length > 0 ? person.email : person.id;
+    renderNewSpaceWizard();
+  };
+  attachPersonTypeahead(name, row, pick);
+  attachPersonTypeahead(email, row, pick);
   return row;
 }
 
