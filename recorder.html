@@ -6540,6 +6540,26 @@
               }
               return;
             }
+            // Stopped-but-unsaved: the state a failed auto-save leaves behind
+            // (the blob only exists in this window's memory — a real 2h16m
+            // meeting's video was lost by closing here). Block the close and
+            // put the review/save UI in front so the user can Save, Download,
+            // or explicitly Discard.
+            if (this.recordedBlob && !this._recordingPersisted) {
+              e.preventDefault();
+              e.returnValue = false;
+              this.showStatus(
+                'Your recording is NOT saved yet — Save or Discard it before closing.',
+                'error',
+                7000
+              );
+              try {
+                this.showReview();
+              } catch (_e) {
+                /* review UI unavailable -- the status warning still stands */
+              }
+              return;
+            }
           });
 
           // Clean up meeting tokens when window is closed without clicking End Session
@@ -8076,6 +8096,17 @@
                 }
               } else {
                 console.log('[Transcription] Reconnected; reusing audio pipeline + flush');
+                // Close out the dropout marker with the measured gap.
+                if (this._transcriptionDropoutAt) {
+                  const gapSecs = Math.max(1, Math.round((Date.now() - this._transcriptionDropoutAt) / 1000));
+                  this.accumulatedTranscript.push({
+                    text: '— transcription resumed after ' + gapSecs + 's —',
+                    speaker: null,
+                    timestamp: Date.now(),
+                    system: true,
+                  });
+                  this._transcriptionDropoutAt = null;
+                }
               }
             };
 
@@ -8100,6 +8131,18 @@
               // captured ~60 min. Reconnect while still recording so the whole
               // meeting is transcribed; the audio pipeline is reused (no gap).
               if (this._transcriptionIntentionalStop || !this.isRecording) return;
+              // Mark the dropout IN the transcript (once per outage) so the
+              // saved record is honest about the hole instead of reading as a
+              // seamless conversation across missing minutes.
+              if (!this._transcriptionDropoutAt) {
+                this._transcriptionDropoutAt = Date.now();
+                this.accumulatedTranscript.push({
+                  text: '— transcription dropped out; reconnecting —',
+                  speaker: null,
+                  timestamp: this._transcriptionDropoutAt,
+                  system: true,
+                });
+              }
               const attempt = (this._transcriptionReconnectAttempts = (this._transcriptionReconnectAttempts || 0) + 1);
               if (attempt > 20) {
                 console.warn('[Transcription] Giving up reconnect after 20 attempts');
@@ -8319,6 +8362,7 @@
         stopLiveTranscription() {
           // Deliberate stop -> don't let onclose schedule a reconnect.
           this._transcriptionIntentionalStop = true;
+          this._transcriptionDropoutAt = null;
           clearTimeout(this._transcriptionReconnectTimer);
           // Guests drop their CC indicator + caption bar
           this._broadcastCcState(false);
@@ -8353,6 +8397,7 @@
           this.transcriptSessionId = `rec_${Date.now()}`;
           this.transcriptRecordingStartedAt = new Date().toISOString();
           this.transcriptLastFlushedIndex = 0;
+          this._lastSessionCopyAt = 0;
 
           // Flush every 5 seconds
           this.transcriptFlushInterval = setInterval(() => {
@@ -8605,6 +8650,28 @@
             });
           } catch (err) {
             console.warn('[Transcription] Flush to file failed:', err.message);
+          }
+
+          // live-transcript.md is a FIXED name: the next meeting in this space
+          // overwrites it, and a recorder restart mid-meeting would clobber the
+          // previous session's text with a near-empty file. So keep a rolling
+          // PER-SESSION copy too — refreshed every ~minute and on the final
+          // flush. A recovered 59-minute transcript once survived ONLY because
+          // we happened to back the fixed-name file up in time.
+          const sessionCopyDue =
+            this.transcriptSessionId &&
+            (isFinal || !this._lastSessionCopyAt || Date.now() - this._lastSessionCopyAt > 60000);
+          if (sessionCopyDue) {
+            try {
+              await window.recorder.writeLiveTranscript({
+                spaceId,
+                content: md,
+                filename: 'transcript-' + this.transcriptSessionId + '.md',
+              });
+              this._lastSessionCopyAt = Date.now();
+            } catch (err) {
+              console.warn('[Transcription] Per-session transcript copy failed:', err.message);
+            }
           }
         },
 
@@ -8922,6 +8989,11 @@
           this.pauseStartTime = null;
           this._previewHadNoFrames = false;
           this._capturedAnyData = false;
+          // False until this recording's blob lands in a space (auto or
+          // manual save) or the user explicitly discards it — the window
+          // close guard keys off this so an unsaved take can't be lost.
+          this._recordingPersisted = false;
+          this._transcriptionDropoutAt = null;
 
           const options = { mimeType: 'video/webm;codecs=vp9,opus' };
           try {
@@ -9229,6 +9301,9 @@
         },
 
         discardRecording() {
+          // Explicit user choice — the close guard must not hold the window
+          // hostage for a take the user threw away.
+          this._recordingPersisted = true;
           this.recordAgain();
           this.showStatus('Recording discarded', 'error');
         },
@@ -9299,6 +9374,7 @@
               });
 
               if (result.success) {
+                this._recordingPersisted = true;
                 const spaceName = result.spaceName || 'space';
                 this.showStatus(`Saved to ${spaceName}`, 'success');
                 this.hideSaveDialog();
@@ -9400,6 +9476,23 @@
           const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
           const filename = `recording_${timestamp}.webm`;
 
+          // Save the TRANSCRIPT item first, independently of the video save.
+          // The video path is heavy and fallible (a DOMException reading a
+          // 2-hour blob killed it in the field) and the transcript used to be
+          // saved only inside its success path -- so a failed video save
+          // silently dropped the transcript from Spaces too, even though the
+          // text was tiny and perfectly intact. The transcript is the precious
+          // part; it goes first.
+          let transcriptSaved = false;
+          if (this.accumulatedTranscript && this.accumulatedTranscript.length > 0) {
+            try {
+              await this.saveTranscriptAsItem(spaceId, timestamp);
+              transcriptSaved = true;
+            } catch (tErr) {
+              console.warn('[Recorder] Transcript-first save failed:', tErr?.name, tErr?.message);
+            }
+          }
+
           try {
             this.showStatus('Saving recording...', 'info');
 
@@ -9432,14 +9525,18 @@
             if (result.itemId) {
               this._lastRecordingItemIds = [...(this._lastRecordingItemIds || []), result.itemId];
             }
+            this._recordingPersisted = true;
 
-            // Save accumulated transcript as a separate indexed item
-            if (this.accumulatedTranscript && this.accumulatedTranscript.length > 0) {
+            // Transcript already saved above (transcript-first); only retry
+            // here if that attempt failed.
+            if (!transcriptSaved && this.accumulatedTranscript && this.accumulatedTranscript.length > 0) {
               await this.saveTranscriptAsItem(spaceId, timestamp);
-              this.showStatus(`Recording + transcript saved to ${spaceName}`, 'success');
-            } else {
-              this.showStatus(`Recording saved to ${spaceName}`, 'success');
+              transcriptSaved = true;
             }
+            this.showStatus(
+              transcriptSaved ? `Recording + transcript saved to ${spaceName}` : `Recording saved to ${spaceName}`,
+              'success'
+            );
 
             // Auto-trigger diarized transcription in the background
             if (result.itemId && window.recorder?.transcribeItem) {
@@ -9467,8 +9564,19 @@
             // Reset for next recording after a short delay
             setTimeout(() => this.recordAgain(), 2500);
           } catch (error) {
-            console.error('[Recorder] Auto-save failed:', error);
-            this.showStatus('Auto-save failed: ' + error.message + ' -- use manual save', 'error');
+            // DOMExceptions stringify to "[object DOMException]" with an empty
+            // message -- log name + message explicitly so the field log says
+            // WHAT failed (e.g. NotReadableError = the blob's backing store
+            // was already gone).
+            const errName = (error && error.name) || 'Error';
+            const errMsg = (error && error.message) || String(error);
+            console.error('[Recorder] Auto-save failed: ' + errName + ': ' + errMsg, error);
+            this.showStatus(
+              'Auto-save failed (' + errName + ')' +
+                (transcriptSaved ? ' — transcript saved; ' : ' — ') +
+                'use manual save for the video',
+              'error'
+            );
             // Fall back to manual review/save so the recording isn't lost
             this.showReview();
           }

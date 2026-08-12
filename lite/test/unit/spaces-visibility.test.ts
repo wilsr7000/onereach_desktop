@@ -92,9 +92,10 @@ describe('visibility predicates in the Cypher surface', () => {
     'FIND_AGENT_ASSET_IN_SPACE',
     'LIST_INLINE_BINARY_ASSETS',
     'AGENT_LIBRARY_SEARCH',
-    // ADR-061 live-meeting banner: transient account-wide broadcast
-    // (title/joinUrl/host, TTL-bounded LIMIT 5); completed-meeting
-    // assets ARE gated. See spaces-visibility-inventory EXEMPT note.
+    // ADR-062 meeting ring (Decision 1): :MeetingLive is deliberately
+    // un-spaced — "a doorbell, not an artifact". Transient account-wide
+    // broadcast (title/joinUrl/host, TTL-bounded LIMIT 5); completed-
+    // meeting assets (ADR-061) ARE gated. See inventory EXEMPT note.
     'LIST_LIVE_MEETINGS',
     'MEMBER_LIBRARY_SEARCH',
     'HOME_AGENTS_SAMPLE',

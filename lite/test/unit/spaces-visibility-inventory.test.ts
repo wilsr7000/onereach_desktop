@@ -31,10 +31,11 @@ const EXEMPT: Record<string, string> = {
     'hard-delete pre-flight (internal to the delete flow); the delete ' +
     'mutations themselves carry SPACE_VISIBLE',
   LIST_LIVE_MEETINGS:
-    'account-wide live-meeting banner by design (ADR-061): :MeetingLive is a ' +
-    'transient join-me broadcast (title/joinUrl/host only, 5-row TTL-bounded), ' +
-    'not a Space asset — the COMPLETED meeting mirror is space-gated. Flagged ' +
-    'to the meeting stream for confirmation 2026-08-11.',
+    'account-wide meeting ring by design (ADR-062, Decision 1): :MeetingLive ' +
+    'is "deliberately NOT :Asset and with NO Space membership (a doorbell, ' +
+    'not an artifact)" — a transient join-me broadcast (title/joinUrl/host ' +
+    'only, 5-row TTL-bounded). The COMPLETED meeting mirror (ADR-061) is ' +
+    'space-gated.',
   AGENT_LIBRARY_SEARCH:
     'account-wide agent directory by design — the add-from-library picker ' +
     'must list every agent in the account',
