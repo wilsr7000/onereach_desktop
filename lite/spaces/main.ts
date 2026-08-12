@@ -18,7 +18,7 @@
  *     `SPACES_NOT_INITIALIZED` -- they're wired in Phase 1
  */
 
-import { app, dialog, shell, BrowserWindow, Notification } from 'electron';
+import { app, shell, BrowserWindow, Notification } from 'electron';
 import { registry } from '../menu/registry.js';
 import {
   _setSpacesApiForTesting,
@@ -525,7 +525,6 @@ const RING_TTL_MS = 30 * 60_000;
 const RING_CHECK_MIN_INTERVAL_MS = 20_000;
 const rungMeetingIds = new Set<string>();
 let lastRingCheckMs = 0;
-let ringDialogOpen = false;
 let ringCacheUnsubscribe: (() => void) | null = null;
 let ringFocusHandler: (() => void) | null = null;
 
@@ -571,26 +570,23 @@ async function ringForMeeting(meeting: LiveMeeting, reason: string): Promise<voi
   } catch {
     /* notification is garnish; the dialog is the ring */
   }
-  if (ringDialogOpen) return;
-  ringDialogOpen = true;
+  // 2026-08-12: the ring POPS THE MEETING TAB directly — no dialog
+  // gate. Safe because the guest page (v16) now opens into a pre-join
+  // LOBBY: camera preview + cam/mic toggles + an explicit Join button.
+  // Opening the tab transmits nothing; the user joins on their terms.
   try {
     shell.beep();
-    const { response } = await dialog.showMessageBox({
-      type: 'info',
-      title: 'Meeting ringing',
-      message: `🎥 ${meeting.title}`,
-      detail: `${body}. Join opens the meeting in a Lite tab.`,
-      buttons: ['Join', 'Dismiss'],
-      defaultId: 0,
-      cancelId: 1,
-      noLink: true,
-    });
-    if (response === 0) await joinLiveMeeting(meeting);
-  } finally {
-    ringDialogOpen = false;
+  } catch {
+    /* beep is garnish; the tab is the ring */
   }
+  await joinLiveMeeting(meeting);
 }
 
+/**
+ * Open the meeting's guest page in a Lite tab (raising the window).
+ * Since guest page v16 this lands on the PRE-JOIN LOBBY — camera/mic
+ * toggles + explicit Join — so calling this never auto-joins anyone.
+ */
 async function joinLiveMeeting(meeting: LiveMeeting): Promise<void> {
   const log = getLoggingApi();
   if (meeting.joinUrl === null) {

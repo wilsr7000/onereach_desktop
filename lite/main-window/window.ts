@@ -16,8 +16,10 @@
  *  - Tab views have NO preload -- third-party agents cannot reach
  *    `window.lite.*`. The chrome (separate webContents) DOES use the
  *    standard kernel preload.
- *  - `setWindowOpenHandler` denies child Electron windows; external
- *    links route to the OS default browser via `shell.openExternal`.
+ *  - Window-open routing is Chrome-parity via `attachChromeParity`
+ *    (ADR-063): sized window.open → in-app popup (same partition,
+ *    OAuth allowlist honored), featureless opens → app tabs,
+ *    mailto-class schemes → the OS, unknown schemes blocked.
  *
  * @internal -- consumers go through `getMainWindowApi()` for state
  *  ops; the factory itself is invoked by `lite/main-window/main.ts`
@@ -35,6 +37,7 @@ import {
 import type { Rectangle } from 'electron';
 import { dirname, join } from 'node:path';
 import { readHomeUrl, resolveHomeUrl } from './home-url-store.js';
+import { attachChromeParity } from './browser-parity.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
@@ -728,9 +731,17 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
       nodeIntegration: false,
       webSecurity: true,
       partition: tab.partition,
+      // ADR-063 — Chromium's built-in PDF viewer. Without it, PDF
+      // links download instead of render, which reads as "broken
+      // compared to Chrome".
+      plugins: true,
     },
   });
   ensureDisplayMediaHandler(view.webContents.session);
+  // ADR-063 — Chrome-parity: managed popups (OAuth flows), Chrome UA,
+  // right-click menu, downloads, external-scheme routing. Popups the
+  // page opens inherit all of it recursively.
+  attachChromeParity(view.webContents, { partition: tab.partition });
   // Capture accountId from the IDW URL so the watcher can auto-select
   // it on the OneReach account-picker page (`/multi-user/list-users`).
   // OneReach drops the `?accountId=...` query when redirecting through
@@ -933,27 +944,14 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   view.setBounds({ x: 0, y: CHROME_HEIGHT_PX, width: 0, height: 0 });
   view.setVisible(false);
 
-  // Window-open handler: allow OAuth IdP popups (Google / Microsoft /
-  // Apple / Auth0 / Okta / etc.) in the SAME `persist:tab-<uuid>`
-  // partition so cookies land in this tab's jar. Anything else still
-  // routes to the OS default browser.
-  //
-  // Prior behavior denied every popup, which silently broke
-  // "Sign in with Google" inside ChatGPT / Claude / Gemini / etc.
-  // tabs because the popup completed in Safari and the resulting
-  // session never reached this tab's partition.
-  view.webContents.setWindowOpenHandler(
-    buildPopupHandler({
-      partition: tab.partition,
-      source: `main-window-tab:${tab.id}`,
-      logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
-      // Keep a third-party chatbot's OWN same-site links/buttons in-app
-      // (Grok / ChatGPT / etc. open these as new windows). Cross-site
-      // targets still route to the OS browser. Read live so it tracks
-      // the tab's current page, not just its initial URL.
-      sameSiteOpenerUrl: () => safeWebContentsUrl(view.webContents),
-    })
-  );
+  // Window-open routing lives in attachChromeParity (ADR-063), set at
+  // view creation: sized window.open → in-app popup (same partition,
+  // OAuth allowlist honored even featureless), featureless opens →
+  // app TABS, mailto-class schemes → OS. The previous buildPopupHandler
+  // here routed every non-OAuth cross-site open to the OS browser —
+  // the "everything kicks me to Chrome" complaint — and, being set
+  // AFTER the parity handler, silently clobbered it (last writer
+  // wins). Do not add another setWindowOpenHandler below this point.
 
   // Persist navigation -- save the latest URL to the store so we can
   // restore the user's place across app restarts.
