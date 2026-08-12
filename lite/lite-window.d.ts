@@ -687,6 +687,8 @@ interface LiteSpaceItemSummary {
   sourceUrl?: string;
   createdAt: string;
   updatedAt: string;
+  /** ms epoch of MY last read (VIEWED audit edge); absent = never opened. */
+  viewedAtMs?: number;
   excerpt?: string;
   /** User-authored description when non-blank. Distinct from `excerpt`
    *  (which may itself be derived from description OR content) — tiles

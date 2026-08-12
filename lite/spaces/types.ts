@@ -59,6 +59,26 @@ export type SpaceKind = 'user' | 'shared';
  */
 export type SpaceVisibility = 'open' | 'restricted';
 
+/**
+ * ADR-062 — an ephemeral live-meeting ring signal. Backed by a
+ * `(:MeetingLive)` node the host's recorder announces at room create
+ * and deletes at session end (TTL-swept otherwise). Deliberately NOT
+ * an `:Asset` and never a Space member — it is a doorbell, not an
+ * artifact, so it renders nowhere except the ring.
+ */
+export interface LiveMeeting {
+  /** Signal id (`live_<roomName>`), the ring-dedupe key. */
+  id: string;
+  /** Human title ("Weekly Sync"). */
+  title: string;
+  /** Guest-page join link (null when the host had no published page). */
+  joinUrl: string | null;
+  /** Host display name when known. */
+  host: string | null;
+  /** Epoch ms the meeting went live (0 when unknown). */
+  startedAtMs: number;
+}
+
 export interface Space {
   /** Neo4j-side id (elementId or external uuid; whichever the graph uses). */
   id: string;
@@ -329,6 +349,12 @@ export interface ItemSummary {
   createdAt: string;
   /** ISO timestamp of last update. */
   updatedAt: string;
+  /**
+   * ms epoch of the VIEWER'S OWN last read of this asset (their
+   * `[:VIEWED]` audit edge, 2026-08-11). Absent = never opened it.
+   * Viewer-relative by construction — computed against `$viewerId`.
+   */
+  viewedAtMs?: number;
   /** Up to ~120 char preview; nullable. */
   excerpt?: string;
   /**

@@ -49,6 +49,7 @@ import type {
   ItemSummary,
   ItemKind,
   NoteItemMeta,
+  LiveMeeting,
   ItemProvenance,
   ListOpts,
   SpaceChipRef,
@@ -410,7 +411,9 @@ export const CYPHER = {
                             color: other.color,
                             iconKey: coalesce(other.iconKey, other.icon) }) AS otherSpacesRaw,
          head(collect(creator)) AS producer
+    OPTIONAL MATCH (:Person {id: $viewerId})-[vw:VIEWED]->(a)
     RETURN a.id AS id,
+           toString(vw.lastAt) AS viewedAtMs,
            coalesce(a.name, a.title, a.id) AS title,
            ${MEMBER_KIND} AS kind,
            coalesce(a.url, a.fileUrl) AS fileKey,
@@ -966,6 +969,25 @@ export const CYPHER = {
            coalesce(a.description, a.summary, '') AS description
     ORDER BY toLower(coalesce(a.name, a.id, '')) ASC
     LIMIT toInteger($limit)
+  `,
+
+  /**
+   * ADR-062 — live-meeting ring signals. `(:MeetingLive)` nodes are
+   * ephemeral doorbells the host's recorder announces at room create;
+   * they carry no `:Asset` label and no Space membership, so nothing
+   * else renders them. TTL on the read side ($ttlMs) keeps crashed
+   * hosts from ringing forever; the announce path sweeps stale nodes.
+   */
+  LIST_LIVE_MEETINGS: `
+    MATCH (m:MeetingLive)
+      WHERE coalesce(m.startedAt, 0) > $nowMs - $ttlMs
+    RETURN m.id AS id,
+           coalesce(m.title, 'Meeting') AS title,
+           m.joinUrl AS joinUrl,
+           m.host AS host,
+           coalesce(m.startedAt, 0) AS startedAtMs
+    ORDER BY m.startedAt DESC
+    LIMIT 5
   `,
 
   /**
@@ -2664,6 +2686,33 @@ export class SdkSpacesClient {
         },
       });
     }
+  }
+
+  /**
+   * ADR-062 — the ring check. Read-only, cheap (LIMIT 5), meant to be
+   * driven by EXISTING app events (cache-refresh ticks, window focus)
+   * — never by a timer of its own. Default TTL 30 minutes.
+   */
+  async listLiveMeetings(opts: { ttlMs?: number } = {}): Promise<LiveMeeting[]> {
+    return this.withSpan('spaces.meetings.live', async () => {
+      const ttlMs = typeof opts.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : 30 * 60_000;
+      const rows = await this.run(CYPHER.LIST_LIVE_MEETINGS, { ttlMs });
+      const out: LiveMeeting[] = [];
+      for (const row of rows) {
+        const id = optString(row, 'id');
+        if (id === undefined || id.length === 0) continue;
+        const startedAtMs = optNumber(row, 'startedAtMs');
+        out.push({
+          id,
+          title: optString(row, 'title') ?? 'Meeting',
+          joinUrl: optString(row, 'joinUrl') ?? null,
+          host: optString(row, 'host') ?? null,
+          startedAtMs:
+            startedAtMs !== undefined && Number.isFinite(startedAtMs) ? startedAtMs : 0,
+        });
+      }
+      return out;
+    });
   }
 
   /**
@@ -5273,6 +5322,15 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
     otherSpaces: opts.stripOtherSpaces ? [] : toChipList(row['otherSpaces']),
     producedBy: toProducedBy(row['producedBy']),
   };
+  {
+    // My own last-read time (ms epoch) from the VIEWED audit edge —
+    // powers the "read Xh ago" fragment on the asset card.
+    const rawViewed = optString(row, 'viewedAtMs');
+    if (rawViewed !== undefined) {
+      const n = Number(rawViewed);
+      if (Number.isFinite(n) && n > 0) summary.viewedAtMs = n;
+    }
+  }
   const fileKey = optString(row, 'fileKey');
   if (fileKey !== undefined) summary.fileKey = fileKey;
   const sourceUrl = optString(row, 'sourceUrl');

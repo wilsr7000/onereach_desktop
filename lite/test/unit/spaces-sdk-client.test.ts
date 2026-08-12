@@ -3926,3 +3926,84 @@ describe('SdkSpacesClient — asset view audit trail (2026-08-10)', () => {
     ]);
   });
 });
+
+describe('LIST_ITEMS_IN_SPACE — viewer read time (2026-08-11)', () => {
+  it('projects the viewer-scoped VIEWED lastAt as viewedAtMs', () => {
+    const src = CYPHER.LIST_ITEMS_IN_SPACE;
+    expect(src).toContain("OPTIONAL MATCH (:Person {id: $viewerId})-[vw:VIEWED]->(a)");
+    expect(src).toContain('toString(vw.lastAt) AS viewedAtMs');
+  });
+
+  it('threads viewedAtMs through the summary mapper', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('BELONGS_TO]->(s:Space {id: $spaceId})', [
+      {
+        id: 'a1',
+        title: 'Note',
+        kind: 'text',
+        createdAt: '2026-08-01T00:00:00Z',
+        updatedAt: '2026-08-10T00:00:00Z',
+        viewedAtMs: '1765400000000',
+        otherSpaces: [],
+        producedBy: null,
+      },
+    ]);
+    const client = makeClient(stub);
+    const items = await client.listItems({ kind: 'space', spaceId: 's1' });
+    expect(items[0]?.viewedAtMs).toBe(1765400000000);
+  });
+});
+
+// ─── ADR-062: the meeting ring ───────────────────────────────────────────
+//
+// (:MeetingLive) is an ephemeral doorbell, not an artifact: no :Asset
+// label, no Space membership, TTL-guarded on read. The check is driven
+// by EXISTING app events (cache refresh, focus) — these tests pin the
+// query shape and mapping; the no-new-timers rule lives in main.ts.
+describe('ADR-062: live-meeting ring reads', () => {
+  it('LIST_LIVE_MEETINGS is TTL-guarded, small, and never touches :Asset', () => {
+    const q = CYPHER.LIST_LIVE_MEETINGS;
+    expect(q).toContain('MATCH (m:MeetingLive)');
+    expect(q).toContain('coalesce(m.startedAt, 0) > $nowMs - $ttlMs');
+    expect(q).toContain('LIMIT 5');
+    expect(q).not.toContain(':Asset');
+    expect(q).not.toContain('BELONGS_TO');
+  });
+
+  it('listLiveMeetings maps rows and forwards the ttl', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (m:MeetingLive)', [
+      {
+        id: 'live_weekly-sync-a1b2c3',
+        title: 'Weekly Sync',
+        joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
+        host: 'Robb',
+        startedAtMs: 1786500000000,
+      },
+      { id: '', title: 'junk row dropped' },
+    ]);
+    const client = makeClient(stub);
+    const out = await client.listLiveMeetings({ ttlMs: 60_000 });
+    expect(out).toEqual([
+      {
+        id: 'live_weekly-sync-a1b2c3',
+        title: 'Weekly Sync',
+        joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
+        host: 'Robb',
+        startedAtMs: 1786500000000,
+      },
+    ]);
+    const call = stub.calls.find((c) => c.cypher.includes('MATCH (m:MeetingLive)'));
+    expect(call?.parameters).toMatchObject({ ttlMs: 60_000 });
+  });
+
+  it('defaults the ttl to 30 minutes and nulls absent fields', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (m:MeetingLive)', [{ id: 'live_x', title: 'X' }]);
+    const client = makeClient(stub);
+    const out = await client.listLiveMeetings();
+    expect(out[0]).toEqual({ id: 'live_x', title: 'X', joinUrl: null, host: null, startedAtMs: 0 });
+    const call = stub.calls.find((c) => c.cypher.includes('MATCH (m:MeetingLive)'));
+    expect(call?.parameters).toMatchObject({ ttlMs: 30 * 60_000 });
+  });
+});

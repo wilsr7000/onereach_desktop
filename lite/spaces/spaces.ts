@@ -3527,9 +3527,28 @@ function renderItemList(opts: RenderItemListOpts): void {
   grid.className = 'spaces-card-grid';
   grid.id = 'spaces-card-grid';
   grid.setAttribute('aria-label', 'Assets');
-  for (const item of filteredItems) {
+  // Recency organization (2026-08-11): the server orders by updatedAt
+  // DESC, but that ORDER BY compares mixed-format timestamp STRINGS
+  // (ISO vs epoch-ms across writers) — re-sort on parsed time so the
+  // bands below are always coherent. Stable, so equal stamps keep
+  // server order.
+  const nowMs = Date.now();
+  const recencySorted = [...filteredItems].sort(
+    (a, b) => (itemLastEditMs(b) ?? -1) - (itemLastEditMs(a) ?? -1)
+  );
+  const recencyRules = planRecencyRules(recencySorted, nowMs);
+  let ruleCursor = 0;
+  recencySorted.forEach((item, index) => {
+    if (ruleCursor < recencyRules.length && recencyRules[ruleCursor]?.index === index) {
+      const rule = document.createElement('div');
+      rule.className = 'spaces-grid-recency-rule';
+      rule.setAttribute('role', 'separator');
+      rule.textContent = recencyRules[ruleCursor]!.label;
+      grid.appendChild(rule);
+      ruleCursor += 1;
+    }
     grid.appendChild(buildItemCard(item, item.id === state.activeItemId));
-  }
+  });
   wrap.appendChild(grid);
 
   // A sidebar selection made before this paint (scope switch = async
@@ -5405,6 +5424,62 @@ function applyActiveCard(grid: HTMLElement, itemId: string | null): void {
  * `is-active`, and the `data-item-id` attribute are preserved so the
  * existing wiring + tests still find the right hooks.
  */
+// ─── Recency organization (2026-08-11) ─────────────────────────────────
+// "Subtle organize by last edit time": the grid is already served
+// newest-edit-first; these helpers make that order LEGIBLE — thin
+// full-width rules where the recency band changes (Today / Yesterday /
+// This week / This month / Older), and an explicit "edited … · read …"
+// line on each card. Rules render only when the grid spans 2+ bands,
+// so a uniformly-fresh Space stays clean.
+
+/** The card's organizing instant: last edit, falling back to creation. */
+export function itemLastEditMs(item: {
+  updatedAt?: string;
+  createdAt?: string;
+}): number | null {
+  return (
+    parseTimestamp(item.updatedAt ?? '') ?? parseTimestamp(item.createdAt ?? '')
+  );
+}
+
+/** Calendar-local recency band for a timestamp. */
+export function recencyBucketLabel(tsMs: number | null, nowMs: number): string {
+  if (tsMs === null) return 'Older';
+  const now = new Date(nowMs);
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  if (tsMs >= startOfToday) return 'Today';
+  if (tsMs >= startOfToday - 86_400_000) return 'Yesterday';
+  if (tsMs >= startOfToday - 6 * 86_400_000) return 'This week';
+  if (tsMs >= startOfToday - 29 * 86_400_000) return 'This month';
+  return 'Older';
+}
+
+/**
+ * Plan the divider rows for a recency-sorted item list: one entry per
+ * band CHANGE (including index 0), or NONE when everything falls in a
+ * single band. Pure — the grid loop consumes it.
+ */
+export function planRecencyRules(
+  items: ReadonlyArray<{ updatedAt?: string; createdAt?: string }>,
+  nowMs: number
+): Array<{ index: number; label: string }> {
+  const rules: Array<{ index: number; label: string }> = [];
+  let prev: string | null = null;
+  items.forEach((item, index) => {
+    const label = recencyBucketLabel(itemLastEditMs(item), nowMs);
+    if (label !== prev) {
+      rules.push({ index, label });
+      prev = label;
+    }
+  });
+  return rules.length > 1 ? rules : [];
+}
+
+/** ms-epoch variant of formatRelativeTime. */
+function formatRelativeMs(ms: number): string {
+  return formatRelativeTime(new Date(ms).toISOString());
+}
+
 export function buildItemCard(
   item: RendererItemSummary,
   active: boolean
@@ -5517,8 +5592,31 @@ export function buildItemCard(
 
   const time = document.createElement('span');
   time.className = 'spaces-card-time';
-  time.textContent = formatRelativeTime(item.updatedAt);
+  // Label the instant so it reads unambiguously: "edited 2h ago"
+  // (or "created" when it has never been edited since creation), and
+  // — when the viewer has opened this asset — "· read 5m ago" from
+  // their own VIEWED audit edge. Hover carries the absolute time.
+  const neverEdited =
+    item.updatedAt === item.createdAt || item.updatedAt === undefined || item.updatedAt === '';
+  const editStamp = neverEdited ? item.createdAt : item.updatedAt;
+  time.textContent = `${neverEdited ? 'created' : 'edited'} ${formatRelativeTime(editStamp)}`;
+  {
+    const abs = parseTimestamp(editStamp ?? '');
+    if (abs !== null) time.title = new Date(abs).toLocaleString();
+  }
   metaRow.appendChild(time);
+  if (typeof item.viewedAtMs === 'number' && item.viewedAtMs > 0) {
+    const sepR = document.createElement('span');
+    sepR.className = 'spaces-card-meta-sep';
+    sepR.setAttribute('aria-hidden', 'true');
+    sepR.textContent = '·';
+    metaRow.appendChild(sepR);
+    const read = document.createElement('span');
+    read.className = 'spaces-card-time spaces-card-read';
+    read.textContent = `read ${formatRelativeMs(item.viewedAtMs)}`;
+    read.title = new Date(item.viewedAtMs).toLocaleString();
+    metaRow.appendChild(read);
+  }
 
   // Multi-space indicator: signals an asset filed in more than the
   // current Space. Quiet "⧉ N" with the space names in the tooltip.

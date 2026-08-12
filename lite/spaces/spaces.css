@@ -8945,3 +8945,28 @@ body {
 }
 .spaces-detail-viewers-name { color: var(--or-text, #d8d8d8); }
 .spaces-detail-viewers-when { color: var(--or-text-muted, rgba(255,255,255,0.42)); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Recency bands in the asset grid (2026-08-11) — subtle full-width
+   rules marking Today / Yesterday / This week / This month / Older. */
+.spaces-grid-recency-rule {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 -4px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--or-text-muted, rgba(255, 255, 255, 0.38));
+  user-select: none;
+}
+.spaces-grid-recency-rule::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--or-border, rgba(255, 255, 255, 0.08));
+}
+/* My own last-read fragment on the card meta row. */
+.spaces-card-read {
+  color: var(--or-text-muted, rgba(255, 255, 255, 0.35));
+}
