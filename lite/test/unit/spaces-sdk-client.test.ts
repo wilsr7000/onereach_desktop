@@ -3978,7 +3978,8 @@ describe('ADR-062: live-meeting ring reads', () => {
         title: 'Weekly Sync',
         joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
         host: 'Robb',
-        startedAtMs: 1786500000000,
+        spaceName: null,
+          startedAtMs: 1786500000000,
       },
       { id: '', title: 'junk row dropped' },
     ]);
@@ -3990,7 +3991,8 @@ describe('ADR-062: live-meeting ring reads', () => {
         title: 'Weekly Sync',
         joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
         host: 'Robb',
-        startedAtMs: 1786500000000,
+        spaceName: null,
+          startedAtMs: 1786500000000,
       },
     ]);
     const call = stub.calls.find((c) => c.cypher.includes('MATCH (m:MeetingLive)'));
@@ -4002,8 +4004,24 @@ describe('ADR-062: live-meeting ring reads', () => {
     stub.setResponse('MATCH (m:MeetingLive)', [{ id: 'live_x', title: 'X' }]);
     const client = makeClient(stub);
     const out = await client.listLiveMeetings();
-    expect(out[0]).toEqual({ id: 'live_x', title: 'X', joinUrl: null, host: null, startedAtMs: 0 });
+    expect(out[0]).toEqual({ id: 'live_x', title: 'X', joinUrl: null, host: null, spaceName: null,
+          startedAtMs: 0 });
     const call = stub.calls.find((c) => c.cypher.includes('MATCH (m:MeetingLive)'));
     expect(call?.parameters).toMatchObject({ ttlMs: 30 * 60_000 });
+  });
+});
+
+describe('LIST_LIVE_MEETINGS — space context (2026-08-12)', () => {
+  it('projects m.spaceName and maps it through (null when absent)', async () => {
+    expect(CYPHER.LIST_LIVE_MEETINGS).toContain('m.spaceName AS spaceName');
+    const stub = buildStubQuery();
+    stub.setResponse('MATCH (m:MeetingLive)', [
+      { id: 'live_a', title: 'Weekly Sync', joinUrl: null, host: null, spaceName: 'Design', startedAtMs: 5 },
+      { id: 'live_b', title: 'Standup', joinUrl: null, host: null, spaceName: null, startedAtMs: 6 },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.listLiveMeetings();
+    expect(rows[0]?.spaceName).toBe('Design');
+    expect(rows[1]?.spaceName).toBeNull();
   });
 });

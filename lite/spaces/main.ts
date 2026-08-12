@@ -596,9 +596,18 @@ async function joinLiveMeeting(meeting: LiveMeeting): Promise<void> {
   try {
     // openTab raises the main window via the a8f1bfa raise-on-tab-open
     // machinery, so the meeting is front-and-center after one click.
+    // Tab label leads with the SPACE when the signal carries one
+    // ("Design · Weekly Sync"), deduped when the title already starts
+    // with the space name (rooms are derived from space names).
+    const title = meeting.title || 'Meeting';
+    const space = meeting.spaceName ?? '';
+    const label =
+      space.length > 0 && !title.toLowerCase().startsWith(space.toLowerCase())
+        ? `${space} · ${title}`
+        : title;
     await getMainWindowApi().openTab({
       url: meeting.joinUrl,
-      label: meeting.title.slice(0, 40) || 'Meeting',
+      label: label.slice(0, 48),
     });
   } catch (err) {
     log.warn('spaces', 'ring join failed', {
