@@ -1293,6 +1293,23 @@ Respond with JSON:
               joinUrl = `${guestUrl}?room=${encodeURIComponent(roomName)}${pub ? `#k=${pub}` : ''}`;
             }
             this._lastLiveRoomName = roomName;
+            // ADR-064 — presence facet: hosting a meeting is the most
+            // "who's doing what" fact there is. Identity-gated inside.
+            const presenceEmail = global.settingsManager?.get('userEmail');
+            if (presenceEmail) {
+              const presence = require('./lib/presence-beacon');
+              void presence.beat({
+                personId: presenceEmail,
+                appId: 'onereach-desktop',
+                appName: 'Onereach.ai',
+                facets: {
+                  tool: 'meeting',
+                  meetingRoom: roomName,
+                  lastAction: `started meeting “${require('./lib/meeting/meeting-graph-bridge').prettyRoomTitle(roomName)}”`,
+                },
+                log,
+              });
+            }
             await bridge.announceMeetingLive({
               roomName,
               joinUrl,
@@ -1333,6 +1350,18 @@ Respond with JSON:
           try {
             const { endMeetingLive } = require('./lib/meeting/meeting-graph-bridge');
             void endMeetingLive(room, { log });
+            // ADR-064 — clear the meeting facet (null removes it).
+            const presenceEmail = global.settingsManager?.get('userEmail');
+            if (presenceEmail) {
+              const presence = require('./lib/presence-beacon');
+              void presence.beat({
+                personId: presenceEmail,
+                appId: 'onereach-desktop',
+                appName: 'Onereach.ai',
+                facets: { tool: null, meetingRoom: null, lastAction: 'ended a meeting' },
+                log,
+              });
+            }
           } catch (ringError) {
             log.warn('recorder', 'meeting ring teardown unavailable', { error: ringError.message });
           }

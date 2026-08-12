@@ -695,6 +695,13 @@ function _buildToolsMenu(_showTestMenu) {
           executeAction('open-recorder');
         },
       },
+      {
+        label: 'Live Activity',
+        click: () => {
+          const { executeAction } = require('./action-executor');
+          executeAction('open-live-activity');
+        },
+      },
       { type: 'separator' },
       {
         label: 'Manage Tools...',

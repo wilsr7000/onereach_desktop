@@ -1350,6 +1350,58 @@ app.whenReady().then(() => {
       console.error('[Startup] Error initializing recorder:', error);
     }
 
+    // ADR-064 — presence beacon + Live Activity read surface. The
+    // graph gets a TTL'd now-snapshot; the temporal trail lives in the
+    // KV log the graph points to. Identity is the `userEmail` setting
+    // (the Person convention) — absent identity means no beacon, by
+    // design. Everything here is best-effort; presence must never
+    // affect startup.
+    try {
+      const presence = require('./lib/presence-beacon');
+      void presence.ensurePresenceSchema();
+      const presenceIdentity = () => {
+        const email = global.settingsManager?.get('userEmail');
+        if (typeof email !== 'string' || email.trim().length === 0) return null;
+        return {
+          personId: email.trim(),
+          appId: 'onereach-desktop',
+          appName: 'Onereach.ai',
+        };
+      };
+      presence.startHeartbeat({
+        getIdentity: presenceIdentity,
+        getFacets: () => {
+          const room = global.recorder?._lastLiveRoomName;
+          return room
+            ? { tool: 'meeting', meetingRoom: String(room) }
+            : {};
+        },
+      });
+      const { ipcMain: presenceIpc } = require('electron');
+      presenceIpc.handle('activity:list', async () => {
+        try {
+          const [presenceRows, activity] = await Promise.all([
+            presence.listPresence(),
+            presence.listRecentActivity(),
+          ]);
+          return { ok: true, presence: presenceRows, activity };
+        } catch (error) {
+          return { ok: false, error: error.message };
+        }
+      });
+      presenceIpc.handle('activity:trail', async (_event, { personId, appId }) => {
+        try {
+          const entries = await presence.readPresenceLog(String(personId || ''), String(appId || ''));
+          return { ok: true, entries };
+        } catch (error) {
+          return { ok: false, error: error.message, entries: [] };
+        }
+      });
+      console.log('Presence beacon initialized');
+    } catch (error) {
+      console.error('[Startup] Error initializing presence:', error);
+    }
+
     // Initialize module manager
     try {
       moduleManager = new ModuleManager();

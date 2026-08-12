@@ -240,6 +240,18 @@ const ACTION_REGISTRY = {
     },
   },
 
+  'open-live-activity': {
+    category: 'windows',
+    description: 'Open Live Activity (who is doing what across the account)',
+    execute: () => {
+      createStandardWindow({
+        width: 1040, height: 720, title: 'Live Activity',
+        preload: 'preload-live-activity.js', file: 'live-activity.html',
+      });
+      return { success: true, message: 'Live Activity opened' };
+    },
+  },
+
   'open-log-viewer': {
     category: 'windows',
     description: 'Open Event Log Viewer',
