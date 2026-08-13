@@ -4493,7 +4493,7 @@ async function openAddMemberPrompt(
   const head = document.createElement('div');
   head.className = 'spaces-member-picker-head';
   const title = document.createElement('span');
-  title.textContent = 'Add member';
+  title.textContent = 'People';
   head.appendChild(title);
   const close = document.createElement('button');
   close.type = 'button';
@@ -4509,6 +4509,68 @@ async function openAddMemberPrompt(
   search.placeholder = 'Search people and agents in your account…';
   search.autocomplete = 'off';
   panel.appendChild(search);
+
+  // Who's already in — visible up top, removable in place. Feeds the
+  // exclusion set so search never re-offers an existing member.
+  const currentIds = new Set<string>();
+  const currentSection = document.createElement('div');
+  currentSection.className = 'spaces-member-current';
+  panel.insertBefore(currentSection, search);
+  const renderCurrent = async (): Promise<void> => {
+    const bridge2 = window.lite?.spaces;
+    if (bridge2 === undefined) return;
+    try {
+      const envelope = await bridge2.members.list(spaceId);
+      if (envelope.ok !== true) return;
+      currentIds.clear();
+      currentSection.replaceChildren();
+      const members = envelope.value;
+      if (members.length === 0) return;
+      const heading = document.createElement('div');
+      heading.className = 'spaces-member-current-title';
+      heading.textContent = `In this space · ${members.length}`;
+      currentSection.appendChild(heading);
+      for (const member of members) {
+        currentIds.add(member.id.toLowerCase());
+        const row = document.createElement('div');
+        row.className = 'spaces-member-current-row';
+        row.appendChild(buildPersonAvatar(member, 'md'));
+        const nameEl = document.createElement('span');
+        nameEl.className = 'spaces-member-current-name';
+        nameEl.textContent = member.name;
+        row.appendChild(nameEl);
+        if (member.kind === 'Agent') {
+          const kindEl = document.createElement('span');
+          kindEl.className = 'spaces-member-current-kind';
+          kindEl.textContent = 'agent';
+          row.appendChild(kindEl);
+        }
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'spaces-member-current-remove';
+        removeBtn.textContent = '×';
+        removeBtn.title = `Remove ${member.name}`;
+        removeBtn.addEventListener('click', () => {
+          void (async (): Promise<void> => {
+            const env2 = await bridge2.members.remove(spaceId, member.id);
+            if (env2.ok === false) {
+              showToast(env2.error.message);
+              return;
+            }
+            showToast(`Removed ${member.name}`);
+            await renderCurrent();
+            void runSearch(search.value.trim());
+            if (refresh !== undefined) await refresh();
+          })();
+        });
+        row.appendChild(removeBtn);
+        currentSection.appendChild(row);
+      }
+    } catch {
+      /* section is progressive enhancement */
+    }
+  };
+  void renderCurrent();
 
   const results = document.createElement('div');
   results.className = 'spaces-member-picker-results';
@@ -4585,7 +4647,14 @@ async function openAddMemberPrompt(
           ? `Added ${added}`
           : `Added ${added} · ${accessLabel({ accessExpiresAt: expiresAt })}`
       );
-      dispose();
+      // Stay open: adding several people is the common case. The
+      // member appears above; the search resets for the next pick.
+      await renderCurrent();
+      search.value = '';
+      void runSearch('');
+      search.focus();
+      if (refresh !== undefined) await refresh();
+      return;
       if (refresh !== undefined) await refresh();
       else await loadSharedSpaceDashboard(spaceId);
     } catch (err) {
@@ -4604,27 +4673,23 @@ async function openAddMemberPrompt(
       const envelope = await bridge.members.searchLibrary(q, 25);
       if (seq !== searchSeq) return; // superseded by a newer keystroke
       results.replaceChildren();
-      const entries = envelope.ok === true ? envelope.value : [];
+      const entries = (envelope.ok === true ? envelope.value : []).filter(
+        // Graph-only, and never re-offer an existing member (they're
+        // listed above with a remove control instead).
+        (entry) => !currentIds.has(entry.id.toLowerCase())
+      );
       for (const entry of entries) {
         results.appendChild(
           buildMemberPickerRow(entry, () => void addMember(entry.id, false))
         );
       }
-      // Email not in the graph yet → offer to invite as a new Person.
-      const email = q.trim().toLowerCase();
-      const emailShaped = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
-      const exists = entries.some((e) => e.id.toLowerCase() === email);
-      if (emailShaped && !exists) {
-        results.appendChild(
-          buildMemberPickerRow(
-            { kind: 'Person', id: email, name: `Add "${email}" as a new person`, email: '' },
-            () => void addMember(email, true)
-          )
-        );
-      }
       if (results.childElementCount === 0) {
         results.appendChild(
-          buildAgentLibraryStatus('No matches — type an email to invite someone new.')
+          buildAgentLibraryStatus(
+            q.trim().length > 0
+              ? `No one matching “${q.trim()}” — people must already exist in the account.`
+              : 'Everyone in the account is already here.'
+          )
         );
       }
     } catch (err) {
@@ -4834,6 +4899,8 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
       // ADR-051: per-space visibility control + (when restricted) the
       // member management strip, on every Space kind.
       titleWrap.appendChild(buildSpaceVisibilityRow(space));
+      // Who's in it, always visible (2026-08-12 UX pass).
+      titleWrap.appendChild(buildSpaceMembersStrip(space));
     }
   }
 
@@ -4912,6 +4979,94 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
  * Spaces — describes the purpose of the space, edited in-place so
  * adoption follows naturally from a click.
  */
+/** "Robb Wilson" -> "RW"; emails use the local part ("robb.w" -> "RW"). */
+export function personInitials(name: string): string {
+  const clean = name.includes('@') ? name.split('@')[0] ?? name : name;
+  const parts = clean
+    .split(/[\s._-]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return (parts[0] ?? '?').slice(0, 2).toUpperCase();
+  return ((parts[0]?.[0] ?? '') + (parts[parts.length - 1]?.[0] ?? '')).toUpperCase();
+}
+
+/** Deterministic avatar hue from an id — stable across paints. */
+export function avatarHue(id: string): number {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return ((hash % 360) + 360) % 360;
+}
+
+function buildPersonAvatar(member: { id: string; name: string }, size: 'sm' | 'md'): HTMLElement {
+  const el = document.createElement('span');
+  el.className = `spaces-avatar spaces-avatar-${size}`;
+  el.textContent = personInitials(member.name);
+  el.title = member.name;
+  const hue = avatarHue(member.id);
+  el.style.background = `hsl(${hue}, 32%, 26%)`;
+  el.style.borderColor = `hsl(${hue}, 40%, 38%)`;
+  return el;
+}
+
+/**
+ * Who's in this Space, at a glance — an avatar strip on EVERY space
+ * header ("needs to be more obvious who is part of it", 2026-08-12).
+ * Async-populated; clicking anywhere opens the People panel.
+ */
+function buildSpaceMembersStrip(space: RendererSpace): HTMLElement {
+  const strip = document.createElement('button');
+  strip.type = 'button';
+  strip.className = 'spaces-view-header-members';
+  strip.title = 'People in this space — click to manage';
+  strip.addEventListener('click', () => {
+    void openAddMemberPrompt(space.id, async () => {
+      await loadSpaces();
+    });
+  });
+  const label = document.createElement('span');
+  label.className = 'spaces-view-header-members-label';
+  label.textContent = 'People';
+  strip.appendChild(label);
+  const holder = document.createElement('span');
+  holder.className = 'spaces-view-header-members-avatars';
+  strip.appendChild(holder);
+  const summary = document.createElement('span');
+  summary.className = 'spaces-view-header-members-summary';
+  summary.textContent = '…';
+  strip.appendChild(summary);
+
+  void (async (): Promise<void> => {
+    const bridge = window.lite?.spaces;
+    if (bridge === undefined) return;
+    try {
+      const envelope = await bridge.members.list(space.id);
+      if (envelope.ok !== true) {
+        summary.textContent = '';
+        return;
+      }
+      const members = envelope.value;
+      holder.replaceChildren();
+      for (const member of members.slice(0, 8)) {
+        holder.appendChild(buildPersonAvatar(member, 'sm'));
+      }
+      if (members.length > 8) {
+        const more = document.createElement('span');
+        more.className = 'spaces-avatar spaces-avatar-sm spaces-avatar-more';
+        more.textContent = `+${members.length - 8}`;
+        holder.appendChild(more);
+      }
+      summary.textContent =
+        members.length === 0
+          ? 'Nobody yet — add people'
+          : `${members.length} ${members.length === 1 ? 'person' : 'people'}`;
+    } catch {
+      summary.textContent = '';
+    }
+  })();
+  return strip;
+}
+
 function buildSpaceObjectiveRow(space: RendererSpace): HTMLElement {
   const sub = document.createElement('p');
   sub.className = 'spaces-view-header-sub';
@@ -8621,6 +8776,7 @@ function buildAutoFillButton(onAutoFill: () => Promise<void>): HTMLElement {
   button.type = 'button';
   button.className = 'spaces-detail-metadata-autofill';
   button.textContent = '✨ Auto-fill';
+  button.setAttribute('aria-label', 'Auto-fill metadata with AI');
   button.title = 'Use Claude to generate a summary, tags, topics, and more';
   button.addEventListener('click', () => {
     if (button.disabled) return;
