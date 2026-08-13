@@ -1598,3 +1598,19 @@ describe('personTypeaheadEntries — wizard people dropdown', () => {
     expect(out.map((p) => p.id)).toEqual(['robb@onereach.com', 'ada@x.y']);
   });
 });
+
+describe('machineNamedLast (people panel ordering)', () => {
+  it('demotes uuid-named entries below human names, otherwise stable', async () => {
+    const mod = await import('../../spaces/spaces');
+    const out = mod.machineNamedLast([
+      { name: '35254342-4a2e-475b-aec1-18547e517e29' },
+      { name: 'Alex Petrov' },
+      { name: 'Erika Hall' },
+    ]);
+    expect(out.map((e) => e.name)).toEqual([
+      'Alex Petrov',
+      'Erika Hall',
+      '35254342-4a2e-475b-aec1-18547e517e29',
+    ]);
+  });
+});

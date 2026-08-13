@@ -30,23 +30,9 @@
   display: none !important;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.18);
-  border-radius: 5px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
-}
+/* Scrollbar chrome lives in signature.css (10px, pill thumb,
+ * padding-box inset) — no local override so every lite window
+ * scrolls identically. */
 
 html,
 body {
@@ -112,6 +98,10 @@ body {
   display: grid;
   grid-template-columns: 240px 1fr 0;
   min-height: 0;
+  /* Containing block for the <=1100px overlay detail rail below —
+   * without this the rail escapes to the viewport and covers the
+   * app header / draggable title bar. */
+  position: relative;
 }
 
 .spaces-layout.has-detail {
@@ -175,7 +165,7 @@ body {
   grid-template-columns: 18px 1fr auto;
   align-items: center;
   gap: 8px;
-  padding: 7px 10px;
+  padding: 7px 8px;
   border-radius: 6px;
   cursor: pointer;
   color: #d2d2d6;
@@ -436,9 +426,9 @@ body {
 
 .spaces-items-region {
   /* Per-Space view shares the home-timeline layout so the page width
-   * and padding match across scopes. */
+   * and padding match across scopes. `.spaces-main` is the single
+   * scroll container — no nested overflow here (double scrollbars). */
   padding: 24px 32px 48px;
-  overflow-y: auto;
   max-width: 1120px;
   width: 100%;
   margin: 0 auto;
@@ -682,7 +672,7 @@ body {
 }
 .spaces-member-current-remove:hover { color: #f87171; background: #262833; }
 
-.spaces-view-header-objective-counter {.spaces-view-header-objective-counter {
+.spaces-view-header-objective-counter {
   margin-left: auto;
   font-size: 11px;
   color: var(--spaces-muted, #8b8e9c);
@@ -7326,7 +7316,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 10px 8px 14px;
+  /* One sidebar gutter: every text edge in the rail starts at 16px. */
+  padding: 10px 10px 8px 16px;
   flex: 0 0 auto;
 }
 
@@ -7351,9 +7342,9 @@ body {
   justify-content: center;
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   color: #8b93a7;
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
   transition: background 80ms ease, color 80ms ease;
@@ -7377,7 +7368,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 10px;
+  padding: 6px 8px;
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -7408,11 +7399,11 @@ body {
 
 .spaces-action-row-badge {
   margin-left: auto;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: 999px;
   background: rgba(123, 167, 255, 0.16);
   color: #7ba7ff;
 }
@@ -7423,25 +7414,10 @@ body {
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 8px 8px 14px;
+  /* Dark thin scrollbar comes from signature.css — no local override
+   * so the rail scrolls identically to every other lite surface. */
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
-}
-
-.spaces-sidebar-scroll::-webkit-scrollbar {
-  width: 8px;
-}
-
-.spaces-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 4px;
-}
-
-.spaces-sidebar-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
-}
-
-.spaces-sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 /* ── Collapsible sections ── */
@@ -7461,10 +7437,10 @@ body {
   gap: 4px;
   flex: 1 1 auto;
   width: 100%;
-  padding: 4px 6px;
+  padding: 4px 8px;
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   cursor: pointer;
   color: #8b93a7;
   transition: background 80ms ease, color 80ms ease;
@@ -7527,7 +7503,7 @@ body {
 }
 
 .spaces-side-tree-group {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.8px;
   text-transform: uppercase;
@@ -7545,10 +7521,10 @@ body {
 .spaces-tree-item {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-height: 24px;
   padding: 2px 8px;
-  border-radius: 5px;
+  border-radius: 6px;
   font-size: 12.5px;
   color: #b9bfcc;
   cursor: pointer;
@@ -7642,7 +7618,7 @@ body {
 .spaces-row-space {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
 }
 
 .spaces-row-space .spaces-row-name {
@@ -7661,8 +7637,10 @@ body {
 
 .spaces-ctx-menu {
   position: fixed;
-  z-index: 1600;
+  /* Menus sit above every backdrop/dialog (backdrops 2000, toast 2700). */
+  z-index: 2600;
   min-width: 200px;
+  max-width: 280px;
   background: var(--or-bg-elevated, #1b1b20);
   border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
   border-radius: var(--or-radius-sm, 6px);
@@ -7678,15 +7656,24 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 8px;
+  padding: 6px 10px;
   background: transparent;
   border: none;
-  border-radius: 5px;
-  color: #d2d2d6;
+  border-radius: 6px;
+  color: var(--or-text-primary, #f4f6fb);
   text-align: left;
   cursor: pointer;
   position: relative;
-  transition: background 70ms ease;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+/* Space names populate the "Move to…" submenu — ellipsize instead of
+ * letting one long name blow the menu across the window. */
+.spaces-ctx-item > span:not(.spaces-ctx-check):not(.spaces-ctx-submenu-arrow) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spaces-ctx-item:hover {
@@ -7738,9 +7725,10 @@ body {
 .spaces-ctx-item-submenu > .spaces-ctx-flyout {
   display: none;
   position: absolute;
-  left: calc(100% - 4px);
-  top: -5px;
+  left: 100%;
+  top: -4px;
   min-width: 180px;
+  max-width: 280px;
   background: var(--or-bg-elevated, #1b1b20);
   border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
   border-radius: var(--or-radius-sm, 6px);
@@ -7750,8 +7738,16 @@ body {
   gap: 1px;
 }
 
-.spaces-ctx-item-submenu:hover > .spaces-ctx-flyout {
+.spaces-ctx-item-submenu:hover > .spaces-ctx-flyout,
+.spaces-ctx-item-submenu:focus-within > .spaces-ctx-flyout {
   display: flex;
+}
+
+/* Set by openContextMenu when the menu sits near the right viewport
+ * edge — the flyout opens leftward instead of clipping off-screen. */
+.spaces-ctx-menu.is-flyout-left .spaces-ctx-item-submenu > .spaces-ctx-flyout {
+  left: auto;
+  right: 100%;
 }
 
 .spaces-ctx-submenu-arrow {

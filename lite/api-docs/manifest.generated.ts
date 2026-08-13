@@ -533,9 +533,16 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
-            "name": "onSessionChanged",
-            "signature": "onSessionChanged(cb: (env: Environment, session: AuthSession | null) => void): () => void;\n\n  /**\n   * Subscribe to proactive session-expired notifications. The store\n   * arms a timer at capture/hydrate and fires ONCE when a session's\n   * `expiresAt` passes (or on the first tick after the machine wakes\n   * from sleeping through it) — so recovery can be offered BEFORE the\n   * user trips over a dead KV op or a login-bounced tab. Not fired for\n   * sessions with no known expiry. Returns an unsubscribe function.\n   */\n  onSessionExpired(cb: (env: Environment, session: AuthSession) => void): () => void;\n\n  /**\n   * Subscribe to 2FA-needs-setup notifications. Fires when the\n   * autofill watcher detects a OneReach 2FA prompt during sign-in\n   * AND Lite has no TOTP secret saved in the keychain (i.e. the user\n   * needs to open Settings -> Two-Factor and paste their authenticator\n   * setup secret). The renderer wires a contextual banner +\n   * \"Open Settings -> Two-Factor\" button. Returns an unsubscribe.\n   */\n  onTwoFactorNeedsSetup(\n    cb: (payload: import('./store.js').TwoFactorNeedsSetupPayload) => void\n  ): () => void;\n\n  /**\n   * Subscribe to typed auth events (ADR-032). Branch on `ev.name` for\n   * type-narrowed access to span data, IPC payloads, the\n   * `auth.signIn.coalesced` event, and serialized errors.\n   *\n   * @example\n   * ```typescript\n   * import { getAuthApi, AUTH_EVENTS } from '../auth/api.js';\n   * getAuthApi().onEvent((ev) => {\n   *   if (ev.name === AUTH_EVENTS.SIGN_IN_FINISH) {\n   *     metrics.timing('auth.signIn', ev.durationMs);\n   *     metrics.tag({ accountId: ev.data.accountId });\n   *   }\n   * });\n   * ```\n   */\n  onEvent(handler: (event: import('./events.js').AuthEvent) => void): () => void;",
-            "description": "Subscribe to session changes. Fires whenever a sign-in completes\nor a sign-out happens. Returns an unsubscribe function.\n\nThe callback receives `(env, session)` where `session` is the new\nsession or `null` if the env was just signed out.",
+            "name": "revalidateSession",
+            "signature": "revalidateSession(\n    env: Environment\n  ): Promise<'alive' | 'dead' | 'unreachable' | 'no-session'>",
+            "description": "Ask the SERVER whether this env's session is still honored, and —\nonly on a definitive 'dead' — clear every client copy (memory,\nkeychain vault, partition cookies) so nothing re-injects a corpse.\n'unreachable' (offline / transient) changes nothing: offline must\nnever sign the user out. (2026-08-11 session-expiry fix.)",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "startSessionKeepAlive",
+            "signature": "startSessionKeepAlive(intervalMs?: number): () => void;\n\n  /**\n   * Subscribe to session changes. Fires whenever a sign-in completes\n   * or a sign-out happens. Returns an unsubscribe function.\n   *\n   * The callback receives `(env, session)` where `session` is the new\n   * session or `null` if the env was just signed out.\n   */\n  onSessionChanged(cb: (env: Environment, session: AuthSession | null) => void): () => void;\n\n  /**\n   * Subscribe to proactive session-expired notifications. The store\n   * arms a timer at capture/hydrate and fires ONCE when a session's\n   * `expiresAt` passes (or on the first tick after the machine wakes\n   * from sleeping through it) — so recovery can be offered BEFORE the\n   * user trips over a dead KV op or a login-bounced tab. Not fired for\n   * sessions with no known expiry. Returns an unsubscribe function.\n   */\n  onSessionExpired(cb: (env: Environment, session: AuthSession) => void): () => void;\n\n  /**\n   * Subscribe to 2FA-needs-setup notifications. Fires when the\n   * autofill watcher detects a OneReach 2FA prompt during sign-in\n   * AND Lite has no TOTP secret saved in the keychain (i.e. the user\n   * needs to open Settings -> Two-Factor and paste their authenticator\n   * setup secret). The renderer wires a contextual banner +\n   * \"Open Settings -> Two-Factor\" button. Returns an unsubscribe.\n   */\n  onTwoFactorNeedsSetup(\n    cb: (payload: import('./store.js').TwoFactorNeedsSetupPayload) => void\n  ): () => void;\n\n  /**\n   * Subscribe to typed auth events (ADR-032). Branch on `ev.name` for\n   * type-narrowed access to span data, IPC payloads, the\n   * `auth.signIn.coalesced` event, and serialized errors.\n   *\n   * @example\n   * ```typescript\n   * import { getAuthApi, AUTH_EVENTS } from '../auth/api.js';\n   * getAuthApi().onEvent((ev) => {\n   *   if (ev.name === AUTH_EVENTS.SIGN_IN_FINISH) {\n   *     metrics.timing('auth.signIn', ev.durationMs);\n   *     metrics.tag({ accountId: ev.data.accountId });\n   *   }\n   * });\n   * ```\n   */\n  onEvent(handler: (event: import('./events.js').AuthEvent) => void): () => void;",
+            "description": "Start the 10-min per-env keep-alive loop (validate + activity\ntouch). Idempotent; returns a stopper.",
             "tags": [],
             "examples": []
           }
@@ -543,7 +550,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "AUTH_EVENTS",
-        "count": 58,
+        "count": 59,
         "entries": [
           {
             "constantKey": "SIGN_IN_START",
@@ -618,6 +625,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "SESSION_EXPIRED",
             "name": "auth.session.expired",
+            "description": ""
+          },
+          {
+            "constantKey": "SESSION_SERVER_EXPIRED",
+            "name": "auth.session.server-expired",
             "description": ""
           },
           {
@@ -2660,7 +2672,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "MAIN_WINDOW_EVENTS",
-        "count": 31,
+        "count": 32,
         "entries": [
           {
             "constantKey": "OPEN_TAB_START",
@@ -2775,6 +2787,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "LOGIN_RECOVERY",
             "name": "main-window.tab.login-recovery",
+            "description": ""
+          },
+          {
+            "constantKey": "LOGIN_RECOVERY_VALIDATED",
+            "name": "main-window.tab.login-recovery-validated",
             "description": ""
           },
           {
@@ -3177,6 +3194,20 @@ export const MANIFEST: Manifest = {
             "examples": []
           },
           {
+            "name": "recordView",
+            "signature": "recordView(id: string): Promise<void>",
+            "description": "Audit trail (2026-08-10): record that the current viewer opened\nthis asset (fire-and-forget graph write), and read who has viewed\nit. Backed by a (:Person)-[:VIEWED {firstAt,lastAt,count}]->(:Asset)\nedge, updated per view.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "viewers",
+            "signature": "viewers(id: string): Promise<AssetViewer[]>",
+            "description": "",
+            "tags": [],
+            "examples": []
+          },
+          {
             "name": "create",
             "signature": "create(input: CreateAssetInput): Promise<Item>",
             "description": "Create a new asset (Sprint 1). Either `content` (text body) or\n`fileKey` (already uploaded via `getFilesApi().upload(...)`)\nsupplies the payload. Returns the freshly re-fetched Item.",
@@ -3324,7 +3355,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 115,
+        "count": 118,
         "entries": [
           {
             "constantKey": "CHECKLISTS_CREATE_START",
@@ -3534,6 +3565,21 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "ITEMS_GET_FAIL",
             "name": "spaces.items.get.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "MEETINGS_LIVE_START",
+            "name": "spaces.meetings.live.start",
+            "description": ""
+          },
+          {
+            "constantKey": "MEETINGS_LIVE_FINISH",
+            "name": "spaces.meetings.live.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "MEETINGS_LIVE_FAIL",
+            "name": "spaces.meetings.live.fail",
             "description": ""
           },
           {
@@ -4432,5 +4478,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-11T02:22:10.209Z"
+  "generatedAt": "2026-08-13T05:22:52.195Z"
 } as const;

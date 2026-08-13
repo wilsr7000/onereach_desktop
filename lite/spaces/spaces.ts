@@ -1367,8 +1367,14 @@ function buildCtxEntryRows(host: HTMLElement, entries: CtxEntry[]): void {
       continue;
     }
     if (entry.type === 'submenu') {
+      // The flyout holds real <button> children, so the parent stays a
+      // div — but a focusable one, so keyboard users can reach it (the
+      // flyout opens on :focus-within alongside :hover).
       const row = document.createElement('div');
       row.className = 'spaces-ctx-item spaces-ctx-item-submenu';
+      row.tabIndex = 0;
+      row.setAttribute('role', 'menuitem');
+      row.setAttribute('aria-haspopup', 'menu');
       const label = document.createElement('span');
       label.textContent = entry.label;
       row.appendChild(label);
@@ -1419,6 +1425,11 @@ export function openContextMenu(x: number, y: number, entries: CtxEntry[]): void
   const top = Math.min(y, window.innerHeight - rect.height - 8);
   menu.style.left = `${Math.max(4, Math.round(left))}px`;
   menu.style.top = `${Math.max(4, Math.round(top))}px`;
+  // Flyout submenus open rightward by default; flip when there is no
+  // room so they don't clip off-screen.
+  if (left + rect.width + 280 > window.innerWidth) {
+    menu.classList.add('is-flyout-left');
+  }
   window.setTimeout(() => {
     document.addEventListener('click', closeContextMenu, { once: true });
     document.addEventListener('contextmenu', closeContextMenu, { once: true });
@@ -4654,9 +4665,8 @@ async function openAddMemberPrompt(
       void runSearch('');
       search.focus();
       if (refresh !== undefined) await refresh();
-      return;
-      if (refresh !== undefined) await refresh();
       else await loadSharedSpaceDashboard(spaceId);
+      return;
     } catch (err) {
       window.logging?.error?.('spaces', 'addMember failed', { spaceId, error: messageFrom(err) });
       showToast(messageFrom(err));
@@ -4673,10 +4683,12 @@ async function openAddMemberPrompt(
       const envelope = await bridge.members.searchLibrary(q, 25);
       if (seq !== searchSeq) return; // superseded by a newer keystroke
       results.replaceChildren();
-      const entries = (envelope.ok === true ? envelope.value : []).filter(
-        // Graph-only, and never re-offer an existing member (they're
-        // listed above with a remove control instead).
-        (entry) => !currentIds.has(entry.id.toLowerCase())
+      const entries = machineNamedLast(
+        (envelope.ok === true ? envelope.value : []).filter(
+          // Graph-only, and never re-offer an existing member (they're
+          // listed above with a remove control instead).
+          (entry) => !currentIds.has(entry.id.toLowerCase())
+        )
       );
       for (const entry of entries) {
         results.appendChild(
@@ -4980,6 +4992,15 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
  * adoption follows naturally from a click.
  */
 /** "Robb Wilson" -> "RW"; emails use the local part ("robb.w" -> "RW"). */
+// Graph hygiene guard: entities named by a raw id (account UUIDs from
+// system writers) are real nodes but meaningless picks — sort them last
+// so humans always lead the list.
+export const machineNamedLast = <T extends { name: string }>(entries: T[]): T[] => {
+  const uuidish = (s: string): boolean =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.trim());
+  return [...entries].sort((a, b) => Number(uuidish(a.name)) - Number(uuidish(b.name)));
+};
+
 export function personInitials(name: string): string {
   const clean = name.includes('@') ? name.split('@')[0] ?? name : name;
   const parts = clean
@@ -14007,12 +14028,17 @@ function openRowMenu(spaceId: string, triggerEl: HTMLButtonElement): void {
   if (sharedLabel !== null) {
     sharedLabel.textContent = space?.kind === 'shared' ? 'Make user-managed' : 'Make shared';
   }
-  // Position relative to the trigger.
+  // Position relative to the trigger, then clamp into the viewport
+  // (mirrors openContextMenu) — a ⋯ on the last visible row would
+  // otherwise open the fixed-position menu off the bottom edge.
   const rect = triggerEl.getBoundingClientRect();
-  menu.style.top = `${Math.round(rect.bottom + 4)}px`;
-  menu.style.left = `${Math.round(rect.left - 100)}px`; // shift left so menu opens to the left of ⋯
   menu.hidden = false;
   menu.setAttribute('aria-hidden', 'false');
+  const menuRect = menu.getBoundingClientRect();
+  const top = Math.min(rect.bottom + 4, window.innerHeight - menuRect.height - 8);
+  const left = Math.min(rect.left - 100, window.innerWidth - menuRect.width - 8);
+  menu.style.top = `${Math.max(4, Math.round(top))}px`;
+  menu.style.left = `${Math.max(4, Math.round(left))}px`;
 }
 
 function closeRowMenu(): void {

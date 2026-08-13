@@ -205,6 +205,14 @@ assertNoFullAppModulesLoaded();
 // userData), so this lock does NOT conflict with the full app's lock.
 // ============================================================================
 
+// Dev affordance: LITE_USER_DATA_DIR relocates userData (and with it the
+// single-instance lock), so a dev build can run beside the installed app.
+// Must be set before requestSingleInstanceLock — the lock keys on userData.
+const userDataOverride = process.env.LITE_USER_DATA_DIR;
+if (userDataOverride !== undefined && userDataOverride !== '' && !app.isPackaged) {
+  app.setPath('userData', userDataOverride);
+}
+
 if (!app.requestSingleInstanceLock()) {
   // eslint-disable-next-line no-console
   console.log('[lite] Another instance is already running. Exiting.');
