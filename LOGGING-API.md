@@ -412,6 +412,43 @@ window.logging.info('user-action', 'Button clicked', { target: 'save' });
 
 ---
 
+## File Writer Reliability (event-logger.js)
+
+The disk persistence layer (`event-logger.js`, consumed by the queue's file
+consumer) is hardened against the failure modes from the 2026-08-12
+v0.0.60 incident, where the log file went silent mid-session and a log
+flood's rotation storm deleted the entire on-disk history:
+
+- **Liveness heartbeat**: a `logger.heartbeat` line is written (file-only,
+  never the ring buffer/WS) every ~5 minutes. A log file that stops
+  mid-session now means the *process* died or stalled -- the writer can no
+  longer wedge silently. The first tick after an event-loop stall also
+  writes an `Event-loop stall detected` line with `tickDelayMs`.
+- **Self-healing writer**: if the current file is unlinked externally
+  (sibling instance's cleanup, manual delete) or the stream errors
+  (ENOSPC, EIO), the next 30s tick reopens a fresh file and drains the
+  buffered entries into it, announcing the gap with a `Logger recovered`
+  line. Previously an unlinked file meant invisible ghost-inode writes
+  forever, and a dead stream meant an unbounded buffer retried forever.
+- **Rotation-storm guards**: size-based rotations honor a 5s cooldown;
+  same-second rotations get a filename suffix instead of silently reusing
+  the name; cleanup tie-breaks equal mtimes stably, never deletes the
+  active file, and never deletes files modified in the last 60s (a
+  sibling instance may be writing them).
+- **Flood guard**: entries reaching disk are token-bucket limited
+  (200/sec sustained, 2000 burst) with a reserved error budget (50/sec,
+  500 burst) so an info flood can't drown failures. Drops are counted and
+  reported in a single `Log flood: entries dropped` summary line. The
+  per-entry `statSync` rotation check and per-error immediate flush are
+  gone (byte accounting + 1s debounce), so a log flood no longer
+  saturates the main-process event loop.
+- **Diagnosable rejections**: `Unhandled Rejection` entries serialize the
+  reason's name/message/stack instead of the old `{}`.
+
+Unit coverage: `lite/test/unit/event-logger-hardening.test.ts`.
+
+---
+
 ## Testing
 
 Run the test suite:
