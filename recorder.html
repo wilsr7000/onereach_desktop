@@ -6041,6 +6041,15 @@
               </svg>
               <span class="share-screen-label" id="screenShareLabel">Share</span>
             </button>
+            <button class="session-media-btn share-screen-btn invite-btn" id="inviteBtn" onclick="app.sessionInvite()" title="Copy the meeting join link to invite people">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <line x1="19" y1="8" x2="19" y2="14" />
+                <line x1="16" y1="11" x2="22" y2="11" />
+              </svg>
+              <span class="share-screen-label">Invite</span>
+            </button>
             <button class="session-media-btn pause-ai-btn" id="pauseAiBtn" onclick="app.toggleAgentPause()" title="Pause the meeting AI (live transcription & notes). Recording keeps running.">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M12 3l1.6 4.1L18 8.6l-4.4 1.5L12 15l-1.6-4.9L6 8.6l4.4-1.5L12 3z" />
@@ -8094,6 +8103,31 @@
                   this._trackError('audio-streaming', err.message);
                   console.error('[Transcription] Audio streaming failed:', err);
                 }
+                // Stall watchdog: the realtime session can die WITHOUT closing
+                // the socket — events just stop while the WS stays open, so the
+                // onclose reconnect never fires (observed in the field: a
+                // 136-min meeting's transcript ended at [59:06] with no close
+                // logged). If audio is audibly flowing but no transcription
+                // event has arrived for 3 minutes, force-cycle the socket; the
+                // onclose handler then does its normal reconnect + dropout
+                // markers.
+                this._lastTranscriptionEventAt = Date.now();
+                clearInterval(this._transcriptionStallWatchdog);
+                this._transcriptionStallWatchdog = setInterval(() => {
+                  if (!this.isRecording || this.isPaused || this._agentPaused) return;
+                  if (!this.transcriptionWs || this.transcriptionWs.readyState !== WebSocket.OPEN) return;
+                  const stalledMs = Date.now() - (this._lastTranscriptionEventAt || 0);
+                  const audioFlowing = (this._lastAudioRMS || 0) > 0.01;
+                  if (stalledMs > 180000 && audioFlowing) {
+                    console.warn(
+                      '[Transcription] No events for ' + Math.round(stalledMs / 1000) +
+                        's with live audio — cycling the realtime session'
+                    );
+                    try {
+                      this.transcriptionWs.close(); // unintentional close -> reconnect path
+                    } catch (_e) { /* already closing */ }
+                  }
+                }, 30000);
               } else {
                 console.log('[Transcription] Reconnected; reusing audio pipeline + flush');
                 // Close out the dropout marker with the measured gap.
@@ -8290,6 +8324,8 @@
         },
 
         handleTranscriptionEvent(data) {
+          // Any event = the session is alive; the stall watchdog keys off this.
+          this._lastTranscriptionEventAt = Date.now();
           switch (data.type) {
             case 'conversation.item.input_audio_transcription.delta':
               // Real transcript flowing => healthy session; reset reconnect
@@ -8364,6 +8400,8 @@
           this._transcriptionIntentionalStop = true;
           this._transcriptionDropoutAt = null;
           clearTimeout(this._transcriptionReconnectTimer);
+          clearInterval(this._transcriptionStallWatchdog);
+          this._transcriptionStallWatchdog = null;
           // Guests drop their CC indicator + caption bar
           this._broadcastCcState(false);
           this._lastAudioRMS = 0;
@@ -10899,10 +10937,15 @@
 
             try {
               await this.setupPublicJoin(result.guestTokens, result.livekitUrl, result.roomName, els);
+              // The waiting panel that used to display this link is hidden now
+              // that joining enters the session immediately — point at the
+              // always-available Invite button instead.
+              this.showStatus('Meeting is live — Invite (bottom bar) copies the join link', 'success');
             } catch (err) {
               console.error('[Session] Guest page publish failed:', err);
               els.publicJoinUrl.textContent =
                 'Guest page unavailable — share room name "' + result.roomName + '" manually';
+              this.showStatus('Join link unavailable — Invite will copy the room name instead', 'warning', 6000);
             }
 
             // Hide LAN address (not needed with LiveKit)
@@ -11710,6 +11753,39 @@
             cancelAnimationFrame(this._audioGlowFrame);
             this._audioGlowFrame = null;
           }
+        },
+
+        // Copy the join link from anywhere in a live session. The link UI
+        // historically lived only on the pre-session waiting panel — which the
+        // join-just-joins change hides immediately (and even before that, it
+        // disappeared the moment the first guest arrived). A live meeting with
+        // no way to invite people is a dead end; this button is always there.
+        async sessionInvite() {
+          if (this.publicJoinUrl) {
+            // copySessionCode's own feedback flashes the code display on the
+            // (hidden) waiting panel, so toast here where the host can see it.
+            await this.copySessionCode();
+            this.showStatus('Join link copied — send it to anyone', 'success');
+            return;
+          }
+          if (this.sessionRole === 'guest') {
+            this.showStatus('Ask the host for the join link — only the host holds it', 'info');
+            return;
+          }
+          if (this._meetingRoomName) {
+            // Link publish failed or is still running — give them something
+            // shareable rather than a dead button.
+            try {
+              window.electronClipboard?.writeText?.(this._meetingRoomName);
+            } catch (_e) { /* clipboard bridge unavailable */ }
+            this.showStatus(
+              'Join link not ready — room name "' + this._meetingRoomName + '" copied instead',
+              'warning',
+              6000
+            );
+            return;
+          }
+          this.showStatus('Invite link is still being prepared — try again in a moment', 'info');
         },
 
         // Toggle screen sharing within an active LiveKit session
