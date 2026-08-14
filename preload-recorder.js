@@ -47,6 +47,8 @@ contextBridge.exposeInMainWorld('recorder', {
   writeLiveTranscript: (data) => ipcRenderer.invoke('recorder:write-live-transcript', data),
   trackTranscriptionUsage: (usage) => ipcRenderer.invoke('recorder:track-transcription-usage', usage),
   getMeetingCost: (data) => ipcRenderer.invoke('recorder:get-meeting-cost', data),
+  listInvitablePeople: (opts) => ipcRenderer.invoke('recorder:list-invitable-people', opts),
+  inviteToMeeting: (data) => ipcRenderer.invoke('recorder:invite-to-meeting', data),
   saveTranscriptToSpace: (data) => ipcRenderer.invoke('recorder:save-transcript-to-space', data),
 
   // Start/stop the meeting monitor agent

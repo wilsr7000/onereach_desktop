@@ -232,6 +232,16 @@ const ACTION_REGISTRY = {
         global.recorder.open(params);
         return { success: true, message: 'Recorder opened' };
       }
+      // Fallback only runs pre-init. Never create a SECOND meeting window:
+      // focus an existing recorder window if one is already up.
+      const { BrowserWindow } = require('electron');
+      const existing = BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && w.webContents.getURL().includes('recorder.html')
+      );
+      if (existing) {
+        existing.focus();
+        return { success: true, message: 'Recorder focused' };
+      }
       createStandardWindow({
         width: 1200, height: 800, title: 'WISER Meeting',
         preload: 'preload-recorder.js', file: 'recorder.html', sandbox: false,

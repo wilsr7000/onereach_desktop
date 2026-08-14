@@ -1060,6 +1060,16 @@ export const CYPHER = {
                    WHERE ${GRANT_LIVE}
                  })
         }
+        // Per-meeting audience (2026-08-14): membership only bounds who MAY
+        // be rung at all; the doorbell rings ONLY the host and the people
+        // explicitly invited to THIS meeting ("started a meeting and it
+        // invited someone I never picked" — sticky space membership must
+        // never be the invite list). Legacy :MeetingLive nodes without
+        // these fields ring nobody but their host: silence over surprise.
+        AND (
+          coalesce(m.hostId, '') = $viewerId
+          OR $viewerId IN coalesce(m.invitees, [])
+        )
     RETURN m.id AS id,
            coalesce(m.title, 'Meeting') AS title,
            m.joinUrl AS joinUrl,

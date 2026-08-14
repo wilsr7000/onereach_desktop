@@ -3495,6 +3495,134 @@
         line-height: 1;
       }
 
+      /* In-meeting invite picker: pick a person, they get rung. */
+      .invite-picker {
+        position: absolute;
+        bottom: 56px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 320px;
+        max-height: 340px;
+        background: rgba(16, 16, 26, 0.97);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 10px;
+        z-index: 60;
+        display: none;
+        flex-direction: column;
+        overflow: hidden;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      .invite-picker.visible {
+        display: flex;
+      }
+
+      .invite-picker-search {
+        margin: 10px 10px 6px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 13px;
+        font-family: inherit;
+      }
+
+      .invite-picker-search:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+
+      .invite-picker-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+      }
+
+      .invite-picker-list::-webkit-scrollbar {
+        width: 8px;
+      }
+
+      .invite-picker-list::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.18);
+        border-radius: 4px;
+      }
+
+      .invite-picker-list::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .invite-person {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .invite-person:hover {
+        background: rgba(255, 255, 255, 0.05);
+      }
+
+      .invite-person .who {
+        min-width: 0;
+      }
+
+      .invite-person .nm {
+        font-size: 13px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .invite-person .em {
+        font-size: 11px;
+        color: var(--text-muted);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .invite-person .state {
+        flex-shrink: 0;
+        font-size: 11px;
+        color: var(--accent-green);
+      }
+
+      .invite-picker-empty {
+        padding: 16px 12px;
+        font-size: 12px;
+        color: var(--text-muted);
+        text-align: center;
+      }
+
+      .invite-picker-foot {
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        padding: 8px 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .invite-picker-foot button {
+        background: none;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 6px;
+        color: var(--text);
+        font-size: 11px;
+        font-family: inherit;
+        padding: 5px 10px;
+        cursor: pointer;
+      }
+
+      .invite-picker-foot button:hover {
+        border-color: var(--accent);
+      }
+
       /* Paused = amber, so "the AI is not listening" is unmistakable. */
       .session-media-btn.pause-ai-btn.paused {
         background: rgba(240, 170, 40, 0.16);
@@ -6050,6 +6178,19 @@
               </svg>
               <span class="share-screen-label">Invite</span>
             </button>
+            <div class="invite-picker" id="invitePicker">
+              <input
+                class="invite-picker-search"
+                id="invitePickerSearch"
+                placeholder="Search people…"
+                oninput="app.invitePickerFilter()"
+              />
+              <div class="invite-picker-list" id="invitePickerList"></div>
+              <div class="invite-picker-foot">
+                <span>Click a person to invite</span>
+                <button onclick="app.invitePickerCopyLink()">Copy join link</button>
+              </div>
+            </div>
             <button class="session-media-btn pause-ai-btn" id="pauseAiBtn" onclick="app.toggleAgentPause()" title="Pause the meeting AI (live transcription & notes). Recording keeps running.">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                 <path d="M12 3l1.6 4.1L18 8.6l-4.4 1.5L12 15l-1.6-4.9L6 8.6l4.4-1.5L12 3z" />
@@ -11760,21 +11901,126 @@
         // join-just-joins change hides immediately (and even before that, it
         // disappeared the moment the first guest arrived). A live meeting with
         // no way to invite people is a dead end; this button is always there.
+        // Invite = pick a person, they get rung. The picker lists people from
+        // the meeting's space (all known people as fallback); clicking one
+        // grants ring access AND appends them to this meeting's live audience,
+        // so their Lite/main app doorbell rings immediately. Copy-link lives
+        // in the picker's footer for everyone outside the roster.
         async sessionInvite() {
+          if (this.sessionRole === 'guest') {
+            this.showStatus('Ask the host to invite people — only the host can', 'info');
+            return;
+          }
+          const picker = document.getElementById('invitePicker');
+          if (!picker) return;
+          if (picker.classList.contains('visible')) {
+            this._closeInvitePicker();
+            return;
+          }
+          picker.classList.add('visible');
+          this._invitedEmails = this._invitedEmails || new Set();
+          // Close on outside click / Escape (bound once per open).
+          this._invitePickerDismiss = (ev) => {
+            if (ev.type === 'keydown' && ev.key !== 'Escape') return;
+            if (ev.type === 'click' && (picker.contains(ev.target) || ev.target.closest('#inviteBtn'))) return;
+            this._closeInvitePicker();
+          };
+          setTimeout(() => {
+            document.addEventListener('click', this._invitePickerDismiss);
+            document.addEventListener('keydown', this._invitePickerDismiss);
+          }, 0);
+
+          const list = document.getElementById('invitePickerList');
+          list.innerHTML = '<div class="invite-picker-empty">Loading people…</div>';
+          try {
+            const spaceId = this._captureSpaceId(null);
+            let res = await window.recorder.listInvitablePeople({ spaceId });
+            let people = (res && res.people) || [];
+            if (people.length === 0 && spaceId) {
+              // Space has no members yet — offer everyone we know instead.
+              res = await window.recorder.listInvitablePeople({});
+              people = (res && res.people) || [];
+            }
+            this._invitablePeople = people;
+            this._renderInvitePicker('');
+            const search = document.getElementById('invitePickerSearch');
+            if (search) {
+              search.value = '';
+              search.focus();
+            }
+          } catch (e) {
+            list.innerHTML =
+              '<div class="invite-picker-empty">Could not load people — use Copy join link below</div>';
+          }
+        },
+
+        _closeInvitePicker() {
+          document.getElementById('invitePicker')?.classList.remove('visible');
+          if (this._invitePickerDismiss) {
+            document.removeEventListener('click', this._invitePickerDismiss);
+            document.removeEventListener('keydown', this._invitePickerDismiss);
+            this._invitePickerDismiss = null;
+          }
+        },
+
+        _renderInvitePicker(filter) {
+          const list = document.getElementById('invitePickerList');
+          if (!list) return;
+          const f = (filter || '').toLowerCase();
+          const rows = (this._invitablePeople || []).filter(
+            (p) => !f || p.name.toLowerCase().includes(f) || p.email.toLowerCase().includes(f)
+          );
+          if (rows.length === 0) {
+            list.innerHTML =
+              '<div class="invite-picker-empty">No people found — use Copy join link below</div>';
+            return;
+          }
+          list.innerHTML = '';
+          for (const p of rows) {
+            const row = document.createElement('div');
+            row.className = 'invite-person';
+            const who = document.createElement('div');
+            who.className = 'who';
+            const nm = document.createElement('div');
+            nm.className = 'nm';
+            nm.textContent = p.name;
+            const em = document.createElement('div');
+            em.className = 'em';
+            em.textContent = p.email;
+            who.append(nm, em);
+            const st = document.createElement('div');
+            st.className = 'state';
+            st.textContent = this._invitedEmails.has(p.email) ? 'invited ✓' : '';
+            row.append(who, st);
+            row.onclick = () => this._invitePerson(p, st);
+            list.appendChild(row);
+          }
+        },
+
+        invitePickerFilter() {
+          this._renderInvitePicker(document.getElementById('invitePickerSearch')?.value || '');
+        },
+
+        async _invitePerson(p, stateEl) {
+          if (this._invitedEmails.has(p.email)) return;
+          stateEl.textContent = 'inviting…';
+          const res = await window.recorder
+            .inviteToMeeting({ emails: [p.email], roomName: this._meetingRoomName || null })
+            .catch(() => null);
+          if (res && res.ok) {
+            this._invitedEmails.add(p.email);
+            stateEl.textContent = 'invited ✓';
+            this.showStatus('Invited ' + p.name + ' — their app will ring', 'success');
+          } else {
+            stateEl.textContent = 'failed — click to retry';
+          }
+        },
+
+        async invitePickerCopyLink() {
           if (this.publicJoinUrl) {
-            // copySessionCode's own feedback flashes the code display on the
-            // (hidden) waiting panel, so toast here where the host can see it.
             await this.copySessionCode();
             this.showStatus('Join link copied — send it to anyone', 'success');
-            return;
-          }
-          if (this.sessionRole === 'guest') {
-            this.showStatus('Ask the host for the join link — only the host holds it', 'info');
-            return;
-          }
-          if (this._meetingRoomName) {
-            // Link publish failed or is still running — give them something
-            // shareable rather than a dead button.
+          } else if (this._meetingRoomName) {
             try {
               window.electronClipboard?.writeText?.(this._meetingRoomName);
             } catch (_e) { /* clipboard bridge unavailable */ }
@@ -11783,9 +12029,10 @@
               'warning',
               6000
             );
-            return;
+          } else {
+            this.showStatus('Invite link is still being prepared — try again in a moment', 'info');
           }
-          this.showStatus('Invite link is still being prepared — try again in a moment', 'info');
+          this._closeInvitePicker();
         },
 
         // Toggle screen sharing within an active LiveKit session

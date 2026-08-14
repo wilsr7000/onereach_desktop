@@ -3973,6 +3973,16 @@ describe('ADR-062: live-meeting ring reads', () => {
     expect(q).not.toContain('BELONGS_TO');
   });
 
+  it('the doorbell rings ONLY the host and this meeting’s explicit invitees (fail-closed)', () => {
+    // "Started a meeting and it invited someone I never picked": sticky
+    // WISER-Meetings membership must never be the invite list. The audience
+    // predicate is per-meeting; legacy nodes without hostId/invitees ring
+    // nobody but their host.
+    const q = CYPHER.LIST_LIVE_MEETINGS;
+    expect(q).toContain("coalesce(m.hostId, '') = $viewerId");
+    expect(q).toContain('$viewerId IN coalesce(m.invitees, [])');
+  });
+
   it('listLiveMeetings maps rows and forwards the ttl', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MATCH (m:MeetingLive)', [

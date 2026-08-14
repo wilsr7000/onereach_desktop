@@ -185,6 +185,32 @@ class Recorder {
       return this.window;
     }
 
+    // Singleton hard guarantee: if a recorder.html window exists that this
+    // instance lost track of (created by a legacy fallback path, or a state
+    // desync), ADOPT it instead of opening a second meeting window.
+    try {
+      const { BrowserWindow } = require('electron');
+      const orphan = BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && w.webContents.getURL().includes('recorder.html')
+      );
+      if (orphan) {
+        this.window = orphan;
+        orphan.focus();
+        orphan.on('closed', () => {
+          this.window = null;
+        });
+        if (options.instructions || options.spaceId || options.projectId) {
+          this.instructions = options.instructions ? options : this.instructions;
+          if (options.spaceId) this.targetSpace = options.spaceId;
+          orphan.webContents.send('recorder:instructions', options);
+        }
+        logger.logFeatureUsed('recorder', { action: 'adopt-orphan-window' });
+        return this.window;
+      }
+    } catch (_e) {
+      /* adoption is best-effort; fall through to a normal create */
+    }
+
     logger.logFeatureUsed('recorder', {
       action: 'open',
       hasInstructions: !!options.instructions,
@@ -1252,6 +1278,44 @@ Respond with JSON:
       }
     });
 
+    // ==========================================
+    // IN-MEETING INVITES (people picker)
+    // ==========================================
+
+    // People the host can invite; scoped to the meeting's space when given,
+    // falling back to all known humans. Served by the bridge's baked
+    // shared-graph transport (the omnigraph client is unconfigured on most
+    // installs, so it cannot be the picker's data path).
+    ipcMain.handle('recorder:list-invitable-people', async (event, { spaceId } = {}) => {
+      try {
+        const bridge = require('./lib/meeting/meeting-graph-bridge');
+        return await bridge.listInvitablePeople({ spaceId, log });
+      } catch (error) {
+        return { ok: false, people: [], error: error.message };
+      }
+    });
+
+    // An explicit invite from the picker: grant ring access (membership) AND
+    // append to the live meeting's audience so their doorbell rings NOW.
+    ipcMain.handle('recorder:invite-to-meeting', async (event, { emails, roomName } = {}) => {
+      try {
+        const bridge = require('./lib/meeting/meeting-graph-bridge');
+        const grantedBy = global.settingsManager?.get('userEmail') || 'host';
+        const grant = await bridge.grantMeetingRingAccess(emails, { log, grantedBy });
+        const live = roomName
+          ? await bridge.addLiveInvitees(roomName, emails, { log })
+          : { ok: true, added: 0 };
+        return {
+          ok: !!(grant.ok && live.ok),
+          granted: grant.granted || 0,
+          added: live.added || 0,
+          error: grant.error || live.error || undefined,
+        };
+      } catch (error) {
+        return { ok: false, error: error.message };
+      }
+    });
+
     // Close recorder
     ipcMain.handle('recorder:close', () => {
       this.close();
@@ -1334,6 +1398,10 @@ Respond with JSON:
               joinUrl,
               title: bridge.prettyRoomTitle(roomName),
               host: global.settingsManager?.get('userDisplayName') || null,
+              // Ring audience: ONLY the host + these explicitly-named people
+              // get the Lite doorbell (never the whole sticky membership).
+              hostId: global.settingsManager?.get('userEmail') || null,
+              invitees,
               // Lets ring surfaces (Lite tab label) lead with the space.
               spaceId: this.targetSpace || null,
               log,

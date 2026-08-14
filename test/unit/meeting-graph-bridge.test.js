@@ -328,3 +328,78 @@ describe('grantMeetingRingAccess (the invite half of the meeting ring)', () => {
     expect(out.error).toMatch(/unreachable/);
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// PER-MEETING RING AUDIENCE — the doorbell rings host + explicit invitees
+// ONLY (sticky space membership must never be the invite list).
+// ═══════════════════════════════════════════════════════════════════
+
+// announceMeetingLive already imported by the ADR-062 block above.
+import { addLiveInvitees, listInvitablePeople } from '../../lib/meeting/meeting-graph-bridge.js';
+
+describe('per-meeting ring audience', () => {
+  it('announce stores normalized invitees + hostId on the live node', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await announceMeetingLive({
+      roomName: 'product-abc123',
+      joinUrl: 'https://x/join.html?room=product-abc123',
+      hostId: 'Robb@OneReach.com',
+      invitees: ['Erika@Example.com', 'erika@example.com', 'jonas@example.com', 'nope'],
+      fetchImpl,
+      nowMs: NOW,
+    });
+    const announce = calls.find((c) => c.body.cypher.includes('MERGE (m:MeetingLive'));
+    expect(announce).toBeTruthy();
+    expect(announce.body.parameters.hostId).toBe('robb@onereach.com');
+    expect(announce.body.parameters.invitees).toEqual(['erika@example.com', 'jonas@example.com']);
+    expect(announce.body.cypher).toContain('m.invitees = $invitees');
+    expect(announce.body.cypher).toContain('m.hostId = $hostId');
+  });
+
+  it('announce without invitees stores an EMPTY audience (fail-closed), never null', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    await announceMeetingLive({ roomName: 'r1', fetchImpl, nowMs: NOW });
+    const announce = calls.find((c) => c.body.cypher.includes('MERGE (m:MeetingLive'));
+    expect(announce.body.parameters.invitees).toEqual([]);
+  });
+
+  it('addLiveInvitees appends deduped emails to the live audience', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const out = await addLiveInvitees('product-abc123', ['New@Person.com', 'new@person.com'], {
+      fetchImpl,
+      nowMs: NOW,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.added).toBe(1);
+    const upd = calls.find((c) => c.body.cypher.includes('m.invitees ='));
+    expect(upd.body.parameters.id).toBe('live_product-abc123');
+    expect(upd.body.parameters.emails).toEqual(['new@person.com']);
+    // Cypher-side dedupe: existing entries matching new ones are removed first.
+    expect(upd.body.cypher).toContain('WHERE NOT x IN $emails');
+  });
+
+  it('listInvitablePeople scopes to space members and maps rows', async () => {
+    const { calls, fetchImpl } = buildFetchStub([
+      ['MATCH (p:Person)-[:HAS_ACCESS]', [
+        { email: 'erika@example.com', name: 'Erika' },
+        { email: 'svc-bot@example.com', name: 'svc-bot' },
+      ]],
+    ]);
+    const out = await listInvitablePeople({ spaceId: 'space-1', fetchImpl, nowMs: NOW });
+    expect(out.ok).toBe(true);
+    const q = calls[0].body;
+    expect(q.cypher).toContain('HAS_ACCESS');
+    expect(q.parameters.spaceId).toBe('space-1');
+    // Humans-only filter applies (service identities dropped).
+    expect(out.people.map((p) => p.email)).toContain('erika@example.com');
+  });
+
+  it('listInvitablePeople never throws — outage yields an empty list', async () => {
+    const out = await listInvitablePeople({
+      fetchImpl: async () => { throw new Error('down'); },
+      nowMs: NOW,
+    });
+    expect(out.ok).toBe(false);
+    expect(out.people).toEqual([]);
+  });
+});
