@@ -1227,6 +1227,7 @@ export function buildSpaceContextEntries(
     addPeople: () => void;
     upload: () => void;
     rename: () => void;
+    editObjective: () => void;
     convertShared: () => void;
     convertUser: () => void;
   }
@@ -1254,6 +1255,10 @@ export function buildSpaceContextEntries(
     { type: 'action', label: 'Add people…', run: handlers.addPeople },
     { type: 'action', label: 'Upload file…', run: handlers.upload },
     { type: 'action', label: 'Rename', run: handlers.rename },
+    // Same inline editor the description click opens — this entry is
+    // the discoverable route ("how do I redo the description after
+    // creation", 2026-08-13 user report).
+    { type: 'action', label: 'Edit description…', run: handlers.editObjective },
     { type: 'separator' },
     {
       type: 'submenu',
@@ -1483,6 +1488,19 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
       switchNewAssetMode('upload');
     },
     rename: () => startInlineRename(space.id),
+    editObjective: () => {
+      // Already on this space's header → open the editor in place.
+      const mounted = document.querySelector<HTMLElement>(
+        `.spaces-view-header-sub[data-space-id="${CSS.escape(space.id)}"]`
+      );
+      if (mounted !== null) {
+        mounted.click();
+        return;
+      }
+      // Otherwise navigate there; the latch opens the editor on mount.
+      requestObjectiveEdit(space.id);
+      setActiveScope(space.id);
+    },
     convertShared: () => void toggleSpaceKind(space.id),
     convertUser: () => void toggleSpaceKind(space.id),
   });
@@ -5088,6 +5106,19 @@ function buildSpaceMembersStrip(space: RendererSpace): HTMLElement {
   return strip;
 }
 
+// One-shot latch: "open the objective editor as soon as this space's
+// header renders." Set by the context menu (which may navigate first),
+// consumed by buildSpaceObjectiveRow on mount. Exported for tests.
+export const pendingObjectiveEdit: { spaceId: string | null } = { spaceId: null };
+export function requestObjectiveEdit(spaceId: string): void {
+  pendingObjectiveEdit.spaceId = spaceId;
+}
+export function consumeObjectiveEdit(spaceId: string): boolean {
+  if (pendingObjectiveEdit.spaceId !== spaceId) return false;
+  pendingObjectiveEdit.spaceId = null;
+  return true;
+}
+
 function buildSpaceObjectiveRow(space: RendererSpace): HTMLElement {
   const sub = document.createElement('p');
   sub.className = 'spaces-view-header-sub';
@@ -5098,14 +5129,36 @@ function buildSpaceObjectiveRow(space: RendererSpace): HTMLElement {
   if (hasDescription) {
     sub.textContent = space.description ?? '';
     sub.title = 'Click to edit the objective for this space';
+    // Visible affordance: a pencil chip that fades in on hover/focus —
+    // "click to edit" must be discoverable, not tooltip-only lore.
+    const editChip = document.createElement('span');
+    editChip.className = 'spaces-view-header-sub-edit';
+    editChip.textContent = '✎ Edit';
+    editChip.setAttribute('aria-hidden', 'true');
+    sub.appendChild(editChip);
   } else {
     sub.textContent = 'Add an objective for this space…';
     sub.classList.add('spaces-view-header-sub-placeholder');
     sub.title = 'Click to add an objective for this space';
   }
 
+  if (consumeObjectiveEdit(space.id)) {
+    // Deferred one tick so the row is appended before the editor swaps in.
+    queueMicrotask(() => enterSpaceObjectiveEdit(sub, space));
+  }
+
+  // Keyboard path: the row is a click target, so it must be focusable
+  // and Enter/Space must work — the global focus ring then applies.
+  sub.tabIndex = 0;
+  sub.setAttribute('role', 'button');
   sub.addEventListener('click', () => {
     enterSpaceObjectiveEdit(sub, space);
+  });
+  sub.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      enterSpaceObjectiveEdit(sub, space);
+    }
   });
 
   return sub;

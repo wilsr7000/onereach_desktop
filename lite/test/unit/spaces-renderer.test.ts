@@ -1614,3 +1614,31 @@ describe('machineNamedLast (people panel ordering)', () => {
     ]);
   });
 });
+
+describe('space description editability (2026-08-13 report)', () => {
+  it('space context menu carries Edit description… next to Rename', async () => {
+    const mod = await import('../../spaces/spaces');
+    const noop = (): void => {};
+    const entries = mod.buildSpaceContextEntries(
+      { id: 's1', name: 'S', visibility: 'open' } as never,
+      {
+        share: noop, unshare: noop, addPeople: noop, upload: noop,
+        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop,
+      }
+    );
+    const labels = entries
+      .map((e) => ('label' in e ? (e as { label: string }).label : ''))
+      .filter((l) => l.length > 0);
+    expect(labels).toContain('Edit description…');
+    expect(labels.indexOf('Edit description…')).toBe(labels.indexOf('Rename') + 1);
+  });
+
+  it('objective-edit latch: request → consume once → cleared; wrong id is a no-op', async () => {
+    const mod = await import('../../spaces/spaces');
+    mod.requestObjectiveEdit('space-a');
+    expect(mod.consumeObjectiveEdit('space-b')).toBe(false);
+    expect(mod.consumeObjectiveEdit('space-a')).toBe(true);
+    expect(mod.consumeObjectiveEdit('space-a')).toBe(false);
+    expect(mod.pendingObjectiveEdit.spaceId).toBeNull();
+  });
+});

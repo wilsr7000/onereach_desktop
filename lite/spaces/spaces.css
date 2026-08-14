@@ -503,6 +503,30 @@ body {
   color: #c2c2cb;
 }
 
+/* "✎ Edit" chip inside the description row: invisible until the row is
+ * hovered or keyboard-focused, so editability is discoverable without
+ * cluttering the header at rest. */
+.spaces-view-header-sub-edit {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  font-size: 10.5px;
+  font-style: normal;
+  color: #9a9aa3;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  opacity: 0;
+  transition: opacity 80ms ease;
+  pointer-events: none;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+
+.spaces-view-header-sub:hover .spaces-view-header-sub-edit,
+.spaces-view-header-sub:focus-visible .spaces-view-header-sub-edit {
+  opacity: 1;
+}
+
 .spaces-view-header-sub-placeholder {
   /* Slightly faded so the empty state reads as a prompt, not data. */
   color: #6f6f78;
