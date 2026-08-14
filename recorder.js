@@ -1310,6 +1310,25 @@ Respond with JSON:
                 log,
               });
             }
+            // Organized participants become MEMBERS of the shared "WISER
+            // Meetings" Space before the live signal goes out — ADR-065 rings
+            // members only, so this grant IS the invite reaching Lite users.
+            // Without it, "invite Erika" only ever edited the local draft.
+            const invitees = (this.instructions && Array.isArray(this.instructions.participants)
+              ? this.instructions.participants
+              : []
+            )
+              .map((p) => (p && typeof p.email === 'string' ? p.email : null))
+              .filter(Boolean);
+            if (invitees.length > 0) {
+              await bridge
+                .grantMeetingRingAccess(invitees, {
+                  log,
+                  grantedBy: global.settingsManager?.get('userEmail') || 'host',
+                })
+                .catch(() => {});
+            }
+
             await bridge.announceMeetingLive({
               roomName,
               joinUrl,

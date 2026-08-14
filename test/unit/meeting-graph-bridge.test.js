@@ -279,3 +279,52 @@ describe('ADR-062 ring signal', () => {
     expect(prettyRoomTitle(undefined)).toBe('Meeting');
   });
 });
+
+// ═══════════════════════════════════════════════════════════════════
+// RING ACCESS GRANTS — "inviting" someone IS making them a member of the
+// WISER Meetings Space (ADR-065: the doorbell rings members only). These
+// pin the wire contract: normalized deduped emails, HAS_ACCESS MERGE with
+// no expiry (GRANT_LIVE passes on expiresUnixMs IS NULL), never throws.
+// ═══════════════════════════════════════════════════════════════════
+
+import { grantMeetingRingAccess } from '../../lib/meeting/meeting-graph-bridge.js';
+
+describe('grantMeetingRingAccess (the invite half of the meeting ring)', () => {
+  it('grants HAS_ACCESS on the WISER Meetings space for each invitee email', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const out = await grantMeetingRingAccess(
+      ['Erika@Example.com', 'jonas@example.com', 'erika@example.com ', 'not-an-email'],
+      { fetchImpl, nowMs: NOW, grantedBy: 'robb@onereach.com' }
+    );
+    expect(out.ok).toBe(true);
+    expect(out.granted).toBe(2); // normalized + deduped, non-email dropped
+
+    const grant = calls.find((c) => c.body.cypher.includes('HAS_ACCESS'));
+    expect(grant).toBeTruthy();
+    expect(grant.body.parameters.spaceId).toBe(MEETINGS_SPACE.id);
+    expect(grant.body.parameters.emails).toEqual(['erika@example.com', 'jonas@example.com']);
+    expect(grant.body.parameters.grantedBy).toBe('robb@onereach.com');
+    // No expiry property is ever set -- GRANT_LIVE must pass on NULL.
+    expect(grant.body.cypher).not.toContain('expiresUnixMs');
+    // The space is ensured before granting into it.
+    expect(calls.findIndex((c) => c.body.cypher.includes('MERGE (s:Space'))).toBeLessThan(
+      calls.indexOf(grant)
+    );
+  });
+
+  it('is a no-op without valid emails (no network at all)', async () => {
+    const { calls, fetchImpl } = buildFetchStub();
+    const out = await grantMeetingRingAccess(['', 'nope', null], { fetchImpl, nowMs: NOW });
+    expect(out).toEqual({ ok: true, granted: 0 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('never throws: a proxy failure returns ok:false', async () => {
+    const fetchImpl = async () => {
+      throw new Error('graph unreachable');
+    };
+    const out = await grantMeetingRingAccess(['a@b.com'], { fetchImpl, nowMs: NOW });
+    expect(out.ok).toBe(false);
+    expect(out.error).toMatch(/unreachable/);
+  });
+});
