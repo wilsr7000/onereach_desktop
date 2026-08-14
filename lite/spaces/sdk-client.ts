@@ -1011,9 +1011,55 @@ export const CYPHER = {
    * else renders them. TTL on the read side ($ttlMs) keeps crashed
    * hosts from ringing forever; the announce path sweeps stale nodes.
    */
+  /**
+   * ADR-065 feedback drop-box pre-step (main-process only, never IPC).
+   * Belonging-gated listing hides the shared feedback Space from
+   * first-time reporters; this finds it by name UNGATED — returning
+   * ONLY id + name, no content — so the caller can grant the reporter
+   * access and let every downstream gated flow work normally.
+   */
+  FIND_SPACE_BY_NAME: `
+    MATCH (s:Space)
+    WHERE s.deletedAt IS NULL
+      AND toLower(coalesce(s.name, '')) = toLower($name)
+    RETURN s.id AS id, coalesce(s.name, '') AS name
+    LIMIT 1
+  `,
+
+  /**
+   * Idempotent self-grant: the viewer becomes a live member of the
+   * Space. Used by the feedback drop-box so reporters belong to the
+   * shared Space they file into. MERGE-only on :Person (never mutates
+   * an existing one).
+   */
+  GRANT_SELF_ACCESS: `
+    MATCH (s:Space {id: $spaceId})
+    WHERE s.deletedAt IS NULL
+    MERGE (p:Person {id: $viewerId})
+      ON CREATE SET p.name = $viewerId, p.email = $viewerId, p.createdAt = $now
+    MERGE (p)-[r:HAS_ACCESS]->(s)
+      ON CREATE SET r.grantedAt = $now
+    RETURN s.id AS id
+  `,
+
   LIST_LIVE_MEETINGS: `
     MATCH (m:MeetingLive)
       WHERE coalesce(m.startedAt, 0) > $nowMs - $ttlMs
+        // ADR-065: the doorbell rings only people who belong to the
+        // meetings Space — join URLs are access, not ambience. The
+        // :MeetingLive node itself stays un-spaced (ADR-062); the
+        // WISER Meetings Space is the invite list.
+        AND $viewerId <> ''
+        AND EXISTS {
+          MATCH (ms:Space)
+          WHERE ms.deletedAt IS NULL
+            AND toLower(coalesce(ms.name, '')) = 'wiser meetings'
+            AND (coalesce(ms.createdBy, '') = $viewerId
+                 OR EXISTS {
+                   MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(ms)
+                   WHERE ${GRANT_LIVE}
+                 })
+        }
     RETURN m.id AS id,
            coalesce(m.title, 'Meeting') AS title,
            m.joinUrl AS joinUrl,
@@ -1116,7 +1162,7 @@ export const CYPHER = {
     MERGE (a)-[:BELONGS_TO]->(s)
     MERGE (a)-[:REPRESENTS]->(g)
     WITH a, g
-    OPTIONAL MATCH (p:Person {id: $creatorId})
+    OPTIONAL MATCH (p:Person {id: coalesce($creatorId, $viewerId)})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
     RETURN a.id AS id, g.id AS agentId
@@ -1687,6 +1733,7 @@ export const CYPHER = {
     MATCH (a:Asset)
     WHERE a.deletedAt IS NULL
       AND a.content STARTS WITH 'data:'
+      AND ${ASSET_VISIBLE}
     RETURN a.id AS id,
            a.content AS content,
            coalesce(a.name, a.title, '') AS title,
@@ -1743,7 +1790,7 @@ export const CYPHER = {
     })
     MERGE (a)-[:BELONGS_TO]->(s)
     WITH a, s
-    OPTIONAL MATCH (p:Person {id: $creatorId})
+    OPTIONAL MATCH (p:Person {id: coalesce($creatorId, $viewerId)})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
     // Activity: one Commit per create, so the asset's ACTIVITY panel
@@ -1783,7 +1830,7 @@ export const CYPHER = {
       updatedAt: $now
     })
     WITH a
-    OPTIONAL MATCH (p:Person {id: $creatorId})
+    OPTIONAL MATCH (p:Person {id: coalesce($creatorId, $viewerId)})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
     FOREACH (x IN CASE WHEN $commitAuthor IS NULL THEN [] ELSE [1] END |
@@ -1845,7 +1892,7 @@ export const CYPHER = {
     })
     CREATE (ag)-[:HAS_TYPE]->(t)
     WITH a
-    OPTIONAL MATCH (p:Person {id: $creatorId})
+    OPTIONAL MATCH (p:Person {id: coalesce($creatorId, $viewerId)})
     FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
       MERGE (x)-[:CREATED]->(a))
     RETURN a.id AS id
@@ -4293,6 +4340,29 @@ export class SdkSpacesClient {
    *
    * @throws {SpacesError} `SPACES_INVALID_INPUT` if `id` is empty.
    */
+  /**
+   * ADR-065 drop-box pre-step. Main-process internal — deliberately
+   * absent from the IPC surface. Returns null when no such Space.
+   */
+  async findSpaceByNameInternal(name: string): Promise<{ id: string; name: string } | null> {
+    if (typeof name !== 'string' || name.trim().length === 0) return null;
+    const rows = await this.run(CYPHER.FIND_SPACE_BY_NAME, { name: name.trim() });
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (row === undefined) return null;
+    return { id: requireString(row, 'id'), name: optString(row, 'name') ?? '' };
+  }
+
+  /** Idempotent self-grant; no-op when the viewer is unknown. */
+  async grantSelfAccessInternal(spaceId: string): Promise<boolean> {
+    const viewer = this.viewerParam();
+    if (viewer === '') return false;
+    const rows = await this.run(CYPHER.GRANT_SELF_ACCESS, {
+      spaceId,
+      now: nowIso(),
+    });
+    return rows.length > 0;
+  }
+
   async getOrCreatePerson(input: PersonUpsertInput): Promise<Person> {
     if (typeof input.id !== 'string' || input.id.length === 0) {
       throw new SpacesError({

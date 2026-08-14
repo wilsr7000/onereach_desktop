@@ -3064,7 +3064,7 @@ describe('CYPHER source strings — Sprint 1 (asset CRUD)', () => {
     expect(CYPHER.CREATE_ASSET).toMatch(/CREATE \(a:Asset \{/);
     expect(CYPHER.CREATE_ASSET).toMatch(/type: \$kind/);
     expect(CYPHER.CREATE_ASSET).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(s\)/);
-    expect(CYPHER.CREATE_ASSET).toMatch(/OPTIONAL MATCH \(p:Person \{id: \$creatorId\}\)/);
+    expect(CYPHER.CREATE_ASSET).toMatch(/OPTIONAL MATCH \(p:Person \{id: coalesce\(\$creatorId, \$viewerId\)\}\)/);
     expect(CYPHER.CREATE_ASSET).toMatch(/MERGE \(x\)-\[:CREATED\]->\(a\)/);
   });
 
@@ -4068,5 +4068,39 @@ describe('ADR-065 — belonging-only space visibility', () => {
     // viewer check, so '' can never satisfy it.
     expect(CYPHER.LIST_SPACES).not.toMatch(/'open'\s*<>\s*'restricted'/);
     expect(CYPHER.HOME_RECENT_ITEMS).toContain("$viewerId <> '' AND (");
+  });
+});
+
+describe('ADR-065 second pass — whole-app NEON scoping audit (2026-08-14)', () => {
+  it('the meeting ring only reaches people who belong to the meetings Space', () => {
+    const q = CYPHER.LIST_LIVE_MEETINGS;
+    expect(q).toContain("$viewerId <> ''");
+    expect(q).toContain("toLower(coalesce(ms.name, '')) = 'wiser meetings'");
+    expect(q).toContain('[r:HAS_ACCESS]->(ms)');
+  });
+
+  it('inline binary assets are viewer-gated (no ungated content dump)', () => {
+    expect(CYPHER.LIST_INLINE_BINARY_ASSETS).toContain("coalesce(vs.createdBy, '') = $viewerId");
+  });
+
+  it('every CREATED-stamping create falls back to the injected viewer', () => {
+    // A create with a missing creatorId must never produce an item
+    // invisible to everyone (uncategorized items are creator-gated).
+    const stamped = Object.values(CYPHER).filter((q) => q.includes('[:CREATED]->(a)'));
+    expect(stamped.length).toBeGreaterThanOrEqual(4);
+    for (const q of stamped) {
+      if (q.includes('OPTIONAL MATCH (p:Person {id:')) {
+        expect(q).toContain('coalesce($creatorId, $viewerId)');
+      }
+    }
+  });
+
+  it('drop-box pre-step: by-name find returns only id+name; self-grant is MERGE-only on Person', () => {
+    expect(CYPHER.FIND_SPACE_BY_NAME).toContain('RETURN s.id AS id');
+    expect(CYPHER.FIND_SPACE_BY_NAME).not.toMatch(/description|content|visibility/);
+    expect(CYPHER.GRANT_SELF_ACCESS).toContain('MERGE (p:Person {id: $viewerId})');
+    expect(CYPHER.GRANT_SELF_ACCESS).toContain('MERGE (p)-[r:HAS_ACCESS]->(s)');
+    // Never mutates an existing Person outside ON CREATE.
+    expect(CYPHER.GRANT_SELF_ACCESS).not.toContain('ON MATCH SET p.');
   });
 });

@@ -518,6 +518,15 @@ export interface SpacesIdentityApi {
    */
   attributionEmailGet(): Promise<string | null>;
   attributionEmailSet(raw: string | null): Promise<string | null>;
+
+  /**
+   * ADR-065 drop-box internals (main-process only — deliberately NOT
+   * registered on the IPC surface). The feedback filing flow finds the
+   * shared Space by name past the belonging gate, grants the reporter
+   * a live membership, and then every downstream gated flow works.
+   */
+  findSpaceByNameInternal(name: string): Promise<{ id: string; name: string } | null>;
+  grantSelfAccessInternal(spaceId: string): Promise<boolean>;
 }
 
 /**
@@ -931,6 +940,14 @@ class UninitializedSpacesApi implements SpacesApi {
 
     async getOrCreatePerson(_input: PersonUpsertInput): Promise<Person> {
       throw notInitialized('identity.getOrCreatePerson');
+    },
+
+    async findSpaceByNameInternal(_name: string): Promise<{ id: string; name: string } | null> {
+      throw notInitialized('identity.findSpaceByNameInternal');
+    },
+
+    async grantSelfAccessInternal(_spaceId: string): Promise<boolean> {
+      throw notInitialized('identity.grantSelfAccessInternal');
     },
   };
 

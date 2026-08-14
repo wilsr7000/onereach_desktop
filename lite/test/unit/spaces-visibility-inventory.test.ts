@@ -30,12 +30,11 @@ const EXEMPT: Record<string, string> = {
   SPACE_ITEM_COUNT:
     'hard-delete pre-flight (internal to the delete flow); the delete ' +
     'mutations themselves carry SPACE_VISIBLE',
-  LIST_LIVE_MEETINGS:
-    'account-wide meeting ring by design (ADR-062, Decision 1): :MeetingLive ' +
-    'is "deliberately NOT :Asset and with NO Space membership (a doorbell, ' +
-    'not an artifact)" — a transient join-me broadcast (title/joinUrl/host ' +
-    'only, 5-row TTL-bounded). The COMPLETED meeting mirror (ADR-061) is ' +
-    'space-gated.',
+  FIND_SPACE_BY_NAME:
+    'ADR-065 feedback drop-box pre-step (main-process internal, never on ' +
+    'IPC): finds ONE Space by exact name returning id+name only, so a ' +
+    'first-time reporter can be granted membership before the gated flows ' +
+    'run. Gating it would orphan every non-member filing.',
   AGENT_LIBRARY_SEARCH:
     'account-wide agent directory by design — the add-from-library picker ' +
     'must list every agent in the account',
@@ -48,16 +47,9 @@ const EXEMPT: Record<string, string> = {
   GET_AGENT_ENDPOINTS:
     'feeds createAgentFromLibrary only (library semantics above); not ' +
     'exposed as a renderer read',
-  UNCATEGORIZED_COUNT:
-    'items in no Space are account-visible by the ADR-051 rule itself',
-  LIST_ITEMS_UNCATEGORIZED:
-    'same uncategorized-lane rule as UNCATEGORIZED_COUNT',
   SPACE_EXISTS_BY_ID:
     'boolean existence pre-flight used by internal flows; returns no ' +
     'content beyond "a row exists"',
-  LIST_INLINE_BINARY_ASSETS:
-    'GSX migration sweep (main-process background job over the whole ' +
-    'account); gating would strand restricted-space legacy assets unmigrated',
   FIND_AGENT_ASSET_IN_SPACE:
     'idempotency pre-flight inside createAgentFromLibrary — returns only an ' +
     'existing tile id so re-picking an agent focuses it instead of minting a ' +
@@ -66,7 +58,10 @@ const EXEMPT: Record<string, string> = {
     'returns a single aggregate count of other members, no identities',
 };
 
-const GATE_MARKERS = ['SPACE_VISIBLE', 'ASSET_VISIBLE', 'OTHER_SPACE_VISIBLE'];
+// The three ADR-051 macros, plus the ADR-065 inline fail-closed
+// signature — a query carrying the viewer-required clause is gated by
+// construction even when its alias forces the predicate inline.
+const GATE_MARKERS = ['SPACE_VISIBLE', 'ASSET_VISIBLE', 'OTHER_SPACE_VISIBLE', "$viewerId <> ''"];
 const WRITE_MARKERS = [/\bMERGE\b/, /\bCREATE\b/, /\bSET\b/, /\bDETACH\b/, /\bDELETE\b/];
 
 function loadSource(): string {

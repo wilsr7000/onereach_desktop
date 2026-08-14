@@ -252,6 +252,8 @@ function buildStubConsumer(): {
       attributionEmailSet: async () => null,
       getOrCreatePerson: async (input) =>
         maybeFail({ id: input.id, name: input.name ?? '' }),
+      findSpaceByNameInternal: async () => null,
+      grantSelfAccessInternal: async () => false,
     },
     checklists: {
       draft: async () => ({

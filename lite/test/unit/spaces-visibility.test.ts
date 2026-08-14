@@ -96,7 +96,11 @@ describe('visibility predicates in the Cypher surface', () => {
     // un-spaced — "a doorbell, not an artifact". Transient account-wide
     // broadcast (title/joinUrl/host, TTL-bounded LIMIT 5); completed-
     // meeting assets (ADR-061) ARE gated. See inventory EXEMPT note.
-    'LIST_LIVE_MEETINGS',
+    // ADR-065 second pass: the ring is now belonging-gated inline
+    // (WISER Meetings membership) — no longer on this list.
+    // FIND_SPACE_BY_NAME: drop-box pre-step, main-only, returns id+name
+    // of one Space matched by exact name — no content, no enumeration.
+    'FIND_SPACE_BY_NAME',
     'MEMBER_LIBRARY_SEARCH',
     'HOME_AGENTS_SAMPLE',
     'SPACE_EXISTS_BY_ID',

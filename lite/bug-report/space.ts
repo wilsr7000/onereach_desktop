@@ -108,6 +108,19 @@ function isDuplicateNameError(err: unknown): boolean {
  */
 export async function ensureLiteFeedbackSpace(api: SpacesApi): Promise<EnsureSpaceResult> {
   try {
+    // ADR-065 pre-step: belonging-gated listing hides the shared Space
+    // from first-time reporters. Find it past the gate (id+name only)
+    // and grant this reporter a live membership — after that the
+    // normal gated resolution below just works, and the reporter can
+    // see their own filings on the board.
+    try {
+      const found = await api.identity.findSpaceByNameInternal(LITE_FEEDBACK_SPACE_NAME);
+      if (found !== null) {
+        await api.identity.grantSelfAccessInternal(found.id);
+      }
+    } catch {
+      /* pre-step is best-effort; the flow below reports real failures */
+    }
     const existing = findFeedbackSpace(await api.listSpaces());
     if (existing !== null) return { space: existing, outcome: 'found' };
   } catch (err) {

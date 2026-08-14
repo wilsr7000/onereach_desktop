@@ -1107,6 +1107,17 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       nukeReadCache();
       return result;
     },
+
+    findSpaceByNameInternal(name: string) {
+      return client.findSpaceByNameInternal(name);
+    },
+
+    async grantSelfAccessInternal(spaceId: string): Promise<boolean> {
+      const granted = await client.grantSelfAccessInternal(spaceId);
+      // A new grant changes what the viewer can see.
+      if (granted) nukeReadCache();
+      return granted;
+    },
   };
 
   const checklists: SpacesChecklistsApi = {
