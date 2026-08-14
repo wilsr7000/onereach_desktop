@@ -30,6 +30,7 @@
 import { BrowserWindow, WebContentsView, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { getLoggingApi } from './logging/api.js';
+import { getAuthApi } from './auth/api.js';
 
 /**
  * The deployed WISER Playbooks build the launcher opens. This is the
@@ -58,6 +59,23 @@ const HEADER_PX = 38;
 let win: BrowserWindow | null = null;
 let view: WebContentsView | null = null;
 
+/**
+ * The signed-in viewer's email for the ?riffUser hand-off — the session
+ * email, same source as the Spaces identity gate. Null when unknown:
+ * the hosted app then fails closed on its own rather than showing
+ * someone else's spaces and playbooks.
+ */
+function wiserViewerIdentity(): string | null {
+  try {
+    const session = getAuthApi().getSession('edison');
+    const email = typeof session?.email === 'string' ? session.email.trim().toLowerCase() : '';
+    if (email.length > 0) return email;
+  } catch {
+    /* signed-out or auth not initialized — fail closed downstream */
+  }
+  return null;
+}
+
 /** Keep the app view filling the window below the header strip. */
 function layoutView(): void {
   if (win === null || view === null || win.isDestroyed()) return;
@@ -71,10 +89,18 @@ function layoutView(): void {
  * another.
  */
 export function openWiserPlaybooksWindow(opts?: { riffId?: string }): void {
-  const target =
-    opts?.riffId !== undefined && opts.riffId.length > 0
-      ? `${WISER_PLAYBOOKS_URL}?riff=${encodeURIComponent(opts.riffId)}`
-      : WISER_PLAYBOOKS_URL;
+  // ADR-065 hand-off: pass the signed-in identity so the hosted app's
+  // belonging-gated listings know who is looking. Without it the app
+  // fails closed (shows nothing) rather than showing someone else's
+  // spaces and playbooks.
+  const params = new URLSearchParams();
+  if (opts?.riffId !== undefined && opts.riffId.length > 0) {
+    params.set('riff', opts.riffId);
+  }
+  const viewer = wiserViewerIdentity();
+  if (viewer !== null) params.set('riffUser', viewer);
+  const qs = params.toString();
+  const target = qs.length > 0 ? `${WISER_PLAYBOOKS_URL}?${qs}` : WISER_PLAYBOOKS_URL;
 
   if (win !== null && !win.isDestroyed()) {
     // Deep link into the already-open window: point the app view at the
