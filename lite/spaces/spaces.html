@@ -266,10 +266,10 @@
 
           <div class="spaces-new-asset-field" data-asset-pane="agent" hidden>
             <div class="spaces-agent-source-toggle" role="tablist" aria-label="Agent source">
-              <button type="button" class="spaces-agent-source-btn is-active" data-agent-source="library">
+              <button type="button" role="tab" aria-selected="true" class="spaces-agent-source-btn is-active" data-agent-source="library">
                 From library
               </button>
-              <button type="button" class="spaces-agent-source-btn" data-agent-source="okf">
+              <button type="button" role="tab" aria-selected="false" class="spaces-agent-source-btn" data-agent-source="okf">
                 Paste OKF
               </button>
             </div>
@@ -311,18 +311,18 @@
               </div>
               <div class="spaces-endpoint-row">
                 <span class="spaces-endpoint-kind" data-kind="mcp">MCP</span>
-                <input type="url" id="spaces-new-asset-agent-mcp-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/mcp" autocomplete="off" />
-                <input type="text" id="spaces-new-asset-agent-mcp-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. web, slack)" autocomplete="off" />
+                <input type="url" id="spaces-new-asset-agent-mcp-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/mcp" aria-label="MCP endpoint URL" autocomplete="off" />
+                <input type="text" id="spaces-new-asset-agent-mcp-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. web, slack)" aria-label="MCP channels" autocomplete="off" />
               </div>
               <div class="spaces-endpoint-row">
                 <span class="spaces-endpoint-kind" data-kind="api">API</span>
-                <input type="url" id="spaces-new-asset-agent-api-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/api" autocomplete="off" />
-                <input type="text" id="spaces-new-asset-agent-api-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. rest, webhook)" autocomplete="off" />
+                <input type="url" id="spaces-new-asset-agent-api-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/api" aria-label="API endpoint URL" autocomplete="off" />
+                <input type="text" id="spaces-new-asset-agent-api-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. rest, webhook)" aria-label="API channels" autocomplete="off" />
               </div>
               <div class="spaces-endpoint-row">
                 <span class="spaces-endpoint-kind" data-kind="skill">Skill</span>
-                <input type="url" id="spaces-new-asset-agent-skill-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/skill" autocomplete="off" />
-                <input type="text" id="spaces-new-asset-agent-skill-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. voice, sms)" autocomplete="off" />
+                <input type="url" id="spaces-new-asset-agent-skill-url" class="spaces-new-asset-input spaces-endpoint-url" placeholder="https://…/skill" aria-label="Skill endpoint URL" autocomplete="off" />
+                <input type="text" id="spaces-new-asset-agent-skill-channels" class="spaces-new-asset-input spaces-endpoint-channels" placeholder="channels (e.g. voice, sms)" aria-label="Skill channels" autocomplete="off" />
               </div>
             </div>
           </div>
@@ -452,6 +452,7 @@
             type="button"
             id="spaces-action-new-space"
             class="spaces-action-row spaces-action-row-accent"
+            title="Create a new Space"
           >
             <span class="spaces-action-row-glyph" aria-hidden="true">＋</span>
             <span>New Space</span>
@@ -537,10 +538,15 @@
             </button>
             <div class="spaces-side-body">
               <ul class="spaces-list" id="spaces-list-intake">
-                <li class="spaces-row spaces-row-intake" data-scope-id="__uncategorized__">
-                  <span class="spaces-row-dot spaces-row-dot-intake"></span>
+                <li
+                  class="spaces-row spaces-row-intake"
+                  data-scope-id="__uncategorized__"
+                  role="button"
+                  tabindex="0"
+                >
+                  <span class="spaces-row-dot spaces-row-dot-intake" aria-hidden="true"></span>
                   <span class="spaces-row-name">Uncategorized</span>
-                  <span class="spaces-row-count" data-count-target="uncategorized">—</span>
+                  <span class="spaces-row-count" data-count-target="uncategorized" title="Items">—</span>
                 </li>
               </ul>
             </div>

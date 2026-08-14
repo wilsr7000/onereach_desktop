@@ -1,4 +1,5 @@
 :root {
+  color-scheme: dark;
   --or-bg-canvas: #0e0e10;
   --or-bg-shell: #121216;
   --or-bg-surface: #161618;
@@ -96,7 +97,6 @@ button:focus-visible,
 summary:focus-visible {
   outline: none;
   box-shadow: var(--or-focus-ring);
-  border-radius: var(--or-radius-sm);
 }
 
 /* Text selection carries the brand, quietly. */

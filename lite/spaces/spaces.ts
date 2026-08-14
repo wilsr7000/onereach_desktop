@@ -1580,7 +1580,11 @@ function buildCtxEntryRows(host: HTMLElement, entries: CtxEntry[]): void {
     row.type = 'button';
     row.className = 'spaces-ctx-item';
     if (entry.danger === true) row.classList.add('is-danger');
-    if (entry.disabled === true) row.classList.add('is-disabled');
+    if (entry.disabled === true) {
+      row.classList.add('is-disabled');
+      // A real disabled state — no tab stop, no phantom focus ring.
+      row.disabled = true;
+    }
     const check = document.createElement('span');
     check.className = 'spaces-ctx-check';
     check.textContent = entry.checked === true ? '✓' : '';
@@ -5224,9 +5228,9 @@ function buildPersonAvatar(member: { id: string; name: string }, size: 'sm' | 'm
   el.className = `spaces-avatar spaces-avatar-${size}`;
   el.textContent = personInitials(member.name);
   el.title = member.name;
-  const hue = avatarHue(member.id);
-  el.style.background = `hsl(${hue}, 32%, 26%)`;
-  el.style.borderColor = `hsl(${hue}, 40%, 38%)`;
+  // Only the hue is data; saturation/lightness are design decisions
+  // owned by .spaces-avatar in spaces.css via --avatar-hue.
+  el.style.setProperty('--avatar-hue', String(avatarHue(member.id)));
   return el;
 }
 
@@ -5383,7 +5387,7 @@ function enterSpaceObjectiveEdit(
   const renderCount = (): void => {
     const len = textarea.value.trim().length;
     counter.textContent = `${len.toLocaleString()} / ${SPACE_OBJECTIVE_MAX.toLocaleString()}`;
-    counter.style.color = len > SPACE_OBJECTIVE_MAX ? '#f87171' : '';
+    counter.classList.toggle('is-over', len > SPACE_OBJECTIVE_MAX);
   };
   renderCount();
   textarea.addEventListener('input', renderCount);
@@ -9819,8 +9823,10 @@ function enterContentEditMode(
   // grows with the document rather than stuck at a fixed height.
   const autoSize = (): void => {
     textarea.style.height = 'auto';
-    // +2 to dodge a 1-row scrollbar flicker on some platforms.
-    textarea.style.height = `${textarea.scrollHeight + 2}px`;
+    // +2 to dodge a 1-row scrollbar flicker on some platforms. Capped
+    // at 640px so a long document scrolls inside the editor instead of
+    // pushing the save/cancel actions below the fold.
+    textarea.style.height = `${Math.min(textarea.scrollHeight + 2, 640)}px`;
   };
   // Defer until the element is in the DOM so scrollHeight is correct.
   requestAnimationFrame(autoSize);
@@ -10543,7 +10549,7 @@ function buildChecklistLibraryCard(
   onChanged: () => void
 ): HTMLElement {
   const card = document.createElement('div');
-  card.className = 'spaces-checklist-card';
+  card.className = 'spaces-checklist-lib-card';
 
   const top = document.createElement('div');
   top.className = 'spaces-checklist-card-top';
@@ -13830,7 +13836,8 @@ export function personTypeaheadEntries(
  */
 function attachPersonTypeahead(
   input: HTMLInputElement,
-  host: HTMLElement,
+  // Kept for call-site symmetry; the panel is portaled to <body> now.
+  _host: HTMLElement,
   onPick: (person: { id: string; name: string; email: string }) => void
 ): void {
   let panel: HTMLDivElement | null = null;
@@ -13869,7 +13876,22 @@ function attachPersonTypeahead(
       });
       panel.appendChild(row);
     }
-    host.appendChild(panel);
+    // Portal to <body> with fixed positioning: the wizard body is an
+    // overflow-y:auto region, so an absolutely-positioned child panel
+    // gets clipped at its bottom edge (worst on the last person row —
+    // the common case). Fixed + measured placement escapes the clip.
+    panel.style.position = 'fixed';
+    panel.style.visibility = 'hidden';
+    document.body.appendChild(panel);
+    const inputRect = input.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    panel.style.left = `${Math.round(inputRect.left)}px`;
+    panel.style.width = `${Math.round(inputRect.width)}px`;
+    const fitsBelow = inputRect.bottom + 4 + panelRect.height <= window.innerHeight - 8;
+    panel.style.top = fitsBelow
+      ? `${Math.round(inputRect.bottom + 4)}px`
+      : `${Math.max(8, Math.round(inputRect.top - 4 - panelRect.height))}px`;
+    panel.style.visibility = '';
   };
 
   const search = (q: string): void => {
@@ -15197,7 +15219,9 @@ function switchAgentSourceMode(mode: AgentSourceMode): void {
   document
     .querySelectorAll<HTMLElement>('[data-agent-source]')
     .forEach((btn) => {
-      btn.classList.toggle('is-active', btn.getAttribute('data-agent-source') === mode);
+      const active = btn.getAttribute('data-agent-source') === mode;
+      btn.classList.toggle('is-active', active);
+      btn.setAttribute('aria-selected', String(active));
     });
   document
     .querySelectorAll<HTMLElement>('[data-agent-source-pane]')

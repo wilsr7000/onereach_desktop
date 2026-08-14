@@ -63,7 +63,7 @@ body {
   gap: 12px;
   padding: 14px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  background: #16181D;
+  background: #161618;
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -72,7 +72,7 @@ body {
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.1px;
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-header-spacer {
@@ -179,7 +179,7 @@ body {
 
 .spaces-row.is-active {
   background: rgba(79, 140, 255, 0.14);
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-row-dot {
@@ -206,7 +206,7 @@ body {
 }
 
 .spaces-row-intake.is-active .spaces-row-name {
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-row-dot-intake.has-count {
@@ -387,13 +387,13 @@ body {
   padding: 28px;
   border: 1px dashed rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  background: #16181D;
+  background: #161618;
 }
 
 .spaces-empty-state-title {
   font-size: 15px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin-bottom: 8px;
 }
 
@@ -471,7 +471,7 @@ body {
 .spaces-view-header-title {
   font-size: 18px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin: 0;
   letter-spacing: -0.2px;
   /* No nowrap / overflow:hidden -- the title now lives on its own
@@ -629,7 +629,7 @@ body {
   padding: 4px 10px 4px 8px;
   background: transparent;
   border: 1px solid #262833;
-  border-radius: 20px;
+  border-radius: 999px;
   cursor: pointer;
   color: inherit;
   width: fit-content;
@@ -651,7 +651,10 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 1px solid;
+  /* Hue is per-person data (set inline as --avatar-hue by
+   * buildPersonAvatar); saturation/lightness are design and live here. */
+  background: hsl(var(--avatar-hue, 215), 32%, 26%);
+  border: 1px solid hsl(var(--avatar-hue, 215), 40%, 38%);
   color: #e6e7ec;
   font-weight: 600;
   user-select: none;
@@ -677,9 +680,9 @@ body {
 .spaces-member-current-row {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 5px 6px;
-  border-radius: 7px;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
 }
 .spaces-member-current-row:hover { background: #1d1f28; }
 .spaces-member-current-name { font-size: 13px; }
@@ -689,10 +692,10 @@ body {
   background: transparent;
   border: none;
   color: #8b8e9c;
-  font-size: 14px;
+  font-size: 13px;
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: 6px;
 }
 .spaces-member-current-remove:hover { color: #f87171; background: #262833; }
 
@@ -701,6 +704,10 @@ body {
   font-size: 11px;
   color: var(--spaces-muted, #8b8e9c);
   font-variant-numeric: tabular-nums;
+}
+
+.spaces-view-header-objective-counter.is-over {
+  color: var(--or-danger, #ff6b7a);
 }
 
 
@@ -724,12 +731,13 @@ body {
   font-family: inherit;
   font-size: 12px;
   padding: 5px 12px;
+  height: 28px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
   color: #d2d2d6;
   cursor: pointer;
-  transition: background 80ms ease, border-color 80ms ease;
+  transition: background var(--or-transition-fast, 120ms ease), border-color var(--or-transition-fast, 120ms ease);
 }
 
 .spaces-items-refresh:hover:not(:disabled) {
@@ -801,7 +809,7 @@ body {
   position: relative;
   aspect-ratio: 4 / 3;
   border-radius: 10px;
-  background: #16181D;
+  background: #161618;
   border: 1px solid rgba(255, 255, 255, 0.06);
   overflow: hidden;
   display: flex;
@@ -1195,12 +1203,14 @@ body {
 .spaces-card-agent-hex { color: rgba(176, 138, 255, 0.5); }
 .spaces-card-knowledge-hex { color: rgba(110, 231, 183, 0.45); }
 
-/* Agent tile v2 — hexagon anchor + AGENT chip + endpoint chips. */
+/* Agent tile v2 — hexagon anchor + AGENT chip + endpoint chips.
+ * Layout lives here; the violet surface block later in the file adds
+ * color only (it used to redeclare padding/gap and silently won). */
 .spaces-card-preview-agent {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 9px;
+  gap: 8px;
   padding: 14px 16px;
 }
 
@@ -1232,6 +1242,11 @@ body {
   border: 1px solid rgba(214, 194, 255, 0.3);
   border-radius: 999px;
   padding: 1px 8px;
+  /* Long agent types truncate like knowledge domains / journey stages. */
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spaces-card-agent-endpoints {
@@ -1247,7 +1262,7 @@ body {
   font-weight: 600;
   letter-spacing: 1px;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   border: 1px solid rgba(176, 138, 255, 0.4);
   color: #d6c2ff;
   background: rgba(176, 138, 255, 0.08);
@@ -1278,7 +1293,7 @@ body {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 9px;
+  gap: 8px;
   padding: 14px 16px;
   position: relative;
 }
@@ -1360,7 +1375,7 @@ body {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 10px;
+  gap: 8px;
   padding: 14px 16px;
 }
 
@@ -1428,7 +1443,7 @@ body {
   flex-direction: column;
   align-items: stretch;
   justify-content: flex-start;
-  gap: 9px;
+  gap: 8px;
   padding: 14px 16px;
 }
 
@@ -1527,17 +1542,15 @@ body {
   overflow: hidden;
 }
 
-/* ── Agent tile: distinct violet surface so agents don't read as docs ── */
+/* ── Agent tile: distinct violet surface so agents don't read as docs ──
+ * Color only — layout (padding/gap) is owned by the v2 block above so
+ * the agent head row lines up with its knowledge/journey/transcript
+ * siblings. */
 
 .spaces-card-preview-agent {
   background:
     radial-gradient(circle at 50% 30%, rgba(150, 120, 255, 0.22), transparent 62%),
     linear-gradient(165deg, #1B1630, #120E20);
-  align-items: stretch;
-  justify-content: flex-start;
-  padding: 16px;
-  flex-direction: column;
-  gap: 8px;
 }
 
 .spaces-card-glyph-agent {
@@ -1580,7 +1593,7 @@ body {
 .spaces-card-title {
   font-size: 13.5px;
   font-weight: 500;
-  color: #f4f4f6;
+  color: #f4f6fb;
   line-height: 1.35;
   margin: 0;
   letter-spacing: -0.005em;
@@ -1851,13 +1864,21 @@ body {
   cursor: default;
 }
 
-/* Text-bearing previews reserve room for the badge row so badges never
-   cover the first line of the excerpt / ticket body. */
+/* Content-bearing previews reserve room for the badge row so badges
+   never cover the first line — includes every structured tile whose
+   head row starts at the top (playbook/agent/knowledge/journey/
+   transcript), not just the text family. Badges end at y≈27px
+   (top 8 + height 19); 32px keeps the first line clear. */
 .spaces-card-preview-text.has-badges,
 .spaces-card-preview-document.has-badges,
 .spaces-card-preview-other.has-badges,
-.spaces-card-preview-ticket.has-badges {
-  padding-top: 36px;
+.spaces-card-preview-ticket.has-badges,
+.spaces-card-preview-playbook.has-badges,
+.spaces-card-preview-agent.has-badges,
+.spaces-card-preview-knowledge.has-badges,
+.spaces-card-preview-journey.has-badges,
+.spaces-card-preview-transcript.has-badges {
+  padding-top: 32px;
 }
 
 /* ── Keyboard focus: crisp accent ring (no default outline) ──────────── */
@@ -1925,7 +1946,7 @@ body {
 .spaces-banner {
   margin: 0 0 14px;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: var(--or-radius-md, 10px);
   font-size: 12.5px;
 }
 
@@ -1937,7 +1958,7 @@ body {
 
 .spaces-banner-error {
   background: rgba(255, 99, 99, 0.06);
-  color: #ff8585;
+  color: #ff6b7a;
   border: 1px solid rgba(255, 99, 99, 0.2);
 }
 
@@ -1948,24 +1969,26 @@ body {
   padding: 28px;
   border: 1px dashed rgba(255, 255, 255, 0.08);
   border-radius: 10px;
-  background: #16181D;
+  background: #161618;
 }
 
 .spaces-empty-items-title {
   font-size: 14px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin-bottom: 8px;
 }
 
-.spaces-empty-items-body {
+.spaces-empty-items-body,
+.spaces-empty-items-line {
   font-size: 12.5px;
   color: #9a9aa3;
   line-height: 1.55;
+  margin: 0;
 }
 
 .spaces-empty-hint-error {
-  color: #ff8585;
+  color: #ff6b7a;
 }
 
 /* ── Detail rail ─────────────────────────────────────────────────── */
@@ -2029,18 +2052,21 @@ body {
 
 .spaces-detail-close:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-detail-title {
   /* The title is the answer to "what am I looking at" and must outrank
      the kind/mime strip above it. 15px/600 was near-body weight; the
-     pane's hierarchy inverted. */
-  font-size: 17px;
-  font-weight: 650;
+     pane's hierarchy inverted. 18px = --or-text-lg, on the ladder. */
+  font-size: var(--or-text-lg, 18px);
+  font-weight: 600;
   letter-spacing: -0.01em;
-  color: #f4f4f6;
+  color: var(--or-text-primary, #f4f6fb);
   line-height: 1.3;
+  /* Long unbroken names (URLs, generated filenames) must wrap, not
+   * push the 480px rail wider. */
+  overflow-wrap: anywhere;
 }
 
 .spaces-detail-meta {
@@ -2236,7 +2262,7 @@ body {
 
 .spaces-detail-toggle-btn.is-active {
   background: rgba(79, 140, 255, 0.18);
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-detail-content {
@@ -2297,7 +2323,7 @@ body {
   gap: 6px;
   padding: 10px 12px;
   border: 1px solid rgba(150, 120, 255, 0.18);
-  border-radius: 8px;
+  border-radius: var(--or-radius-md, 10px);
   background: rgba(150, 120, 255, 0.05);
 }
 
@@ -2364,15 +2390,15 @@ body {
 .spaces-markdown h1,
 .spaces-markdown h2,
 .spaces-markdown h3 {
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin: 18px 0 6px;
   font-weight: 600;
   letter-spacing: -0.1px;
 }
 
-.spaces-markdown h1 { font-size: 18px; }
-.spaces-markdown h2 { font-size: 16px; }
-.spaces-markdown h3 { font-size: 14px; text-transform: uppercase; letter-spacing: 0.4px; color: #c7c7cd; }
+.spaces-markdown h1 { font-size: var(--or-text-lg, 18px); }
+.spaces-markdown h2 { font-size: var(--or-text-md, 15px); }
+.spaces-markdown h3 { font-size: var(--or-text-sm, 13px); text-transform: uppercase; letter-spacing: 0.4px; color: #c7c7cd; }
 
 .spaces-markdown h1:first-child,
 .spaces-markdown h2:first-child,
@@ -2381,7 +2407,7 @@ body {
 .spaces-markdown p { margin: 0 0 12px; }
 .spaces-markdown p:last-child { margin-bottom: 0; }
 
-.spaces-markdown strong { color: #f4f4f6; }
+.spaces-markdown strong { color: #f4f6fb; }
 .spaces-markdown em { color: #c7c7cd; }
 
 .spaces-markdown a {
@@ -2442,7 +2468,7 @@ body {
 /* Mime hint next to the kind badge. */
 .spaces-detail-mime {
   font-family: 'SF Mono', Menlo, Consolas, monospace;
-  font-size: 10.5px;
+  font-size: var(--or-text-2xs, 11px);
   color: #6f6f78;
   letter-spacing: 0.2px;
 }
@@ -2470,7 +2496,15 @@ body {
 
 .spaces-detail-tag.is-removing { opacity: 0.4; }
 
-.spaces-detail-tag-label { line-height: 1.2; }
+.spaces-detail-tag-label {
+  line-height: 1.2;
+  /* Machine-generated tags can be arbitrarily long — cap like
+   * .spaces-chip-name does. */
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .spaces-detail-tag-remove {
   background: transparent;
@@ -2478,12 +2512,14 @@ body {
   color: #8a8a93;
   font-size: 13px;
   line-height: 1;
-  padding: 0 0 0 2px;
+  /* A usable hit target inside the chip, not a 13px sliver. */
+  padding: 2px 4px;
+  margin: -2px -4px -2px 0;
   cursor: pointer;
   font-family: inherit;
 }
 
-.spaces-detail-tag-remove:hover { color: #ff8585; }
+.spaces-detail-tag-remove:hover { color: #ff6b7a; }
 .spaces-detail-tag-remove:disabled { cursor: progress; opacity: 0.6; }
 
 .spaces-detail-tag-add-wrap {
@@ -2514,7 +2550,7 @@ body {
   font-size: 11px;
   background: rgba(79, 140, 255, 0.08);
   border: 1px solid rgba(79, 140, 255, 0.4);
-  color: #f4f4f6;
+  color: #f4f6fb;
   padding: 2px 9px;
   border-radius: 999px;
   outline: none;
@@ -2567,17 +2603,22 @@ body {
 }
 
 .spaces-detail-title-input {
+  /* Matches .spaces-detail-title metrics exactly, and the negative
+   * margin offsets the border+padding — the glyphs don't move when
+   * the input swaps in. */
   font: inherit;
-  font-size: 15px;
+  font-size: var(--or-text-lg, 18px);
   font-weight: 600;
-  color: #f4f4f6;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  color: var(--or-text-primary, #f4f6fb);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(79, 140, 255, 0.45);
   border-radius: 6px;
   padding: 4px 8px;
-  width: 100%;
+  margin: -5px -9px;
+  width: calc(100% + 18px);
   outline: none;
-  letter-spacing: -0.2px;
 }
 
 .spaces-detail-title-input:focus {
@@ -2595,7 +2636,7 @@ body {
 
 .spaces-detail-reclassify-select {
   font: inherit;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -2615,9 +2656,12 @@ body {
   background-repeat: no-repeat;
 }
 
-.spaces-detail-reclassify-select:focus {
-  outline: 1px solid rgba(123, 219, 255, 0.5);
-  outline-offset: 1px;
+.spaces-detail-reclassify-select:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.spaces-detail-reclassify-select:focus-visible {
+  box-shadow: var(--or-focus-ring);
 }
 
 .spaces-detail-reclassify.is-saving { opacity: 0.6; }
@@ -2709,7 +2753,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   padding: 18px 22px;
-  background: #16181D;
+  background: #161618;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px 10px 0 0;
 }
@@ -2717,7 +2761,7 @@ body {
 .spaces-discovery-title {
   font-size: 14px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin-bottom: 4px;
 }
 
@@ -2805,7 +2849,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: #16181D;
+  background: #161618;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-top: none;
   border-radius: 0 0 10px 10px;
@@ -2835,7 +2879,7 @@ body {
 .spaces-discovery-card-title {
   font-size: 13px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin: 0;
   flex: 1;
 }
@@ -2869,7 +2913,7 @@ body {
 }
 
 .spaces-discovery-pill-status-fail {
-  color: #ff8585;
+  color: #ff6b7a;
   border-color: rgba(255, 99, 99, 0.4);
   background: rgba(255, 99, 99, 0.08);
 }
@@ -2915,7 +2959,7 @@ body {
     Consolas,
     monospace;
   font-size: 11.5px;
-  color: #ff8585;
+  color: #ff6b7a;
   background: rgba(255, 99, 99, 0.05);
   border: 1px solid rgba(255, 99, 99, 0.2);
   padding: 8px 12px;
@@ -3035,7 +3079,7 @@ body {
 .home-welcome-title {
   font-size: 18px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   margin: 0;
   letter-spacing: -0.2px;
 }
@@ -3114,20 +3158,13 @@ body {
   padding-bottom: 2px;
   /* Dark scrollbar — never a default white slab on a dark surface. */
   scrollbar-width: thin;
-  scrollbar-color: #3a3f4b transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
+/* Low-profile horizontal scrollbar; colors come from the global
+ * treatment in signature.css. */
 .home-filter-chips::-webkit-scrollbar {
   height: 6px;
-}
-
-.home-filter-chips::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.home-filter-chips::-webkit-scrollbar-thumb {
-  background: #3a3f4b;
-  border-radius: 3px;
 }
 
 .home-filter-chip {
@@ -3154,7 +3191,7 @@ body {
 .home-filter-chip.is-active {
   background: rgba(79, 140, 255, 0.18);
   border-color: rgba(79, 140, 255, 0.4);
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 /* Timeline (the primary surface). */
@@ -3256,8 +3293,9 @@ body {
 .spaces-bulk-move-select {
   font: inherit;
   font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 4px 12px;
+  height: 26px;
+  border-radius: 6px;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: #e8e8ec;
@@ -3278,15 +3316,16 @@ body {
   font: inherit;
   font-size: 12px;
   padding: 4px 12px;
-  border-radius: 4px;
+  height: 26px;
+  border-radius: 6px;
   cursor: pointer;
-  transition: background 80ms ease, border-color 80ms ease;
+  transition: background var(--or-transition-fast, 120ms ease), border-color var(--or-transition-fast, 120ms ease);
 }
 
 .spaces-bulk-delete {
   background: rgba(255, 99, 99, 0.10);
   border: 1px solid rgba(255, 99, 99, 0.35);
-  color: #ff8a8a;
+  color: #ff6b7a;
 }
 
 .spaces-bulk-delete:hover:not(:disabled) {
@@ -3340,7 +3379,7 @@ body {
 }
 
 .home-timeline-author {
-  color: #f4f4f6;
+  color: #f4f6fb;
   font-weight: 600;
 }
 
@@ -3349,7 +3388,7 @@ body {
 }
 
 .home-timeline-object {
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .home-timeline-meta {
@@ -3540,7 +3579,7 @@ body {
 
 .home-card-error {
   font-size: 12.5px;
-  color: #ff7878;
+  color: #ff6b7a;
   background: rgba(255, 99, 99, 0.06);
   border: 1px solid rgba(255, 99, 99, 0.2);
   padding: 8px 12px;
@@ -3552,15 +3591,18 @@ body {
 .home-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(8, 10, 14, 0.7);
+  /* Same backdrop treatment as .spaces-modal-backdrop — one dialog
+   * system. Ladder: backdrops 2000 · menus 2600 · toast 2700. */
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 100;
+  z-index: 2000;
 }
 
 .home-modal {
-  background: #16181D;
+  background: var(--or-bg-surface, #161618);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   width: min(560px, 90vw);
@@ -3581,7 +3623,7 @@ body {
 .home-modal-title {
   font-size: 13px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   letter-spacing: 0.2px;
   margin: 0;
 }
@@ -3622,7 +3664,7 @@ body {
 
 .home-modal-row-title {
   font-size: 13px;
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .home-modal-row-meta {
@@ -3731,7 +3773,7 @@ body {
 /* The row context menu (popover). */
 .spaces-row-menu {
   position: fixed;
-  z-index: 1500;
+  z-index: 2600;
   min-width: 140px;
   background: var(--or-bg-elevated, #1b1b20);
   border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
@@ -3774,15 +3816,19 @@ body {
   color: var(--or-danger, #ff6b7a);
 }
 
-/* Inline rename: an <input> replaces the row name in place. */
+/* Inline rename: an <input> replaces the row name in place. Compact
+ * box (negative margin offsets the border+padding) so the sidebar row
+ * keeps its height and the list below doesn't jump. */
 .spaces-row-rename-input {
   flex: 1;
   min-width: 0;
   background: var(--or-bg-shell, #121216);
   color: var(--or-text-primary, #f4f6fb);
   border: 1px solid var(--or-border-signal, rgba(79, 140, 255, 0.46));
-  border-radius: 4px;
-  padding: 3px 7px;
+  border-radius: 6px;
+  padding: 0 6px;
+  margin: -1px 0;
+  height: 20px;
   font: inherit;
   font-size: 13px;
   outline: none;
@@ -4080,18 +4126,17 @@ body {
   flex: 1 1 60%;
 }
 
-/* Graph-backed person typeahead (wizard people step). The row is the
- * positioned host; the panel floats under the focused input. */
+/* Graph-backed person typeahead (wizard people step). The panel is
+ * portaled to <body> with fixed positioning (set inline by
+ * attachPersonTypeahead) so the wizard's scroll container can't clip
+ * it. z-index sits above the modal backdrop (2000). */
 .spaces-wizard-row { position: relative; }
 .spaces-wizard-typeahead {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 34px;
-  z-index: 40;
-  background: #1d1f28;
-  border: 1px solid #2c2e3a;
-  border-radius: 8px;
+  position: fixed;
+  z-index: 2400;
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
+  border-radius: var(--or-radius-md, 10px);
   overflow: hidden;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
@@ -4244,10 +4289,11 @@ body {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  z-index: 2500;
+  z-index: 2700;
   display: inline-flex;
   align-items: center;
   gap: 16px;
+  max-width: min(560px, calc(100vw - 48px));
   background: var(--or-bg-elevated, #1b1b20);
   border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
   border-radius: var(--or-radius-md, 10px);
@@ -4323,14 +4369,14 @@ body {
   color: var(--or-text-primary, #f4f6fb);
   font-size: 12px;
   line-height: 1.35;
-  max-width: max-content;
+  max-width: 100%;
 }
 
 .spaces-detail-attribution-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--or-accent, #6aa9ff);
+  background: var(--or-accent, #4f8cff);
   display: inline-block;
 }
 
@@ -4340,6 +4386,11 @@ body {
 
 .spaces-detail-attribution-name {
   font-weight: 600;
+  /* Long display names truncate instead of overflowing the rail. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spaces-detail-attribution-sep,
@@ -4400,7 +4451,7 @@ body {
   height: 6px;
   margin-top: 6px;
   border-radius: 50%;
-  background: var(--or-accent, #6aa9ff);
+  background: var(--or-accent, #4f8cff);
 }
 
 .spaces-detail-activity-body {
@@ -4444,7 +4495,7 @@ body {
   padding: 1px 5px;
   margin-left: 6px;
   border-radius: 3px;
-  background: linear-gradient(135deg, #7bdbff, #6aa9ff);
+  background: linear-gradient(135deg, #7bdbff, #4f8cff);
   color: #0a1018;
   text-transform: uppercase;
   align-self: center;
@@ -4506,9 +4557,9 @@ body {
 }
 
 .spaces-ticket-status-pill[data-status='open'] {
-  background: rgba(106, 169, 255, 0.12);
+  background: rgba(79, 140, 255, 0.12);
   color: #a5cbff;
-  border-color: rgba(106, 169, 255, 0.32);
+  border-color: rgba(79, 140, 255, 0.32);
 }
 
 .spaces-ticket-status-pill[data-status='in_progress'] {
@@ -4530,10 +4581,12 @@ body {
 }
 
 .spaces-detail-ticket-priority {
+  /* Same shape family as the status pill beside it. */
   display: inline-flex;
   align-items: center;
-  padding: 2px 8px;
-  border-radius: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 246, 251, 0.12);
   font-size: 11px;
   font-weight: 600;
   background: rgba(244, 246, 251, 0.08);
@@ -4593,7 +4646,7 @@ body {
   border-radius: 8px;
   background: linear-gradient(135deg,
               rgba(123, 219, 255, 0.10),
-              rgba(106, 169, 255, 0.06));
+              rgba(79, 140, 255, 0.06));
   border: 1px solid rgba(123, 219, 255, 0.28);
 }
 
@@ -4750,6 +4803,10 @@ body {
 
 .spaces-shared-member-chip-name {
   font-weight: 600;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spaces-shared-member-chip-kind {
@@ -4789,7 +4846,7 @@ body {
 }
 
 .spaces-shared-members-add:hover {
-  border-color: var(--or-accent, #6aa9ff);
+  border-color: var(--or-accent, #4f8cff);
   color: var(--or-accent-strong, #7bdbff);
 }
 
@@ -4823,8 +4880,8 @@ body {
 }
 
 .spaces-shared-add-ticket-button {
-  background: rgba(106, 169, 255, 0.15);
-  border: 1px solid rgba(106, 169, 255, 0.4);
+  background: rgba(79, 140, 255, 0.15);
+  border: 1px solid rgba(79, 140, 255, 0.4);
   color: #a5cbff;
   font: inherit;
   font-size: 11.5px;
@@ -4835,7 +4892,7 @@ body {
 }
 
 .spaces-shared-add-ticket-button:hover {
-  background: rgba(106, 169, 255, 0.25);
+  background: rgba(79, 140, 255, 0.25);
 }
 
 /* Playbook card (dashboard). */
@@ -4849,7 +4906,7 @@ body {
 
 .spaces-shared-playbook-card {
   padding: 16px;
-  background: linear-gradient(135deg, rgba(123, 219, 255, 0.10), rgba(106, 169, 255, 0.06));
+  background: linear-gradient(135deg, rgba(123, 219, 255, 0.10), rgba(79, 140, 255, 0.06));
   border: 1px solid rgba(123, 219, 255, 0.28);
   border-radius: 8px;
   cursor: pointer;
@@ -5018,16 +5075,16 @@ body {
 
 /* "+ New" button in the items header. */
 .spaces-items-new {
-  background: var(--or-accent, #6aa9ff);
-  color: #0a1018;
+  background: var(--or-accent, #4f8cff);
+  color: #ffffff;
   border: none;
   font: inherit;
   font-size: 12px;
   font-weight: 700;
   padding: 6px 14px;
+  height: 28px;
   border-radius: 6px;
   cursor: pointer;
-  margin-right: 8px;
   transition: background var(--or-transition-fast, 120ms ease);
 }
 
@@ -5047,8 +5104,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(106, 169, 255, 0.12);
-  border: 2px dashed var(--or-accent, #6aa9ff);
+  background: rgba(79, 140, 255, 0.12);
+  border: 2px dashed var(--or-accent, #4f8cff);
   border-radius: 12px;
   color: var(--or-accent-strong, #7bdbff);
   font-size: 16px;
@@ -5057,76 +5114,10 @@ body {
   z-index: 50;
 }
 
-/* New-asset modal: tabs + textarea + file picker. */
-.spaces-modal-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 14px;
-  border-bottom: 1px solid rgba(244, 246, 251, 0.12);
-}
-
-.spaces-modal-tab {
-  background: transparent;
-  border: none;
-  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 14px;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
-  transition: color var(--or-transition-fast, 120ms ease),
-              border-color var(--or-transition-fast, 120ms ease);
-}
-
-.spaces-modal-tab:hover {
-  color: var(--or-text-primary, #f4f6fb);
-}
-
-.spaces-modal-tab.is-active {
-  color: var(--or-accent-strong, #7bdbff);
-  border-bottom-color: var(--or-accent, #6aa9ff);
-}
-
-.spaces-modal-textarea {
-  resize: vertical;
-  min-height: 140px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
-}
-
-.spaces-modal-file {
-  display: block;
-  width: 100%;
-  cursor: pointer;
-  padding: 12px;
-  background: rgba(244, 246, 251, 0.04);
-  border: 1px dashed rgba(244, 246, 251, 0.18);
-  border-radius: 6px;
-  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
-  font: inherit;
-  font-size: 12px;
-}
-
-.spaces-modal-file::-webkit-file-upload-button {
-  background: rgba(106, 169, 255, 0.12);
-  color: var(--or-accent-strong, #7bdbff);
-  border: 1px solid rgba(106, 169, 255, 0.4);
-  padding: 4px 10px;
-  border-radius: 4px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-right: 12px;
-}
-
-.spaces-new-asset-file-hint {
-  margin-top: 6px;
-  font-size: 11.5px;
-  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
-}
+/* (The generation-1 new-asset modal chrome — .spaces-modal-tabs /
+ * -tab / -textarea / -file — was dead CSS: nothing in spaces.html or
+ * spaces.ts references those classes. The live modal is the
+ * segmented-control redesign further down. Removed 2026-08-12.) */
 
 /* Delete affordance on the detail pane. */
 .spaces-detail-delete-wrap {
@@ -5180,7 +5171,7 @@ body {
   height: 460px;
   border: 1px solid rgba(244, 246, 251, 0.12);
   border-radius: 8px;
-  background: #14171d;
+  background: #161618;
   margin-bottom: 8px;
 }
 
@@ -5234,7 +5225,7 @@ body {
   border-radius: 10px;
   background:
     linear-gradient(135deg, rgba(255, 95, 86, 0.10), transparent 62%),
-    #1A1D24;
+    #1b1b20;
   border: 1px solid rgba(255, 255, 255, 0.08);
   margin-bottom: 8px;
 }
@@ -5263,7 +5254,7 @@ body {
 .spaces-detail-pdf-card-name {
   font-size: 13.5px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5353,7 +5344,10 @@ body {
 /* CSV table. */
 .spaces-detail-csv-preview {
   margin-top: 10px;
-  overflow-x: auto;
+  /* Bounded in both axes: a 2,000-row CSV must not blow out the
+   * detail rail, and the sticky header needs a scroll container. */
+  max-height: 360px;
+  overflow: auto;
 }
 
 .spaces-detail-csv-empty {
@@ -5489,14 +5483,7 @@ body {
   border-radius: 999px;
   padding: 0 6px;
 }
-/* Dark scrollbar — never a white default on this dark pane. */
-.spaces-membership-list::-webkit-scrollbar { width: 8px; }
-.spaces-membership-list::-webkit-scrollbar-track { background: transparent; }
-.spaces-membership-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 4px;
-}
-.spaces-membership-list::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.22); }
+/* Dark scrollbar comes from the global treatment in signature.css. */
 
 .spaces-detail-move-wrap,
 .spaces-detail-add-to-space-wrap {
@@ -5538,14 +5525,14 @@ body {
   border: 1px solid rgba(244, 246, 251, 0.12);
   border-radius: 6px;
   padding: 6px 10px;
+  height: 28px;
   font: inherit;
   font-size: 12.5px;
-  margin-right: 8px;
 }
 
 .spaces-items-search:focus {
   outline: none;
-  border-color: var(--or-accent, #6aa9ff);
+  border-color: var(--or-accent, #4f8cff);
   background: rgba(244, 246, 251, 0.08);
 }
 
@@ -5597,7 +5584,8 @@ body {
 .spaces-detail-metadata-table {
   margin: 0;
   display: grid;
-  grid-template-columns: minmax(110px, max-content) 1fr auto;
+  /* 40% cap: one long metadata key must not crush the value column. */
+  grid-template-columns: minmax(110px, 40%) 1fr auto;
   gap: 2px 14px;
   align-items: baseline;
 }
@@ -5621,6 +5609,9 @@ body {
   letter-spacing: -0.005em;
   margin: 0;
   padding: 5px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spaces-detail-metadata-value {
@@ -5698,12 +5689,14 @@ body {
   border-radius: 50%;
   cursor: pointer;
   align-self: center;
-  visibility: hidden;
+  /* Faded, not visibility:hidden — a hidden button can't take focus,
+   * which made metadata rows undeletable by keyboard. */
+  opacity: 0;
 }
 
 .spaces-detail-metadata-row:hover .spaces-detail-metadata-remove,
-.spaces-detail-metadata-remove:focus {
-  visibility: visible;
+.spaces-detail-metadata-remove:focus-visible {
+  opacity: 1;
 }
 
 .spaces-detail-metadata-remove:hover {
@@ -5733,7 +5726,7 @@ body {
 }
 
 .spaces-detail-metadata-add:hover {
-  border-color: var(--or-accent, #6aa9ff);
+  border-color: var(--or-accent, #4f8cff);
   color: var(--or-accent-strong, #7bdbff);
 }
 
@@ -5824,9 +5817,12 @@ body {
   display: inline-flex;
   margin: 16px 24px 0;
   /* Pinned (don't scroll) and kept content-width / left-aligned now that
-     the modal is a flex column. */
+     the modal is a flex column. Wraps on narrow windows so the last
+     tab never clips silently (the modal is overflow:hidden). */
   flex: 0 0 auto;
   align-self: flex-start;
+  flex-wrap: wrap;
+  max-width: calc(100% - 48px);
   padding: 4px;
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.04);
@@ -5966,9 +5962,9 @@ body {
 
 .spaces-new-asset-input:focus,
 .spaces-new-asset-textarea:focus {
-  border-color: var(--or-accent, #6aa9ff);
+  border-color: var(--or-accent, #4f8cff);
   background: rgba(0, 0, 0, 0.34);
-  box-shadow: 0 0 0 3px rgba(106, 169, 255, 0.15);
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.15);
 }
 
 .spaces-new-asset-textarea {
@@ -6004,6 +6000,11 @@ body {
   cursor: pointer;
 }
 
+.spaces-agent-source-btn:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--or-text-primary, #f4f6fb);
+}
+
 .spaces-agent-source-btn.is-active {
   background: rgba(176, 138, 255, 0.14);
   border-color: rgba(176, 138, 255, 0.5);
@@ -6017,7 +6018,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  scrollbar-color: #3a3d45 transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .spaces-agent-results-status {
@@ -6093,7 +6094,9 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(8, 9, 12, 0.6);
-  z-index: 300;
+  /* Above the base modals (2000) — this picker opens on top of the
+   * People panel / new-asset modal. */
+  z-index: 2200;
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -6103,7 +6106,7 @@ body {
 .spaces-member-picker {
   width: 440px;
   max-width: calc(100vw - 48px);
-  background: #16181d;
+  background: #161618;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 12px;
   padding: 16px;
@@ -6119,7 +6122,7 @@ body {
   justify-content: space-between;
   font-size: 14px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-member-picker-close {
@@ -6129,6 +6132,12 @@ body {
   font-size: 18px;
   cursor: pointer;
   padding: 0 4px;
+  border-radius: 6px;
+}
+
+.spaces-member-picker-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--or-text-primary, #f4f6fb);
 }
 
 .spaces-member-picker-results {
@@ -6137,7 +6146,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  scrollbar-color: #3a3d45 transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .spaces-member-picker-row {
@@ -6255,6 +6264,11 @@ body {
   cursor: pointer;
 }
 
+.spaces-existing-row-add:hover:not(:disabled) {
+  background: rgba(79, 140, 255, 0.2);
+  border-color: rgba(79, 140, 255, 0.7);
+}
+
 .spaces-existing-row-add:disabled {
   opacity: 0.55;
   cursor: default;
@@ -6313,15 +6327,15 @@ body {
 
 .spaces-new-asset-dropzone:hover,
 .spaces-new-asset-dropzone.is-drag-target {
-  border-color: var(--or-accent, #6aa9ff);
-  background: rgba(106, 169, 255, 0.06);
+  border-color: var(--or-accent, #4f8cff);
+  background: rgba(79, 140, 255, 0.06);
 }
 
 .spaces-new-asset-dropzone-icon {
   width: 48px;
   height: 48px;
   border-radius: 50%;
-  background: linear-gradient(135deg, rgba(123, 219, 255, 0.22), rgba(106, 169, 255, 0.12));
+  background: linear-gradient(135deg, rgba(123, 219, 255, 0.22), rgba(79, 140, 255, 0.12));
   color: var(--or-accent-strong, #7bdbff);
   display: flex;
   align-items: center;
@@ -6375,6 +6389,10 @@ body {
 .spaces-new-asset-file-chip-name {
   font-weight: 600;
   color: var(--or-text-primary, #f4f6fb);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .spaces-new-asset-file-chip-meta {
@@ -6415,13 +6433,15 @@ body {
 }
 
 .spaces-new-asset-button-primary {
-  background: linear-gradient(180deg, #7fb3ff, #4f8cff);
-  color: #0a1018;
+  /* Same primary recipe as .spaces-modal-button-primary / signature's
+   * .or-button-primary — token gradient, white text. */
+  background: linear-gradient(180deg, var(--or-accent-hover, #6fa2ff), var(--or-accent, #4f8cff));
+  color: #ffffff;
   border-color: rgba(255, 255, 255, 0.16);
 }
 
 .spaces-new-asset-button-primary:hover {
-  background: linear-gradient(180deg, #95c2ff, #5f99ff);
+  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover, #6fa2ff));
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(79, 140, 255, 0.32);
 }
@@ -6766,7 +6786,7 @@ body {
 .spaces-share-title {
   font-size: 13px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
 }
 
 .spaces-share-sub {
@@ -6802,7 +6822,7 @@ body {
   margin-top: 1px;
   border-radius: 50%;
   background: rgba(255, 213, 107, 0.9);
-  color: #16181d;
+  color: #161618;
   font-size: 10px;
   font-weight: 700;
   line-height: 14px;
@@ -6859,13 +6879,11 @@ body {
 
 .spaces-switch[aria-checked='true'] .spaces-switch-knob {
   transform: translateX(16px);
-  background: #16181d;
+  background: #161618;
 }
 
-.spaces-switch:focus-visible {
-  outline: 2px solid rgba(79, 140, 255, 0.7);
-  outline-offset: 2px;
-}
+/* Focus comes from signature.css's --or-focus-ring — a local outline
+ * here doubled the indicator. */
 
 /* Honour the existing reduced-motion contract in this stylesheet. */
 @media (prefers-reduced-motion: reduce) {
@@ -6961,10 +6979,7 @@ body {
   color: #c7c7cd;
 }
 
-.spaces-member-access:focus-visible {
-  outline: 2px solid rgba(79, 140, 255, 0.7);
-  outline-offset: 1px;
-}
+/* Focus ring: global --or-focus-ring (signature.css). */
 
 .spaces-member-access-permanent {
   font-size: 12px;
@@ -7086,7 +7101,7 @@ body {
   border-radius: 6px;
   border: 1px solid rgba(79, 140, 255, 0.45);
   background: rgba(79, 140, 255, 0.12);
-  color: #6aa9ff;
+  color: #4f8cff;
   font: inherit;
   font-size: 12px;
   font-weight: 500;
@@ -7100,11 +7115,8 @@ body {
   border-color: rgba(79, 140, 255, 0.7);
 }
 
-.spaces-empty-hint-cta:focus-visible,
-.spaces-empty-items-cta:focus-visible {
-  outline: 2px solid rgba(79, 140, 255, 0.8);
-  outline-offset: 2px;
-}
+/* Focus ring: global --or-focus-ring (signature.css) — a local
+ * outline here doubled the indicator. */
 
 /* The empty-Space card centres its content, so its button centres too. */
 .spaces-empty-items-cta {
@@ -7201,7 +7213,7 @@ body {
   min-width: 0;
   font-size: 12.5px;
   font-weight: 600;
-  color: #f4f4f6;
+  color: #f4f6fb;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7254,11 +7266,27 @@ body {
   color: #d2d2d6;
   cursor: pointer;
   line-height: 1.45;
+  border-radius: 6px;
+  margin: 0 -4px;
+  padding: 2px 4px;
+  transition: background var(--or-transition-fast, 120ms ease);
+}
+
+/* The whole row is the click target — say so on hover. */
+.spaces-checklist-item:hover {
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .spaces-checklist-item input[type='checkbox'] {
   margin-top: 2px;
-  accent-color: #4f8cff;
+  accent-color: var(--or-accent, #4f8cff);
+}
+
+/* The sharing block's auto-delete row reads as a separate concern —
+ * hairline above it (the class existed in markup with no rule). */
+.spaces-share-expiry {
+  border-top: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  padding-top: 12px;
 }
 
 .spaces-checklist-item.is-killer input[type='checkbox'] {
@@ -7294,7 +7322,7 @@ body {
   max-height: 180px;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: #3a3f4b transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
 .spaces-checklist-pick-row {
@@ -7705,7 +7733,7 @@ body {
 }
 
 .spaces-ctx-item.is-danger {
-  color: #ff8a8a;
+  color: #ff6b7a;
 }
 
 .spaces-ctx-item.is-disabled {
@@ -7829,45 +7857,10 @@ body {
   position: relative;
 }
 
-.spaces-card-preview-knowledge::after,
-.spaces-card-preview-journey::after,
-.spaces-card-preview-transcript::after,
-.spaces-card-preview-agent::after,
-.spaces-card-preview-ticket::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(
-    150deg,
-    rgba(var(--tile-accent), 0.55),
-    rgba(var(--tile-accent), 0.12) 60%,
-    transparent
-  );
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0.6;
-  transition: opacity var(--or-transition-normal, 200ms ease);
-}
-
-.spaces-card:hover .spaces-card-preview-knowledge::after,
-.spaces-card:hover .spaces-card-preview-journey::after,
-.spaces-card:hover .spaces-card-preview-transcript::after,
-.spaces-card:hover .spaces-card-preview-agent::after,
-.spaces-card:hover .spaces-card-preview-ticket::after {
-  opacity: 1;
-}
-
-.spaces-card:hover .spaces-card-preview-knowledge,
-.spaces-card:hover .spaces-card-preview-journey,
-.spaces-card:hover .spaces-card-preview-transcript,
-.spaces-card:hover .spaces-card-preview-agent,
-.spaces-card:hover .spaces-card-preview-ticket {
-  box-shadow: 0 6px 26px rgba(var(--tile-accent), 0.16);
-}
+/* (The gradient hairline ring this family used to wear was replaced
+ * by the left colour spine — see the "small multiples" block near the
+ * end of the file, which also carries the hover glow. One treatment,
+ * not two.) */
 
 /* The eyebrow chips (TRANSCRIPT / KNOWLEDGE MODEL / JOURNEY / AGENT)
  * become one editorial voice: small-caps, tracked, hue-tinted. */
@@ -8001,11 +7994,17 @@ body {
   gap: 10px;
 }
 
-.spaces-checklist-card {
+/* Library card — its own class: it used to share
+ * .spaces-checklist-card with the ticket run card and the two
+ * blocks silently restyled each other. */
+.spaces-checklist-lib-card {
   padding: 12px 14px;
   border: 1px solid rgba(255, 255, 255, 0.09);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.025);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .spaces-checklist-card-top {
@@ -8061,7 +8060,7 @@ body {
 
 .spaces-checklist-card-del:hover {
   border-color: rgba(255, 107, 107, 0.5);
-  color: #ff8a8a;
+  color: #ff6b7a;
 }
 
 .spaces-checklist-card-pause {
@@ -8169,8 +8168,11 @@ body {
   outline: none;
 }
 
+/* !important beats signature.css's global blue input:focus ring — the
+ * AI field keeps its violet agent-signal identity. */
 .spaces-checklist-ai-input:focus {
-  border-color: rgba(124, 92, 255, 0.7);
+  border-color: rgba(124, 92, 255, 0.7) !important;
+  box-shadow: 0 0 0 3px rgba(124, 92, 255, 0.15) !important;
 }
 
 .spaces-checklist-ai-btn {
@@ -8184,6 +8186,14 @@ body {
   background: linear-gradient(135deg, #7c5cff, #4f8cff);
   cursor: pointer;
   white-space: nowrap;
+  transition:
+    filter var(--or-transition-fast, 120ms ease),
+    transform var(--or-transition-fast, 120ms ease);
+}
+
+.spaces-checklist-ai-btn:hover:not(:disabled) {
+  filter: brightness(1.12);
+  transform: translateY(-1px);
 }
 
 .spaces-checklist-ai-btn:disabled {
@@ -8237,6 +8247,12 @@ body {
   cursor: pointer;
 }
 
+/* Match the renderer's killer checkboxes — without this the editor's
+ * is the one default-styled checkbox in the panel. */
+.spaces-checklist-editor-row-killer input[type='checkbox'] {
+  accent-color: var(--or-danger, #ff6b7a);
+}
+
 .spaces-checklist-editor-row-moretoggle,
 .spaces-checklist-item-more-toggle {
   appearance: none;
@@ -8260,7 +8276,7 @@ body {
 }
 
 .spaces-checklist-editor-row-remove:hover {
-  color: #ff8a8a;
+  color: #ff6b7a;
 }
 
 .spaces-checklist-editor-row-more {
@@ -8604,7 +8620,7 @@ body {
 .spaces-version-viewer-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1700;
+  z-index: 2000;
   background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
@@ -8617,7 +8633,7 @@ body {
   max-height: 82vh;
   display: flex;
   flex-direction: column;
-  background: var(--or-bg-elevated, #16181d);
+  background: var(--or-bg-elevated, #161618);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5);
@@ -8671,18 +8687,7 @@ body {
   scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 
-.spaces-version-viewer-body::-webkit-scrollbar {
-  width: 9px;
-}
-
-.spaces-version-viewer-body::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
-  border-radius: 4px;
-}
-
-.spaces-version-viewer-body::-webkit-scrollbar-track {
-  background: transparent;
-}
+/* Dark scrollbar comes from the global treatment in signature.css. */
 
 .spaces-version-viewer-content {
   margin: 0;
@@ -8750,10 +8755,12 @@ body {
  *   editorial serif and let it breathe: Tufte's hero, set quietly. */
 .spaces-view-header-title {
   font-family: var(--or-font-display);
-  font-size: 25px;
+  /* On the ladder: --or-text-2xl. The Space name is the hero. */
+  font-size: var(--or-text-2xl, 28px);
   font-weight: 500;
   letter-spacing: -0.01em;
   color: var(--or-text-primary);
+  overflow-wrap: anywhere;
 }
 
 /* — Tiles settle on a spring, and lift with intent, not a jolt. */
@@ -8781,10 +8788,13 @@ body {
 .spaces-card-preview-knowledge  { box-shadow: inset 3px 0 0 rgba(52, 211, 153, 0.55); }
 .spaces-card-preview-journey    { box-shadow: inset 3px 0 0 rgba(79, 140, 255, 0.55); }
 .spaces-card-preview-agent      { box-shadow: inset 3px 0 0 rgba(240, 164, 75, 0.55); }
-.spaces-card:hover .spaces-card-preview-transcript { box-shadow: inset 4px 0 0 rgba(45, 212, 191, 0.9); }
-.spaces-card:hover .spaces-card-preview-knowledge  { box-shadow: inset 4px 0 0 rgba(52, 211, 153, 0.9); }
-.spaces-card:hover .spaces-card-preview-journey    { box-shadow: inset 4px 0 0 rgba(79, 140, 255, 0.9); }
-.spaces-card:hover .spaces-card-preview-agent      { box-shadow: inset 4px 0 0 rgba(240, 164, 75, 0.9); }
+.spaces-card-preview-ticket     { box-shadow: inset 3px 0 0 rgba(148, 163, 184, 0.55); }
+/* Hover: spine thickens + the tile glows in its own hue. */
+.spaces-card:hover .spaces-card-preview-transcript { box-shadow: inset 4px 0 0 rgba(45, 212, 191, 0.9), 0 6px 26px rgba(45, 212, 191, 0.16); }
+.spaces-card:hover .spaces-card-preview-knowledge  { box-shadow: inset 4px 0 0 rgba(52, 211, 153, 0.9), 0 6px 26px rgba(52, 211, 153, 0.16); }
+.spaces-card:hover .spaces-card-preview-journey    { box-shadow: inset 4px 0 0 rgba(79, 140, 255, 0.9), 0 6px 26px rgba(79, 140, 255, 0.16); }
+.spaces-card:hover .spaces-card-preview-agent      { box-shadow: inset 4px 0 0 rgba(240, 164, 75, 0.9), 0 6px 26px rgba(240, 164, 75, 0.16); }
+.spaces-card:hover .spaces-card-preview-ticket     { box-shadow: inset 4px 0 0 rgba(148, 163, 184, 0.9), 0 6px 26px rgba(148, 163, 184, 0.16); }
 
 /* — Fun: the playbook star catches the light on hover. The cap-chew's
  *   cousin — a small mark that rewards attention. */
@@ -8812,28 +8822,17 @@ body {
   padding: 44px 28px;
   max-width: 460px;
 }
-.spaces-empty-items::before {
-  content: '✎';
-  display: block;
-  font-size: 30px;
-  line-height: 1;
-  margin: 0 auto 16px;
-  width: 68px;
-  height: 68px;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  color: var(--or-accent-strong);
-  border: 1px solid rgba(123, 219, 255, 0.22);
-  box-shadow: inset 0 0 30px rgba(123, 219, 255, 0.06);
-  animation: or-breathe 4.5s var(--or-ease-out) infinite;
-}
+/* The breathing mark itself is the .spaces-empty-items-mark span the
+ * renderer appends (✎ / ✽ / ⌇ depending on the state) — a ::before
+ * here doubled the mark and always showed ✎ regardless of state. The
+ * ring chrome lives on the span (below, "soul-mark" section). */
 .spaces-empty-items-title {
   font-family: var(--or-font-display);
   font-size: 17px;
   font-weight: 500;
 }
-.spaces-empty-items-body {
+.spaces-empty-items-body,
+.spaces-empty-items-line {
   color: var(--or-text-muted);
 }
 
@@ -8941,13 +8940,19 @@ body {
 
 /* Empty-state soul-mark — the ✎ family, breathing (Invisible Machine). */
 .spaces-empty-items-mark {
-  display: block;
+  display: grid;
+  place-items: center;
+  width: 68px;
+  height: 68px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  border: 1px solid rgba(123, 219, 255, 0.22);
+  box-shadow: inset 0 0 30px rgba(123, 219, 255, 0.06);
   font-family: var(--or-font-display, Georgia, serif);
-  font-size: 34px;
+  font-size: 30px;
   line-height: 1;
   color: var(--or-accent, #4f8cff);
-  opacity: 0.7;
-  margin-bottom: 14px;
+  opacity: 0.85;
   animation: or-breathe 4.5s var(--or-ease-out, ease) infinite;
   transform-origin: center;
 }
@@ -9047,14 +9052,42 @@ body {
   background: rgba(42, 115, 80, 0.14);
   border-color: rgba(42, 115, 80, 0.55);
 }
+/* Ink for the stepper itself — the base rules paint near-white text
+ * and lavender markers, which vanish on the ivory paper. */
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step-text {
+  color: rgba(27, 23, 18, 0.85);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step.is-done .spaces-card-playbook-step-text {
+  color: rgba(27, 23, 18, 0.45);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step-marker {
+  color: rgba(87, 79, 160, 0.9);
+  border-color: rgba(87, 79, 160, 0.45);
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step.is-done .spaces-card-playbook-step-marker {
+  color: #2a7350;
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-more {
+  color: rgba(87, 79, 160, 0.7);
+}
+/* The lavender eyebrow + white ruled lines of the v1 tile variant are
+ * invisible on ivory — flip them to gold-ink and faint ink rules. */
+.spaces-card.spaces-card-playbook .spaces-card-playbook-label {
+  color: #a8863c;
+}
+.spaces-card.spaces-card-playbook .spaces-card-playbook-line {
+  background: rgba(27, 23, 18, 0.12);
+}
 
 /* Universal asset Download in the detail header (2026-08-10). */
 .spaces-detail-download-btn {
   appearance: none;
-  border: 1px solid var(--rule, #dcd6c8);
+  /* (--rule / --or-text were undefined tokens — the ivory fallback
+   * painted a paper-colored border on the dark detail header.) */
+  border: 1px solid var(--or-border-strong, rgba(255, 255, 255, 0.12));
   background: transparent;
-  color: var(--or-text, #cfcfcf);
-  border-radius: 7px;
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+  border-radius: 6px;
   width: 26px; height: 26px;
   font-size: 15px; line-height: 1;
   cursor: pointer;
@@ -9079,7 +9112,13 @@ body {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
   font-size: 12px;
 }
-.spaces-detail-viewers-name { color: var(--or-text, #d8d8d8); }
+.spaces-detail-viewers-name {
+  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .spaces-detail-viewers-when { color: var(--or-text-muted, rgba(255,255,255,0.42)); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 /* Recency bands in the asset grid (2026-08-11) — subtle full-width
@@ -9100,7 +9139,7 @@ body {
   content: '';
   flex: 1;
   height: 1px;
-  background: var(--or-border, rgba(255, 255, 255, 0.08));
+  background: var(--or-border-subtle, rgba(255, 255, 255, 0.08));
 }
 /* My own last-read fragment on the card meta row. */
 .spaces-card-read {
