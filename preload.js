@@ -370,6 +370,9 @@ contextBridge.exposeInMainWorld('api', {
   testLLMConnection: (config) => ipcRenderer.invoke('settings:test-llm', config),
 
   // Live location: precise GPS (reported by renderer) > IP geolocation > stored.
+  // Meeting History timeline window
+  openMeetingHistory: () => ipcRenderer.send('meetings:open-history'),
+
   getLocation: (opts) => ipcRenderer.invoke('location:get', opts || {}),
   reportLocation: (payload) => ipcRenderer.invoke('location:report-precise', payload),
 

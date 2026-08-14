@@ -97,6 +97,7 @@ const EXTERNAL_CHANNELS = [
   'enable-loopback-audio',
   'disable-loopback-audio',
   'shell:open-external',
+  'meetings:open-history', // main.js -> action-executor open-meeting-history
 ];
 
 // Method names window.recorder must expose (renderer code in recorder.html

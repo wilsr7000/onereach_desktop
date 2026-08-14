@@ -3337,6 +3337,29 @@ function setupSpacesAPI() {
     }
   });
 
+  // Meeting history: merged meetings + orphan transcripts, newest first,
+  // each with a transcript summary. See lib/meetings/meeting-history.js.
+  ipcMain.handle('meetings:history', async (event, opts = {}) => {
+    try {
+      const { getSpacesAPI } = require('./spaces-api');
+      const { buildMeetingHistoryFromSpaces } = require('./lib/meetings/meeting-history');
+      const rows = await buildMeetingHistoryFromSpaces(getSpacesAPI(), { limit: opts.limit });
+      return { success: true, rows };
+    } catch (error) {
+      return { success: false, error: error.message, rows: [] };
+    }
+  });
+
+  // Open the Meeting History timeline window (recorder + Spaces manager both
+  // trigger this; the action keeps it a singleton).
+  ipcMain.on('meetings:open-history', () => {
+    try {
+      require('./action-executor').executeAction('open-meeting-history', {});
+    } catch (error) {
+      log.warn('meetings', 'Could not open Meeting History', { error: error.message });
+    }
+  });
+
   // Deterministic playbook search: title, tags, metadata AND full content,
   // ranked, across all spaces (or one). See lib/playbook-search.js.
   ipcMain.handle('playbook:search', async (event, query, opts) => {

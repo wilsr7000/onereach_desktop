@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('recorder', {
   // Get project folder for a space
   getProjectFolder: (spaceId) => ipcRenderer.invoke('recorder:get-project-folder', spaceId),
 
+  // Open the Meeting History timeline window
+  openMeetingHistory: () => ipcRenderer.send('meetings:open-history'),
+
   // Close recorder window
   close: () => ipcRenderer.invoke('recorder:close'),
 

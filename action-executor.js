@@ -262,6 +262,26 @@ const ACTION_REGISTRY = {
     },
   },
 
+  'open-meeting-history': {
+    category: 'windows',
+    description: 'Open Meeting History (timeline of past meetings with transcript summaries)',
+    execute: () => {
+      const { BrowserWindow } = require('electron');
+      const existing = BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && w.webContents.getURL().includes('meeting-history.html')
+      );
+      if (existing) {
+        existing.focus();
+        return { success: true, message: 'Meeting History focused' };
+      }
+      createStandardWindow({
+        width: 780, height: 860, title: 'Meeting History',
+        preload: 'preload-meeting-history.js', file: 'meeting-history.html',
+      });
+      return { success: true, message: 'Meeting History opened' };
+    },
+  },
+
   'open-log-viewer': {
     category: 'windows',
     description: 'Open Event Log Viewer',

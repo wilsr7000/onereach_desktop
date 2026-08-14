@@ -1356,6 +1356,27 @@
         background-color: var(--bg-elevated);
       }
 
+      /* History button: quiet sibling of the Save-to select */
+      .meeting-history-btn {
+        margin-top: 6px;
+        width: 100%;
+        padding: 7px 10px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+      }
+      .meeting-history-btn:hover {
+        border-color: var(--border-light);
+        border-style: solid;
+        color: var(--text-primary);
+        background: var(--bg-elevated);
+      }
+
       .source-select:focus {
         outline: none;
         border-color: var(--border-focus);
@@ -6098,6 +6119,15 @@
           <select class="source-select" id="targetSpace" onchange="app.onTargetSpaceChange()">
             <option value="">Select a space...</option>
           </select>
+          <button
+            type="button"
+            class="meeting-history-btn"
+            id="meetingHistoryBtn"
+            onclick="app.openMeetingHistory()"
+            title="Meeting history — past meetings with transcript summaries"
+          >
+            🕘 History
+          </button>
         </div>
 
         <!-- Controls Bar -->
@@ -7410,6 +7440,15 @@
             this.renderTemplateGrid();
           } catch (error) {
             console.error('[Recorder] Failed to load spaces:', error);
+          }
+        },
+
+        // Open the Meeting History timeline window
+        openMeetingHistory() {
+          try {
+            window.recorder.openMeetingHistory();
+          } catch (error) {
+            console.error('[Recorder] Could not open meeting history:', error);
           }
         },
 

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Meeting History</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #161920;
+    --panel-2: #1b1f28;
+    --line: #262b36;
+    --spine: #303748;
+    --ink: #e6e8ee;
+    --ink-dim: #9aa3b5;
+    --ink-faint: #6b7385;
+    --accent: #a78bfa;      /* meeting violet — matches the Spaces node color */
+    --cyan: #22d3ee;        /* transcript cyan */
+    --chip-bg: #23283a;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 14px; line-height: 1.45;
+  }
+
+  /* Dark scrollbars — never a white scrollbar on a dark body */
+  * { scrollbar-color: #3a3f4b #16181d; scrollbar-width: thin; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: #16181d; }
+  *::-webkit-scrollbar-thumb { background: #3a3f4b; border-radius: 5px; }
+  *::-webkit-scrollbar-thumb:hover { background: #4a5060; }
+
+  .app { display: flex; flex-direction: column; height: 100%; }
+
+  /* ── Header ─────────────────────────────────────────────────────────── */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+    flex-shrink: 0;
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
+  header .count { color: var(--ink-faint); font-size: 12px; }
+  header .spacer { flex: 1; }
+  #search {
+    width: 220px; background: var(--panel-2); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 11px; font-size: 13px; outline: none;
+  }
+  #search:focus { border-color: var(--accent); }
+  #refreshBtn {
+    background: var(--panel-2); color: var(--ink-dim);
+    border: 1px solid var(--line); border-radius: 8px;
+    width: 32px; height: 32px; cursor: pointer; font-size: 15px; line-height: 1;
+  }
+  #refreshBtn:hover { color: var(--ink); border-color: var(--spine); }
+
+  /* ── Timeline ───────────────────────────────────────────────────────── */
+  main { flex: 1; overflow-y: auto; padding: 18px 24px 32px; }
+
+  .day {
+    color: var(--ink-dim); font-size: 12px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    margin: 20px 0 10px; padding-left: 28px; position: relative;
+  }
+  .day:first-child { margin-top: 2px; }
+
+  .timeline { position: relative; }
+  .timeline::before {
+    content: ''; position: absolute; left: 9px; top: 4px; bottom: 4px;
+    width: 2px; background: var(--spine); border-radius: 1px;
+  }
+
+  .entry { position: relative; padding: 0 0 14px 28px; }
+  .entry::before {
+    content: ''; position: absolute; left: 4px; top: 14px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--bg);
+  }
+  .entry.transcript-only::before { background: var(--cyan); }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px 14px; cursor: pointer;
+    transition: border-color 0.12s ease;
+  }
+  .card:hover { border-color: var(--spine); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  .card .top { display: flex; align-items: baseline; gap: 10px; }
+  .card .title { font-weight: 600; font-size: 14px; flex: 1; min-width: 0;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .card .time { color: var(--ink-faint); font-size: 12px; flex-shrink: 0; }
+
+  .card .meta { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 5px;
+                color: var(--ink-dim); font-size: 12px; }
+  .card .meta .chip {
+    background: var(--chip-bg); border-radius: 999px; padding: 1px 9px;
+    color: #c9d2ea; font-size: 11px;
+  }
+  .card .meta .chip.t-only { background: #12333b; color: #7fd9ea; }
+
+  .card .summary {
+    margin-top: 8px; color: var(--ink-dim); font-size: 13px;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .entry.open .card .summary { display: block; -webkit-line-clamp: unset; color: var(--ink); }
+  .card .summary.none { color: var(--ink-faint); font-style: italic; }
+  .card .summary-src { margin-top: 6px; color: var(--ink-faint); font-size: 11px; display: none; }
+  .entry.open .card .summary-src { display: block; }
+
+  /* ── States ─────────────────────────────────────────────────────────── */
+  .state { color: var(--ink-faint); text-align: center; padding: 60px 20px; font-size: 13px; }
+  .state .big { font-size: 30px; display: block; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Meeting History</h1>
+    <span class="count" id="count"></span>
+    <span class="spacer"></span>
+    <input id="search" type="search" placeholder="Search meetings…  ( / )" autocomplete="off" />
+    <button id="refreshBtn" title="Refresh">↻</button>
+  </header>
+  <main id="main">
+    <div class="state" id="loading"><span class="big">🕘</span>Loading meetings…</div>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  let allRows = [];
+
+  const $ = (id) => document.getElementById(id);
+
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function dayLabel(ms) {
+    const d = new Date(ms);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const that = new Date(d); that.setHours(0, 0, 0, 0);
+    const diff = Math.round((today - that) / 86400000);
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Yesterday';
+    return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function timeLabel(ms) {
+    return new Date(ms).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function durLabel(min) {
+    if (min == null || !isFinite(min)) return null;
+    const m = Math.round(min);
+    if (m < 60) return m + ' min';
+    return Math.floor(m / 60) + ' h ' + (m % 60 ? (m % 60) + ' min' : '').trim();
+  }
+
+  function srcLabel(row) {
+    if (row.summarySource === 'analysis') return 'Summary from the meeting agent’s analysis';
+    if (row.summarySource === 'transcript') return 'Preview from the transcript (no analysis ran)';
+    return '';
+  }
+
+  function render(rows) {
+    const main = $('main');
+    $('count').textContent = rows.length ? rows.length + (rows.length === 1 ? ' meeting' : ' meetings') : '';
+
+    if (!rows.length) {
+      main.innerHTML = allRows.length
+        ? '<div class="state"><span class="big">🔍</span>No meetings match that search.</div>'
+        : '<div class="state"><span class="big">🕘</span>No meetings yet.<br>Start one in WISER Meeting and it will appear here.</div>';
+      return;
+    }
+
+    const parts = [];
+    let currentDay = null;
+    let openList = false;
+
+    for (const row of rows) {
+      const day = dayLabel(row.startedAtMs);
+      if (day !== currentDay) {
+        if (openList) parts.push('</div>');
+        parts.push('<div class="day">' + esc(day) + '</div><div class="timeline">');
+        currentDay = day;
+        openList = true;
+      }
+
+      const meta = [];
+      const dur = durLabel(row.durationMin);
+      if (dur) meta.push('<span>' + esc(dur) + '</span>');
+      if (row.spaceName) meta.push('<span class="chip">' + esc(row.spaceName) + '</span>');
+      if (row.participants && row.participants.length) {
+        meta.push('<span>' + esc(row.participants.join(', ')) + '</span>');
+      }
+      if (row.status === 'transcript-only') {
+        meta.push('<span class="chip t-only">transcript only</span>');
+      }
+
+      const summary = row.summary
+        ? '<div class="summary">' + esc(row.summary) + '</div>' +
+          '<div class="summary-src">' + esc(srcLabel(row)) + '</div>'
+        : '<div class="summary none">No transcript captured.</div>';
+
+      parts.push(
+        '<div class="entry ' + (row.status === 'transcript-only' ? 'transcript-only' : '') + '" data-key="' + esc(row.key) + '">' +
+          '<div class="card" tabindex="0" role="button" aria-expanded="false">' +
+            '<div class="top">' +
+              '<span class="title">' + esc(row.title) + '</span>' +
+              '<span class="time">' + esc(timeLabel(row.startedAtMs)) + '</span>' +
+            '</div>' +
+            (meta.length ? '<div class="meta">' + meta.join('') + '</div>' : '') +
+            summary +
+          '</div>' +
+        '</div>'
+      );
+    }
+    if (openList) parts.push('</div>');
+    main.innerHTML = parts.join('');
+  }
+
+  function applyFilter() {
+    const q = $('search').value.trim().toLowerCase();
+    if (!q) { render(allRows); return; }
+    render(allRows.filter((r) =>
+      [r.title, r.summary, r.spaceName, (r.participants || []).join(' ')]
+        .filter(Boolean).join(' ').toLowerCase().includes(q)
+    ));
+  }
+
+  async function load() {
+    try {
+      const res = await window.meetingHistory.get({ limit: 200 });
+      allRows = (res && res.rows) || [];
+      applyFilter();
+    } catch (err) {
+      $('main').innerHTML =
+        '<div class="state"><span class="big">⚠️</span>Could not load meeting history.<br>' +
+        esc(err && err.message ? err.message : String(err)) + '</div>';
+    }
+  }
+
+  // Card click / Enter / Space toggles summary expansion
+  $('main').addEventListener('click', (e) => {
+    const entry = e.target.closest('.entry');
+    if (!entry) return;
+    entry.classList.toggle('open');
+    const card = entry.querySelector('.card');
+    if (card) card.setAttribute('aria-expanded', entry.classList.contains('open') ? 'true' : 'false');
+  });
+  $('main').addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && e.target.classList.contains('card')) {
+      e.preventDefault();
+      e.target.click();
+    }
+  });
+
+  $('search').addEventListener('input', applyFilter);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === '/' && document.activeElement !== $('search')) {
+      e.preventDefault();
+      $('search').focus();
+    }
+    if (e.key === 'Escape' && document.activeElement === $('search')) {
+      $('search').value = '';
+      applyFilter();
+      $('search').blur();
+    }
+  });
+  $('refreshBtn').addEventListener('click', load);
+
+  load();
+})();
+</script>
+</body>
+</html>

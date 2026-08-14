@@ -218,6 +218,76 @@ describe('renderMeetingSetup', () => {
 
 // ─── tools ───────────────────────────────────────────────────────────────────
 
+// The setup modal must close (and stay closed) once the real meeting window
+// opens — a reopened modal is the "second meeting window" users kept finding
+// stacked under the meeting.
+describe('setup modal lifecycle on start', () => {
+  let closed;
+  let nowMs;
+
+  beforeEach(() => {
+    closed = 0;
+    nowMs = 1_000_000;
+    draftLib.updateDraft({}); // clears any leftover just-started suppression
+    draftLib.clearDraft();
+    draftLib._setTestDeps({
+      listSpaces: async () => [{ id: 'sp-meet', name: 'Meetings' }],
+      createSpace: async () => null,
+      openRecorder: () => ({ success: true }),
+      closeSetupModal: () => { closed += 1; },
+      now: () => nowMs,
+    });
+  });
+
+  afterEach(() => {
+    draftLib._setTestDeps(null);
+    draftLib.updateDraft({}); // do not leak suppression into other tests
+  });
+
+  it('a successful start closes the setup modal and arms reopen suppression', async () => {
+    const out = await draftLib.startMeeting({});
+    expect(out.started).toBe(true);
+    expect(closed).toBe(1);
+    expect(draftLib.wasJustStarted()).toBe(true);
+  });
+
+  it('a failed start keeps the modal open (user still needs it to retry)', async () => {
+    draftLib._setTestDeps({
+      listSpaces: async () => [],
+      createSpace: async () => null,
+      openRecorder: () => ({ success: false, error: 'nope' }),
+      closeSetupModal: () => { closed += 1; },
+      now: () => nowMs,
+    });
+    const out = await draftLib.startMeeting({});
+    expect(out.started).toBe(false);
+    expect(closed).toBe(0);
+    expect(draftLib.wasJustStarted()).toBe(false);
+  });
+
+  it('suppression expires after the window', async () => {
+    await draftLib.startMeeting({});
+    expect(draftLib.wasJustStarted()).toBe(true);
+    nowMs += 20001;
+    expect(draftLib.wasJustStarted()).toBe(false);
+  });
+
+  it('editing the draft again clears suppression (organizing a new meeting)', async () => {
+    await draftLib.startMeeting({});
+    expect(draftLib.wasJustStarted()).toBe(true);
+    draftLib.updateDraft({ add: ['Erika Hall'] });
+    expect(draftLib.wasJustStarted()).toBe(false);
+  });
+
+  it('meeting_open_setup refuses to reopen while just-started', async () => {
+    await draftLib.startMeeting({});
+    const [tool] = resolveTools(['meeting_open_setup']);
+    const out = await tool.execute({ notice: 'Meeting started' });
+    expect(out.opened).toBe(false);
+    expect(out.suppressed).toBe(true);
+  });
+});
+
 describe('meeting tools', () => {
   beforeEach(() => {
     draftLib.clearDraft();
@@ -295,13 +365,35 @@ describe('ensureMeetingStarterAgent', () => {
   });
 
   it('patches older definitions and no-ops complete ones', async () => {
-    const complete = { id: 'm1', name: 'meeting starter', tools: [...MEETING_AGENT_TOOLS], playbook: { markdown: '#' } };
+    const complete = {
+      id: 'm1',
+      name: 'meeting starter',
+      tools: [...MEETING_AGENT_TOOLS],
+      playbook: { markdown: '#' },
+      prompt: buildMeetingAgentConfig().prompt,
+    };
     expect((await ensureMeetingStarterAgent({ getStore: () => makeStore([complete]), playbookLib })).status).toBe('exists');
 
     const stale = makeStore([{ id: 'm2', name: MEETING_AGENT_NAME, tools: ['meeting_start'], playbook: { markdown: '#' } }]);
     const out = await ensureMeetingStarterAgent({ getStore: () => stale, playbookLib });
     expect(out.status).toBe('patched');
     expect(stale.updateAgent.mock.calls[0][1].tools).toEqual([...MEETING_AGENT_TOOLS]);
+  });
+
+  it('patches an agent whose prompt drifted from the code (stale prompt)', async () => {
+    const drifted = makeStore([
+      {
+        id: 'm3',
+        name: MEETING_AGENT_NAME,
+        tools: [...MEETING_AGENT_TOOLS],
+        playbook: { markdown: '#' },
+        prompt: 'old prompt that still reopens the setup modal after start',
+      },
+    ]);
+    const out = await ensureMeetingStarterAgent({ getStore: () => drifted, playbookLib });
+    expect(out.status).toBe('patched');
+    const updates = drifted.updateAgent.mock.calls[0][1];
+    expect(updates.prompt).toContain('never after meeting_start');
   });
 
   it('the REAL template composes all sections for this agent', async () => {

@@ -6525,6 +6525,18 @@ function setupEventListeners() {
     discoveredSpaces = [];
   }
 
+  // Meeting History timeline window
+  const meetingHistoryBtn = document.getElementById('meetingHistoryBtn');
+  if (meetingHistoryBtn) {
+    meetingHistoryBtn.addEventListener('click', () => {
+      if (window.api && window.api.openMeetingHistory) {
+        window.api.openMeetingHistory();
+      } else {
+        showToast('Meeting history not available', 'error');
+      }
+    });
+  }
+
   // Manual discover button
   const discoverBtn = document.getElementById('discoverSpacesBtn');
   if (discoverBtn) {
