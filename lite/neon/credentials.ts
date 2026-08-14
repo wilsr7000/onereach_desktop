@@ -265,6 +265,8 @@ export class KVCredentialsProvider implements CredentialsProvider {
   }
 
   async write(partial: Partial<NeonSettingsRecord>): Promise<void> {
+    // A write makes the cached resolution stale by definition (2026-08-14).
+    this.invalidate();
     if (!this.isSignedIn()) {
       throw new KVError({
         code: 'KV_HTTP',
@@ -286,6 +288,9 @@ export class KVCredentialsProvider implements CredentialsProvider {
           : current.database,
     };
     await this.kvApi.set(this.collection, this.key, next);
+    // Invalidate AGAIN post-write: the merge-read above legitimately
+    // re-cached the PRE-write resolution; the next read must see KV.
+    this.invalidate();
   }
 
   /**
