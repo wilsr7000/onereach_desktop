@@ -3392,7 +3392,11 @@
         height: 14px;
       }
 
-      /* Session media controls (mute mic, camera off) */
+      /* Session media controls — ONE centered bar, meeting-app style:
+         [mic][cam][bg]  [Share][Invite]  [Pause AI]  [End]. Grew as a
+         cramped left-edge pile ("those buttons are so close together and
+         it is messy"); now a fixed glass row floated above the shortcuts
+         bar, grouped by spacing, uniform 40px controls. */
       .session-media-controls {
         display: none;
         align-items: center;
@@ -3401,12 +3405,47 @@
 
       .session-media-controls.visible {
         display: flex;
+        position: fixed;
+        left: 50%;
+        bottom: 44px;
+        transform: translateX(-50%);
+        z-index: 40;
+        padding: 8px 12px;
+        background: rgba(12, 12, 20, 0.82);
+        backdrop-filter: blur(18px) saturate(1.2);
+        -webkit-backdrop-filter: blur(18px) saturate(1.2);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 999px;
+        box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+        max-width: calc(100vw - 24px);
+      }
+
+      /* The bg popover's hoisted "Choose image" trigger is not a bar
+         control — it re-appears when the popover opens. */
+      .session-media-controls.visible > .bg-image-btn {
+        display: none;
+      }
+
+      /* Group rhythm: actions, AI, and End each start a new cluster. */
+      .session-media-controls.visible .share-screen-btn:not(.invite-btn) {
+        margin-left: 12px;
+      }
+
+      .session-media-controls.visible .pause-ai-btn {
+        margin-left: 12px;
+      }
+
+      .session-media-controls.visible .end-session-btn {
+        margin-left: 14px;
+        padding: 0 16px;
+        height: 40px;
+        border-radius: 999px;
       }
 
       .session-media-btn {
-        width: 36px;
-        height: 36px;
-        border-radius: var(--radius-sm);
+        width: 40px;
+        height: 40px;
+        border-radius: 999px;
         background: var(--bg-panel);
         border: 1px solid var(--border-color);
         color: var(--text-secondary);
@@ -11308,7 +11347,20 @@
           // Show connected badge and session controls
           els.connectedBadge.classList.add('visible');
           els.endSessionBtn.classList.add('visible');
-          document.getElementById('sessionMediaControls').classList.add('visible');
+          const mediaControls = document.getElementById('sessionMediaControls');
+          mediaControls.classList.add('visible');
+          // Assemble THE one meeting bar. These controls accreted across the
+          // bottom panel as separate strays ("so close together and messy");
+          // in a session they all belong in the single centered bar:
+          // [mic][cam][bg] [Share][Invite] [Pause AI] [End]. appendChild
+          // MOVES nodes, so this is idempotent across re-entries.
+          for (const id of ['screenShareBtn', 'inviteBtn', 'invitePicker', 'pauseAiBtn']) {
+            const el = document.getElementById(id);
+            if (el && el.parentElement !== mediaControls) mediaControls.appendChild(el);
+          }
+          if (els.endSessionBtn.parentElement !== mediaControls) {
+            mediaControls.appendChild(els.endSessionBtn);
+          }
 
           this.showStatus('Session connected - ready to record', 'success');
 
