@@ -1289,7 +1289,12 @@ Respond with JSON:
     ipcMain.handle('recorder:list-invitable-people', async (event, { spaceId } = {}) => {
       try {
         const bridge = require('./lib/meeting/meeting-graph-bridge');
-        return await bridge.listInvitablePeople({ spaceId, log });
+        return await bridge.listInvitablePeople({
+          spaceId,
+          // The host must not appear in their own invite list.
+          excludeEmails: [global.settingsManager?.get('userEmail')].filter(Boolean),
+          log,
+        });
       } catch (error) {
         return { ok: false, people: [], error: error.message };
       }

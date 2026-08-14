@@ -403,3 +403,19 @@ describe('per-meeting ring audience', () => {
     expect(out.people).toEqual([]);
   });
 });
+
+describe('invite roster hygiene (live-test findings)', () => {
+  it('excludes the host and anonymous@ service identities from the picker', async () => {
+    const { fetchImpl } = buildFetchStub([
+      ['MATCH (p:Person)', [
+        { email: 'robb@onereach.com', name: 'robb' },
+        { email: 'anonymous@playbooks.app', name: 'anonymous@playbooks.app' },
+        { email: 'erika@example.com', name: 'Erika' },
+      ]],
+    ]);
+    const out = await listInvitablePeople(
+      { excludeEmails: ['Robb@OneReach.com'], fetchImpl, nowMs: NOW }
+    );
+    expect(out.people.map((p) => p.email)).toEqual(['erika@example.com']);
+  });
+});

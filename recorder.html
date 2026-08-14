@@ -3591,6 +3591,17 @@
         color: var(--accent-green);
       }
 
+      /* Invite is THE primary meeting action — it must never read as gray
+         chrome (live test: the host looked straight past it). */
+      .session-media-btn.invite-btn {
+        border-color: rgba(77, 124, 255, 0.5);
+        color: var(--accent);
+      }
+
+      .session-media-btn.invite-btn:hover {
+        background: rgba(77, 124, 255, 0.15);
+      }
+
       .invite-person.invite-all {
         border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
