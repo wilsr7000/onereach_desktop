@@ -273,12 +273,12 @@ describe('run() injects viewerId and nowMs into every query', () => {
 
 describe('checklist Cypher carries the visibility predicates', () => {
   it('LIST_CHECKLISTS_IN_SPACE gates on the Space', () => {
-    expect(CYPHER.LIST_CHECKLISTS_IN_SPACE).toContain("coalesce(s.visibility, 'open')");
+    expect(CYPHER.LIST_CHECKLISTS_IN_SPACE).toContain("coalesce(s.createdBy, '') = $viewerId");
   });
 
   it('GET_TICKET_CHECKLISTS and the gate read are asset-gated', () => {
-    expect(CYPHER.GET_TICKET_CHECKLISTS).toContain('coalesce(vs.visibility');
-    expect(CYPHER.TICKET_GATE_STATE).toContain('coalesce(vs.visibility');
+    expect(CYPHER.GET_TICKET_CHECKLISTS).toContain("coalesce(vs.createdBy, '') = $viewerId");
+    expect(CYPHER.TICKET_GATE_STATE).toContain("coalesce(vs.createdBy, '') = $viewerId");
   });
 
   it('the atomic toggle is a native list op, not a JSON read-modify-write', () => {

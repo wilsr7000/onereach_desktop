@@ -217,25 +217,45 @@ const MAX_LIMIT = 500;
 const GRANT_LIVE = `(r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs)`;
 
 /**
- * SPACE_VISIBLE for a space bound as `other` (the GET_ITEM chips join).
- * Without it, an item visible through one open Space showed chips
- * NAMING every restricted Space it also belongs to — and names are
- * often the sensitive part.
+ * ADR-065 — belonging-only visibility (2026-08-13). "Open to account"
+ * no longer lists a Space for everyone: every install shares one graph
+ * account, so account-open meant world-open the moment an outsider
+ * installed ("it is showing them my spaces and my playbooks"). A Space
+ * is now visible ONLY to people it belongs to:
+ *
+ *   - its creator (`s.createdBy`, stamped on create; backfilled for
+ *     pre-ADR-065 spaces), or
+ *   - a live `[:HAS_ACCESS]` member (grant unexpired).
+ *
+ * `$viewerId = ''` (signed out / identity unresolved) sees NO spaces —
+ * the identity gate makes that state unreachable in normal use, and
+ * failing closed here is the entire point. The `visibility` property
+ * ('open'/'restricted') remains on the node for join/discovery
+ * semantics to be designed later; it no longer affects listing.
+ *
+ * OTHER_SPACE_VISIBLE is the same predicate for a space bound as
+ * `other` (the GET_ITEM chips join) — without it, chips NAME spaces
+ * the viewer doesn't belong to, and names are often the sensitive
+ * part.
  */
 const OTHER_SPACE_VISIBLE = `(
-        coalesce(other.visibility, 'open') <> 'restricted'
-        OR ($viewerId <> '' AND EXISTS {
-          MATCH (:Person {id: $viewerId})-[r2:HAS_ACCESS]->(other)
-          WHERE (r2.expiresUnixMs IS NULL OR r2.expiresUnixMs > $nowMs)
-        })
+        $viewerId <> '' AND (
+          coalesce(other.createdBy, '') = $viewerId
+          OR EXISTS {
+            MATCH (:Person {id: $viewerId})-[r2:HAS_ACCESS]->(other)
+            WHERE (r2.expiresUnixMs IS NULL OR r2.expiresUnixMs > $nowMs)
+          }
+        )
       )`;
 
 const SPACE_VISIBLE = `(
-        coalesce(s.visibility, 'open') <> 'restricted'
-        OR ($viewerId <> '' AND EXISTS {
-          MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(s)
-          WHERE ${GRANT_LIVE}
-        })
+        $viewerId <> '' AND (
+          coalesce(s.createdBy, '') = $viewerId
+          OR EXISTS {
+            MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(s)
+            WHERE ${GRANT_LIVE}
+          }
+        )
       )`;
 
 /**
@@ -245,18 +265,23 @@ const SPACE_VISIBLE = `(
  * open one is visible — it genuinely lives in the open space.
  */
 const ASSET_VISIBLE = `(
-        NOT EXISTS {
+        (NOT EXISTS {
           MATCH (a)-[:BELONGS_TO]->(anyLive:Space)
           WHERE anyLive.deletedAt IS NULL
         }
+        AND $viewerId <> ''
+        AND EXISTS {
+          MATCH (:Person {id: $viewerId})-[:CREATED]->(a)
+        })
         OR EXISTS {
           MATCH (a)-[:BELONGS_TO]->(vs:Space)
           WHERE vs.deletedAt IS NULL
-            AND (coalesce(vs.visibility, 'open') <> 'restricted'
-                 OR ($viewerId <> '' AND EXISTS {
-                   MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(vs)
-                   WHERE ${GRANT_LIVE}
-                 }))
+            AND ($viewerId <> '' AND (
+                  coalesce(vs.createdBy, '') = $viewerId
+                  OR EXISTS {
+                    MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(vs)
+                    WHERE ${GRANT_LIVE}
+                  }))
         }
       )`;
 
@@ -345,6 +370,10 @@ export const CYPHER = {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
       }
+      AND $viewerId <> ''
+      AND EXISTS {
+        MATCH (:Person {id: $viewerId})-[:CREATED]->(a)
+      }
     RETURN count(a) AS count
   `,
   LIST_ITEMS_UNCATEGORIZED: `
@@ -354,6 +383,10 @@ export const CYPHER = {
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
+      }
+      AND $viewerId <> ''
+      AND EXISTS {
+        MATCH (:Person {id: $viewerId})-[:CREATED]->(a)
       }
     OPTIONAL MATCH (creator:Person)-[:CREATED]->(a)
     WITH a, head(collect(creator)) AS producer
@@ -1138,6 +1171,7 @@ export const CYPHER = {
       description: $description,
       color: $color,
       iconKey: $iconKey,
+      createdBy: $viewerId,
       createdAt: $now,
       updatedAt: $now
     })

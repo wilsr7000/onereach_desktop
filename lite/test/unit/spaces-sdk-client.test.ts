@@ -503,7 +503,7 @@ describe('SdkSpacesClient.getUncategorizedCount', () => {
 describe('SdkSpacesClient.listItems (uncategorized)', () => {
   it('emits LIST_ITEMS_UNCATEGORIZED with default offset/limit', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', []);
+    stub.setResponse('[] AS otherSpaces', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' });
     const call = stub.calls[stub.calls.length - 1];
@@ -513,7 +513,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('always returns otherSpaces=[] for uncategorized scope', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', [
+    stub.setResponse('[] AS otherSpaces', [
       {
         id: 'i-1',
         title: 'Inbox file',
@@ -531,7 +531,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('normalizes unknown kinds to "other"', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', [
+    stub.setResponse('[] AS otherSpaces', [
       {
         id: 'i-2',
         title: 'Weird',
@@ -549,7 +549,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('parses producedBy when the producer projection is populated', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', [
+    stub.setResponse('[] AS otherSpaces', [
       {
         id: 'i-3',
         title: 'Agent output',
@@ -571,7 +571,7 @@ describe('SdkSpacesClient.listItems (uncategorized)', () => {
 
   it('respects limit/offset opts (clamped to MAX_LIMIT=500)', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('MATCH (a)-[:BELONGS_TO]->(live:Space)\n        WHERE live.deletedAt IS NULL\n      }\n    OPTIONAL MATCH', []);
+    stub.setResponse('[] AS otherSpaces', []);
     const client = makeClient(stub);
     await client.listItems({ kind: 'uncategorized' }, { limit: 999_999, offset: 50 });
     const call = stub.calls[stub.calls.length - 1];
@@ -2886,7 +2886,9 @@ describe('CYPHER source strings — Phase 4 v2 (identity + sharing)', () => {
     // SPACE_VISIBLE, so a caller who cannot see a restricted Space
     // cannot strip its members.
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)/);
-    expect(CYPHER.REMOVE_SPACE_MEMBER).toContain("coalesce(s.visibility, 'open')");
+    // ADR-065: the gate is belonging-only (creator or live member) —
+    // 'open' visibility no longer grants anything.
+    expect(CYPHER.REMOVE_SPACE_MEMBER).toContain("coalesce(s.createdBy, '') = $viewerId");
     expect(CYPHER.REMOVE_SPACE_MEMBER).toMatch(
       /MATCH \(member \{id: \$memberId\}\)-\[r:HAS_ACCESS\]->\(s\)/
     );
@@ -3876,7 +3878,8 @@ describe('ADR-060 addendum: HOME_RECENT_EVENTS space fallback', () => {
     // OTHER_SPACE_VISIBLE binds alias `other` — the resolved space
     // must pass the same gate as otherSpaces chips.
     const q = CYPHER.HOME_RECENT_EVENTS;
-    const gate = q.indexOf("coalesce(other.visibility, 'open') <> 'restricted'");
+    // ADR-065: belonging-only gate for the `other` alias.
+    const gate = q.indexOf("coalesce(other.createdBy, '') = $viewerId");
     expect(gate).toBeGreaterThan(-1);
     expect(gate).toBeGreaterThan(q.indexOf('OPTIONAL MATCH (other:Space)'));
   });
@@ -4043,5 +4046,27 @@ describe('space description cap', () => {
     await expect(
       client.updateSpace('sp-1', { description: 'x'.repeat(3001) })
     ).rejects.toMatchObject({ code: 'SPACES_INVALID_INPUT' });
+  });
+});
+
+describe('ADR-065 — belonging-only space visibility', () => {
+  it('SPACE_VISIBLE requires an identified viewer who created the space or holds a live grant', () => {
+    const q = CYPHER.LIST_SPACES;
+    expect(q).toContain("$viewerId <> '' AND (");
+    expect(q).toContain("coalesce(s.createdBy, '') = $viewerId");
+    expect(q).toMatch(/HAS_ACCESS]->\(s\)/);
+    // The old world-readable clause must be gone from listing.
+    expect(q).not.toContain("coalesce(s.visibility, 'open') <> 'restricted'");
+  });
+
+  it('CREATE_SPACE stamps the creator so new spaces belong to their maker', () => {
+    expect(CYPHER.CREATE_SPACE).toContain('createdBy: $viewerId');
+  });
+
+  it('an empty viewerId fails closed everywhere SPACE_VISIBLE gates', () => {
+    // Signed-out listing must be impossible: the macro leads with the
+    // viewer check, so '' can never satisfy it.
+    expect(CYPHER.LIST_SPACES).not.toMatch(/'open'\s*<>\s*'restricted'/);
+    expect(CYPHER.HOME_RECENT_ITEMS).toContain("$viewerId <> '' AND (");
   });
 });

@@ -85,7 +85,7 @@ describe('visibility predicates in the Cypher surface', () => {
    *    HOME_AGENTS_SAMPLE: account-wide directories by design.
    *  - SPACE_EXISTS_BY_ID / SPACE_ITEM_COUNT: internal pre-flights;
    *    the mutations they serve are themselves gated now.
-   *  - UNCATEGORIZED_*: items with no Space are visible by definition.
+   *  - UNCATEGORIZED_*: creator-gated inline per ADR-065 (viewer-created only).
    */
   const DELIBERATELY_UNGATED = [
     'FIND_ASSET_BY_FILE_KEY',
@@ -112,9 +112,9 @@ describe('visibility predicates in the Cypher surface', () => {
       if (!/\bMATCH\b/.test(body)) continue;
       const gated =
         body.includes('SPACE_VISIBLE') === false && // predicates are interpolated…
-        !body.includes('coalesce(s.visibility') &&
-        !body.includes('coalesce(vs.visibility') &&
-        !body.includes('coalesce(other.visibility') &&
+        !body.includes("coalesce(s.createdBy, '') = $viewerId") &&
+        !body.includes("coalesce(vs.createdBy, '') = $viewerId") &&
+        !body.includes("coalesce(other.createdBy, '') = $viewerId") &&
         !body.includes('$viewerId');
       const writes = /\b(MERGE|CREATE|SET|DELETE|DETACH)\b/.test(body);
       if (gated && !writes && !name.startsWith('UNCATEGORIZED') && !name.startsWith('LIST_ITEMS_UNCATEGORIZED')) {
@@ -129,9 +129,9 @@ describe('visibility predicates in the Cypher surface', () => {
     // NAMES of restricted Spaces it also belongs to. GET_ITEM gates
     // the `s`-bound chips join; LIST_ITEMS_IN_SPACE gates its
     // `other`-bound join.
-    expect(CYPHER.GET_ITEM).toContain('coalesce(vs.visibility'); // the item itself
-    expect(CYPHER.GET_ITEM).toContain('coalesce(s.visibility'); // its chips
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain('coalesce(other.visibility');
+    expect(CYPHER.GET_ITEM).toContain("coalesce(vs.createdBy, '') = $viewerId"); // the item itself
+    expect(CYPHER.GET_ITEM).toContain("coalesce(s.createdBy, '') = $viewerId"); // its chips
+    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain("coalesce(other.createdBy, '') = $viewerId");
     expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain('r2.expiresUnixMs');
   });
 
@@ -145,14 +145,15 @@ describe('visibility predicates in the Cypher surface', () => {
       CYPHER.HARD_DELETE_SPACE,
       CYPHER.UNDELETE_SPACE,
     ]) {
-      expect(q).toContain("coalesce(s.visibility, 'open')");
+      expect(q).toContain("coalesce(s.createdBy, '') = $viewerId");
       expect(q).toContain('$viewerId');
     }
   });
 
   it.each(gatedSpaceQueries)('%s gates on the space visibility predicate', (_name, q) => {
-    expect(q).toContain("coalesce(s.visibility, 'open') <> 'restricted'");
-    expect(q).toContain('$viewerId');
+    // ADR-065: belonging-only — creator or live member, never 'open'.
+    expect(q).toContain("$viewerId <> '' AND (");
+    expect(q).toContain("coalesce(s.createdBy, '') = $viewerId");
     expect(q).toContain('[r:HAS_ACCESS]->(s)');
     // ADR-052 — an EXISTING grant is not enough; it must still be live.
     expect(
@@ -162,7 +163,7 @@ describe('visibility predicates in the Cypher surface', () => {
   });
 
   it.each(gatedAssetQueries)('%s gates on the asset visibility rule', (_name, q) => {
-    expect(q).toContain("coalesce(vs.visibility, 'open') <> 'restricted'");
+    expect(q).toContain("coalesce(vs.createdBy, '') = $viewerId");
     expect(q).toContain('$viewerId');
     expect(q).toContain('[r:HAS_ACCESS]->(vs)');
     expect(q).toContain('r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs');
