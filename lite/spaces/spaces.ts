@@ -351,6 +351,9 @@ export function markVisitNow(): void {
 // ─── Bootstrap ──────────────────────────────────────────────────────────
 
 function init(): void {
+  // Opaque identity cover FIRST — anonymous eyes never see the shared
+  // account's content, not even for one paint (2026-08-13).
+  mountIdentityBootGate();
   applyActiveRow(state.activeScopeId);
   wireSidebarClicks();
   wireSidebarSections();
@@ -456,10 +459,15 @@ async function initialLoad(): Promise<void> {
   // Identity prefetch (Phase 4 v2) runs in parallel — its failure is
   // soft: the renderer still works without a stashed Person id, just
   // with anonymous attribution.
+  // Identity settles the boot gate the moment it resolves — it never
+  // waits on the data loads (and they never wait on it).
+  const identityWork = loadCurrentUser().then((status) => {
+    settleIdentityGate(status);
+  });
   const sidebarWork: Array<Promise<void>> = [
     loadSpaces(),
     loadUncategorizedCount(),
-    loadCurrentUser(),
+    identityWork,
   ];
   if (state.activeScopeId === HOME_SCOPE_ID) {
     sidebarWork.push(loadHome());
@@ -478,7 +486,18 @@ async function initialLoad(): Promise<void> {
  * leave `state.currentUser` null. The SDK's "anonymous edit" path
  * runs in that case.
  */
-async function loadCurrentUser(): Promise<void> {
+/**
+ * Identity-gate outcome of the boot person-bootstrap (2026-08-13).
+ * 'ok'          — session with a usable email; Person ensured.
+ * 'no-session'  — nobody is signed in: the gate must demand sign-in.
+ * 'no-email'    — signed in but the session carries no email and no
+ *                 attribution email is stored: the gate asks for one.
+ * 'soft-error'  — infrastructure hiccup (bridge missing, IPC threw):
+ *                 never lock the app on these, keep legacy behavior.
+ */
+export type IdentityStatus = 'ok' | 'no-session' | 'no-email' | 'soft-error';
+
+async function loadCurrentUser(): Promise<IdentityStatus> {
   const w = window as unknown as {
     lite?: {
       auth?: {
@@ -500,13 +519,13 @@ async function loadCurrentUser(): Promise<void> {
   };
   const auth = w.lite?.auth;
   const identity = w.lite?.spaces?.identity;
-  if (auth === undefined || identity === undefined) return;
+  if (auth === undefined || identity === undefined) return 'soft-error';
   try {
     // Lite ships only the 'edison' environment in v1; if more land we
     // can read the active env from settings.
     const res = await auth.getSession('edison');
     const session = res.session;
-    if (session === null) return;
+    if (session === null) return 'no-session';
     let email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
     if (email.length === 0) {
       // Some sign-in flows never put an email in the or-cookie
@@ -519,8 +538,10 @@ async function loadCurrentUser(): Promise<void> {
       }
     }
     if (email.length === 0) {
-      console.warn('[spaces] no session or attribution email; skipping person bootstrap');
-      return;
+      // Still "skipping person bootstrap" — never manufacture a UUID
+      // Person; the identity gate takes over and asks for the email.
+      console.warn('[spaces] no email in session; skipping person bootstrap — gate takes over');
+      return 'no-email';
     }
     const id = email;
     const name = personNameFromEmail(email) ?? email;
@@ -530,16 +551,177 @@ async function loadCurrentUser(): Promise<void> {
       email,
     };
     const envelope = await identity.getOrCreatePerson(upsertPayload);
-    if (envelope.ok === false) return;
+    if (envelope.ok === false) return 'soft-error';
     state.currentUser = {
       id: envelope.value.id,
       name: envelope.value.name.length > 0 ? envelope.value.name : name,
       ...(envelope.value.email !== undefined ? { email: envelope.value.email } : {}),
     };
+    return 'ok';
   } catch (err) {
     window.logging?.warn?.('spaces', 'loadCurrentUser failed', { error: messageFrom(err) });
     // Soft failure: keep currentUser null and proceed.
+    return 'soft-error';
   }
+}
+
+// ─── Identity gate (2026-08-13) ─────────────────────────────────────────
+//
+// A fresh install must know WHO is working before Spaces shows the
+// shared account's content: sign in with GSX right away, and the
+// Person is created in the graph on first sign-in (unless one
+// exists — `getOrCreatePerson` is a MERGE). The overlay mounts opaque
+// before first paint so anonymous eyes never see data, then either
+// dissolves (identity ok) or becomes the sign-in wall.
+
+let identityGateEl: HTMLElement | null = null;
+let identityGateWatchdog: number | null = null;
+
+/** Opaque cover, mounted synchronously in init() before any paint. */
+export function mountIdentityBootGate(): void {
+  if (identityGateEl !== null) return;
+  const gate = document.createElement('div');
+  gate.className = 'spaces-identity-gate';
+  document.body.appendChild(gate);
+  identityGateEl = gate;
+  // Never lock the app on infrastructure silence: if identity hasn't
+  // resolved in 8s, fall back to legacy (ungated) behavior and log.
+  identityGateWatchdog = window.setTimeout(() => {
+    window.logging?.warn?.('spaces', 'identity gate watchdog fired — settling soft');
+    settleIdentityGate('soft-error');
+  }, 8000);
+}
+
+/** Resolve the boot cover into: gone (ok/soft) or a sign-in wall. */
+export function settleIdentityGate(status: IdentityStatus): void {
+  if (identityGateWatchdog !== null) {
+    window.clearTimeout(identityGateWatchdog);
+    identityGateWatchdog = null;
+  }
+  const gate = identityGateEl;
+  if (gate === null || !gate.isConnected) return;
+  if (status === 'ok' || status === 'soft-error') {
+    gate.remove();
+    identityGateEl = null;
+    return;
+  }
+  gate.replaceChildren(buildIdentityGatePanel(status));
+}
+
+/** The wall itself. Exported for tests. */
+export function buildIdentityGatePanel(kind: 'no-session' | 'no-email'): HTMLElement {
+  const panel = document.createElement('div');
+  panel.className = 'spaces-identity-gate-panel';
+
+  const title = document.createElement('h2');
+  title.className = 'spaces-identity-gate-title';
+  title.textContent = kind === 'no-session' ? 'Sign in to Spaces' : 'Confirm your email';
+  panel.appendChild(title);
+
+  const body = document.createElement('p');
+  body.className = 'spaces-identity-gate-body';
+  body.textContent =
+    kind === 'no-session'
+      ? 'Spaces is a shared workspace, so it needs to know who you are. Sign in with your GSX account — your user is created in the graph the first time.'
+      : 'You are signed in, but the session has no email address. Enter your work email so your work is attributed to you.';
+  panel.appendChild(body);
+
+  const error = document.createElement('p');
+  error.className = 'spaces-identity-gate-error';
+  error.hidden = true;
+
+  if (kind === 'no-session') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'spaces-identity-gate-signin';
+    btn.textContent = 'Sign in with GSX';
+    btn.addEventListener('click', () => {
+      void (async (): Promise<void> => {
+        const identity = (
+          window as unknown as {
+            lite?: { spaces?: { identity?: { requestSignIn(): Promise<
+              { ok: true; value: { email: string | null; accountId: string | null } } | { ok: false; error: { message: string } }
+            > } } };
+          }
+        ).lite?.spaces?.identity;
+        if (identity === undefined) return;
+        btn.disabled = true;
+        btn.textContent = 'Opening GSX sign-in…';
+        error.hidden = true;
+        try {
+          const res = await identity.requestSignIn();
+          if (res.ok === true) {
+            // Reload boots clean with the session present; the Person
+            // MERGE (or the no-email wall) happens on the way back in.
+            window.location.reload();
+            return;
+          }
+          error.textContent = res.error.message;
+          error.hidden = false;
+        } catch (err) {
+          error.textContent = messageFrom(err);
+          error.hidden = false;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Sign in with GSX';
+      })();
+    });
+    panel.appendChild(btn);
+  } else {
+    const input = document.createElement('input');
+    input.type = 'email';
+    input.className = 'spaces-identity-gate-email';
+    input.placeholder = 'you@company.com';
+    input.autocomplete = 'email';
+    panel.appendChild(input);
+
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'spaces-identity-gate-signin';
+    save.textContent = 'Continue';
+    const submit = (): void => {
+      void (async (): Promise<void> => {
+        const value = input.value.trim().toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          error.textContent = 'Enter a valid email address.';
+          error.hidden = false;
+          return;
+        }
+        const identity = (
+          window as unknown as {
+            lite?: { spaces?: { identity?: { attributionEmailSet(email: string | null): Promise<
+              { ok: true; value: string | null } | { ok: false; error: { message: string } }
+            > } } };
+          }
+        ).lite?.spaces?.identity;
+        if (identity === undefined) return;
+        save.disabled = true;
+        error.hidden = true;
+        try {
+          const res = await identity.attributionEmailSet(value);
+          if (res.ok === true) {
+            window.location.reload();
+            return;
+          }
+          error.textContent = res.error.message;
+          error.hidden = false;
+        } catch (err) {
+          error.textContent = messageFrom(err);
+          error.hidden = false;
+        }
+        save.disabled = false;
+      })();
+    };
+    save.addEventListener('click', submit);
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') submit();
+    });
+    panel.appendChild(save);
+    queueMicrotask(() => input.focus());
+  }
+
+  panel.appendChild(error);
+  return panel;
 }
 
 /**

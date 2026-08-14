@@ -1642,3 +1642,36 @@ describe('space description editability (2026-08-13 report)', () => {
     expect(mod.pendingObjectiveEdit.spaceId).toBeNull();
   });
 });
+
+describe('identity gate — sign in right away (2026-08-13)', () => {
+  it('no-session wall: GSX sign-in button, no dismiss affordance', async () => {
+    const mod = await import('../../spaces/spaces');
+    const panel = mod.buildIdentityGatePanel('no-session');
+    const btn = panel.querySelector('.spaces-identity-gate-signin');
+    expect(btn?.textContent).toBe('Sign in with GSX');
+    expect(panel.querySelector('input')).toBeNull();
+    expect(panel.textContent).toContain('created in the graph');
+    // A wall, not a dialog: no close/cancel control of any kind.
+    expect(panel.querySelectorAll('button').length).toBe(1);
+  });
+
+  it('no-email wall: email input + Continue, Enter submits', async () => {
+    const mod = await import('../../spaces/spaces');
+    const panel = mod.buildIdentityGatePanel('no-email');
+    const input = panel.querySelector<HTMLInputElement>('input[type="email"]');
+    expect(input).not.toBeNull();
+    expect(panel.querySelector('.spaces-identity-gate-signin')?.textContent).toBe('Continue');
+  });
+
+  it('AUTH_SIGN_IN ipc channel exists and is registered in main (drift guard)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { resolve } = await import('node:path');
+    const src = readFileSync(resolve(__dirname, '../../spaces/ipc.ts'), 'utf-8');
+    expect(src).toContain("AUTH_SIGN_IN: 'lite:spaces:auth:signIn'");
+    expect(src).toContain('SPACES_IPC.AUTH_SIGN_IN');
+    // Renderer side must reach it through the preload bridge.
+    const preload = readFileSync(resolve(__dirname, '../../preload-lite.ts'), 'utf-8');
+    expect(preload).toContain("'lite:spaces:auth:signIn'");
+    expect(preload).toContain('requestSignIn');
+  });
+});

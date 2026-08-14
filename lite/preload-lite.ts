@@ -94,6 +94,7 @@ const SPACES_TICKETS_UPDATE = 'lite:spaces:tickets:update';
 const SPACES_IDENTITY_GET_OR_CREATE_PERSON = 'lite:spaces:identity:getOrCreatePerson';
 const SPACES_IDENTITY_ATTR_EMAIL_GET = 'lite:spaces:identity:attributionEmail:get';
 const SPACES_IDENTITY_ATTR_EMAIL_SET = 'lite:spaces:identity:attributionEmail:set';
+const SPACES_AUTH_SIGN_IN = 'lite:spaces:auth:signIn';
 const SPACES_MEMBERS_LIST = 'lite:spaces:members:list';
 const SPACES_MEMBERS_ADD = 'lite:spaces:members:add';
 const SPACES_MEMBERS_SEARCH_LIBRARY = 'lite:spaces:members:searchLibrary';
@@ -846,6 +847,11 @@ interface SpacesIdentityBridge {
     name?: string;
     email?: string;
   }): Promise<SpacesIpcResultView<{ id: string; name: string; email?: string }>>;
+  /** Identity gate — main runs the interactive GSX sign-in; resolves
+   * once the session lands (or fails). Renderer never sees tokens. */
+  requestSignIn(): Promise<
+    SpacesIpcResultView<{ email: string | null; accountId: string | null }>
+  >;
 }
 
 /** A member row. `accessExpiresAt` absent means permanent access. */
@@ -1853,6 +1859,10 @@ const spaces: SpacesBridge = {
     getOrCreatePerson: (input) =>
       ipcRenderer.invoke(SPACES_IDENTITY_GET_OR_CREATE_PERSON, { input }) as Promise<
         SpacesIpcResultView<{ id: string; name: string; email?: string }>
+      >,
+    requestSignIn: () =>
+      ipcRenderer.invoke(SPACES_AUTH_SIGN_IN) as Promise<
+        SpacesIpcResultView<{ email: string | null; accountId: string | null }>
       >,
   },
   members: {

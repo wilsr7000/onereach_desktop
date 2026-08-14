@@ -114,6 +114,9 @@ export const SPACES_IPC = {
   IDENTITY_ATTRIBUTION_EMAIL_GET: 'lite:spaces:identity:attributionEmail:get',
   IDENTITY_ATTRIBUTION_EMAIL_SET: 'lite:spaces:identity:attributionEmail:set',
   MEMBERS_REMOVE: 'lite:spaces:members:remove',
+  /** Identity gate — first-run sign-in (2026-08-13). Main-process only
+   * `signIn()` stays main-side; the renderer merely requests it. */
+  AUTH_SIGN_IN: 'lite:spaces:auth:signIn',
   /** ADR-055 — checklists. */
   CHECKLISTS_CREATE: 'lite:spaces:checklists:create',
   CHECKLISTS_LIST: 'lite:spaces:checklists:list',
@@ -1129,6 +1132,32 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           hasExpiry ? { expiresAt } : {}
         );
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.AUTH_SIGN_IN,
+    async (
+      _event: IpcMainInvokeEvent
+    ): Promise<SpacesIpcResult<{ email: string | null; accountId: string | null }>> => {
+      try {
+        // Lazy import keeps ipc.ts test-loadable without the full auth
+        // module graph; `signIn()` opens the interactive GSX sign-in
+        // window and resolves once the session lands in the vault.
+        const { getAuthApi } = await import('../auth/api.js');
+        const session = await getAuthApi().signIn('edison');
+        const email =
+          typeof session.email === 'string' && session.email.trim().length > 0
+            ? session.email.trim().toLowerCase()
+            : null;
+        const accountId =
+          typeof session.accountId === 'string' && session.accountId.length > 0
+            ? session.accountId
+            : null;
+        return { ok: true, value: { email, accountId } };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }
