@@ -38,12 +38,9 @@ describe('home-url store', () => {
     const state = await readHomeUrl();
     expect(state.isDefault).toBe(true);
     expect(state.url).toBe(DEFAULT_HOME_URL);
-    expect(DEFAULT_HOME_URL).toContain(
-      'thelearningmachine-dev.up.railway.app/prototype/gsx-product-expert/live/email-triage'
-    );
+    expect(DEFAULT_HOME_URL).toBe('https://idw.edison.onereach.ai/gsx-expert');
     // The original request for this URL asked for the GSX account id
     // on the query string — the placeholder delivers it at load time.
-    expect(DEFAULT_HOME_URL).toContain('accountId={accountId}');
     expect(validateHomeUrl(DEFAULT_HOME_URL)).toBe(DEFAULT_HOME_URL);
   });
 
@@ -82,7 +79,9 @@ describe('home-url store', () => {
     expect(resolveHomeUrl('https://x.example/app?accountId={accountId}', null)).toBe(
       'https://x.example/app?accountId='
     );
-    expect(resolveHomeUrl(DEFAULT_HOME_URL, 'acct-1')).toContain('accountId=acct-1');
+    // The new default (gsx-expert IDW) carries no placeholder — it must
+    // pass through untouched.
+    expect(resolveHomeUrl(DEFAULT_HOME_URL, 'acct-1')).toBe(DEFAULT_HOME_URL);
     expect(resolveHomeUrl('https://x.example/static', 'acct-1')).toBe(
       'https://x.example/static'
     );

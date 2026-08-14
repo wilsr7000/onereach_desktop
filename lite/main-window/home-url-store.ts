@@ -20,13 +20,12 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 /**
- * The default Home page (2026-08-07, third iteration by user request):
- * the GSX Product Expert email-triage prototype on the Learning
- * Machine. The signed-in GSX account id rides the query string via the
- * placeholder, per the original request for this URL.
+ * The default Home page (2026-08-14, fourth iteration by user request):
+ * the GSX Expert IDW on Edison. No placeholder needed — the IDW reads
+ * the signed-in session itself (the tab rides the auto-login
+ * machinery like any IDW surface).
  */
-export const DEFAULT_HOME_URL =
-  'https://thelearningmachine-dev.up.railway.app/prototype/gsx-product-expert/live/email-triage?accountId={accountId}';
+export const DEFAULT_HOME_URL = 'https://idw.edison.onereach.ai/gsx-expert';
 
 /** Overridable for tests. */
 let baseDirOverride: string | null = null;
