@@ -194,7 +194,7 @@ interface KVCredentialsProviderOptions {
  *
  * Caching: reads are NOT cached. The KV `get()` itself is fast and
  * stays consistent with concurrent writes from the Settings UI.
- * `invalidate()` is a no-op for this provider.
+ * `invalidate()` drops the 60s resolution cache (2026-08-14).
  */
 export class KVCredentialsProvider implements CredentialsProvider {
   private readonly kvApi: ReturnType<typeof getKVApi>;
@@ -310,6 +310,33 @@ export class KVCredentialsProvider implements CredentialsProvider {
    * diagnostics show whether a user is on real account config or still
    * riding the (temporary) baked-in default.
    */
+  // Result cache (2026-08-14). "Reads are NOT cached" made every graph
+  // query re-read KV config — which turned the 08-12 KV outage into a
+  // full-speed retry flood from every surface at once. Successful
+  // resolutions are reused for 60s; during a 10s failure cooldown the
+  // last-good record is served stale (stale-while-error) without
+  // touching KV at all. invalidate() clears both.
+  private cachedResolution: { record: NeonSettingsRecord | null; source: ConfigSource } | null =
+    null;
+  private cachedAtMs = 0;
+  private failCooldownUntilMs = 0;
+  private static readonly RESOLVE_TTL_MS = 60_000;
+  private static readonly FAIL_COOLDOWN_MS = 10_000;
+
+  /** Drop the cached resolution — the next read re-resolves from KV. */
+  invalidate(): void {
+    this.cachedResolution = null;
+    this.cachedAtMs = 0;
+    this.failCooldownUntilMs = 0;
+  }
+
+  private cloneResolution(r: {
+    record: NeonSettingsRecord | null;
+    source: ConfigSource;
+  }): { record: NeonSettingsRecord | null; source: ConfigSource } {
+    return { record: r.record === null ? null : { ...r.record }, source: r.source };
+  }
+
   private async resolveRecord(): Promise<{
     record: NeonSettingsRecord | null;
     source: ConfigSource;
@@ -321,13 +348,30 @@ export class KVCredentialsProvider implements CredentialsProvider {
     if (!this.isSignedIn()) {
       return fallback();
     }
+    const now = Date.now();
+    if (
+      this.cachedResolution !== null &&
+      now - this.cachedAtMs < KVCredentialsProvider.RESOLVE_TTL_MS
+    ) {
+      return this.cloneResolution(this.cachedResolution);
+    }
+    if (now < this.failCooldownUntilMs) {
+      // Backend recently failing: serve stale (or the bundle fallback)
+      // rather than re-hammering it.
+      return this.cachedResolution !== null
+        ? this.cloneResolution(this.cachedResolution)
+        : fallback();
+    }
     try {
       const value = await this.kvApi.get(this.collection, this.key);
       if (value === null || value === undefined || typeof value !== 'object') {
-        return fallback();
+        const fb = fallback();
+        this.cachedResolution = this.cloneResolution(fb);
+        this.cachedAtMs = Date.now();
+        return fb;
       }
       const v = value as Partial<NeonSettingsRecord>;
-      return {
+      const resolved: { record: NeonSettingsRecord | null; source: ConfigSource } = {
         record: {
           endpoint: typeof v.endpoint === 'string' ? v.endpoint : '',
           uri: typeof v.uri === 'string' ? v.uri : '',
@@ -338,12 +382,15 @@ export class KVCredentialsProvider implements CredentialsProvider {
         },
         source: 'account',
       };
+      this.cachedResolution = this.cloneResolution(resolved);
+      this.cachedAtMs = Date.now();
+      return resolved;
     } catch (err) {
-      if (err instanceof KVError) {
-        // Propagate; the calling layer surfaces this as a Neon-side
-        // error if needed. Reads happen outside the query hot-path so
-        // we don't need to wrap here.
-        throw err;
+      // Backend failed: start the cooldown; serve the last-good record
+      // if we have one so live surfaces keep working through the blip.
+      this.failCooldownUntilMs = Date.now() + KVCredentialsProvider.FAIL_COOLDOWN_MS;
+      if (this.cachedResolution !== null) {
+        return this.cloneResolution(this.cachedResolution);
       }
       throw err;
     }

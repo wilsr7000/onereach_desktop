@@ -380,23 +380,78 @@ export class FlowHttpKVClient {
     return cached;
   }
 
+  // ── Circuit breaker (2026-08-14) ──────────────────────────────────
+  // The 08-12 incident: the KV backend 500'd and EVERY caller kept
+  // hammering it full-speed (each graph query re-read config), turning
+  // one server blip into a 90 MB/6s log storm and a hung sign-in.
+  // After 5 consecutive server-side failures (5xx / timeout / network),
+  // the breaker opens for 15s: requests fail fast WITHOUT touching the
+  // network, one warn line marks each transition, and a single probe
+  // is allowed through when the cooldown lapses.
+  private breakerConsecutive = 0;
+  private breakerOpenUntil = 0;
+
+  private static readonly BREAKER_THRESHOLD = 5;
+  private static readonly BREAKER_COOLDOWN_MS = 15_000;
+
+  /** Server-side failure = the backend's fault, counts toward the breaker. */
+  private static isBreakerCounted(err: KVError): boolean {
+    if (typeof err.status === 'number' && err.status >= 500) return true;
+    return err.code === KV_ERROR_CODES.TIMEOUT || err.code === KV_ERROR_CODES.NETWORK;
+  }
+
   private async runRequest<T>(
     op: string,
     collection: string,
     key: string | undefined,
     fn: () => Promise<T>
   ): Promise<T> {
+    const now = Date.now();
+    if (now < this.breakerOpenUntil) {
+      // Fail fast, no network, no error-level log (the dedupe upstream
+      // would collapse it anyway; one warn marked the transition).
+      throw new KVError({
+        code: KV_ERROR_CODES.HTTP,
+        message: `KV circuit open — failing fast (${op} ${collection})`,
+        status: 503,
+        context: { op, collection, ...(key !== undefined ? { key } : {}), breakerOpen: true },
+        remediation:
+          'OneReach KV had repeated server errors; requests resume automatically within 15s.',
+      });
+    }
     const span = this.spanEmitter?.(`kv.${op}`, {
       collection,
       ...(key !== undefined ? { key } : {}),
     });
     try {
       const result = await fn();
+      if (this.breakerConsecutive > 0) {
+        this.log('info', 'kv-flow: backend recovered — breaker reset', {
+          afterFailures: this.breakerConsecutive,
+        });
+      }
+      this.breakerConsecutive = 0;
       this.log('info', `kv-flow: ${op} ok`, { collection, key });
       span?.finish();
       return result;
     } catch (err) {
       const wrapped = this.normalizeError(err, op, collection, key);
+      if (FlowHttpKVClient.isBreakerCounted(wrapped)) {
+        this.breakerConsecutive += 1;
+        if (this.breakerConsecutive >= FlowHttpKVClient.BREAKER_THRESHOLD) {
+          this.breakerOpenUntil = Date.now() + FlowHttpKVClient.BREAKER_COOLDOWN_MS;
+          // Half-open: one more counted failure after the cooldown
+          // reopens immediately.
+          this.breakerConsecutive = FlowHttpKVClient.BREAKER_THRESHOLD - 1;
+          this.log('warn', 'kv-flow: circuit OPENED — repeated KV server errors; failing fast 15s', {
+            op,
+            collection,
+            status: wrapped.status,
+          });
+        }
+      } else {
+        this.breakerConsecutive = 0;
+      }
       this.log('error', `kv-flow: ${op} failed`, {
         collection,
         key,
