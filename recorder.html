@@ -3591,6 +3591,15 @@
         color: var(--accent-green);
       }
 
+      .invite-person.invite-all {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .invite-person.invite-all .nm {
+        color: var(--accent);
+        font-weight: 600;
+      }
+
       .invite-picker-empty {
         padding: 16px 12px;
         font-size: 12px;
@@ -11936,6 +11945,10 @@
             const spaceId = this._captureSpaceId(null);
             let res = await window.recorder.listInvitablePeople({ spaceId });
             let people = (res && res.people) || [];
+            // Scope matters: "Invite all" is only offered for the SPACE's own
+            // members. The all-known-people fallback must never get a
+            // one-click invite-everyone (that would ring the whole account).
+            this._invitableScope = spaceId && people.length > 0 ? 'space' : 'all';
             if (people.length === 0 && spaceId) {
               // Space has no members yet — offer everyone we know instead.
               res = await window.recorder.listInvitablePeople({});
@@ -11976,6 +11989,25 @@
             return;
           }
           list.innerHTML = '';
+          // One-click "everyone in this space" — explicit, space-scoped only,
+          // and only while the list is unfiltered (a filtered invite-all is
+          // ambiguous about who "all" means).
+          const uninvited = rows.filter((p) => !this._invitedEmails.has(p.email));
+          if (this._invitableScope === 'space' && !f && uninvited.length > 1) {
+            const all = document.createElement('div');
+            all.className = 'invite-person invite-all';
+            const who = document.createElement('div');
+            who.className = 'who';
+            const nm = document.createElement('div');
+            nm.className = 'nm';
+            nm.textContent = 'Invite everyone in this space (' + uninvited.length + ')';
+            who.appendChild(nm);
+            const st = document.createElement('div');
+            st.className = 'state';
+            all.append(who, st);
+            all.onclick = () => this._inviteAll(uninvited, st);
+            list.appendChild(all);
+          }
           for (const p of rows) {
             const row = document.createElement('div');
             row.className = 'invite-person';
@@ -11999,6 +12031,31 @@
 
         invitePickerFilter() {
           this._renderInvitePicker(document.getElementById('invitePickerSearch')?.value || '');
+        },
+
+        // Invite the space's whole (uninvited) roster in one explicit click —
+        // one batched IPC so the grant + audience append are a single write.
+        async _inviteAll(people, stateEl) {
+          if (this._inviteAllInFlight) return;
+          this._inviteAllInFlight = true;
+          stateEl.textContent = 'inviting…';
+          const emails = people.map((p) => p.email);
+          const res = await window.recorder
+            .inviteToMeeting({ emails, roomName: this._meetingRoomName || null })
+            .catch(() => null);
+          this._inviteAllInFlight = false;
+          if (res && res.ok) {
+            emails.forEach((e) => this._invitedEmails.add(e));
+            this.showStatus(
+              'Invited ' + emails.length + ' people — their apps will ring',
+              'success'
+            );
+            this._renderInvitePicker(
+              document.getElementById('invitePickerSearch')?.value || ''
+            );
+          } else {
+            stateEl.textContent = 'failed — click to retry';
+          }
         },
 
         async _invitePerson(p, stateEl) {
