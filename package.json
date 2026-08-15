@@ -253,7 +253,7 @@
     "@vitest/coverage-v8": "^4.0.16",
     "adm-zip": "^0.5.16",
     "dependency-cruiser": "^16.10.4",
-    "electron": "^41.0.4",
+    "electron": "41.10.5",
     "electron-builder": "^26.9.0",
     "esbuild": "^0.24.2",
     "eslint": "^9.39.2",

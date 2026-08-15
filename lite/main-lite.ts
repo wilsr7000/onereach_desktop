@@ -221,6 +221,37 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 // ============================================================================
+// TOUCH ID WEBAUTHN (ADR-066) — Secure Enclave platform authenticator for
+// the Web Authentication API, so "Sign in with Passkey" on the OneReach
+// login page works inside the embedded sign-in window (Electron ≥41.10;
+// before this, isUserVerifyingPlatformAuthenticatorAvailable() was false
+// and the page's passkey button dead-ended in an error — live-confirmed
+// 2026-08-14). Credentials are device-bound (Secure Enclave, NOT iCloud
+// Keychain) and PER-PARTITION, so enrollment must happen in the same
+// auth partition the sign-in window uses. The keychain access group here
+// MUST also appear in lite/build/entitlements.mac.plist — a pairing test
+// enforces the match. Unsigned dev builds lack the entitlement, so the
+// authenticator only materializes in signed builds; this call is safely
+// inert otherwise.
+// ============================================================================
+
+export const WEBAUTHN_KEYCHAIN_ACCESS_GROUP = '6KTEPA3LSD.com.onereach.lite.webauthn';
+
+if (process.platform === 'darwin' && typeof app.configureWebAuthn === 'function') {
+  try {
+    app.configureWebAuthn({
+      touchID: {
+        keychainAccessGroup: WEBAUTHN_KEYCHAIN_ACCESS_GROUP,
+        promptReason: 'sign you in to $1',
+      },
+    });
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[lite] configureWebAuthn failed (continuing without Touch ID passkeys):', (err as Error).message);
+  }
+}
+
+// ============================================================================
 // GLOBAL ERROR HANDLERS — the net under every fire-and-forget `void fn()`
 // in main. Without these, a post-boot rejection or throw vanishes with no
 // log line in an app whose value prop is observability (2026-08-08

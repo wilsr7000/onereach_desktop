@@ -29,6 +29,7 @@ import {
 import type { Environment, EnvironmentConfig } from './types.js';
 import { AUTH_EVENTS } from './events.js';
 import { buildPopupHandler, attachPopupLifecycle } from './oauth-popup.js';
+import { getLoggingApi } from '../logging/api.js';
 
 /**
  * Build a Chrome user-agent string that matches the Electron-bundled
@@ -90,6 +91,34 @@ function disguiseSession(sess: Session, userAgent: string): void {
     }
     callback({ requestHeaders: headers });
   });
+
+  // ADR-066 — Touch ID WebAuthn account picker. Once configureWebAuthn
+  // is active (signed builds), a passkey sign-in with multiple stored
+  // credentials surfaces them here instead of auto-selecting. Contract:
+  // the callback MUST always be invoked or the WebAuthn request pends
+  // forever. v1 policy: exactly one account → use it; several → most
+  // recently created wins (last in list), logged for auditability.
+  sess.on(
+    'select-webauthn-account',
+    (
+      _event,
+      details: { relyingPartyId: string; accounts: Array<{ credentialId: string }> },
+      pick: (credentialId?: string | null) => void
+    ) => {
+      let chosen: string | null = null;
+      try {
+        const accounts = Array.isArray(details.accounts) ? details.accounts : [];
+        chosen = accounts.length > 0 ? (accounts[accounts.length - 1]?.credentialId ?? null) : null;
+        getLoggingApi().event(AUTH_EVENTS.WEBAUTHN_ACCOUNT_SELECT, {
+          relyingPartyId: details.relyingPartyId,
+          accountCount: Array.isArray(details.accounts) ? details.accounts.length : 0,
+          chose: chosen !== null,
+        });
+      } finally {
+        pick(chosen);
+      }
+    }
+  );
   REWRITTEN_PARTITIONS.add(sess);
 }
 
