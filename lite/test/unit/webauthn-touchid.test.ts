@@ -71,13 +71,20 @@ describe('ADR-066 — Touch ID WebAuthn pairing', () => {
     expect(cfg.appId).toBe('com.onereach.lite');
   });
 
-  it('the account-select handler always answers (no pending-forever requests)', () => {
+  it('the account-select handler always answers, on EVERY session', () => {
     const src = readFileSync(resolve(root, 'lite/auth/window.ts'), 'utf-8');
-    expect(src).toContain("sess.on(\n    'select-webauthn-account'");
-    // The callback invocation must be in a finally block.
-    const idx = src.indexOf("'select-webauthn-account'");
-    const body = src.slice(idx, idx + 1200);
+    // Idempotent installer exported for boot wiring.
+    expect(src).toContain('export function installWebAuthnAccountPicker');
+    // The callback invocation must be in a finally block — an
+    // unanswered event pends the WebAuthn ceremony forever, which
+    // reads as "I clicked and nothing happened" (live-hit 2026-08-15).
+    const idx = src.indexOf('export function installWebAuthnAccountPicker');
+    const body = src.slice(idx, idx + 1600);
     expect(body).toContain('} finally {');
     expect(body).toContain('pick(chosen);');
+    // Boot installs it on every session the app ever creates.
+    const boot = readFileSync(resolve(root, 'lite/main-lite.ts'), 'utf-8');
+    expect(boot).toContain("app.on('session-created'");
+    expect(boot).toContain('installWebAuthnAccountPicker(sess);');
   });
 });

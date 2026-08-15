@@ -59,6 +59,9 @@ import { initUniversity, type UniversityHandle } from './university/main.js';
 // Bringing TTS back is a separate chunk that re-introduces lite/ai/.
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
 import { initOnboarding, type OnboardingHandle } from './onboarding/main.js';
+// Sanctioned exception to auth/window.ts's "don't import directly" rule:
+// this is boot wiring (per-session WebAuthn picker), not an auth flow.
+import { installWebAuthnAccountPicker } from './auth/window.js';
 import { initDownloads, type DownloadsHandle } from './downloads/main.js';
 import { initUpdater, verifyUpdateOnStartup, type UpdaterHandle } from './updater/index.js';
 import { getLoggingApi, LOGGING_SELF_CATEGORY } from './logging/api.js';
@@ -495,6 +498,15 @@ app
   .then(async () => {
     // Touch ID WebAuthn (ADR-066) — safe only here, never at module load.
     configureTouchIdWebAuthn();
+    // Every session (tabs, popups, partitions) gets the account picker:
+    // an unanswered 'select-webauthn-account' pends the ceremony forever.
+    app.on('session-created', (sess) => {
+      try {
+        installWebAuthnAccountPicker(sess);
+      } catch {
+        /* picker is progressive enhancement; never break session setup */
+      }
+    });
     // Branding banner -- log line that makes it visually unmistakable
     // which app is running when both lite + full are open simultaneously.
     const userDataPath = app.getPath('userData');

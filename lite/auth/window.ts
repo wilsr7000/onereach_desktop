@@ -92,12 +92,28 @@ function disguiseSession(sess: Session, userAgent: string): void {
     callback({ requestHeaders: headers });
   });
 
-  // ADR-066 — Touch ID WebAuthn account picker. Once configureWebAuthn
-  // is active (signed builds), a passkey sign-in with multiple stored
-  // credentials surfaces them here instead of auto-selecting. Contract:
-  // the callback MUST always be invoked or the WebAuthn request pends
-  // forever. v1 policy: exactly one account → use it; several → most
-  // recently created wins (last in list), logged for auditability.
+  installWebAuthnAccountPicker(sess);
+  REWRITTEN_PARTITIONS.add(sess);
+}
+
+/** Sessions that already carry the WebAuthn account picker. */
+const PICKER_SESSIONS = new WeakSet<Session>();
+
+/**
+ * ADR-066 — Touch ID WebAuthn account picker. Once configureWebAuthn
+ * is active (signed builds), a passkey ceremony with stored
+ * credentials surfaces them via 'select-webauthn-account'. Contract:
+ * the callback MUST always be invoked or the WebAuthn request pends
+ * forever — which reads as "I clicked and nothing happened" (live-hit
+ * 2026-08-15 on a login page in a regular tab, whose session had no
+ * handler). Installed on EVERY session via the app 'session-created'
+ * hook in main-lite, plus explicitly on auth partitions. Idempotent.
+ * v1 policy: one account → use it; several → most recently created
+ * (last in list); zero → cancel. All logged.
+ */
+export function installWebAuthnAccountPicker(sess: Session): void {
+  if (PICKER_SESSIONS.has(sess)) return;
+  PICKER_SESSIONS.add(sess);
   sess.on(
     'select-webauthn-account',
     (
@@ -111,7 +127,7 @@ function disguiseSession(sess: Session, userAgent: string): void {
         chosen = accounts.length > 0 ? (accounts[accounts.length - 1]?.credentialId ?? null) : null;
         getLoggingApi().event(AUTH_EVENTS.WEBAUTHN_ACCOUNT_SELECT, {
           relyingPartyId: details.relyingPartyId,
-          accountCount: Array.isArray(details.accounts) ? details.accounts.length : 0,
+          accountCount: accounts.length,
           chose: chosen !== null,
         });
       } finally {
@@ -119,7 +135,6 @@ function disguiseSession(sess: Session, userAgent: string): void {
       }
     }
   );
-  REWRITTEN_PARTITIONS.add(sess);
 }
 
 /**
