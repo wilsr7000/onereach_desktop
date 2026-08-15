@@ -208,8 +208,13 @@ assertNoFullAppModulesLoaded();
 // Dev affordance: LITE_USER_DATA_DIR relocates userData (and with it the
 // single-instance lock), so a dev build can run beside the installed app.
 // Must be set before requestSingleInstanceLock — the lock keys on userData.
+// Packaged builds honor it ONLY with the explicit second opt-in flag —
+// used by signed-build verification harnesses (e.g. the ADR-066 Touch ID
+// probe); unreachable for normal users, who never launch with env vars.
 const userDataOverride = process.env.LITE_USER_DATA_DIR;
-if (userDataOverride !== undefined && userDataOverride !== '' && !app.isPackaged) {
+const packagedOverrideOk =
+  process.env.LITE_USER_DATA_DIR_UNSAFE_PACKAGED === '1' || !app.isPackaged;
+if (userDataOverride !== undefined && userDataOverride !== '' && packagedOverrideOk) {
   app.setPath('userData', userDataOverride);
 }
 
