@@ -55,7 +55,8 @@ describe('ADR-066 — Touch ID WebAuthn pairing', () => {
   it('electron-builder signs with the lite plist (both entitlement keys)', () => {
     const cfg = JSON.parse(readFileSync(resolve(root, 'lite/electron-builder.json'), 'utf-8'));
     expect(cfg.mac.entitlements).toBe('lite/build/entitlements.mac.plist');
-    expect(cfg.mac.entitlementsInherit).toBe('lite/build/entitlements.mac.plist');
+    // Helpers deliberately use the inherit plist (no restricted keys).
+    expect(cfg.mac.entitlementsInherit).toBe('lite/build/entitlements.mac.inherit.plist');
     expect(cfg.appId).toBe('com.onereach.lite');
   });
 
