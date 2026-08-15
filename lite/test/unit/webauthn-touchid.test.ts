@@ -22,7 +22,15 @@ describe('ADR-066 — Touch ID WebAuthn pairing', () => {
     expect(src).toContain('app.configureWebAuthn');
     expect(src).toContain('keychainAccessGroup: WEBAUTHN_KEYCHAIN_ACCESS_GROUP');
     // Guarded: never crash a platform/build without the API.
-    expect(src).toContain("typeof app.configureWebAuthn === 'function'");
+    expect(src).toContain("typeof app.configureWebAuthn !== 'function'");
+    // MUST run after whenReady — the module-load-time call SIGTRAPs
+    // packaged builds (live-bisected 2026-08-14). The call lives in a
+    // function invoked from the whenReady chain, never at module scope.
+    expect(src).toContain('export function configureTouchIdWebAuthn');
+    const readyIdx = src.indexOf('.whenReady()');
+    const invokeIdx = src.indexOf('configureTouchIdWebAuthn();');
+    expect(readyIdx).toBeGreaterThan(-1);
+    expect(invokeIdx).toBeGreaterThan(readyIdx);
   });
 
   it('the restricted entitlements and the provisioning profile move together', () => {
@@ -35,7 +43,10 @@ describe('ADR-066 — Touch ID WebAuthn pairing', () => {
     const plist = readFileSync(resolve(root, 'lite/build/entitlements.mac.plist'), 'utf-8');
     expect(plist).toContain('<key>keychain-access-groups</key>');
     expect(plist).toContain(`<string>${GROUP}</string>`);
-    expect(plist).toContain('<string>6KTEPA3LSD.com.onereach.lite</string>');
+    // Minimal restricted surface: the keychain group alone satisfies
+    // configureWebAuthn; the application-identifier pair is deliberately
+    // NOT requested (fewer restricted entitlements to reason about).
+    expect(plist).not.toContain('com.apple.application-identifier');
 
     const cfg = JSON.parse(readFileSync(resolve(root, 'lite/electron-builder.json'), 'utf-8'));
     expect(cfg.mac.provisioningProfile).toBe('lite/build/Onereach_Lite_DeveloperID.provisionprofile');

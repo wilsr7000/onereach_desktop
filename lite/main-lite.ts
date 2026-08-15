@@ -242,7 +242,16 @@ if (!app.requestSingleInstanceLock()) {
 
 export const WEBAUTHN_KEYCHAIN_ACCESS_GROUP = '6KTEPA3LSD.com.onereach.lite.webauthn';
 
-if (process.platform === 'darwin' && typeof app.configureWebAuthn === 'function') {
+/**
+ * MUST be called AFTER app.whenReady — calling at module-load time
+ * SIGTRAPs packaged builds (Chromium CHECK; live-bisected 2026-08-14:
+ * every fused build with the early call trapped at exit 133 on every
+ * Electron 41.5+, while the identical build with the call removed ran;
+ * dev binaries tolerate the early call, which is why tests and dev
+ * boots never caught it). Invoked from the whenReady chain below.
+ */
+export function configureTouchIdWebAuthn(): void {
+  if (process.platform !== 'darwin' || typeof app.configureWebAuthn !== 'function') return;
   try {
     app.configureWebAuthn({
       touchID: {
@@ -484,6 +493,8 @@ const bootSpan = (() => {
 app
   .whenReady()
   .then(async () => {
+    // Touch ID WebAuthn (ADR-066) — safe only here, never at module load.
+    configureTouchIdWebAuthn();
     // Branding banner -- log line that makes it visually unmistakable
     // which app is running when both lite + full are open simultaneously.
     const userDataPath = app.getPath('userData');
