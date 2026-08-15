@@ -31,12 +31,19 @@
     <true/>
     <key>com.apple.security.files.downloads.read-write</key>
     <true/>
-    <!-- ADR-066: Touch ID WebAuthn platform authenticator (Electron
-         app.configureWebAuthn). The group here MUST equal the constant
-         in lite/main-lite.ts — a pairing test enforces it. -->
-    <key>keychain-access-groups</key>
-    <array>
-        <string>6KTEPA3LSD.com.onereach.lite.webauthn</string>
-    </array>
+    <!-- ADR-066: Touch ID WebAuthn — the keychain-access-groups
+         entitlement is DELIBERATELY ABSENT. Under Developer ID signing
+         it is a RESTRICTED entitlement: without an embedded Developer ID
+         provisioning profile, AMFI SIGKILLs the app at launch
+         (live-confirmed 2026-08-14, exit 137 — a release would have
+         killed every install). To enable Touch ID passkeys:
+           1. Apple portal: create a Developer ID provisioning profile
+              for com.onereach.lite with Keychain Sharing
+              (group 6KTEPA3LSD.com.onereach.lite.webauthn).
+           2. electron-builder: mac.provisioningProfile → that file.
+           3. Restore here: keychain-access-groups +
+              com.apple.application-identifier (6KTEPA3LSD.com.onereach.lite)
+              + com.apple.developer.team-identifier (6KTEPA3LSD).
+         Until then app.configureWebAuthn is harmlessly inert. -->
 </dict>
 </plist> 

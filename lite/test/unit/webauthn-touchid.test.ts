@@ -25,10 +25,19 @@ describe('ADR-066 — Touch ID WebAuthn pairing', () => {
     expect(src).toContain("typeof app.configureWebAuthn === 'function'");
   });
 
-  it('the lite entitlements plist carries the same group', () => {
+  it('the entitlement stays OFF until the provisioning profile exists', () => {
+    // Under Developer ID, keychain-access-groups without an embedded
+    // Developer ID provisioning profile makes AMFI SIGKILL the app at
+    // launch (live-confirmed 2026-08-14, exit 137 — shipping it would
+    // have killed every install). When the profile lands: restore the
+    // group + com.apple.application-identifier pair in the plist, set
+    // mac.provisioningProfile in lite/electron-builder.json, and invert
+    // these assertions.
     const plist = readFileSync(resolve(root, 'lite/build/entitlements.mac.plist'), 'utf-8');
-    expect(plist).toContain('<key>keychain-access-groups</key>');
-    expect(plist).toContain(`<string>${GROUP}</string>`);
+    expect(plist).not.toContain('<key>keychain-access-groups</key>');
+    expect(plist).toContain('DELIBERATELY ABSENT');
+    const cfg = JSON.parse(readFileSync(resolve(root, 'lite/electron-builder.json'), 'utf-8'));
+    expect(cfg.mac.provisioningProfile).toBeUndefined();
   });
 
   it('electron-builder signs with the lite plist (both entitlement keys)', () => {
