@@ -19,7 +19,16 @@
  * @internal
  */
 
-import { BrowserWindow, session as electronSession, type Cookie, type Session, type Event as ElectronEvent } from 'electron';
+import { app, BrowserWindow, session as electronSession, type Cookie, type Session, type Event as ElectronEvent } from 'electron';
+
+/** True in a packaged build; false in dev and in unit tests (no app). */
+function isPackagedRuntime(): boolean {
+  try {
+    return app?.isPackaged === true;
+  } catch {
+    return false;
+  }
+}
 import { LiteError } from '../errors.js';
 import type { LiteErrorOptions } from '../errors.js';
 import { SessionVault, withPersistentExpiry } from './session-vault.js';
@@ -1227,6 +1236,15 @@ export class AuthStore {
    * don't loop restoring it). Soft-fails to false on any write error.
    */
   private async restoreSessionFromVault(env: Environment): Promise<boolean> {
+    // Dev affordance (unpackaged only): LITE_SKIP_SESSION_RESTORE=1
+    // boots this instance signed-out WITHOUT touching the shared
+    // keychain vault — the vault entry (and every other install's
+    // session) is left intact. Pairs with LITE_USER_DATA_DIR for
+    // fresh-install rehearsals: identity gate, sign-in, passkeys.
+    if (process.env['LITE_SKIP_SESSION_RESTORE'] === '1' && !isPackagedRuntime()) {
+      this.log('info', 'auth: vault restore skipped (LITE_SKIP_SESSION_RESTORE)', { env });
+      return false;
+    }
     const vaulted = await this.sessionVault.load(env);
     if (vaulted === null) return false;
     if (
