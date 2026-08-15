@@ -19,6 +19,22 @@ const webmcpTabTools = new Map(); // tabId -> Map<toolName, toolDef>
  * The bridge script intercepts navigator.modelContext.registerTool()
  * and posts tool metadata back via console.log JSON messages.
  */
+// WebMCP notifications are fire-and-forget: the main-side consumer
+// initializes LATE in boot (and may be off entirely), while tabs and
+// their bridges exist from the first paint. An un-caught invoke against
+// an unregistered handler throws an unhandled rejection — which
+// Electron surfaces as the desktop "A JavaScript error occurred"
+// dialog (seen live 2026-08-14: 'webmcp:tab-closed' 11s after launch).
+// Every notification goes through this guard instead.
+function webmcpNotify(channel, payload) {
+  try {
+    const p = window.api.invoke(channel, payload);
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => { /* consumer not up (yet) — notification is moot */ });
+    }
+  } catch (_e) { /* same: never let a notification take the app down */ }
+}
+
 function injectWebMCPBridge(webview, tabId) {
   fetch('webmcp-bridge.js')
     .then((res) => res.text())
@@ -69,7 +85,7 @@ function handleWebMCPConsoleMessage(tabId, webview, message) {
         webmcpTabTools.get(tabId).set(parsed.tool.name, parsed.tool);
         updateWebMCPBadge(tabId);
         if (window.api?.invoke) {
-          window.api.invoke('webmcp:tool-registered', { tabId, tool: parsed.tool, origin });
+          webmcpNotify('webmcp:tool-registered', { tabId, tool: parsed.tool, origin });
         }
       }
       break;
@@ -82,7 +98,7 @@ function handleWebMCPConsoleMessage(tabId, webview, message) {
           updateWebMCPBadge(tabId);
         }
         if (window.api?.invoke) {
-          window.api.invoke('webmcp:tool-unregistered', { tabId, name: parsed.name });
+          webmcpNotify('webmcp:tool-unregistered', { tabId, name: parsed.name });
         }
       }
       break;
@@ -93,7 +109,7 @@ function handleWebMCPConsoleMessage(tabId, webview, message) {
         updateWebMCPBadge(tabId);
       }
       if (window.api?.invoke) {
-        window.api.invoke('webmcp:context-cleared', { tabId });
+        webmcpNotify('webmcp:context-cleared', { tabId });
       }
       break;
   }
@@ -139,7 +155,7 @@ function cleanupWebMCPForTab(tabId) {
   webmcpTabTools.delete(tabId);
   updateWebMCPBadge(tabId);
   if (window.api?.invoke) {
-    window.api.invoke('webmcp:tab-closed', { tabId });
+    webmcpNotify('webmcp:tab-closed', { tabId });
   }
 }
 
@@ -151,7 +167,7 @@ function handleWebMCPCallTool({ callId, tabId, toolName, input }) {
   const tab = tabs.find((t) => t.id === tabId);
   if (!tab || !tab.webview) {
     if (window.api?.invoke) {
-      window.api.invoke('webmcp:call-tool-result', {
+      webmcpNotify('webmcp:call-tool-result', {
         callId,
         error: `Tab ${tabId} not found`,
       });
@@ -164,7 +180,7 @@ function handleWebMCPCallTool({ callId, tabId, toolName, input }) {
     .executeJavaScript(`window.__webmcp__callTool(${JSON.stringify(toolName)}, ${escaped})`)
     .then((result) => {
       if (window.api?.invoke) {
-        window.api.invoke('webmcp:call-tool-result', {
+        webmcpNotify('webmcp:call-tool-result', {
           callId,
           result: result?.result,
           error: result?.error,
@@ -173,7 +189,7 @@ function handleWebMCPCallTool({ callId, tabId, toolName, input }) {
     })
     .catch((err) => {
       if (window.api?.invoke) {
-        window.api.invoke('webmcp:call-tool-result', {
+        webmcpNotify('webmcp:call-tool-result', {
           callId,
           error: err.message || 'executeJavaScript failed',
         });
@@ -3640,7 +3656,7 @@ function createNewTabWithPartition(url = 'https://my.onereach.ai/', partition = 
       webmcpTabTools.get(tabId).clear();
       updateWebMCPBadge(tabId);
       if (window.api?.invoke) {
-        window.api.invoke('webmcp:tab-navigated', { tabId, origin: e.url });
+        webmcpNotify('webmcp:tab-navigated', { tabId, origin: e.url });
       }
     }
 
