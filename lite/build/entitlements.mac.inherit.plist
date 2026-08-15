@@ -31,21 +31,5 @@
     <true/>
     <key>com.apple.security.files.downloads.read-write</key>
     <true/>
-    <!-- ADR-066: Touch ID WebAuthn (Secure Enclave platform authenticator).
-         These three RESTRICTED entitlements are valid ONLY because the
-         Developer ID provisioning profile embedded via
-         mac.provisioningProfile allowlists them (keychain wildcard
-         6KTEPA3LSD.*). Without that profile macOS SIGKILLs the app at
-         launch — the paired guard test enforces profile + entitlements
-         move together. Helpers sign with entitlements.mac.inherit.plist
-         (no restricted keys, no profile needed). -->
-    <key>com.apple.application-identifier</key>
-    <string>6KTEPA3LSD.com.onereach.lite</string>
-    <key>com.apple.developer.team-identifier</key>
-    <string>6KTEPA3LSD</string>
-    <key>keychain-access-groups</key>
-    <array>
-        <string>6KTEPA3LSD.com.onereach.lite.webauthn</string>
-    </array>
 </dict>
-</plist>
+</plist> 

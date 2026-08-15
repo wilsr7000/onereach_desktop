@@ -121,14 +121,15 @@
     "gatekeeperAssess": false,
     "strictVerify": false,
     "entitlements": "lite/build/entitlements.mac.plist",
-    "entitlementsInherit": "lite/build/entitlements.mac.plist",
+    "entitlementsInherit": "lite/build/entitlements.mac.inherit.plist",
     "notarize": false,
     "extendInfo": {
       "NSMicrophoneUsageDescription": "Onereach.ai Lite uses the microphone for future voice features (kernel does not access mic).",
       "NSCameraUsageDescription": "Onereach.ai Lite uses the camera for future recording features (kernel does not access camera).",
       "CFBundleHelpBookFolder": "OnereachLite.help",
       "CFBundleHelpBookName": "com.onereach.lite.help"
-    }
+    },
+    "provisioningProfile": "lite/build/Onereach_Lite_DeveloperID.provisionprofile"
   },
   "afterSign": "scripts/notarize.js",
   "win": {

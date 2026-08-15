@@ -25,19 +25,31 @@ describe('ADR-066 — Touch ID WebAuthn pairing', () => {
     expect(src).toContain("typeof app.configureWebAuthn === 'function'");
   });
 
-  it('the entitlement stays OFF until the provisioning profile exists', () => {
+  it('the restricted entitlements and the provisioning profile move together', () => {
     // Under Developer ID, keychain-access-groups without an embedded
     // Developer ID provisioning profile makes AMFI SIGKILL the app at
-    // launch (live-confirmed 2026-08-14, exit 137 — shipping it would
-    // have killed every install). When the profile lands: restore the
-    // group + com.apple.application-identifier pair in the plist, set
-    // mac.provisioningProfile in lite/electron-builder.json, and invert
-    // these assertions.
+    // launch (live-confirmed 2026-08-14, exit 137). The profile landed
+    // 2026-08-15; these assertions keep the pairing intact: entitlement
+    // trio in the MAIN plist, profile wired in the builder, helpers on
+    // a separate inherit plist with NO restricted keys.
     const plist = readFileSync(resolve(root, 'lite/build/entitlements.mac.plist'), 'utf-8');
-    expect(plist).not.toContain('<key>keychain-access-groups</key>');
-    expect(plist).toContain('DELIBERATELY ABSENT');
+    expect(plist).toContain('<key>keychain-access-groups</key>');
+    expect(plist).toContain(`<string>${GROUP}</string>`);
+    expect(plist).toContain('<string>6KTEPA3LSD.com.onereach.lite</string>');
+
     const cfg = JSON.parse(readFileSync(resolve(root, 'lite/electron-builder.json'), 'utf-8'));
-    expect(cfg.mac.provisioningProfile).toBeUndefined();
+    expect(cfg.mac.provisioningProfile).toBe('lite/build/Onereach_Lite_DeveloperID.provisionprofile');
+    expect(cfg.mac.entitlementsInherit).toBe('lite/build/entitlements.mac.inherit.plist');
+
+    // The embedded profile must actually allowlist our group (wildcard).
+    const profile = readFileSync(resolve(root, 'lite/build/Onereach_Lite_DeveloperID.provisionprofile'), 'latin1');
+    expect(profile).toContain('6KTEPA3LSD.*');
+    expect(profile).toContain('6KTEPA3LSD.com.onereach.lite');
+
+    // Helpers carry no restricted keys — they have no embedded profile.
+    const inherit = readFileSync(resolve(root, 'lite/build/entitlements.mac.inherit.plist'), 'utf-8');
+    expect(inherit).not.toContain('keychain-access-groups');
+    expect(inherit).not.toContain('com.apple.application-identifier');
   });
 
   it('electron-builder signs with the lite plist (both entitlement keys)', () => {
