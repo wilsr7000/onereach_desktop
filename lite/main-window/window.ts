@@ -285,6 +285,21 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     if (session === null) return; // Sign-out path doesn't auto-reload.
     if (mainWindow === null || mainWindow.isDestroyed()) return;
     void refreshAttachedTabsForEnv(env);
+    // The Home view is an IDW too (2026-08-15): give it the fresh
+    // session and a reload so signing in un-sticks it without a
+    // restart. Best-effort — never let Home wiring break tab refresh.
+    void (async () => {
+      try {
+        if (homeFeedView === null || homeFeedView.webContents.isDestroyed()) return;
+        const homeUrl = homeFeedView.webContents.getURL();
+        if (getEnvironmentForUrl(homeUrl) !== env) return;
+        await getAuthApi().injectTokenIntoPartition(env, HOME_REMOTE_PARTITION);
+        homeFeedView.webContents.reload();
+        getLoggingApi().info('main-window', 'home remote reloaded after sign-in', { env });
+      } catch {
+        /* best-effort */
+      }
+    })();
   });
 
   mainWindow = win;
@@ -1334,17 +1349,21 @@ function attachRemoteHome(win: BrowserWindow): void {
       partition: HOME_REMOTE_PARTITION,
     },
   });
-  view.webContents.setWindowOpenHandler(({ url }) => {
-    try {
-      const scheme = new URL(url).protocol;
-      if (scheme === 'https:' || scheme === 'http:') {
-        void shell.openExternal(url);
-      }
-    } catch {
-      /* malformed URL — drop */
-    }
-    return { action: 'deny' };
-  });
+  // 2026-08-15: the Home surface is now an IDW (gsx-expert), and IDWs
+  // sign in via SSO. The old handler shipped EVERY https popup to the
+  // OS browser — silently, unlogged — so "Sign in with Google" opened
+  // in Chrome with no window.opener and the finished flow could never
+  // hand its token back ("sign in with google is broken", live).
+  // buildPopupHandler is the shared policy: OAuth IdP URLs open as
+  // SAME-PARTITION in-app popups (opener + cookies work); everything
+  // else still goes to the OS browser. Every decision logs.
+  view.webContents.setWindowOpenHandler(
+    buildPopupHandler({
+      partition: HOME_REMOTE_PARTITION,
+      source: 'main-window-home-remote',
+      logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
+    })
+  );
   view.webContents.on(
     'did-fail-load',
     (_e, errorCode, errorDescription, _validatedURL, isMainFrame) => {
@@ -1381,6 +1400,26 @@ function attachRemoteHome(win: BrowserWindow): void {
     const { url: configured } = await readHomeUrl();
     const accountId = getAuthApi().getSession('edison')?.accountId ?? null;
     const resolved = resolveHomeUrl(configured, accountId);
+    // Auto-login for an IDW-shaped Home (2026-08-15): inject the
+    // OneReach session into the Home partition BEFORE the load, same
+    // contract as IDW tabs — so the gsx-expert IDW comes up signed in
+    // instead of showing its SSO screen at all. Best-effort: a
+    // signed-out user just sees the IDW's own sign-in.
+    try {
+      const env = getEnvironmentForUrl(resolved);
+      if (env !== null) {
+        const inj = await getAuthApi().injectTokenIntoPartition(env, HOME_REMOTE_PARTITION);
+        getLoggingApi().info('main-window', 'home remote session inject', {
+          env,
+          injected: inj.injected,
+          ...(inj.reason !== undefined ? { reason: inj.reason } : {}),
+        });
+      }
+    } catch (err) {
+      getLoggingApi().warn('main-window', 'home remote session inject failed', {
+        error: (err as Error).message,
+      });
+    }
     // Some Home pages (e.g. the WISER capture join room) need
     // mic/camera. The handler is installed UNCONDITIONALLY: Electron's
     // default with no handler is GRANT-all, so a parse failure must
