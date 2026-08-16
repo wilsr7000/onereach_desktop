@@ -3,11 +3,11 @@
  *
  * Kernel menu structure (per ADR-016, which supersedes ADR-014):
  *
- *   Onereach.ai Lite (top:app,  role: appMenu)
- *     |- About Onereach.ai Lite (app:about, click)
+ *   WISER (top:app,  role: appMenu)
+ *     |- About WISER (app:about, click)
  *     |- Edit                   (top:edit,  submenu)
  *     |    |- Undo / Redo / Cut / Copy / Paste / Select All (role-driven)
- *     |- Quit Onereach.ai Lite  (app:quit,  click)
+ *     |- Quit WISER  (app:quit,  click)
  *
  *   Help (top:help)
  *     |- Onereach.ai Lite Help  (help:user-guide,        click) -- owned by lite/help
@@ -208,7 +208,7 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
     id: 'app:about',
     type: 'item',
     parentId: 'top:app',
-    label: 'About Onereach.ai Lite',
+    label: 'About WISER',
     order: 0,
     click: handlers.onAbout,
   });
@@ -261,7 +261,7 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
     id: 'app:quit',
     type: 'item',
     parentId: 'top:app',
-    label: 'Quit Onereach.ai Lite',
+    label: 'Quit WISER',
     order: 100,
     click: handlers.onQuit,
   });

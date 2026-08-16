@@ -104,8 +104,8 @@ function clickByLabel(
 }
 
 describe('TRAY_TOOLTIP', () => {
-  it('reads "Onereach.ai Lite" verbatim', () => {
-    expect(TRAY_TOOLTIP).toBe('Onereach.ai Lite');
+  it('reads "WISER" verbatim', () => {
+    expect(TRAY_TOOLTIP).toBe('WISER');
   });
 
   it('shares its value with TRAY_TOOLTIP_BASE (static base for dynamic tooltips)', () => {
@@ -130,7 +130,7 @@ describe('buildTooltip', () => {
     // non-empty>". Both are acceptable; the assertion below proves we
     // never produce an empty or malformed "v" suffix.
     if (tt !== TRAY_TOOLTIP_BASE) {
-      expect(tt).toMatch(/^Onereach\.ai Lite v\S+$/);
+      expect(tt).toMatch(/^WISER v\S+$/);
     }
   });
 });
@@ -143,9 +143,9 @@ describe('buildTrayMenuTemplate', () => {
     const labels = template
       .map((t) => t.label)
       .filter((l): l is string => typeof l === 'string');
-    expect(labels).toContain('Show Onereach.ai Lite');
-    expect(labels).toContain('Hide Onereach.ai Lite');
-    expect(labels).toContain('Quit Onereach.ai Lite');
+    expect(labels).toContain('Show WISER');
+    expect(labels).toContain('Hide WISER');
+    expect(labels).toContain('Quit WISER');
   });
 
   // The tray is the only surface still reachable when a window won't
@@ -182,7 +182,7 @@ describe('buildTrayMenuTemplate', () => {
       .filter((l): l is string => typeof l === 'string');
     expect(labels).not.toContain('Spaces…');
     expect(labels).not.toContain('Settings…');
-    expect(labels).not.toContain('Onereach.ai Lite Help');
+    expect(labels).not.toContain('WISER Help');
   });
 
   it('includes each optional entry only when its handler is provided', () => {
@@ -199,14 +199,14 @@ describe('buildTrayMenuTemplate', () => {
       .map((t) => t.label)
       .filter((l): l is string => typeof l === 'string');
     // First labeled item is the version header caption (dynamic version).
-    expect(labels[0]).toMatch(/^Onereach\.ai Lite( v\S+)?$/);
+    expect(labels[0]).toMatch(/^WISER( v\S+)?$/);
     expect(labels.slice(1)).toEqual([
-      'Show Onereach.ai Lite',
-      'Hide Onereach.ai Lite',
+      'Show WISER',
+      'Hide WISER',
       'Spaces…',
       'Settings…',
-      'Onereach.ai Lite Help',
-      'Quit Onereach.ai Lite',
+      'WISER Help',
+      'Quit WISER',
     ]);
   });
 
@@ -218,13 +218,13 @@ describe('buildTrayMenuTemplate', () => {
     // Structure: [Header, sep, Show, Hide, sep, Settings…, sep, Quit]
     expect(template).toHaveLength(8);
     expect(template[0]?.enabled).toBe(false);
-    expect(template[0]?.label).toMatch(/^Onereach\.ai Lite/);
+    expect(template[0]?.label).toMatch(/^WISER/);
     expect(template[1]?.type).toBe('separator');
-    expect(template[2]?.label).toBe('Show Onereach.ai Lite');
+    expect(template[2]?.label).toBe('Show WISER');
     expect(template[4]?.type).toBe('separator');
     expect(template[5]?.label).toBe('Settings…');
     expect(template[6]?.type).toBe('separator');
-    expect(template[7]?.label).toBe('Quit Onereach.ai Lite');
+    expect(template[7]?.label).toBe('Quit WISER');
   });
 
   it('still emits both separators even when no optional entries are wired', () => {
@@ -245,7 +245,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    clickByLabel(template, 'Show Onereach.ai Lite');
+    clickByLabel(template, 'Show WISER');
     expect(win.minimized).toBe(false);
     expect(win.visible).toBe(true);
   });
@@ -255,7 +255,7 @@ describe('buildTrayMenuTemplate', () => {
       getMainWindow: (() => null) as GetMain as () => never,
     });
     // Should not throw.
-    expect(() => clickByLabel(template, 'Show Onereach.ai Lite')).not.toThrow();
+    expect(() => clickByLabel(template, 'Show WISER')).not.toThrow();
   });
 
   it('Show handler no-ops when the main window has been destroyed', () => {
@@ -263,7 +263,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    expect(() => clickByLabel(template, 'Show Onereach.ai Lite')).not.toThrow();
+    expect(() => clickByLabel(template, 'Show WISER')).not.toThrow();
     expect(win.visible).toBe(false);
   });
 
@@ -272,7 +272,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    clickByLabel(template, 'Hide Onereach.ai Lite');
+    clickByLabel(template, 'Hide WISER');
     expect(win.visible).toBe(false);
   });
 
@@ -281,7 +281,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    expect(() => clickByLabel(template, 'Hide Onereach.ai Lite')).not.toThrow();
+    expect(() => clickByLabel(template, 'Hide WISER')).not.toThrow();
     expect(win.visible).toBe(false);
   });
 
@@ -299,7 +299,7 @@ describe('buildTrayMenuTemplate', () => {
     expect(onOpenSpaces).toHaveBeenCalledTimes(1);
     clickByLabel(template, 'Settings…');
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
-    clickByLabel(template, 'Onereach.ai Lite Help');
+    clickByLabel(template, 'WISER Help');
     expect(onOpenHelp).toHaveBeenCalledTimes(1);
   });
 
@@ -309,7 +309,7 @@ describe('buildTrayMenuTemplate', () => {
       getMainWindow: (() => null) as GetMain as () => never,
       onQuit,
     });
-    clickByLabel(template, 'Quit Onereach.ai Lite');
+    clickByLabel(template, 'Quit WISER');
     expect(onQuit).toHaveBeenCalledTimes(1);
   });
 
@@ -323,7 +323,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => null) as GetMain as () => never,
     });
-    const quitItem = template.find((t) => t.label === 'Quit Onereach.ai Lite');
+    const quitItem = template.find((t) => t.label === 'Quit WISER');
     expect(quitItem).toBeDefined();
     expect(typeof quitItem?.click).toBe('function');
   });

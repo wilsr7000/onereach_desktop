@@ -358,7 +358,7 @@ export function buildPulseFrames(
 // ─── Pure helpers (testable without Electron Tray) ──────────────────────
 
 /** Static base portion of the tooltip; combined with the version by `buildTooltip()`. */
-export const TRAY_TOOLTIP_BASE = 'Onereach.ai Lite' as const;
+export const TRAY_TOOLTIP_BASE = 'WISER' as const;
 
 /**
  * Backwards-compatible static tooltip. Retained as a const so the
@@ -474,7 +474,7 @@ export function buildTrayMenuTemplate(
   template.push({ label: buildTooltip(), enabled: false });
   template.push({ type: 'separator' });
   template.push({
-    label: 'Show Onereach.ai Lite',
+    label: 'Show WISER',
     click: () => {
       const win = opts.getMainWindow();
       if (win === null || win.isDestroyed()) return;
@@ -484,7 +484,7 @@ export function buildTrayMenuTemplate(
     },
   });
   template.push({
-    label: 'Hide Onereach.ai Lite',
+    label: 'Hide WISER',
     click: () => {
       const win = opts.getMainWindow();
       if (win === null || win.isDestroyed()) return;
@@ -499,14 +499,14 @@ export function buildTrayMenuTemplate(
     template.push({ label: 'Settings…', click: opts.onOpenSettings });
   }
   if (opts.onOpenHelp !== undefined) {
-    template.push({ label: 'Onereach.ai Lite Help', click: opts.onOpenHelp });
+    template.push({ label: 'WISER Help', click: opts.onOpenHelp });
   }
   if (opts.onReportBug !== undefined) {
     template.push({ label: 'Report a Bug…', click: opts.onReportBug });
   }
   template.push({ type: 'separator' });
   template.push({
-    label: 'Quit Onereach.ai Lite',
+    label: 'Quit WISER',
     click: opts.onQuit ?? ((): void => app.quit()),
   });
   return template;

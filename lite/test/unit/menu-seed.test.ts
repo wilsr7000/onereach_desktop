@@ -115,8 +115,8 @@ describe('seedKernelMenu', () => {
 
   it('every kernel item uses an explicit label (not role-derived)', () => {
     seedKernelMenu(handlers);
-    expect(registry.get('app:about')?.label).toBe('About Onereach.ai Lite');
-    expect(registry.get('app:quit')?.label).toBe('Quit Onereach.ai Lite');
+    expect(registry.get('app:about')?.label).toBe('About WISER');
+    expect(registry.get('app:quit')?.label).toBe('Quit WISER');
     expect(registry.get('help:report-bug')?.label).toBe('Report a Bug...');
   });
 
