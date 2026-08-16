@@ -27,7 +27,7 @@
  */
 
 import { execSync, spawnSync } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, existsSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -111,6 +111,38 @@ if (process.env.SKIP_NOTARIZE === '1') {
   merged.mac = { ...(baseConfig.mac || {}), timestamp: 'none' };
   console.log('[electron-builder-mac] SKIP_NOTARIZE=1 -- mac.timestamp set to "none" (no Apple timestamp server)');
 }
+
+// ---------------------------------------------------------------------------
+// Provisioning profile resolution (open-source signing contract).
+//   * LITE_PROVISIONING_PROFILE=<path>  -> use it (CI injects from a secret).
+//   * LITE_PROVISIONING_PROFILE=none    -> force no profile (unsigned/ad-hoc).
+//   * unset -> use the config's default path IF the file exists on disk,
+//              else drop the key so a fork/CI without the (git-ignored)
+//              profile still builds. The Developer ID identity itself comes
+//              from the keychain, or from CSC_LINK/CSC_KEY_PASSWORD in CI —
+//              electron-builder reads those env vars natively; nothing here
+//              hardcodes a certificate.
+// ---------------------------------------------------------------------------
+const envProfile = process.env.LITE_PROVISIONING_PROFILE;
+if (envProfile === 'none') {
+  delete merged.mac.provisioningProfile;
+  console.log('[electron-builder-mac] LITE_PROVISIONING_PROFILE=none -- building without a provisioning profile');
+} else if (envProfile) {
+  merged.mac.provisioningProfile = envProfile;
+  console.log(`[electron-builder-mac] provisioning profile from env: ${envProfile}`);
+} else if (merged.mac.provisioningProfile) {
+  const resolved = path.isAbsolute(merged.mac.provisioningProfile)
+    ? merged.mac.provisioningProfile
+    : path.join(repoRoot, merged.mac.provisioningProfile);
+  if (!existsSync(resolved)) {
+    delete merged.mac.provisioningProfile;
+    console.log(
+      '[electron-builder-mac] provisioning profile not found on disk -- building without it ' +
+        '(set LITE_PROVISIONING_PROFILE to supply one; keychain/CSC_* still provides the identity)'
+    );
+  }
+}
+
 const tempConfigPath = path.join(distLite, 'build-config.json');
 await fs.writeFile(tempConfigPath, JSON.stringify(merged, null, 2));
 console.log(`[electron-builder-mac] wrote merged config to ${tempConfigPath}`);

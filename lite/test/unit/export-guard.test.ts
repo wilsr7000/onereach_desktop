@@ -63,4 +63,27 @@ describe('export-guard', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('BLOCKS a tree with committed signing material (.provisionprofile)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'exportguard-signing-'));
+    try {
+      mkdirSync(join(dir, 'lite', 'build'), { recursive: true });
+      // Content is irrelevant — presence of the file type is the finding.
+      writeFileSync(join(dir, 'lite', 'build', 'App_DeveloperID.provisionprofile'), 'binary-ish');
+      expect(run(dir)).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('BLOCKS a tree with a private key (.p12)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'exportguard-p12-'));
+    try {
+      mkdirSync(join(dir, 'certs'), { recursive: true });
+      writeFileSync(join(dir, 'certs', 'signing.p12'), 'not-a-real-key');
+      expect(run(dir)).toBe(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

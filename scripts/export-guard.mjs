@@ -22,12 +22,11 @@
  * Exit:   0 = clean · 1 = CRITICAL/HIGH found · 2 = scan error
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, extname } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { join, extname, basename } from 'node:path';
 
 const ROOT = process.argv[2] || '.';
-const SCAN_DIRS = ['lite', 'lib', 'web', 'scripts', 'packages', 'docs'];
-const SCAN_ROOT_FILES = ['main.js', 'menu.js', 'action-executor.js', 'recorder.js', 'settings-manager.js'];
-const SKIP = /node_modules|\.git|dist-lite|dist|\.claude\/worktrees|coverage/;
+const SKIP = /node_modules|\.git\/|dist-lite|dist\/|\.claude\/worktrees|coverage/;
 const EXT = new Set(['.ts', '.js', '.mjs', '.cjs', '.html', '.json', '.md']);
 
 const RULES = [
@@ -44,29 +43,57 @@ const RULES = [
 // Lines that are obviously safe: env reads, placeholders, redaction patterns
 const SAFE = /process\.env|import\.meta\.env|settings[?.]*\.get|placeholder|example|redact|\byour-|xxxx|\$\{/i;
 
-function walk(p, out) {
-  let st; try { st = statSync(p); } catch { return; }
-  if (SKIP.test(p)) return;
-  if (st.isDirectory()) { for (const e of readdirSync(p)) walk(join(p, e), out); return; }
-  if (!EXT.has(extname(p))) return;
-  out.push(p);
+// Private signing material must NEVER be committed to a public repo — the
+// Developer ID key signs as "OneReach, Inc." A provisioning profile carries
+// only the PUBLIC cert (not the key), but a public repo injects it in CI
+// rather than committing it, so it is blocked here too. Cleared by
+// git-ignoring the file and supplying it via a CI secret.
+const SIGNING_FILE = /\.(p12|pfx|cer|pem|key|keystore|mobileprovision|provisionprofile)$/i;
+
+/**
+ * The publishable surface = files that would actually ship. Inside a git
+ * repo that's the TRACKED set (`git ls-files`), so a git-ignored profile
+ * sitting on a dev disk is correctly NOT flagged, while a *committed* one
+ * is. Outside a repo (tests, an extracted export dir) fall back to a full
+ * filesystem walk.
+ */
+function trackedFiles() {
+  try {
+    const out = execFileSync('git', ['-C', ROOT, 'ls-files', '-z'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const rel = out.split('\0').filter(Boolean);
+    if (rel.length > 0) return rel.map((r) => join(ROOT, r));
+  } catch { /* not a git repo — fall through to walk */ }
+  const acc = [];
+  const walk = (p) => {
+    let st; try { st = statSync(p); } catch { return; }
+    if (SKIP.test(p + (st.isDirectory() ? '/' : ''))) return;
+    if (st.isDirectory()) { for (const e of readdirSync(p)) walk(join(p, e)); return; }
+    acc.push(p);
+  };
+  walk(ROOT);
+  return acc;
 }
 
-const files = [];
-for (const d of SCAN_DIRS) walk(join(ROOT, d), files);
-for (const f of SCAN_ROOT_FILES) walk(join(ROOT, f), files);
+const files = trackedFiles().filter((f) => !SKIP.test(f));
 
 const findings = [];
 for (const f of files) {
-  let text; try { text = readFileSync(f, 'utf8'); } catch { continue; }
+  const rel = f.startsWith(ROOT + '/') ? f.slice(ROOT.length + 1) : f;
   const isTest = /\.(test|spec)\.|\/test\//.test(f) || /fixtures?\//.test(f);
+  // Forbidden-file check runs regardless of extension.
+  if (SIGNING_FILE.test(basename(f))) {
+    findings.push({ sev: 'CRITICAL', rule: 'signing-material-committed', file: rel, line: 1, isTest });
+    continue;
+  }
+  if (!EXT.has(extname(f))) continue;
+  let text; try { text = readFileSync(f, 'utf8'); } catch { continue; }
   const lines = text.split('\n');
   for (const rule of RULES) {
     lines.forEach((line, i) => {
       rule.re.lastIndex = 0;
       if (rule.re.test(line)) {
         if (rule.sev === 'MEDIUM' && SAFE.test(line)) return;
-        findings.push({ sev: rule.sev, rule: rule.id, file: f.replace(ROOT + '/', ''), line: i + 1, isTest });
+        findings.push({ sev: rule.sev, rule: rule.id, file: rel, line: i + 1, isTest });
       }
     });
   }

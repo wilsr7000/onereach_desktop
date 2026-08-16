@@ -114,3 +114,13 @@ debug-*.js
 .env.signing
 **/notarization-credentials.json
 certify-*.log
+# ── Code-signing material (open-source: inject via CI, never commit) ──
+# Private keys sign as "OneReach, Inc." — must never be public. The
+# provisioning profile is public-cert-only but is CI-injected, not tracked,
+# so forks supply their own. The export guard blocks any of these if staged.
+*.p12
+*.pfx
+*.cer
+*.keystore
+*.mobileprovision
+*.provisionprofile
