@@ -1605,3 +1605,21 @@ describe('AuthStore × SessionVault — persistence across restarts', () => {
     expect(kc.m.get(`${SESSION_VAULT_SERVICE} session-edison`)).toBeUndefined();
   });
 });
+
+describe('ADR-068 — GSX identity capture from the or cookie', () => {
+  it('primaryEmailFromGsx strips the +tag and lowercases', async () => {
+    const { primaryEmailFromGsx } = await import('../../auth/store');
+    expect(primaryEmailFromGsx('robb+admin/onereach@onereach.com')).toBe('robb@onereach.com');
+    expect(primaryEmailFromGsx('robb+multitenant/edison/gsx_expert@Onereach.com')).toBe('robb@onereach.com');
+    expect(primaryEmailFromGsx('robb@onereach.com')).toBe('robb@onereach.com');
+    expect(primaryEmailFromGsx('not-an-email')).toBeNull();
+    expect(primaryEmailFromGsx(undefined)).toBeNull();
+  });
+
+  it('gsxEmailFromCookie reads username first, then email, verbatim (lowercased)', async () => {
+    const { gsxEmailFromCookie } = await import('../../auth/store');
+    expect(gsxEmailFromCookie({ username: 'Robb+Admin@onereach.com' })).toBe('robb+admin@onereach.com');
+    expect(gsxEmailFromCookie({ email: 'x@y.com' })).toBe('x@y.com');
+    expect(gsxEmailFromCookie({ accountId: 'no-email-here' })).toBeUndefined();
+  });
+});

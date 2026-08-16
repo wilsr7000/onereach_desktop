@@ -1203,11 +1203,16 @@ export class AuthStore {
       return null;
     }
     const hydratedExpiresAt = earliestCookieExpiryMs(mult, or);
+    const gsxEmail = gsxEmailFromCookie(decoded);
+    const primaryEmail = primaryEmailFromGsx(decoded.username ?? decoded.email);
     const session: AuthSession = {
       environment: env,
       accountId,
       capturedAt: Date.now(),
-      ...(typeof decoded.email === 'string' ? { email: decoded.email } : {}),
+      ...(primaryEmail !== null ? { email: primaryEmail } : {}),
+      ...(gsxEmail !== undefined ? { gsxEmail } : {}),
+      ...(typeof decoded.multiUserId === 'string' ? { gsxMultiUserId: decoded.multiUserId } : {}),
+      ...(typeof decoded.userId === 'string' ? { gsxUserId: decoded.userId } : {}),
       ...(hydratedExpiresAt !== undefined ? { expiresAt: hydratedExpiresAt } : {}),
     };
     this.tokens.set(env, mult.value);
@@ -1715,10 +1720,15 @@ export class AuthStore {
     }
 
     const capturedExpiresAt = earliestCookieExpiryMs(mult, or);
+    const capturedGsxEmail = gsxEmailFromCookie(decoded);
+    const capturedPrimaryEmail = primaryEmailFromGsx(decoded.username ?? decoded.email);
     const session: AuthSession = {
       environment: buffer.env,
       accountId,
-      ...(decoded.email !== undefined ? { email: decoded.email } : {}),
+      ...(capturedPrimaryEmail !== null ? { email: capturedPrimaryEmail } : {}),
+      ...(capturedGsxEmail !== undefined ? { gsxEmail: capturedGsxEmail } : {}),
+      ...(typeof decoded.multiUserId === 'string' ? { gsxMultiUserId: decoded.multiUserId } : {}),
+      ...(typeof decoded.userId === 'string' ? { gsxUserId: decoded.userId } : {}),
       capturedAt: Date.now(),
       ...(capturedExpiresAt !== undefined ? { expiresAt: capturedExpiresAt } : {}),
     };
@@ -1943,8 +1953,41 @@ function cookieMetadata(cookie: Cookie): Record<string, unknown> {
 
 interface OrCookiePayload {
   accountId?: string;
+  /** GSX puts the email HERE, not in `email` (verified 2026-08-15). */
+  username?: string;
+  /** Legacy/other cookie shapes may still use `email`. */
   email?: string;
+  /** GSX stable per-user id (UUID) — the canonical Person key (ADR-068). */
+  multiUserId?: string;
+  /** GSX user id (UUID). */
+  userId?: string;
   [key: string]: unknown;
+}
+
+/**
+ * Strip a plus-tag from an email's local part:
+ * `robb+admin/onereach@onereach.com` → `robb@onereach.com`. GSX login
+ * aliases (`+multitenant/…`, `+admin/…`) are the same human, so the
+ * base form is the primary email; the plus form is kept as the GSX
+ * email. Returns lowercased, or null on a non-email.
+ */
+export function primaryEmailFromGsx(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const email = raw.trim().toLowerCase();
+  const at = email.indexOf('@');
+  if (at <= 0 || email.indexOf('.', at) === -1) return null;
+  const local = email.slice(0, at);
+  const domain = email.slice(at + 1);
+  const plus = local.indexOf('+');
+  const base = plus === -1 ? local : local.slice(0, plus);
+  return base.length > 0 ? `${base}@${domain}` : null;
+}
+
+/** The GSX (plus-tagged) email verbatim from the cookie — lowercased. */
+export function gsxEmailFromCookie(decoded: OrCookiePayload): string | undefined {
+  const raw = typeof decoded.username === 'string' ? decoded.username : decoded.email;
+  if (typeof raw !== 'string' || raw.indexOf('@') === -1) return undefined;
+  return raw.trim().toLowerCase();
 }
 
 /**

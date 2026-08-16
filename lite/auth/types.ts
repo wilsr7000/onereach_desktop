@@ -125,10 +125,29 @@ export const ENVIRONMENT_CONFIGS: Readonly<Partial<Record<Environment, Environme
 export interface AuthSession {
   /** Which OneReach environment this session is for. */
   environment: Environment;
-  /** The accountId the user picked in GSX (UUID). */
+  /** The accountId the user picked in GSX (UUID) — the GSX PRIMARY account. */
   accountId: string;
-  /** User email, extracted from the decoded `or` cookie if available. */
+  /**
+   * GSX **multi-user id** (UUID) — the stable per-human identity, unique
+   * across email changes and login aliases. The canonical key for the
+   * graph Person (ADR-068). Present whenever the `or` cookie carries it.
+   */
+  gsxMultiUserId?: string;
+  /** GSX user id (UUID) from the `or` cookie — secondary GSX identifier. */
+  gsxUserId?: string;
+  /**
+   * Primary email — the base address with any `+tag` stripped
+   * (`robb+admin/onereach@…` → `robb@…`). Both the base and the GSX
+   * (plus-tagged) form resolve to the same human.
+   *
+   * NOTE (2026-08-15): GSX stores the email in the `or` cookie under
+   * `username`, NOT `email`. Reading only `decoded.email` made every
+   * session look email-less and fall back to the accountId — the cause
+   * of the zero-visible-spaces bug and the duplicate Person nodes.
+   */
   email?: string;
+  /** The GSX email — the `username` verbatim, i.e. the `+tag` form. */
+  gsxEmail?: string;
   /** Wall-clock time (ms epoch) the cookies were captured. */
   capturedAt: number;
   /** Cookie expiration (ms epoch), if known. From cookie.expirationDate * 1000. */
