@@ -124,8 +124,9 @@
     "entitlementsInherit": "lite/build/entitlements.mac.inherit.plist",
     "notarize": false,
     "extendInfo": {
-      "NSMicrophoneUsageDescription": "Onereach.ai Lite uses the microphone for future voice features (kernel does not access mic).",
-      "NSCameraUsageDescription": "Onereach.ai Lite uses the camera for future recording features (kernel does not access camera).",
+      "CFBundleDisplayName": "WISER",
+      "NSMicrophoneUsageDescription": "WISER uses the microphone for future voice features (kernel does not access mic).",
+      "NSCameraUsageDescription": "WISER uses the camera for future recording features (kernel does not access camera).",
       "CFBundleHelpBookFolder": "OnereachLite.help",
       "CFBundleHelpBookName": "com.onereach.lite.help"
     },

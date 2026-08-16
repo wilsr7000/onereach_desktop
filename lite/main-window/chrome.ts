@@ -500,6 +500,6 @@ async function bootstrap(boot?: RendererBootContext): Promise<void> {
 // unguarded `void bootstrap()` (2026-08-08 hardening review).
 bootRenderer({
   scope: 'chrome',
-  title: 'Onereach.ai Lite failed to load',
+  title: 'WISER failed to load',
   init: (ctx) => bootstrap(ctx),
 });

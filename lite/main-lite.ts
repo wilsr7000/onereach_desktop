@@ -77,7 +77,16 @@ import { rescueAllWindows } from './window-rescue.js';
 let pendingUpdaterBugReport: string | null = null;
 
 const LITE_LOG_PORT = 47392;
+// INTERNAL identity — drives app.setName(), the userData path, the
+// keychain SessionVault service, and Squirrel.Mac update pathing.
+// MUST stay 'Onereach.ai Lite': changing it moves userData (users lose
+// local state + re-sign-in) and breaks auto-update for installed 0.0.67.
+// The WISER rebrand (2026-08-15) is display-only — see LITE_DISPLAY_NAME.
 const LITE_PRODUCT_NAME = 'Onereach.ai Lite';
+// USER-FACING name — window titles, About, banner. Decoupled from the
+// internal bundle identity above so the rebrand costs zero disruption
+// (macOS Dock/Finder show it via CFBundleDisplayName in electron-builder).
+export const LITE_DISPLAY_NAME = 'WISER';
 
 // ============================================================================
 // APP IDENTITY -- override the defaults that Electron picks up from its own
@@ -578,11 +587,11 @@ app
     // app:about menu entry's click handler.
     if (process.platform === 'darwin') {
       app.setAboutPanelOptions({
-        applicationName: LITE_PRODUCT_NAME,
+        applicationName: LITE_DISPLAY_NAME,
         applicationVersion: LITE_VERSION,
         version: LITE_VERSION,
         copyright: 'Copyright © 2026 Onereach.ai',
-        credits: `${LITE_PRODUCT_NAME} -- v0.1 kernel`,
+        credits: `${LITE_DISPLAY_NAME} — WISER method reference kernel`,
       });
     }
 
@@ -1312,7 +1321,7 @@ function createMainWindow(preloadPath: string): BrowserWindow {
   const win = new BrowserWindow({
     width: 720,
     height: 480,
-    title: LITE_PRODUCT_NAME,
+    title: LITE_DISPLAY_NAME,
     backgroundColor: '#0e0e10',
     show: false,
     webPreferences: {
@@ -1358,7 +1367,7 @@ function openAboutWindow(): void {
   aboutWindow = new BrowserWindow({
     width: 360,
     height: 280,
-    title: `About ${LITE_PRODUCT_NAME}`,
+    title: `About ${LITE_DISPLAY_NAME}`,
     resizable: false,
     minimizable: false,
     maximizable: false,

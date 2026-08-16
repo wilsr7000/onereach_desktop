@@ -162,6 +162,7 @@
       "notarize": false,
       "x64ArchFiles": "{Contents/Resources/claude-code/**/*,Contents/Resources/app.asar.unpacked/**/*}",
       "extendInfo": {
+        "CFBundleDisplayName": "WISER",
         "NSMicrophoneUsageDescription": "Onereach.ai uses the microphone for voice commands and speech recognition.",
         "NSCameraUsageDescription": "Onereach.ai uses the camera for video recording and screen capture.",
         "NSLocationUsageDescription": "Onereach.ai uses your location to answer location-aware questions (weather, nearby places, directions) with fresh, precise data instead of stale defaults.",
