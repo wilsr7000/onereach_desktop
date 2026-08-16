@@ -4114,3 +4114,14 @@ describe('ADR-065 second pass — whole-app NEON scoping audit (2026-08-14)', ()
     expect(CYPHER.GRANT_SELF_ACCESS).not.toContain('ON MATCH SET p.');
   });
 });
+
+describe('ADR-068 — Person logs GSX identity (multiUserId + account id)', () => {
+  it('MERGE_PERSON sets the GSX ids set-if-absent (coalesce, never clobber)', () => {
+    const q = CYPHER.MERGE_PERSON;
+    expect(q).toContain('p.gsxMultiUserId = coalesce(p.gsxMultiUserId, $gsxMultiUserId)');
+    expect(q).toContain('p.gsxAccountId   = coalesce(p.gsxAccountId, $gsxAccountId)');
+    expect(q).toContain('p.gsxEmail       = coalesce(p.gsxEmail, $gsxEmail)');
+    // Returns the canonical id back for correlation.
+    expect(q).toContain('p.gsxMultiUserId AS gsxMultiUserId');
+  });
+});

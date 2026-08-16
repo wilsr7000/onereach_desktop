@@ -501,7 +501,15 @@ async function loadCurrentUser(): Promise<IdentityStatus> {
   const w = window as unknown as {
     lite?: {
       auth?: {
-        getSession(env: string): Promise<{ session: { accountId: string; email?: string } | null }>;
+        getSession(env: string): Promise<{
+          session: {
+            accountId: string;
+            email?: string;
+            gsxMultiUserId?: string;
+            gsxUserId?: string;
+            gsxEmail?: string;
+          } | null;
+        }>;
       };
       spaces?: {
         identity?: {
@@ -512,6 +520,10 @@ async function loadCurrentUser(): Promise<IdentityStatus> {
             id: string;
             name?: string;
             email?: string;
+            gsxMultiUserId?: string;
+            gsxAccountId?: string;
+            gsxUserId?: string;
+            gsxEmail?: string;
           }): Promise<{ ok: true; value: { id: string; name: string; email?: string } } | { ok: false }>;
         };
       };
@@ -545,10 +557,24 @@ async function loadCurrentUser(): Promise<IdentityStatus> {
     }
     const id = email;
     const name = personNameFromEmail(email) ?? email;
-    const upsertPayload: { id: string; name: string; email?: string } = {
+    // ADR-068 — log the GSX identity on the Person. accountId is the GSX
+    // primary account; gsxMultiUserId is the canonical per-human id.
+    const upsertPayload: {
+      id: string;
+      name: string;
+      email?: string;
+      gsxMultiUserId?: string;
+      gsxAccountId?: string;
+      gsxUserId?: string;
+      gsxEmail?: string;
+    } = {
       id,
       name,
       email,
+      ...(typeof session.gsxMultiUserId === 'string' ? { gsxMultiUserId: session.gsxMultiUserId } : {}),
+      ...(typeof session.accountId === 'string' ? { gsxAccountId: session.accountId } : {}),
+      ...(typeof session.gsxUserId === 'string' ? { gsxUserId: session.gsxUserId } : {}),
+      ...(typeof session.gsxEmail === 'string' ? { gsxEmail: session.gsxEmail } : {}),
     };
     const envelope = await identity.getOrCreatePerson(upsertPayload);
     if (envelope.ok === false) return 'soft-error';

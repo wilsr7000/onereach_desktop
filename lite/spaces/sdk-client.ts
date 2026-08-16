@@ -1634,9 +1634,19 @@ export const CYPHER = {
       ON MATCH SET p.name = coalesce(p.name, $name),
                    p.email = coalesce(p.email, $email),
                    p.updatedAt = $now
+    // ADR-068 — log the GSX identity on the Person. Set-if-absent
+    // (coalesce keeps the first non-null), so a later login can only
+    // FILL a blank, never clobber. gsxMultiUserId is the canonical
+    // per-human key (UNIQUE-constrained after the dedupe migration).
+    SET p.gsxMultiUserId = coalesce(p.gsxMultiUserId, $gsxMultiUserId),
+        p.gsxAccountId   = coalesce(p.gsxAccountId, $gsxAccountId),
+        p.gsxUserId      = coalesce(p.gsxUserId, $gsxUserId),
+        p.gsxEmail       = coalesce(p.gsxEmail, $gsxEmail)
     RETURN p.id AS id,
            coalesce(p.name, '') AS name,
-           coalesce(p.email, '') AS email
+           coalesce(p.email, '') AS email,
+           p.gsxMultiUserId AS gsxMultiUserId,
+           p.gsxAccountId AS gsxAccountId
   `,
 
   /**
@@ -4385,7 +4395,18 @@ export class SdkSpacesClient {
     const name = typeof input.name === 'string' ? input.name.trim() : '';
     const email = typeof input.email === 'string' ? input.email.trim() : '';
     const now = nowIso();
-    const rows = await this.run(CYPHER.MERGE_PERSON, { id, name, email, now });
+    const gsxParam = (v: unknown): string | null =>
+      typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
+    const rows = await this.run(CYPHER.MERGE_PERSON, {
+      id,
+      name,
+      email,
+      now,
+      gsxMultiUserId: gsxParam(input.gsxMultiUserId),
+      gsxAccountId: gsxParam(input.gsxAccountId),
+      gsxUserId: gsxParam(input.gsxUserId),
+      gsxEmail: gsxParam(input.gsxEmail),
+    });
     const row = rows[0] as Record<string, unknown> | undefined;
     if (row === undefined) {
       // MERGE should always return one row, but if the Neo4j adapter

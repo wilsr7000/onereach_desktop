@@ -369,6 +369,10 @@ interface AuthSessionRendererView {
   environment: AuthEnvironment;
   accountId: string;
   email?: string;
+  /** ADR-068 — GSX identity forwarded from the session for Person logging. */
+  gsxMultiUserId?: string;
+  gsxUserId?: string;
+  gsxEmail?: string;
   capturedAt: number;
   expiresAt?: number;
 }

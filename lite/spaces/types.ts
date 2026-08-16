@@ -873,12 +873,25 @@ export interface Person {
  * insertion so attribution lights up immediately).
  */
 export interface PersonUpsertInput {
-  /** Stable id. Use lowercased email when available; falls back to accountId. */
+  /**
+   * Stable id. The PRIMARY email (base form, +tag stripped) — collapses
+   * GSX login aliases (robb+admin/…@ and robb@ → one node). Falls back
+   * to accountId only when no email is resolvable (ADR-068).
+   */
   id: string;
   /** Display name. Optional; preserves any existing value when omitted. */
   name?: string;
-  /** Optional email. Same preserve-existing rule applies. */
+  /** Primary email. Same preserve-existing rule applies. */
   email?: string;
+  /**
+   * GSX identity, logged on the Person (ADR-068). `gsxMultiUserId` is
+   * the stable per-human id (UNIQUE-constrained); `gsxAccountId` is the
+   * GSX primary account; `gsxEmail` is the +tag login form.
+   */
+  gsxMultiUserId?: string;
+  gsxAccountId?: string;
+  gsxUserId?: string;
+  gsxEmail?: string;
 }
 
 /**
