@@ -86,3 +86,31 @@ describe('bootstrap fallback wiring (source-level)', () => {
     expect(read('preload-lite.ts')).toContain('attributionEmailGet: ()');
   });
 });
+
+describe('attribution email sync cache (viewerId fallback — 2026-08-15 incident)', () => {
+  it('primes a sync accessor so an email-less session resolves to the declared email', async () => {
+    const os = await import('node:os');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const mod = await import('../../spaces/identity-store');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'attr-cache-'));
+    try {
+      mod.setIdentityStoreDirForTesting(dir);
+      // Cold: nothing stored yet.
+      await mod.primeAttributionEmailCache();
+      expect(mod.readAttributionEmailSync()).toBeNull();
+      // Write warms the cache synchronously for the next reader.
+      await mod.writeAttributionEmail('Robb@Onereach.com');
+      expect(mod.readAttributionEmailSync()).toBe('robb@onereach.com'); // lowercased
+      // A fresh process (cache reset) re-primes from disk.
+      await mod.primeAttributionEmailCache();
+      expect(mod.readAttributionEmailSync()).toBe('robb@onereach.com');
+      // Clearing empties the cache.
+      await mod.writeAttributionEmail(null);
+      expect(mod.readAttributionEmailSync()).toBeNull();
+    } finally {
+      mod.setIdentityStoreDirForTesting(null);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

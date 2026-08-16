@@ -44,12 +44,36 @@ export function validateAttributionEmail(raw: unknown): string | null {
   return m === null ? null : email;
 }
 
+/**
+ * Sync cache of the stored attribution email. The query-time viewer
+ * identity (`viewerId()` in main.ts) is synchronous and must fall back
+ * to this email when the session carries none — otherwise a viewer with
+ * an email-less GSX session is gated under their bare accountId and sees
+ * NONE of the Spaces they created under their email (live incident
+ * 2026-08-15: 14 spaces createdBy=robb@onereach.com, viewer resolved to
+ * the accountId → 0 visible). Populated by every read/write and by
+ * `primeAttributionEmailCache()` at boot.
+ */
+let attributionCache: string | null = null;
+
+/** Sync accessor for the query-time identity fallback. Null until primed. */
+export function readAttributionEmailSync(): string | null {
+  return attributionCache;
+}
+
+/** Warm the sync cache once at boot, before any Space query runs. */
+export async function primeAttributionEmailCache(): Promise<void> {
+  await readAttributionEmail();
+}
+
 export async function readAttributionEmail(): Promise<string | null> {
   try {
     const raw = await fs.readFile(storePath(), 'utf8');
     const parsed = JSON.parse(raw) as { email?: unknown };
-    return validateAttributionEmail(parsed.email);
+    attributionCache = validateAttributionEmail(parsed.email);
+    return attributionCache;
   } catch {
+    attributionCache = null;
     return null;
   }
 }
@@ -59,6 +83,7 @@ export async function writeAttributionEmail(raw: string | null): Promise<string 
   const target = storePath();
   if (raw === null || (typeof raw === 'string' && raw.trim().length === 0)) {
     await fs.rm(target, { force: true });
+    attributionCache = null;
     return null;
   }
   const valid = validateAttributionEmail(raw);
@@ -69,5 +94,6 @@ export async function writeAttributionEmail(raw: string | null): Promise<string 
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(tmp, JSON.stringify({ email: valid }, null, 2), 'utf8');
   await fs.rename(tmp, target);
+  attributionCache = valid;
   return valid;
 }

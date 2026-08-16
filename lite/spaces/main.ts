@@ -221,7 +221,12 @@ import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
 import { runGsxMigration } from './gsx-migration.js';
 import { readLearnProgress, writeLearnProgress } from './learn-store.js';
-import { readAttributionEmail, writeAttributionEmail } from './identity-store.js';
+import {
+  readAttributionEmail,
+  readAttributionEmailSync,
+  writeAttributionEmail,
+  primeAttributionEmailCache,
+} from './identity-store.js';
 import { sanitizeChecklistItems } from './sdk-client.js';
 import { getAiApi } from '../ai/api.js';
 
@@ -336,10 +341,19 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
     activeCache.startRefreshTimer();
   }
 
-  // Pre-warm the cache so the renderer's first paint is instant.
-  // Fire-and-forget on the next tick so the kernel boot doesn't block
-  // on Neon -- the user can keep going while these settle.
-  void Promise.resolve().then(() => prewarmSpacesCache(api, log));
+  // Prime the attribution-email cache BEFORE the first Space query, so
+  // viewerId() can resolve an email-less session to the user's declared
+  // email (their createdBy identity) instead of the bare accountId —
+  // otherwise the pre-warm below runs under the wrong identity and the
+  // user sees zero of their own Spaces (2026-08-15 incident). Chained,
+  // not raced, ahead of the pre-warm.
+  void primeAttributionEmailCache()
+    .catch((err) =>
+      log.warn('attribution cache prime failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    )
+    .then(() => prewarmSpacesCache(api, log));
 
   if (registered) return handle;
 
@@ -775,7 +789,15 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       const session = getAuthApi().getSession('edison');
       if (session === null) return null;
       const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
-      return email.length > 0 ? email : session.accountId;
+      if (email.length > 0) return email;
+      // Session carries no email → use the declared attribution email,
+      // the SAME identity loadCurrentUser stamps on created Spaces
+      // (createdBy). Without this the viewer is gated under the bare
+      // accountId and sees none of their own email-owned Spaces
+      // (2026-08-15 incident). accountId is only the last resort.
+      const attribution = readAttributionEmailSync();
+      if (attribution !== null && attribution.length > 0) return attribution;
+      return session.accountId;
     },
     // ADR-059 — universal notes. Note BODIES live in the shared Edison
     // KV store (the same store WISER Playbooks / OR-Mobile write);
