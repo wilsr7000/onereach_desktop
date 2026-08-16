@@ -414,16 +414,21 @@ describe('trayIconCandidates', () => {
     expect(fromAssets.length).toBeGreaterThanOrEqual(1);
   });
 
-  it('on macOS, prefers the color tray-icon.png so the resize is not clamped by macOS template auto-fit', () => {
-    if (process.platform !== 'darwin') return; // platform-specific assertion
+  it('prefers the color tray-icon.png (app-icon artwork) on every platform', () => {
     const candidates = trayIconCandidates();
     expect(candidates[0]).toMatch(/tray-icon\.png$/);
     expect(candidates[0]).not.toMatch(/Template/);
   });
 
-  it('on non-macOS, prefers the template-named variant first (no template auto-fit concern)', () => {
-    if (process.platform === 'darwin') return; // platform-specific assertion
-    const candidates = trayIconCandidates();
-    expect(candidates[0]).toMatch(/tray-iconTemplate\.png$/);
+  it('prefers the template variant when LITE_TRAY_TEMPLATE=1', () => {
+    const prev = process.env['LITE_TRAY_TEMPLATE'];
+    process.env['LITE_TRAY_TEMPLATE'] = '1';
+    try {
+      const candidates = trayIconCandidates();
+      expect(candidates[0]).toMatch(/tray-iconTemplate\.png$/);
+    } finally {
+      if (prev === undefined) delete process.env['LITE_TRAY_TEMPLATE'];
+      else process.env['LITE_TRAY_TEMPLATE'] = prev;
+    }
   });
 });

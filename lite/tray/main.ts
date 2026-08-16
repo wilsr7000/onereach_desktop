@@ -119,10 +119,11 @@ export function initTray(opts: InitTrayOptions): TrayHandle | null {
   // images work in NSStatusItem. So a "make it bigger" bump only
   // actually takes effect when we load the COLOR source
   // (tray-icon.png) and skip the template flag. Trade-off: the icon
-  // doesn't auto-adapt to dark vs light menu bars, but the OneReach
-  // mark itself is identifiable in both. We pick the color path on
-  // macOS for visible-size; renderers that prefer theme-adapt can
-  // override via `LITE_TRAY_TEMPLATE=1` to force the old behavior.
+  // doesn't auto-adapt to dark vs light menu bars, but the color
+  // source carries the app icon's own artwork (navy tile + iDW
+  // mark), which is identifiable in both and keeps the tray visually
+  // matched to the dock / taskbar icon. Renderers that prefer
+  // theme-adapt can override via `LITE_TRAY_TEMPLATE=1`.
   const isTemplateAsset = /tray-iconTemplate\.png$/i.test(iconPath);
   const forceTemplate = process.env['LITE_TRAY_TEMPLATE'] === '1';
   const useTemplate = isTemplateAsset && (forceTemplate || process.platform !== 'darwin');
@@ -435,21 +436,21 @@ export function buildTrayMenuTemplate(
  * Candidate paths the tray icon loader probes, in priority order.
  * Exposed so the no-icon-found warning can list what was searched.
  *
- * Priority depends on platform + the `LITE_TRAY_TEMPLATE` env var:
- *   - macOS (default): prefer the FULL-COLOR `tray-icon.png`. macOS
- *     auto-resizes template images back to ~22pt regardless of any
- *     `.resize()` call, so the color source is the only path that
- *     respects the configured `TRAY_ICON_SIZE`.
- *   - macOS (`LITE_TRAY_TEMPLATE=1`): prefer the template variant.
- *     Restores theme-adaptive rendering at the menu bar's default
- *     22pt height (smaller, but adapts to dark / light bars).
- *   - Windows / Linux: prefer the template-named asset (smaller
- *     pixel footprint, no theme constraint) and fall back to color.
+ * Default (all platforms): prefer the FULL-COLOR `tray-icon.png`,
+ * which carries the same artwork as the app icon (`icon.icns` /
+ * dock / Start-menu icon) so the tray visually matches the app.
+ * On macOS this also means the resize is not clamped by the
+ * template auto-fit (macOS forces template images back to ~22pt
+ * regardless of any `.resize()` call).
+ *
+ * `LITE_TRAY_TEMPLATE=1`: prefer the monochrome template variant
+ * (the same mark as a black + alpha silhouette). On macOS this
+ * restores theme-adaptive rendering (white-on-dark, dark-on-light)
+ * at the menu bar's default 22pt height.
  */
 export function trayIconCandidates(): string[] {
-  const isMac = process.platform === 'darwin';
   const forceTemplate = process.env['LITE_TRAY_TEMPLATE'] === '1';
-  const preferColor = isMac && !forceTemplate;
+  const preferColor = !forceTemplate;
   const candidates: string[] = [];
   // esbuild-copied siblings in dist-lite/build/ first.
   if (preferColor) {

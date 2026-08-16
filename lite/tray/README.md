@@ -10,9 +10,13 @@ window's visibility. The context menu (right-click on macOS / Windows;
 single-click on Linux) gives one-click access to Show / Hide, Spaces,
 Settings, Help, and Quit.
 
-On macOS the icon is loaded as a *template* image (the file name ends
-in `Template.png` AND `NativeImage.setTemplateImage(true)` is called),
-so the OS auto-adapts the icon's color for light vs dark menu bars.
+The tray shows the same artwork as the app icon (`assets/icon.icns` /
+the dock and taskbar icon): the navy tile with the iDW hexagon mark,
+loaded from `assets/tray-icon.png`. Setting `LITE_TRAY_TEMPLATE=1`
+switches to the monochrome *template* variant of the same mark (the
+file name ends in `Template.png` AND
+`NativeImage.setTemplateImage(true)` is called), which macOS
+auto-adapts for light vs dark menu bars.
 
 ## Surface
 
@@ -29,14 +33,18 @@ so the OS auto-adapts the icon's color for light vs dark menu bars.
 
 The module looks for the tray icon in this order:
 
-1. `dist-lite/build/tray-iconTemplate.png` (esbuild-copied)
-2. `dist-lite/build/tray-icon.png` (esbuild-copied)
-3. `<appPath>/assets/tray-iconTemplate.png`
-4. `<appPath>/assets/tray-icon.png`
+1. `dist-lite/build/tray-icon.png` (esbuild-copied)
+2. `dist-lite/build/tray-iconTemplate.png` (esbuild-copied)
+3. `<appPath>/assets/tray-icon.png`
+4. `<appPath>/assets/tray-iconTemplate.png`
 
-The template variant is preferred so macOS gets proper menu-bar
-adaptation. The non-template fallback is used when only the regular
-icon exists (e.g. very old builds or trimmed asset sets).
+The full-color variant is preferred on every platform because it
+carries the app icon's own artwork, keeping the tray visually matched
+to the dock / taskbar. With `LITE_TRAY_TEMPLATE=1` the template
+variant moves to the front of each pair instead (theme-adaptive
+monochrome rendering on macOS). Both `tray-iconTemplate.png` (22x22)
+and `tray-iconTemplate@2x.png` (44x44, Retina) are generated from the
+same source art as the app icon.
 
 ## Wiring
 
