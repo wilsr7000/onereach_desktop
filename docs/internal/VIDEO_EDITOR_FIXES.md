@@ -91,7 +91,9 @@ To test the fixes:
 
 1. **Restart the application**:
    ```bash
-   pkill -9 -f "Electron" 2>/dev/null
+   # anchored to this repo's dev electron — a bare "Electron" pattern
+   # kills every Electron app AND the lite release pipeline's boot-smoke child
+   pkill -9 -f "Onereach_app/node_modules/electron" 2>/dev/null
    sleep 2
    cd /Users/richardwilson/Onereach_app && npm start
    ```

@@ -24,11 +24,24 @@ npm run lite
 
 That builds and launches Lite. Done. No other commands.
 
-If a stale instance blocks startup:
+If a stale instance blocks startup, kill the dev instance (run from the
+repo root):
 
 ```bash
-pkill -f "Onereach.ai Lite" ; pkill -f Electron
+pkill -f "$(pwd)/node_modules/electron"
 ```
+
+If the *installed* app holds the single-instance lock, quit it with the
+pattern anchored to /Applications:
+
+```bash
+pkill -f "/Applications/Onereach.ai Lite.app/Contents/MacOS"
+```
+
+Never use unanchored patterns like `pkill -f "Onereach.ai Lite"` or
+`pkill -f Electron`: they also match the release pipeline's boot-smoke
+child (killing it aborts the cut — this sank lite-v0.0.57 and the first
+lite-v0.0.69 attempt) and every other Electron process on the machine.
 
 ## Test (before opening a PR)
 

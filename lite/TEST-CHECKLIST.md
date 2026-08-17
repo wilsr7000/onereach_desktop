@@ -337,7 +337,11 @@ shows the previous user's data; kill -9 + relaunch loses no persisted state.*
       the BUILT bundle's require()s — never source greps (0.0.46 lesson).
 - [ ] ☠ **Boot smoke** — the freshly packaged binary boots: banner OR
       the single-instance handoff both pass; a bannerless exit or an
-      "electron-updater not available" log line aborts the cut.
+      "electron-updater not available" log line aborts the cut. One
+      external SIGKILL of the smoke child (a concurrent session's
+      pkill) retries once; a second kill aborts. Install snippets must
+      anchor kills to `/Applications/Onereach.ai Lite.app` — never a
+      bare "Onereach.ai Lite" or "Electron" pattern.
 - [ ] **Manifest sanity** — latest-mac.yml version + artifacts match the
       tag before anything uploads.
 

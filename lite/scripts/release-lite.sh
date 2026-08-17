@@ -251,9 +251,11 @@ echo -e "${GREEN}✓ Packaged-boot sanity: asar contains the boot-critical modul
 #
 # CONCURRENT SESSIONS (the 0.0.57 + first-0.0.69 aborts): any
 # install/relaunch snippet that pkills by an UNANCHORED pattern — e.g.
-#   pkill -f "Onereach.ai Lite.app/Contents/MacOS"
-# — ALSO matches this step's worktree smoke child and kills the cut.
-# The safe pattern is anchored to the installed app:
+#   pkill -f "Onereach.ai Lite.app/Contents/MacOS"     (killed the old
+# in-place smoke) or pkill -f "Onereach.ai Lite" (still matches the
+# smoke child today: the temp smoke.app copy keeps the product binary
+# NAME) — kills the cut. The safe pattern is anchored to the installed
+# app:
 #   pkill -f "/Applications/Onereach.ai Lite.app/Contents/MacOS"
 # The smoke tolerates ONE external SIGKILL (retry below); a second
 # kill fails the cut.
