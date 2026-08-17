@@ -45,6 +45,13 @@ interface CacheEntry<T> {
   fetcher: () => Promise<T>;
   /** True after a successful fetch; gates the staleness check. */
   hasValue: boolean;
+  /**
+   * Background refreshes that failed in a row. Silent-failure guard
+   * (2026-08-16): a flaky graph endpoint made every 60s refresh fail
+   * with NO signal anywhere — a member grant never surfaced in an open
+   * window until reopen. Streaks now log, and callers can read them.
+   */
+  consecutiveFailures: number;
 }
 
 /** Update event payload broadcast on every successful refresh. */
@@ -145,6 +152,7 @@ export class SpacesCache {
       fetching: null,
       fetcher,
       hasValue: false,
+      consecutiveFailures: 0,
     };
     entry.fetcher = fetcher;
     this.entries.set(key, entry as CacheEntry<unknown>);
@@ -165,6 +173,7 @@ export class SpacesCache {
       fetching: null,
       fetcher,
       hasValue: false,
+      consecutiveFailures: 0,
     };
     entry.fetcher = fetcher;
     this.entries.set(key, entry as CacheEntry<unknown>);
@@ -251,6 +260,19 @@ export class SpacesCache {
     await Promise.all(work);
   }
 
+  /**
+   * Highest consecutive-failure streak across entries. Zero when every
+   * key's latest background refresh succeeded — the health signal the
+   * staleness watchdog reads.
+   */
+  maxConsecutiveFailures(): number {
+    let max = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.consecutiveFailures > max) max = entry.consecutiveFailures;
+    }
+    return max;
+  }
+
   /** @internal -- test introspection. */
   _sizeForTesting(): number {
     return this.entries.size;
@@ -272,13 +294,30 @@ export class SpacesCache {
 
   // ─── Internal ──────────────────────────────────────────────────────────
 
+  /**
+   * Hard ceiling on a single fetch. Must stay BELOW the refresh
+   * interval: refreshAll skips in-flight entries, so a fetch that
+   * outlives the interval starves the key of every future refresh.
+   */
+  private static readonly FETCH_TIMEOUT_MS = 45_000;
+
   private async runFetch<T>(key: string, entry: CacheEntry<T>): Promise<T> {
     try {
-      const value = await entry.fetcher();
+      const value = await Promise.race([
+        entry.fetcher(),
+        new Promise<never>((_resolve, reject) => {
+          const t = setTimeout(
+            () => reject(new Error(`cache fetch timed out after ${SpacesCache.FETCH_TIMEOUT_MS}ms`)),
+            SpacesCache.FETCH_TIMEOUT_MS
+          );
+          (t as { unref?: () => void }).unref?.();
+        }),
+      ]);
       entry.value = value;
       entry.fetchedAt = Date.now();
       entry.hasValue = true;
       entry.fetching = null;
+      entry.consecutiveFailures = 0;
       try {
         const update: SpacesCacheUpdate = { key, at: entry.fetchedAt };
         this.emitter.emit(UPDATE_EVENT, update);
@@ -291,9 +330,11 @@ export class SpacesCache {
       return value;
     } catch (err) {
       entry.fetching = null;
+      entry.consecutiveFailures += 1;
       this.log.warn('spaces-cache: fetcher failed', {
         key,
         error: (err as Error).message,
+        consecutiveFailures: entry.consecutiveFailures,
       });
       throw err;
     }

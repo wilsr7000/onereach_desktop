@@ -456,6 +456,32 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(tree).toContain('generateItemTitle(item)');
   });
 
+  it('cross-machine staleness: watchdog + visibilitychange are wired', () => {
+    // 2026-08-16: "I added a user to a space but it did not show up in
+    // their spaces manager until they reopened Spaces." Two gaps: the
+    // 60s cache refresh fails silently when the graph flakes, and
+    // focus-refresh only fires on focus TRANSITIONS. The watchdog
+    // surfaces the silence and self-heals; visibilitychange covers
+    // arrivals that never change focus.
+    const src = source();
+    expect(src).toMatch(/function wireStalenessWatchdog/);
+    expect(src).toMatch(/markCacheBroadcast\(\);\s*\n\s*routeCacheUpdate\(update\.key\);/);
+    expect(src).toMatch(/document\.addEventListener\('visibilitychange'/);
+    expect(src).toMatch(/wireStalenessWatchdog\(\);/);
+    const start = src.indexOf('function wireStalenessWatchdog');
+    const body = src.slice(start, start + 900);
+    expect(body).toContain("refreshFromGraph('focus')");
+  });
+
+  it('refreshFromGraph cannot wedge its coalescing flag on a hung IPC', () => {
+    // 2026-08-17: one hung bridge.refresh() left refreshInFlight true
+    // forever — focus-refresh and the staleness watchdog both dead
+    // silently. The Promise.race guarantees the finally clears it.
+    const body = bodyOf('async function refreshFromGraph', 2200);
+    expect(body).toMatch(/Promise\.race\(/);
+    expect(body).toMatch(/refresh timed out/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

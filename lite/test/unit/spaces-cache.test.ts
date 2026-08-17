@@ -13,7 +13,7 @@
  *   - Refresh timer: refreshAll re-runs every stored fetcher.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   SpacesCache,
   SPACES_CACHE_KEYS,
@@ -284,3 +284,60 @@ describe('SPACES_CACHE_KEYS + helpers', () => {
     expect(itemsGetKey('asset-1')).toBe('spaces.items.get:asset-1');
   });
 });
+
+describe('background-failure streaks are tracked, logged, and reset (2026-08-16)', () => {
+  it('counts consecutive failures per entry and resets on success', async () => {
+    const warns: unknown[] = [];
+    const cache = new SpacesCache({
+      ttlMs: 0,
+      refreshIntervalMs: 0,
+      logger: { warn: (...a: unknown[]) => void warns.push(a), info: () => {}, error: () => {} },
+    });
+    let fail = true;
+    const fetcher = async (): Promise<string> => {
+      if (fail) throw new Error('graph 503');
+      return 'ok';
+    };
+    await cache.getOrFetch('k', fetcher).catch(() => undefined);
+    await cache.refreshAll();
+    await cache.refreshAll();
+    expect(cache.maxConsecutiveFailures()).toBeGreaterThanOrEqual(3);
+    fail = false;
+    await cache.refreshAll();
+    expect(cache.maxConsecutiveFailures()).toBe(0);
+    expect(warns.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe('a hung fetch cannot freeze a cache key (2026-08-17)', () => {
+  it('times out a never-settling fetcher, counts the failure, and allows the next refresh', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new SpacesCache({
+        ttlMs: 0,
+        refreshIntervalMs: 0,
+        logger: { warn: () => {}, info: () => {}, error: () => {} },
+      });
+      let calls = 0;
+      let hang = true;
+      const fetcher = (): Promise<string> => {
+        calls++;
+        if (hang) return new Promise<string>(() => undefined); // never settles
+        return Promise.resolve('recovered');
+      };
+      const first = cache.getOrFetch('k', fetcher).catch(() => 'timed-out');
+      await vi.advanceTimersByTimeAsync(46_000);
+      expect(await first).toBe('timed-out');
+      expect(cache.maxConsecutiveFailures()).toBe(1);
+      // The key is NOT frozen: refreshAll fetches it again (the old
+      // behavior skipped it forever because fetching never cleared).
+      hang = false;
+      await cache.refreshAll();
+      expect(calls).toBe(2);
+      expect(cache.maxConsecutiveFailures()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
