@@ -1356,6 +1356,67 @@
         background-color: var(--bg-elevated);
       }
 
+      /* Multi-window demo capture: chips + add button (screen mode) */
+      .demo-source-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-bottom: 4px;
+      }
+      .demo-source-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 3px 8px;
+        border-radius: 999px;
+        font-size: 11px;
+        background: var(--bg-panel);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all var(--transition-fast);
+      }
+      .demo-source-chip:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+      .demo-source-chip.featured {
+        background: rgba(167, 139, 250, 0.14);
+        border-color: rgba(167, 139, 250, 0.45);
+        color: #c8b6ff;
+      }
+      .demo-chip-x {
+        background: none;
+        border: none;
+        color: inherit;
+        opacity: 0.6;
+        cursor: pointer;
+        font-size: 10px;
+        padding: 0 1px;
+      }
+      .demo-chip-x:hover {
+        opacity: 1;
+        color: #f28b9b;
+      }
+      .demo-add-window-btn {
+        width: 100%;
+        padding: 7px 10px;
+        background: transparent;
+        border: 1px dashed var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-secondary);
+        font-size: 12px;
+        font-family: inherit;
+        cursor: pointer;
+        transition: all var(--transition-fast);
+      }
+      .demo-add-window-btn:hover {
+        border-color: var(--border-light);
+        border-style: solid;
+        color: var(--text-primary);
+        background: var(--bg-elevated);
+      }
+
       /* History button: quiet sibling of the Save-to select */
       .meeting-history-btn {
         margin-top: 6px;
@@ -6216,6 +6277,27 @@
                 <option value="">Select camera...</option>
               </select>
             </div>
+            <!-- Multi-window demo capture: record several windows at once.
+                 Shown in screen mode only. -->
+            <div class="source-compact-item" id="demoMultiWrap" style="display: none">
+              <div class="source-compact-label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="2" y="3" width="13" height="10" rx="1" />
+                  <rect x="9" y="11" width="13" height="10" rx="1" />
+                </svg>
+                Windows
+              </div>
+              <div class="demo-source-chips" id="demoSourceChips"></div>
+              <button
+                type="button"
+                class="demo-add-window-btn"
+                id="addWindowBtn"
+                onclick="app.addWindowToDemo()"
+                title="Capture another window or screen alongside this one — great for demos"
+              >
+                ＋ Add window
+              </button>
+            </div>
             <div class="source-compact-item">
               <div class="source-compact-label">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -7393,10 +7475,13 @@
 
           // Update source visibility
           const cameraWrapper = this.elements.cameraSourceWrapper;
+          const demoWrap = document.getElementById('demoMultiWrap');
           if (mode === 'screen') {
             cameraWrapper.style.display = 'none';
+            if (demoWrap) demoWrap.style.display = 'block';
           } else {
             cameraWrapper.style.display = 'block';
+            if (demoWrap) demoWrap.style.display = 'none';
           }
 
           // Stop existing streams
@@ -7707,6 +7792,7 @@
           this.elements.screenPicker.classList.remove('active');
           this.pipModeSelection = false;
           this._sessionScreenSharePending = false;
+          this._demoAddPending = false;
           if (!this.stream) {
             // Cancelled with no active stream (e.g. mode switch already
             // stopped the camera): restore the placeholder instead of
@@ -7728,6 +7814,9 @@
           if (this._sessionScreenSharePending && this.sessionConnected && this._livekitRoom) {
             this._sessionScreenSharePending = false;
             await this.sessionPublishScreenShare(this.selectedScreenSourceId);
+          } else if (this._demoAddPending) {
+            this._demoAddPending = false;
+            await this.addDemoSource(this.selectedScreenSourceId);
           } else if (this.pipModeSelection) {
             await this.startScreenPipCapture(this.selectedScreenSourceId);
           } else {
@@ -7940,6 +8029,13 @@
             this.updateAudioMixControlsVisibility();
             this.updateSystemAudioStatus(hasSystemAudio);
 
+            // Remembered so "+ Add window" can seed the multi-window
+            // compositor with this capture as the first source.
+            this._currentScreenSource = {
+              id: sourceId,
+              name:
+                (this.screenSources.find((s) => s.id === sourceId) || {}).name || 'Screen',
+            };
             console.log('[Recorder] Screen capture started:', sourceId);
           } catch (error) {
             console.error('[Recorder] Screen capture error:', error);
@@ -8185,7 +8281,251 @@
         },
 
         // Cleanup PiP and screen capture audio resources
+        // ── Multi-window demo capture ──────────────────────────────────────
+        // Record several windows/screens at once for a demo: each extra
+        // source is drawn onto one compositor canvas (2 = side-by-side,
+        // 3+ = featured + rail — same stage language as meetings) and the
+        // canvas stream is what gets recorded. Chips under the mode bar
+        // feature (click) or remove (✕) a source.
+        _demoSources: [], // [{id, name, stream, video}]
+        _demoCanvas: null,
+        _demoRaf: null,
+        _demoFeaturedIdx: 0,
+        _demoAddPending: false,
+        _currentScreenSource: null,
+
+        async addWindowToDemo() {
+          if (this.isRecording) {
+            this.showStatus('Add windows before recording starts', 'warning');
+            return;
+          }
+          if (this.currentMode !== 'screen') return;
+          if (!this.stream || this.stream.getVideoTracks().length === 0) {
+            // No capture yet — this is just "pick your (first) screen"
+            await this.showScreenPicker(false);
+            return;
+          }
+          this._demoAddPending = true;
+          await this.showScreenPicker(false);
+        },
+
+        async addDemoSource(sourceId) {
+          try {
+            await window.recorder.setScreenShareSource(sourceId);
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+              video: true,
+              audio: false,
+            });
+            const name =
+              (this.screenSources.find((s) => s.id === sourceId) || {}).name || 'Window';
+
+            if (this._demoSources.length === 0) {
+              // Seed with the capture that's already running. Its audio
+              // tracks move onto the composite stream; its video keeps
+              // feeding a hidden element.
+              const seed = this.stream;
+              this._demoAudioTracks = seed.getAudioTracks();
+              this._demoSources.push({
+                id: (this._currentScreenSource || {}).id || 'primary',
+                name: (this._currentScreenSource || {}).name || 'Screen',
+                stream: seed,
+                video: this._makeDemoVideo(seed),
+              });
+            }
+
+            this._demoSources.push({ id: sourceId, name, stream, video: this._makeDemoVideo(stream) });
+            this._engageDemoComposite();
+            this.showStatus(
+              'Recording ' + this._demoSources.length + ' windows — click a chip to feature one',
+              'success'
+            );
+          } catch (error) {
+            console.error('[Recorder] Add window failed:', error);
+            this.showStatus('Could not capture that window: ' + error.message, 'error');
+          }
+        },
+
+        _makeDemoVideo(stream) {
+          const v = document.createElement('video');
+          v.muted = true;
+          v.autoplay = true;
+          v.playsInline = true;
+          v.srcObject = stream;
+          v.play().catch(() => {});
+          return v;
+        },
+
+        _engageDemoComposite() {
+          if (!this._demoCanvas) {
+            this._demoCanvas = document.createElement('canvas');
+            this._demoCanvas.width = 1920;
+            this._demoCanvas.height = 1080;
+          }
+          if (!this._demoRaf) {
+            const draw = () => {
+              this._demoRaf = requestAnimationFrame(draw);
+              this._drawDemoComposite();
+            };
+            draw();
+
+            const composite = this._demoCanvas.captureStream(30);
+            (this._demoAudioTracks || []).forEach((t) => composite.addTrack(t));
+            this.stream = composite;
+            this.elements.previewVideo.srcObject = composite;
+            this.elements.previewPlaceholder.style.display = 'none';
+            this.elements.previewVideo.style.display = 'block';
+            this.startAudioMeter(composite);
+          }
+          this._renderDemoChips();
+        },
+
+        _drawDemoComposite() {
+          const canvas = this._demoCanvas;
+          if (!canvas) return;
+          const ctx = canvas.getContext('2d');
+          const W = canvas.width;
+          const H = canvas.height;
+          ctx.fillStyle = '#000';
+          ctx.fillRect(0, 0, W, H);
+
+          const n = this._demoSources.length;
+          if (n === 0) return;
+          const featured = Math.min(this._demoFeaturedIdx, n - 1);
+
+          const regions = [];
+          if (n === 1) {
+            regions.push([0, 0, W, H, 0]);
+          } else if (n === 2) {
+            regions.push([0, 0, W / 2 - 2, H, 0]);
+            regions.push([W / 2 + 2, 0, W / 2 - 2, H, 1]);
+          } else {
+            // Featured takes the wide stage, the rest stack in a right rail
+            regions.push([0, 0, W * 0.68 - 2, H, featured]);
+            const others = [];
+            for (let i = 0; i < n; i++) if (i !== featured) others.push(i);
+            const railH = H / others.length;
+            others.forEach((srcIdx, k) => {
+              regions.push([W * 0.68 + 2, k * railH + 2, W * 0.32 - 4, railH - 4, srcIdx]);
+            });
+          }
+
+          for (const [x, y, w, h, idx] of regions) {
+            const src = this._demoSources[idx];
+            if (!src) continue;
+            this._drawFitted(ctx, src.video, x, y, w, h);
+            // Source label so the viewer knows which window is which
+            const label = src.name.length > 40 ? src.name.slice(0, 39) + '…' : src.name;
+            ctx.font = '600 22px -apple-system, sans-serif';
+            const tw = ctx.measureText(label).width;
+            ctx.fillStyle = 'rgba(0,0,0,0.65)';
+            ctx.fillRect(x + 10, y + h - 44, tw + 20, 34);
+            ctx.fillStyle = '#e6e8ee';
+            ctx.fillText(label, x + 20, y + h - 20);
+          }
+        },
+
+        // Aspect-fit (letterbox) a video into a region
+        _drawFitted(ctx, video, x, y, w, h) {
+          const vw = video.videoWidth || 16;
+          const vh = video.videoHeight || 9;
+          const scale = Math.min(w / vw, h / vh);
+          const dw = vw * scale;
+          const dh = vh * scale;
+          ctx.drawImage(video, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+        },
+
+        _renderDemoChips() {
+          const wrap = document.getElementById('demoSourceChips');
+          if (!wrap) return;
+          wrap.innerHTML = '';
+          if (this._demoSources.length < 2) return;
+          this._demoSources.forEach((src, idx) => {
+            const chip = document.createElement('span');
+            chip.className =
+              'demo-source-chip' + (idx === this._demoFeaturedIdx ? ' featured' : '');
+            chip.title =
+              idx === this._demoFeaturedIdx
+                ? src.name + ' (featured)'
+                : 'Click to feature ' + src.name;
+            const nm = document.createElement('span');
+            nm.textContent = src.name.length > 18 ? src.name.slice(0, 17) + '…' : src.name;
+            chip.appendChild(nm);
+            chip.onclick = () => {
+              this._demoFeaturedIdx = idx;
+              this._renderDemoChips();
+            };
+            const x = document.createElement('button');
+            x.className = 'demo-chip-x';
+            x.textContent = '✕';
+            x.title = 'Stop capturing ' + src.name;
+            x.onclick = (e) => {
+              e.stopPropagation();
+              this.removeDemoSource(idx);
+            };
+            chip.appendChild(x);
+            wrap.appendChild(chip);
+          });
+        },
+
+        removeDemoSource(idx) {
+          if (this.isRecording) {
+            this.showStatus('Stop the recording before removing a window', 'warning');
+            return;
+          }
+          const src = this._demoSources[idx];
+          if (!src) return;
+          this._demoSources.splice(idx, 1);
+          // Don't kill the audio tracks riding on the composite — only this
+          // source's video feed.
+          src.stream.getVideoTracks().forEach((t) => t.stop());
+          src.video.srcObject = null;
+          if (this._demoFeaturedIdx >= this._demoSources.length) this._demoFeaturedIdx = 0;
+
+          if (this._demoSources.length === 1) {
+            // Back to a plain single capture: record the survivor directly
+            // (native resolution beats the compositor when there's only one).
+            const survivor = this._demoSources[0];
+            const direct = new MediaStream([
+              ...survivor.stream.getVideoTracks(),
+              ...(this._demoAudioTracks || []),
+            ]);
+            this._teardownDemoComposite({ keepSources: true });
+            this._demoSources = [];
+            this.stream = direct;
+            this.elements.previewVideo.srcObject = direct;
+            this.startAudioMeter(direct);
+            this._currentScreenSource = { id: survivor.id, name: survivor.name };
+          }
+          this._renderDemoChips();
+        },
+
+        // Torn down on every mode/stream switch via cleanupPipResources.
+        _teardownDemoComposite(opts = {}) {
+          if (this._demoRaf) {
+            cancelAnimationFrame(this._demoRaf);
+            this._demoRaf = null;
+          }
+          if (!opts.keepSources) {
+            this._demoSources.forEach((src) => {
+              try {
+                src.stream.getVideoTracks().forEach((t) => t.stop());
+                src.video.srcObject = null;
+              } catch (_e) {
+                /* already stopped */
+              }
+            });
+            this._demoSources = [];
+            this._demoAudioTracks = null;
+          }
+          this._demoCanvas = null;
+          this._demoFeaturedIdx = 0;
+          this._demoAddPending = false;
+          const wrap = document.getElementById('demoSourceChips');
+          if (wrap) wrap.innerHTML = '';
+        },
+
         cleanupPipResources() {
+          this._teardownDemoComposite();
           if (this.pipAnimationFrame) {
             cancelAnimationFrame(this.pipAnimationFrame);
             this.pipAnimationFrame = null;
@@ -13527,7 +13867,15 @@
 
         async _offerSaveAsTemplate(meeting) {
           if (!meeting?.spaceId) return;
-          const name = prompt('Save this meeting setup as a template?\nEnter a name (or cancel to skip):');
+          // window.prompt is unsupported in Electron renderers — it throws /
+          // dead-ends silently. Guard so a session end never dies here.
+          let name = null;
+          try {
+            name = prompt('Save this meeting setup as a template?\nEnter a name (or cancel to skip):');
+          } catch (_e) {
+            console.warn('[Meeting] prompt() unavailable — skipping save-as-template offer');
+            return;
+          }
           if (!name) return;
           try {
             const result = await window.recorder.saveCustomTemplate({
