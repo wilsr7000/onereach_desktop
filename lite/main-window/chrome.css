@@ -61,12 +61,18 @@ body {
   -webkit-app-region: no-drag;
   position: relative;
   overflow: hidden;
-  width: 40px;
+  /* Discoverability (2026-08-16): the unlabeled 40px orb read as
+   * decoration — "people don't see the spaces button". Now an
+   * orb+label pill: same gradient/breathe/hover, same single click
+   * target, but it SAYS Spaces without needing a mouseover. */
+  display: inline-flex;
+  align-items: center;
+  width: auto;
   height: 40px;
   align-self: center;
   margin: 0 8px;
-  padding: 0;
-  border-radius: 50%;
+  padding: 0 16px 0 40px;
+  border-radius: 20px;
   border: 1px solid rgba(79, 140, 255, 0.32);
   background:
     radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.18), transparent 60%),
@@ -117,7 +123,7 @@ body {
   content: '';
   position: absolute;
   top: 50%;
-  left: 50%;
+  left: 20px;
   width: 16px;
   height: 16px;
   background-color: rgba(255, 255, 255, 0.9);
@@ -136,6 +142,15 @@ body {
     opacity 200ms ease,
     transform 200ms ease;
   pointer-events: none;
+}
+
+.spaces-or-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(233, 240, 255, 0.92);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .spaces-or-button:hover {
