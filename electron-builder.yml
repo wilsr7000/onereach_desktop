@@ -1,0 +1,17 @@
+# Full-app electron-builder config. Deliberately MINIMAL — everything
+# not listed here keeps the defaults the app has always built with
+# (build/entitlements.mac.plist is auto-discovered, package.json
+# supplies identity/version).
+#
+# preAutoEntitlements (2026-08-17, AMFI fix): @electron/osx-sign's
+# entitlements automation defaults ON and, on Electron 41, injects the
+# RESTRICTED keychain-access-groups entitlement during Developer ID
+# signs. A restricted entitlement with no embedded provisioning profile
+# means AMFI SIGKILLs the app at launch on users' machines (exit 137,
+# empty output, Gatekeeper "Open Anyway" cannot override) — this
+# bricked Lite releases 0.0.63–0.0.70 for auto-updating users. The full
+# app uses no WebAuthn/keychain groups, so the automation buys nothing
+# and risks everything: OFF. The paired tripwire in
+# scripts/build-signed.sh fails any artifact that regresses.
+mac:
+  preAutoEntitlements: false

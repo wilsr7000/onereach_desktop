@@ -93,7 +93,11 @@ _scripts/
 # yarn.lock
 
 # Electron-specific
-electron-builder.yml
+# electron-builder.yml was ignored here for years (early boilerplate).
+# UN-ignored 2026-08-17: it now carries mac.preAutoEntitlements=false —
+# the AMFI-brick prevention — and an ignored safety config is exactly
+# the gitignored-profile failure mode that bricked Lite 0.0.63-0.0.70.
+# It contains no secrets (the export guard scans for real key material).
 app/dist/
 
 # Claude Code binaries (downloaded at build time)
