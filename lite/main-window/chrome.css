@@ -68,11 +68,11 @@ body {
   display: inline-flex;
   align-items: center;
   width: auto;
-  height: 40px;
+  height: 28px;
   align-self: center;
-  margin: 0 8px;
-  padding: 0 16px 0 40px;
-  border-radius: 20px;
+  margin: 0 10px;
+  padding: 0 12px 0 30px;
+  border-radius: 14px;
   border: 1px solid rgba(79, 140, 255, 0.32);
   background:
     radial-gradient(circle at 50% 50%, rgba(123, 219, 255, 0.18), transparent 60%),
@@ -123,9 +123,9 @@ body {
   content: '';
   position: absolute;
   top: 50%;
-  left: 20px;
-  width: 16px;
-  height: 16px;
+  left: 15px;
+  width: 13px;
+  height: 13px;
   background-color: rgba(255, 255, 255, 0.9);
   -webkit-mask-image: url('./or-logo.png');
   -webkit-mask-size: contain;
@@ -145,7 +145,7 @@ body {
 }
 
 .spaces-or-label {
-  font-size: 12.5px;
+  font-size: 11.5px;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: rgba(233, 240, 255, 0.92);
