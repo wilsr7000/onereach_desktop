@@ -3372,6 +3372,77 @@
         z-index: 20;
       }
 
+      /* Live head-count chip: slots into the top-right stack between the
+         Connected badge (16px) and the transcription pill (78px). */
+      .session-count-chip {
+        position: absolute;
+        top: 46px;
+        right: 16px;
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 11px;
+        font-weight: 600;
+        background: rgba(10, 10, 18, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        color: var(--text-muted);
+        backdrop-filter: blur(20px) saturate(1.3);
+        -webkit-backdrop-filter: blur(20px) saturate(1.3);
+        z-index: 20;
+        pointer-events: none;
+      }
+
+      /* Large-meeting signal: the chip goes violet and the stage gets a
+         subtle top glow — a 20-person room should FEEL different. */
+      .session-count-chip.big {
+        background: rgba(167, 139, 250, 0.16);
+        border-color: rgba(167, 139, 250, 0.45);
+        color: #c8b6ff;
+        box-shadow: 0 0 14px rgba(167, 139, 250, 0.25);
+      }
+
+      .preview-container.session-active.big-room {
+        box-shadow: inset 0 2px 0 rgba(167, 139, 250, 0.45);
+      }
+
+      /* Overflow pill: stands in for the tiles that don't fit the strip
+         (they used to be clipped invisible). */
+      .participant-overflow-pill {
+        display: none;
+        position: absolute;
+        align-items: center;
+        justify-content: center;
+        background: rgba(30, 30, 46, 0.85);
+        border: 1px dashed rgba(255, 255, 255, 0.25);
+        border-radius: var(--radius-sm, 8px);
+        color: var(--text-muted);
+        font-size: 16px;
+        font-weight: 700;
+        z-index: 6;
+      }
+
+      /* Pinned tile indicator */
+      .session-participant.pinned::before {
+        content: '📌';
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        font-size: 12px;
+        z-index: 8;
+        filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.8));
+      }
+
+      /* Featured screen share + side rail (3+ shares, or any clicked share) */
+      .screen-share-container {
+        cursor: pointer;
+      }
+      .screen-share-container.share-rail .screen-share-label {
+        font-size: 10px;
+        padding: 2px 8px;
+      }
+      .screen-share-container.share-featured {
+        z-index: 6;
+      }
+
       .session-connected-badge.visible {
         display: flex;
       }
@@ -6802,7 +6873,12 @@
           });
 
           // Clean up meeting tokens when window is closed without clicking End Session
-          window.addEventListener('beforeunload', () => {
+          window.addEventListener('beforeunload', (e) => {
+            // The guard listener above may have BLOCKED this close (recording
+            // still saving / blob unpersisted). Tearing down anyway would
+            // complete the meeting with no artifacts linked and kill the live
+            // room's tokens even though the window stays open.
+            if (e.defaultPrevented) return;
             // Complete the meeting object too (status -> completed + artifact
             // links + post-meeting analysis). Fire-and-forget: the IPC handler
             // runs in the main process, which outlives this renderer, so the
@@ -6824,6 +6900,19 @@
                 this._livekitRoom.disconnect();
               } catch {}
             }
+          });
+
+          // Re-flow the meeting layout on window resize (tile widths and
+          // strip overflow are computed from clientWidth — without this a
+          // mid-meeting resize leaves tiles mis-sized until the next
+          // join/leave event).
+          window.addEventListener('resize', () => {
+            if (!this.sessionConnected) return;
+            clearTimeout(this._resizeRelayoutTimer);
+            this._resizeRelayoutTimer = setTimeout(() => {
+              this._layoutScreenShares();
+              this._updateLayout();
+            }, 150);
           });
 
           console.log('[Recorder] Ready');
@@ -8599,8 +8688,15 @@
               if (data.transcript) {
                 const finalText = data.transcript.trim();
                 if (finalText) {
-                  // Capture who was speaking when this segment was uttered
-                  const speaker = this.sessionConnected && this._currentSpeakerName ? this._currentSpeakerName : null;
+                  // Attribute to whoever was speaking when the utterance
+                  // STARTED (snapshotted on speech_started). Stamping at
+                  // completion time labels the segment with whoever talked
+                  // last — in rapid back-and-forth that mislabels the tail
+                  // speaker every time.
+                  const speaker = this.sessionConnected
+                    ? this._utteranceSpeakerName || this._currentSpeakerName || null
+                    : null;
+                  this._utteranceSpeakerName = null;
                   this.accumulatedTranscript.push({
                     text: finalText,
                     speaker: speaker,
@@ -8622,9 +8718,10 @@
 
             case 'input_audio_buffer.speech_started':
               this.interimText = '';
-              // Snapshot who started speaking for this utterance
-              if (this.sessionConnected && this._livekitRoom) {
-                // _currentSpeakerName is already updated by ActiveSpeakersChanged
+              // Snapshot who started speaking — the completed event stamps
+              // the segment with THIS name, not whoever talks at its end.
+              if (this.sessionConnected && this._currentSpeakerName) {
+                this._utteranceSpeakerName = this._currentSpeakerName;
               }
               break;
 
@@ -8964,7 +9061,23 @@
             this.elements.transcriptionStatusText.textContent = 'Transcribing...';
 
             console.log(`[Recorder] Triggering post-save transcription for ${itemId}`);
-            const result = await window.recorder.transcribeItem(itemId);
+            // Close a still-open pause window (recording stopped while
+            // paused) and hand the spans + target space to the diarized
+            // pass: paused speech gets redacted, and the result lands as a
+            // readable item in the meeting's space.
+            const pauseWindows = (this._aiPauseWindows || [])
+              .map((w) => ({
+                startSec: w.startSec,
+                endSec:
+                  w.endSec !== null
+                    ? w.endSec
+                    : (Date.now() - (this.recordingStartTime || Date.now())) / 1000,
+              }))
+              .filter((w) => w.endSec > w.startSec);
+            const result = await window.recorder.transcribeItem(itemId, {
+              pauseWindows,
+              indexSpaceId: this._captureSpaceId(null),
+            });
 
             if (result.success) {
               this.elements.transcriptionStatus.classList.add('active');
@@ -9294,6 +9407,7 @@
           this.mediaRecorder.start(1000);
           this.isRecording = true;
           this.recordingStartTime = Date.now();
+          this._aiPauseWindows = []; // fresh recording, fresh redaction spans
 
           // In session mode, notify the other side to start recording too,
           // and reveal the "Pause AI" control (the AI only runs in meetings).
@@ -9370,6 +9484,18 @@
               const reason = this._transcriptionUnavailableReason;
               if (reason === 'no-key') {
                 this.showStatus('Live transcription unavailable -- add OpenAI API key in Settings', 'warning');
+                // A meeting whose transcript silently never existed is the
+                // worst version of this failure — keep a PERSISTENT signal
+                // up, not just a transient toast: the transcription pill
+                // stays visible in its inactive (grey) state with the why.
+                if (this.sessionConnected && this.elements.transcriptionStatus) {
+                  this.elements.transcriptionStatus.classList.add('visible');
+                  this.elements.transcriptionStatus.classList.remove('active');
+                  const label = this.elements.transcriptionStatus.querySelector('span');
+                  if (label) label.textContent = 'No transcript — add OpenAI key';
+                  this.elements.transcriptionStatus.title =
+                    'This meeting is NOT being transcribed. Add an OpenAI API key in Settings to turn on the meeting agent.';
+                }
               } else if (reason === 'no-audio') {
                 this.showStatus('Live transcription off -- no microphone audio in this mode', 'warning');
               } else if (reason) {
@@ -9965,6 +10091,8 @@
         cameraOff: false,
         _hostDisplayName: '', // Host's display name
         _currentSpeakerName: null, // Name of current speaker (for transcription)
+        _utteranceSpeakerName: null, // Speaker snapshotted at speech_started (per utterance)
+        _aiPauseWindows: [], // [{startSec, endSec}] AI-paused spans, redacted from the diarized pass
 
         // Multi-participant layout state
         _participants: new Map(), // sid -> { container, identity, isSpeaking }
@@ -9972,6 +10100,12 @@
         _speakerDebounceTimer: null, // debounce timer for speaker changes
         _audioGlowFrame: null, // requestAnimationFrame id for audio-reactive glow
         _localParticipantSid: 'local', // key used for the host's own tile
+        // Big Room (large meetings) + featuring state
+        BIG_ROOM_MIN: 8, // participant count where the big-room tier kicks in
+        _pinnedSids: new Set(), // user-pinned tiles (click); pins beat auto-promotion
+        _recentSpeakerSids: [], // most-recent-first speaker order (ActiveSpeakersChanged)
+        _featuredShareKey: null, // clicked/featured screen share (null = equal tiling)
+        _resizeRelayoutTimer: null, // debounced resize -> _updateLayout
 
         // Screen share within LiveKit session
         _sessionScreenShareActive: false,
@@ -10901,6 +11035,21 @@
             this._handleActiveSpeakersChanged(speakers);
           });
 
+          // If local media wasn't ready when the session entered (mic still
+          // publishing / permission granted late), retry auto-capture when a
+          // local track lands — _maybeAutoStartCapture deliberately leaves
+          // its attempted-flag unset in that case.
+          room.on(RoomEvent.LocalTrackPublished, () => {
+            if (!this.stream || this.stream.getTracks().length === 0) {
+              try {
+                this._attachLocalSessionMedia();
+              } catch (_e) {
+                /* re-attach is best-effort */
+              }
+            }
+            this._maybeAutoStartCapture();
+          });
+
           // Data messages (recording sync + track transfer + overlays)
           room.on(RoomEvent.DataReceived, (data, participant) => {
             try {
@@ -11080,26 +11229,53 @@
             const spaceName = spaceSelect.options[spaceSelect.selectedIndex]?.textContent || '';
             const roomName = this._deriveRoomName({ id: spaceSelect.value, name: spaceName });
 
-            // 2. Create Meeting Object
+            // 2. Create (or REJOIN) the Meeting Object. "Join should just
+            // join": a host who left and comes back to the same space's live
+            // room must not mint a second Meeting item — one real meeting,
+            // one record. Adopt a recent still-open meeting when one exists.
             els.hostStatus.textContent = 'Creating meeting...';
             try {
-              const meetingResult = await window.recorder.createMeeting({
-                spaceId: spaceSelect.value,
-                templateId: this._activeTemplateId || null,
-                options: {
-                  title: spaceName + ' Meeting',
-                  hostName: hostName,
-                  startTime: new Date().toISOString(),
-                  duration: this._activeTemplateDuration || 30,
-                },
-              });
-              if (meetingResult.success) {
-                this._activeMeeting = meetingResult.meeting;
-                this._activeMeetingItemId = meetingResult.itemId;
-                // Fresh meeting -> clear any artifact ids from a prior one.
-                this._lastTranscriptItemId = null;
-                this._lastRecordingItemIds = [];
-                console.log('[Meeting] Object created:', meetingResult.meeting.id);
+              let adopted = null;
+              try {
+                const existing = await window.recorder.getMeetings({
+                  spaceId: spaceSelect.value,
+                  limit: 10,
+                });
+                const RECENT_MS = 6 * 60 * 60 * 1000;
+                adopted = (existing?.meetings || []).find(
+                  (m) =>
+                    m.status !== 'completed' &&
+                    m._itemId &&
+                    Date.now() - new Date(m.createdAt || 0).getTime() < RECENT_MS
+                );
+              } catch (_e) {
+                /* lookup is best-effort — fall through to create */
+              }
+
+              if (adopted) {
+                this._activeMeeting = adopted;
+                this._activeMeetingItemId = adopted._itemId;
+                // Rejoin: keep any artifact ids the meeting already linked.
+                console.log('[Meeting] Rejoined open meeting object:', adopted.id);
+              } else {
+                const meetingResult = await window.recorder.createMeeting({
+                  spaceId: spaceSelect.value,
+                  templateId: this._activeTemplateId || null,
+                  options: {
+                    title: spaceName + ' Meeting',
+                    hostName: hostName,
+                    startTime: new Date().toISOString(),
+                    duration: this._activeTemplateDuration || 30,
+                  },
+                });
+                if (meetingResult.success) {
+                  this._activeMeeting = meetingResult.meeting;
+                  this._activeMeetingItemId = meetingResult.itemId;
+                  // Fresh meeting -> clear any artifact ids from a prior one.
+                  this._lastTranscriptItemId = null;
+                  this._lastRecordingItemIds = [];
+                  console.log('[Meeting] Object created:', meetingResult.meeting.id);
+                }
               }
             } catch (e) {
               console.warn('[Meeting] Object creation failed (non-blocking):', e.message);
@@ -11436,6 +11612,12 @@
           label.textContent = identity || 'Guest';
           container.appendChild(label);
 
+          // Click to pin: hold this person on the stage (auto-promotion
+          // leaves pinned tiles alone until unpinned by a second click).
+          container.style.cursor = 'pointer';
+          container.title = 'Click to pin on stage';
+          container.addEventListener('click', () => this._togglePin(sid));
+
           this.elements.previewContainer.appendChild(container);
 
           // Fade in
@@ -11529,6 +11711,9 @@
           }, 300);
 
           this._participants.delete(sid);
+          this._pinnedSids.delete(sid);
+          const spkAt = this._recentSpeakerSids.indexOf(sid);
+          if (spkAt !== -1) this._recentSpeakerSids.splice(spkAt, 1);
 
           // If removed participant was in spotlight, pick new one
           if (this._currentSpotlightSid === sid) {
@@ -11537,36 +11722,36 @@
           }
         },
 
-        // Update layout based on participant count and screen share state
+        // Update layout based on participant count and screen share state.
+        // Tiers: presentation (any share) > 1 full-frame > 2 side-by-side >
+        // 3..BIG_ROOM_MIN-1 spotlight+strip > big room (multi-featured stage).
         _updateLayout() {
           const container = this.elements.previewContainer;
           const count = this._participants.size;
+          const bigRoom = count >= this.BIG_ROOM_MIN;
 
-          container.classList.remove('layout-side-by-side', 'layout-speaker-view', 'layout-presentation');
+          container.classList.remove(
+            'layout-side-by-side',
+            'layout-speaker-view',
+            'layout-presentation',
+            'layout-big-room'
+          );
+          container.classList.toggle('big-room', bigRoom);
+          this._updateSessionCountChip(count, bigRoom);
 
-          // Presentation mode: screen share(s) occupy top area, participants fill bottom strip
+          // Presentation mode: screen share(s) occupy the top area,
+          // participants fill a bottom strip (overflow-aware).
           if (this._screenShares.size > 0 || this._sessionScreenShareActive) {
             container.classList.add('layout-presentation');
-            const thumbWidth = Math.min(160, Math.floor(container.clientWidth / Math.max(count, 1)) - 8);
-            const thumbGap = 6;
-            let idx = 0;
-            this._participants.forEach((entry) => {
-              entry.container.classList.remove('in-spotlight', 'in-thumbnails');
-              Object.assign(entry.container.style, {
-                width: thumbWidth + 'px',
-                height: '130px',
-                left: (idx * (thumbWidth + thumbGap)) + 'px',
-                top: 'auto',
-                bottom: '0',
-              });
-              idx++;
-            });
+            this._layoutBottomStrip(this._stripOrder(), { height: 130 });
             return;
           }
 
           if (count <= 1) {
+            this._clearOverflowPill();
             this._participants.forEach((entry) => {
               entry.container.classList.remove('in-spotlight', 'in-thumbnails');
+              entry.container.style.display = '';
               Object.assign(entry.container.style, {
                 top: '0',
                 left: '0',
@@ -11578,10 +11763,12 @@
           }
 
           if (count === 2) {
+            this._clearOverflowPill();
             container.classList.add('layout-side-by-side');
             let idx = 0;
             this._participants.forEach((entry) => {
               entry.container.classList.remove('in-spotlight', 'in-thumbnails');
+              entry.container.style.display = '';
               Object.assign(entry.container.style, {
                 top: '0',
                 height: '100%',
@@ -11590,18 +11777,195 @@
               });
               idx++;
             });
+            return;
+          }
+
+          if (bigRoom) {
+            container.classList.add('layout-big-room');
+            this._applyBigRoomLayout();
+            return;
+          }
+
+          container.classList.add('layout-speaker-view');
+          if (!this._currentSpotlightSid || !this._participants.has(this._currentSpotlightSid)) {
+            this._pickNewSpotlight();
           } else {
-            container.classList.add('layout-speaker-view');
-            if (!this._currentSpotlightSid || !this._participants.has(this._currentSpotlightSid)) {
-              this._pickNewSpotlight();
-            } else {
-              this._applySpotlightLayout();
-            }
+            this._applySpotlightLayout();
           }
         },
 
-        // Pick a new spotlight participant (prefer remote over local)
+        // Live head-count chip next to the Connected badge; doubles as the
+        // big-meeting signal ("Large meeting · 14").
+        _updateSessionCountChip(count, bigRoom) {
+          let chip = document.getElementById('sessionCountChip');
+          if (!chip) {
+            const badge =
+              (this.elements && this.elements.connectedBadge) ||
+              document.getElementById('sessionConnectedBadge');
+            if (!badge || !badge.parentElement) return;
+            chip = document.createElement('div');
+            chip.id = 'sessionCountChip';
+            chip.className = 'session-count-chip';
+            chip.title = 'People in this meeting (right-click for the list)';
+            badge.parentElement.insertBefore(chip, badge.nextSibling);
+          }
+          if (!this.sessionConnected || count <= 1) {
+            chip.style.display = 'none';
+            return;
+          }
+          chip.style.display = '';
+          chip.classList.toggle('big', !!bigRoom);
+          chip.textContent = bigRoom ? 'Large meeting · ' + count : count + ' in room';
+        },
+
+        // Priority order for strip slots: pinned, then recent speakers, then
+        // camera-on, then join order. Keeps the people who matter visible
+        // when there are more tiles than room.
+        _stripOrder(excludeSids) {
+          const excluded = excludeSids || new Set();
+          const rank = (sid, entry) => {
+            if (this._pinnedSids.has(sid)) return 0;
+            const spk = this._recentSpeakerSids.indexOf(sid);
+            if (spk !== -1) return 1 + spk / 100;
+            if (entry.hasVideo) return 2;
+            return 3;
+          };
+          return [...this._participants.entries()]
+            .filter(([sid]) => !excluded.has(sid))
+            .sort((a, b) => rank(a[0], a[1]) - rank(b[0], b[1]));
+        },
+
+        // Lay an ordered list of tiles into the bottom strip. Tiles that
+        // don't fit are hidden behind a "+N" pill (clipping used to make
+        // them silently invisible — in a 20-person meeting half the room
+        // had no representation at all).
+        _layoutBottomStrip(orderedEntries, opts = {}) {
+          const stripHeight = opts.height || 130;
+          const gap = 6;
+          const minTile = 84;
+          const maxTile = 160;
+          const containerWidth = this.elements.previewContainer.clientWidth || 800;
+          const total = orderedEntries.length;
+
+          let tileWidth = Math.min(maxTile, Math.floor(containerWidth / Math.max(total, 1)) - gap);
+          let visible = total;
+          if (tileWidth < minTile) {
+            tileWidth = minTile;
+            // Reserve one slot's width for the "+N" pill when overflowing.
+            visible = Math.max(1, Math.floor((containerWidth - (minTile + gap)) / (minTile + gap)));
+          }
+          const overflow = total - visible;
+
+          orderedEntries.forEach(([, entry], idx) => {
+            entry.container.classList.remove('in-spotlight');
+            entry.container.classList.add('in-thumbnails');
+            if (idx < visible) {
+              entry.container.style.display = '';
+              Object.assign(entry.container.style, {
+                width: tileWidth + 'px',
+                height: stripHeight + 'px',
+                left: gap + idx * (tileWidth + gap) + 'px',
+                top: 'auto',
+                bottom: '0',
+              });
+            } else {
+              entry.container.style.display = 'none';
+            }
+          });
+
+          if (overflow > 0) {
+            const pill = this._ensureOverflowPill();
+            pill.textContent = '+' + overflow;
+            pill.title = overflow + ' more — right-click for the participant list';
+            Object.assign(pill.style, {
+              display: 'flex',
+              width: tileWidth + 'px',
+              height: stripHeight + 'px',
+              left: gap + visible * (tileWidth + gap) + 'px',
+              bottom: '0',
+            });
+          } else {
+            this._clearOverflowPill();
+          }
+        },
+
+        _ensureOverflowPill() {
+          let pill = document.getElementById('participantOverflowPill');
+          if (!pill) {
+            pill = document.createElement('div');
+            pill.id = 'participantOverflowPill';
+            pill.className = 'participant-overflow-pill';
+            this.elements.previewContainer.appendChild(pill);
+          }
+          return pill;
+        },
+
+        _clearOverflowPill() {
+          const pill = document.getElementById('participantOverflowPill');
+          if (pill) pill.style.display = 'none';
+        },
+
+        // Big Room: up to three co-featured tiles share the stage (pinned
+        // people first, then whoever has spoken most recently), everyone
+        // else in the overflow-aware strip. Two people in dialogue hold the
+        // stage together instead of ping-ponging one spotlight.
+        _featuredForBigRoom() {
+          const MAX_FEATURED = 3;
+          const featured = [];
+          for (const sid of this._pinnedSids) {
+            if (this._participants.has(sid) && featured.length < MAX_FEATURED) featured.push(sid);
+          }
+          for (const sid of this._recentSpeakerSids) {
+            if (featured.length >= MAX_FEATURED) break;
+            if (this._participants.has(sid) && !featured.includes(sid)) featured.push(sid);
+          }
+          if (featured.length === 0) {
+            for (const [sid] of this._participants) {
+              if (sid !== this._localParticipantSid) {
+                featured.push(sid);
+                break;
+              }
+            }
+          }
+          if (featured.length === 0 && this._participants.size) {
+            featured.push(this._participants.keys().next().value);
+          }
+          return featured;
+        },
+
+        _applyBigRoomLayout() {
+          const featured = this._featuredForBigRoom();
+          const featuredSet = new Set(featured);
+          const stripHeight = 118;
+          const gap = 4;
+          const cols = Math.max(1, featured.length);
+
+          featured.forEach((sid, idx) => {
+            const entry = this._participants.get(sid);
+            if (!entry) return;
+            entry.container.classList.add('in-spotlight');
+            entry.container.classList.remove('in-thumbnails');
+            entry.container.style.display = '';
+            Object.assign(entry.container.style, {
+              top: '0',
+              left: 'calc(' + (100 / cols) * idx + '% + ' + gap / 2 + 'px)',
+              width: 'calc(' + 100 / cols + '% - ' + gap + 'px)',
+              height: 'calc(100% - ' + (stripHeight + 10) + 'px)',
+            });
+          });
+
+          this._layoutBottomStrip(this._stripOrder(featuredSet), { height: stripHeight });
+        },
+
+        // Pick a new spotlight participant (prefer pinned, then remote)
         _pickNewSpotlight() {
+          let pinned = null;
+          for (const sid of this._pinnedSids) {
+            if (this._participants.has(sid)) {
+              pinned = sid;
+              break;
+            }
+          }
           let firstRemoteSid = null;
           for (const [sid] of this._participants) {
             if (sid !== this._localParticipantSid) {
@@ -11609,43 +11973,28 @@
               break;
             }
           }
-          this._currentSpotlightSid = firstRemoteSid || this._localParticipantSid;
+          this._currentSpotlightSid = pinned || firstRemoteSid || this._localParticipantSid;
           this._applySpotlightLayout();
         },
 
         // Apply spotlight + thumbnail positioning via inline styles
         _applySpotlightLayout() {
-          let thumbIndex = 0;
           const thumbHeight = 130;
-          const thumbGap = 8;
-          // Shrink thumbnails when they'd overflow the container width
-          const thumbCount = Math.max(1, this._participants.size - 1);
-          const containerWidth = this.elements.previewContainer.clientWidth || 800;
-          const thumbWidth = Math.min(160, Math.max(80, Math.floor(containerWidth / thumbCount) - thumbGap));
-
-          this._participants.forEach((entry, sid) => {
-            if (sid === this._currentSpotlightSid) {
-              entry.container.classList.add('in-spotlight');
-              entry.container.classList.remove('in-thumbnails');
-              Object.assign(entry.container.style, {
-                top: '0',
-                left: '0',
-                width: '100%',
-                height: `calc(100% - ${thumbHeight + 10}px)`,
-              });
-            } else {
-              entry.container.classList.remove('in-spotlight');
-              entry.container.classList.add('in-thumbnails');
-              const leftPos = thumbGap + thumbIndex * (thumbWidth + thumbGap);
-              Object.assign(entry.container.style, {
-                top: 'auto',
-                bottom: '0',
-                left: `${leftPos}px`,
-                width: `${thumbWidth}px`,
-                height: `${thumbHeight}px`,
-              });
-              thumbIndex++;
-            }
+          const spotlightSid = this._currentSpotlightSid;
+          const entrySpot = this._participants.get(spotlightSid);
+          if (entrySpot) {
+            entrySpot.container.classList.add('in-spotlight');
+            entrySpot.container.classList.remove('in-thumbnails');
+            entrySpot.container.style.display = '';
+            Object.assign(entrySpot.container.style, {
+              top: '0',
+              left: '0',
+              width: '100%',
+              height: `calc(100% - ${thumbHeight + 10}px)`,
+            });
+          }
+          this._layoutBottomStrip(this._stripOrder(new Set([spotlightSid])), {
+            height: thumbHeight,
           });
         },
 
@@ -11658,14 +12007,33 @@
           this._applySpotlightLayout();
         },
 
+        // Click-to-pin: a pinned tile holds the spotlight / a featured slot
+        // and auto-promotion leaves it alone until unpinned.
+        _togglePin(sid) {
+          if (!this._participants.has(sid)) return;
+          if (this._pinnedSids.has(sid)) {
+            this._pinnedSids.delete(sid);
+          } else {
+            this._pinnedSids.add(sid);
+            if (this._participants.size < this.BIG_ROOM_MIN) {
+              this._currentSpotlightSid = sid;
+            }
+          }
+          const entry = this._participants.get(sid);
+          if (entry) entry.container.classList.toggle('pinned', this._pinnedSids.has(sid));
+          this._updateLayout();
+        },
+
         // Show a participant's screen share in its own container. Multiple
-        // participants can share simultaneously — shares tile side by side.
+        // participants can share simultaneously — shares tile side by side,
+        // and clicking one features it (large stage + side rail).
         _showRemoteScreenShare(videoElement, trackSid, participantName) {
           const key = trackSid || 'share-' + Math.random().toString(36).slice(2);
           this._hideRemoteScreenShare(key); // replace a stale entry for the same track only
           const wrapper = document.createElement('div');
           wrapper.className = 'screen-share-container';
           wrapper.dataset.shareSid = key;
+          wrapper.title = 'Click to feature this screen';
           videoElement.dataset.trackSid = trackSid || '';
           wrapper.appendChild(videoElement);
           const label = document.createElement('div');
@@ -11673,6 +12041,7 @@
           label.textContent =
             participantName === 'You' ? 'You are sharing' : (participantName || 'Participant') + ' is sharing';
           wrapper.appendChild(label);
+          wrapper.addEventListener('click', () => this._toggleFeaturedShare(key));
           this.elements.previewContainer.appendChild(wrapper);
           this._screenShares.set(key, wrapper);
           this._layoutScreenShares();
@@ -11685,26 +12054,77 @@
             if (this._screenShares.size === 0) return;
             this._screenShares.forEach((wrapper) => wrapper.remove());
             this._screenShares.clear();
+            this._featuredShareKey = null;
           } else {
             const wrapper = this._screenShares.get(trackSid);
             if (!wrapper) return;
             wrapper.remove();
             this._screenShares.delete(trackSid);
+            if (this._featuredShareKey === trackSid) this._featuredShareKey = null;
           }
           this._layoutScreenShares();
           this._updateLayout();
         },
 
-        // Tile active shares evenly across the presentation area
+        // Click a share to feature it; click the featured one to go back to
+        // equal tiling.
+        _toggleFeaturedShare(key) {
+          if (this._screenShares.size < 2) return; // a single share is already the stage
+          this._featuredShareKey = this._featuredShareKey === key ? null : key;
+          this._layoutScreenShares();
+        },
+
+        // Lay out active shares across the presentation area. Equal columns
+        // by default; when a share is featured (clicked) it takes the wide
+        // stage and the rest stack in a right-hand rail.
         _layoutScreenShares() {
           const count = this._screenShares.size;
           if (count === 0) return;
-          const width = 100 / count;
-          let idx = 0;
-          this._screenShares.forEach((wrapper) => {
-            wrapper.style.width = 'calc(' + width + '% - 2px)';
-            wrapper.style.left = 'calc(' + width * idx + '% + 1px)';
-            idx++;
+          const featuredKey =
+            this._featuredShareKey && this._screenShares.has(this._featuredShareKey)
+              ? this._featuredShareKey
+              : count >= 3
+                ? this._screenShares.keys().next().value
+                : null;
+
+          if (!featuredKey) {
+            // 1-2 shares, none featured: equal columns.
+            const width = 100 / count;
+            let idx = 0;
+            this._screenShares.forEach((wrapper) => {
+              wrapper.classList.remove('share-featured', 'share-rail');
+              wrapper.style.width = 'calc(' + width + '% - 2px)';
+              wrapper.style.left = 'calc(' + width * idx + '% + 1px)';
+              wrapper.style.top = '';
+              wrapper.style.height = '';
+              idx++;
+            });
+            return;
+          }
+
+          const railCount = count - 1;
+          let railIdx = 0;
+          this._screenShares.forEach((wrapper, key) => {
+            if (key === featuredKey) {
+              wrapper.classList.add('share-featured');
+              wrapper.classList.remove('share-rail');
+              Object.assign(wrapper.style, {
+                left: '1px',
+                width: 'calc(70% - 2px)',
+                top: '',
+                height: '',
+              });
+            } else {
+              wrapper.classList.add('share-rail');
+              wrapper.classList.remove('share-featured');
+              Object.assign(wrapper.style, {
+                left: 'calc(70% + 1px)',
+                width: 'calc(30% - 2px)',
+                top: 'calc((100% - 140px) / ' + railCount + ' * ' + railIdx + ')',
+                height: 'calc((100% - 140px) / ' + railCount + ' - 4px)',
+              });
+              railIdx++;
+            }
           });
         },
 
@@ -11729,7 +12149,24 @@
         _maybeAutoStartCapture() {
           if (this._autoCaptureAttempted || this.isRecording) return;
           if (!this.sessionConnected) return;
-          if (!this.stream || this.stream.getTracks().length === 0) return;
+          // The HOST's agent records the meeting for everyone. In-app guests
+          // auto-recording too produced N duplicate recordings + transcripts
+          // of the same meeting scattered into the guests' own spaces (and N
+          // parallel transcription bills) — and the host's Pause AI never
+          // reached them. Guests can still record manually.
+          if (this.sessionRole !== 'host' && !this._activeMeeting) {
+            this.showStatus('The host’s agent is recording this meeting', 'info');
+            this._autoCaptureAttempted = true;
+            return;
+          }
+          if (!this.stream || this.stream.getTracks().length === 0) {
+            // No local tracks yet (mic denied or still publishing) — say so
+            // instead of silently never capturing, and let a later
+            // track-publish retry (we deliberately do NOT set the attempted
+            // flag here).
+            this.showStatus('Waiting for mic/camera to start the recording agent…', 'warning');
+            return;
+          }
           this._autoCaptureAttempted = true;
           this.startRecording();
           this.showStatus('Recording & live notes on — Pause AI anytime', 'info');
@@ -11746,6 +12183,19 @@
         toggleAgentPause() {
           this._agentPaused = !this._agentPaused;
           const paused = this._agentPaused;
+
+          // Record the pause window (seconds relative to recording start) so
+          // the post-save diarized pass can REDACT it — it runs on the full
+          // recording audio and would otherwise transcribe the paused span.
+          if (this.recordingStartTime) {
+            const relSec = (Date.now() - this.recordingStartTime) / 1000;
+            if (paused) {
+              this._aiPauseWindows.push({ startSec: relSec, endSec: null });
+            } else {
+              const open = this._aiPauseWindows[this._aiPauseWindows.length - 1];
+              if (open && open.endSec === null) open.endSec = relSec;
+            }
+          }
 
           const btn = document.getElementById('pauseAiBtn');
           if (btn) {
@@ -11949,8 +12399,36 @@
             }
           }
 
-          // Debounced spotlight promotion (only in 3+ mode)
-          if (this._participants.size >= 3 && speakers.length > 0) {
+          // Recency order feeds the Big Room featured slots + strip priority.
+          for (const participant of speakers) {
+            const isLocal =
+              this._livekitRoom &&
+              this._livekitRoom.localParticipant &&
+              participant.sid === this._livekitRoom.localParticipant.sid;
+            const key = isLocal ? this._localParticipantSid : participant.sid || participant.identity;
+            if (!key || !this._participants.has(key)) continue;
+            const at = this._recentSpeakerSids.indexOf(key);
+            if (at !== -1) this._recentSpeakerSids.splice(at, 1);
+            this._recentSpeakerSids.unshift(key);
+          }
+          if (this._recentSpeakerSids.length > 8) this._recentSpeakerSids.length = 8;
+
+          const count = this._participants.size;
+          if (count >= this.BIG_ROOM_MIN) {
+            // Big Room: debounced featured-stage refresh (pins always win —
+            // _featuredForBigRoom puts them first).
+            if (speakers.length > 0) {
+              clearTimeout(this._speakerDebounceTimer);
+              this._speakerDebounceTimer = setTimeout(() => {
+                if (this._participants.size >= this.BIG_ROOM_MIN) this._applyBigRoomLayout();
+              }, 1200);
+            }
+            return;
+          }
+
+          // Debounced spotlight promotion (only in 3+ mode; a pinned tile
+          // holds the spotlight against auto-promotion)
+          if (count >= 3 && speakers.length > 0 && this._pinnedSids.size === 0) {
             const topSpeaker = speakers[0];
             const isLocal =
               this._livekitRoom &&
@@ -12085,12 +12563,39 @@
           const rows = (this._invitablePeople || []).filter(
             (p) => !f || p.name.toLowerCase().includes(f) || p.email.toLowerCase().includes(f)
           );
-          if (rows.length === 0) {
+          // Typed an email that matches nobody in the graph? Offer to invite
+          // that address directly — the grant means their Lite app rings the
+          // moment they run it, and the join link still covers everyone else.
+          const typedEmail =
+            /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((filter || '').trim()) &&
+            !rows.some((p) => p.email.toLowerCase() === (filter || '').trim().toLowerCase())
+              ? (filter || '').trim()
+              : null;
+          if (rows.length === 0 && !typedEmail) {
             list.innerHTML =
-              '<div class="invite-picker-empty">No people found — use Copy join link below</div>';
+              '<div class="invite-picker-empty">No people found — type an email, or use Copy join link below</div>';
             return;
           }
           list.innerHTML = '';
+          if (typedEmail) {
+            const row = document.createElement('div');
+            row.className = 'invite-person invite-email';
+            const who = document.createElement('div');
+            who.className = 'who';
+            const nm = document.createElement('div');
+            nm.className = 'nm';
+            nm.textContent = 'Invite ' + typedEmail;
+            const em = document.createElement('div');
+            em.className = 'em';
+            em.textContent = 'not in your graph yet — rings their Lite app once they sign in';
+            who.append(nm, em);
+            const st = document.createElement('div');
+            st.className = 'state';
+            st.textContent = this._invitedEmails.has(typedEmail) ? 'invited ✓' : '';
+            row.append(who, st);
+            row.onclick = () => this._invitePerson({ name: typedEmail, email: typedEmail }, st);
+            list.appendChild(row);
+          }
           // One-click "everyone in this space" — explicit, space-scoped only,
           // and only while the list is unfiltered (a filtered invite-all is
           // ambiguous about who "all" means).
@@ -13056,6 +13561,24 @@
           this._activeMeeting = null;
           this._activeMeetingItemId = null;
           try {
+            // The auto-save (transcript item + video item) may still be in
+            // flight — End Session fires stopRecording and reaches here in
+            // milliseconds while the save takes seconds. Completing now would
+            // link nothing (meeting->transcript / meeting->recording edges
+            // lost). Wait for it; cap the wait so a hung save can't wedge
+            // completion forever. NOT on window-close: the renderer dies
+            // mid-await there (the close guards already forced the save to
+            // finish first), and the completion IPC must fire immediately.
+            if (reason !== 'window-close' && this._autoSavePromise) {
+              await Promise.race([
+                this._autoSavePromise.catch(() => {}),
+                new Promise((r) => setTimeout(r, 120000)),
+              ]);
+            }
+          } catch (_e) {
+            /* never let save-waiting block completion */
+          }
+          try {
             const participants = [...(this._participants?.values() || [])].map(p => ({
               identity: p.identity || 'Guest',
             }));
@@ -13097,6 +13620,12 @@
           this.sessionConnected = false;
           this.sessionRole = null;
           this._currentSpeakerName = null;
+          this._utteranceSpeakerName = null;
+          this._pinnedSids.clear();
+          this._recentSpeakerSids.length = 0;
+          this._featuredShareKey = null;
+          this._clearOverflowPill();
+          this._updateSessionCountChip(0, false);
           this._closeSessionAudioMix();
           document.querySelector('.main-layout')?.classList.remove('session-on');
 

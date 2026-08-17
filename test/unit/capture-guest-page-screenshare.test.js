@@ -290,3 +290,74 @@ describe('guest page — recording transfer guards', () => {
     expect(title(document)).toBe('Transfer complete');
   });
 });
+
+// Big Room + featured shares — the large-meeting accommodations (guest v18).
+describe('guest page — big room + featured share', () => {
+  let guest, document;
+
+  beforeEach(() => {
+    ({ guest, document } = loadGuestWithDom());
+  });
+
+  const grid = (document) => document.getElementById('videoGrid');
+
+  function seedParticipants(guest, document, n) {
+    for (let i = 0; i < n; i++) {
+      guest._ensureParticipantCell('sid-' + i, 'Guest ' + i);
+    }
+  }
+
+  it('7+ participants flip the grid into big-room (scroll, not slivers)', () => {
+    seedParticipants(guest, document, 6);
+    guest._updateGridLayout();
+    expect(grid(document).classList.contains('big-room')).toBe(false);
+    expect(grid(document).classList.contains('grid-6')).toBe(true);
+
+    guest._ensureParticipantCell('sid-7', 'Guest 7');
+    guest._updateGridLayout();
+    expect(grid(document).classList.contains('big-room')).toBe(true);
+    expect(grid(document).classList.contains('grid-7')).toBe(false);
+  });
+
+  it('the header badge carries the live head-count in big rooms only', () => {
+    const badge = document.getElementById('badgeBigRoom');
+    seedParticipants(guest, document, 5);
+    guest._updateGridLayout();
+    expect(badge.classList.contains('visible')).toBe(false);
+
+    seedParticipants(guest, document, 10); // same sids 0-4 reused + 5-9 new
+    guest._updateGridLayout();
+    expect(badge.classList.contains('visible')).toBe(true);
+    expect(badge.textContent).toContain('10');
+  });
+
+  it('clicking a share features it; clicking again returns to the even split', () => {
+    guest._showScreenShare(fakeVideo(document), 'sid-a', 'Alice');
+    guest._showScreenShare(fakeVideo(document), 'sid-b', 'Bob');
+    const a = guest._screenShares.get('sid-a');
+
+    guest._toggleFeaturedShare('sid-a');
+    expect(a.classList.contains('featured')).toBe(true);
+
+    guest._toggleFeaturedShare('sid-b');
+    expect(a.classList.contains('featured')).toBe(false);
+    expect(guest._screenShares.get('sid-b').classList.contains('featured')).toBe(true);
+
+    guest._toggleFeaturedShare('sid-b');
+    expect(guest._screenShares.get('sid-b').classList.contains('featured')).toBe(false);
+  });
+
+  it('a single share ignores featuring (it already owns the stage)', () => {
+    guest._showScreenShare(fakeVideo(document), 'sid-a', 'Alice');
+    guest._toggleFeaturedShare('sid-a');
+    expect(guest._screenShares.get('sid-a').classList.contains('featured')).toBe(false);
+  });
+
+  it('share containers are click-wired (tap to feature)', () => {
+    guest._showScreenShare(fakeVideo(document), 'sid-a', 'Alice');
+    guest._showScreenShare(fakeVideo(document), 'sid-b', 'Bob');
+    const b = guest._screenShares.get('sid-b');
+    b.dispatchEvent(new (b.ownerDocument.defaultView.Event)('click'));
+    expect(b.classList.contains('featured')).toBe(true);
+  });
+});

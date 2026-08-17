@@ -564,6 +564,25 @@ async function checkLiveMeetings(client: SdkSpacesClient | null, reason: string)
 
 async function ringForMeeting(meeting: LiveMeeting, reason: string): Promise<void> {
   const log = getLoggingApi();
+  // No published guest page = nothing a ring can open. Ringing anyway
+  // produced a beep + a notification whose click did nothing.
+  if (meeting.joinUrl === null) {
+    log.warn('spaces', 'meeting ring suppressed — no guest page published', { id: meeting.id });
+    return;
+  }
+  // Don't ring the host's own machine: they're already IN the meeting in
+  // the recorder window; popping a guest lobby tab under it reads as a
+  // phantom second meeting. (The audience predicate keeps hosts in the
+  // LIST so other surfaces can show the meeting as live.)
+  try {
+    const viewer = resolveViewerId();
+    if (viewer !== null && meeting.hostId !== null && meeting.hostId === viewer) {
+      log.info('spaces', 'meeting ring suppressed — viewer is the host', { id: meeting.id });
+      return;
+    }
+  } catch {
+    /* viewer resolution is best-effort; ring rather than stay silent */
+  }
   log.info('spaces', 'meeting ring', { id: meeting.id, title: meeting.title, reason });
   const ageMin =
     meeting.startedAtMs > 0
@@ -761,6 +780,19 @@ const QUIET_READ_SPANS = new Set<string>([
   'spaces.learn.signals',
 ]);
 
+// ADR-051 identity convention, shared by the SDK client's viewerId dep and
+// the meeting ring's self-ring check: lowercased session email → declared
+// attribution email → accountId; null when signed out.
+function resolveViewerId(): string | null {
+  const session = getAuthApi().getSession('edison');
+  if (session === null) return null;
+  const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
+  if (email.length > 0) return email;
+  const attribution = readAttributionEmailSync();
+  if (attribution !== null && attribution.length > 0) return attribution;
+  return session.accountId;
+}
+
 function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // Phase 1: the SDK client now executes real Cypher via the Neon
   // module. `getNeonApi()` lazily instantiates so we can pass the
@@ -785,20 +817,13 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     // convention as the renderer's boot whoAmI probe — lowercased
     // session email, falling back to accountId; null when signed out
     // (restricted Spaces are then gated out entirely).
-    viewerId: () => {
-      const session = getAuthApi().getSession('edison');
-      if (session === null) return null;
-      const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
-      if (email.length > 0) return email;
-      // Session carries no email → use the declared attribution email,
-      // the SAME identity loadCurrentUser stamps on created Spaces
-      // (createdBy). Without this the viewer is gated under the bare
-      // accountId and sees none of their own email-owned Spaces
-      // (2026-08-15 incident). accountId is only the last resort.
-      const attribution = readAttributionEmailSync();
-      if (attribution !== null && attribution.length > 0) return attribution;
-      return session.accountId;
-    },
+    // Session carries no email → the declared attribution email, the SAME
+    // identity loadCurrentUser stamps on created Spaces (createdBy).
+    // Without this the viewer is gated under the bare accountId and sees
+    // none of their own email-owned Spaces (2026-08-15 incident).
+    // accountId is only the last resort. (Logic in resolveViewerId, shared
+    // with the meeting ring's self-ring suppression.)
+    viewerId: () => resolveViewerId(),
     // ADR-059 — universal notes. Note BODIES live in the shared Edison
     // KV store (the same store WISER Playbooks / OR-Mobile write);
     // inject it so :Note edits/creates keep the body in sync. The

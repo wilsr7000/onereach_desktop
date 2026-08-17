@@ -1089,7 +1089,14 @@ Respond with JSON:
 
     // Trigger diarized transcription on a saved recording item
     // Uses the same ElevenLabs Scribe service as the clipboard manager
-    ipcMain.handle('recorder:transcribe-item', async (event, itemId) => {
+    ipcMain.handle('recorder:transcribe-item', async (event, itemId, opts = {}) => {
+      // opts.pauseWindows: [{startSec, endSec}] spans the user Paused the AI
+      //   for — speech inside them must NOT appear in any transcript output
+      //   (the live transcript already honored the pause; this pass runs on
+      //   the FULL recording audio and would silently undo it).
+      // opts.indexSpaceId: when set, the diarized transcript is also saved
+      //   as a readable item in that space (not just files beside the video
+      //   that nothing surfaces).
       let tempAudioPath = null;
       try {
         const clipboardManager = getClipboardManager();
@@ -1175,6 +1182,38 @@ Respond with JSON:
           return { success: false, error: 'Transcription returned no text' };
         }
 
+        // Honor Pause AI: drop every word whose midpoint falls inside a
+        // pause window, and mark the gap so the transcript is honest about
+        // the hole. Without this the "don't transcribe this part" control
+        // was silently undone by the post-save pass.
+        const pauseWindows = Array.isArray(opts.pauseWindows)
+          ? opts.pauseWindows.filter(
+              (w) => w && typeof w.startSec === 'number' && typeof w.endSec === 'number' && w.endSec > w.startSec
+            )
+          : [];
+        const inPause = (sec) => pauseWindows.some((w) => sec >= w.startSec && sec <= w.endSec);
+        let redactedCount = 0;
+        if (pauseWindows.length > 0 && result.words && result.words.length > 0) {
+          const kept = [];
+          let lastDropped = false;
+          for (const w of result.words) {
+            const mid = typeof w.start === 'number' ? w.start + ((w.end || w.start) - w.start) / 2 : 0;
+            if (inPause(mid)) {
+              redactedCount++;
+              if (!lastDropped) {
+                kept.push({ ...w, text: '[paused — not transcribed]', speaker: w.speaker, _redactionMarker: true });
+                lastDropped = true;
+              }
+              continue;
+            }
+            lastDropped = false;
+            kept.push(w);
+          }
+          result.words = kept;
+          result.text = kept.map((w) => w.text).join(' ');
+          result.wordCount = kept.filter((w) => !w._redactionMarker).length;
+        }
+
         // Save transcription files alongside the recording
         const itemDir = path.dirname(audioPath);
 
@@ -1200,14 +1239,47 @@ Respond with JSON:
         }
         fs.writeFileSync(path.join(itemDir, 'transcription.txt'), formattedText);
 
+        // Surface the diarized transcript as a first-class item in the
+        // meeting's space. Per-voice speaker separation is the transcript
+        // that actually scales to large meetings — leaving it as a file
+        // beside the video made it invisible to both users and agents.
+        let diarizedItemId = null;
+        if (opts.indexSpaceId && formattedText) {
+          try {
+            const diarizedContent =
+              '# Meeting Transcript (diarized)\n\n' +
+              '**Speakers:** ' + (result.speakerCount || '?') + ' (voice-separated)\n' +
+              '**Words:** ' + (result.wordCount || '?') +
+              (redactedCount > 0 ? '\n**Redacted:** ' + redactedCount + ' words (AI paused)' : '') +
+              '\n\n---\n\n' +
+              formattedText;
+            await clipboardManager.addToHistory({
+              type: 'text',
+              content: diarizedContent,
+              source: 'wiser-meeting',
+              spaceId: opts.indexSpaceId,
+              metadata: { kind: 'meeting-transcript-diarized', sourceItemId: itemId },
+            });
+            diarizedItemId = clipboardManager.history?.[0]?.id || null;
+          } catch (indexErr) {
+            log.warn('recorder', 'Diarized transcript item indexing failed (files still saved)', {
+              error: indexErr.message,
+            });
+          }
+        }
+
         log.info('recorder', 'Transcription complete: ... words, ... speakers', {
           wordCount: result.wordCount || '?',
           speakerCount: result.speakerCount || '?',
+          redactedCount,
+          diarizedItemId,
         });
         return {
           success: true,
           speakerCount: result.speakerCount || 0,
           wordCount: result.wordCount || 0,
+          redactedCount,
+          diarizedItemId,
           text: result.text,
         };
       } catch (error) {

@@ -46,7 +46,7 @@ contextBridge.exposeInMainWorld('recorder', {
 
   // Live transcription support
   getOpenAIKey: () => ipcRenderer.invoke('recorder:get-openai-key'),
-  transcribeItem: (itemId) => ipcRenderer.invoke('recorder:transcribe-item', itemId),
+  transcribeItem: (itemId, opts) => ipcRenderer.invoke('recorder:transcribe-item', itemId, opts || {}),
   writeLiveTranscript: (data) => ipcRenderer.invoke('recorder:write-live-transcript', data),
   trackTranscriptionUsage: (usage) => ipcRenderer.invoke('recorder:track-transcription-usage', usage),
   getMeetingCost: (data) => ipcRenderer.invoke('recorder:get-meeting-cost', data),

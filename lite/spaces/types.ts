@@ -75,6 +75,8 @@ export interface LiveMeeting {
   joinUrl: string | null;
   /** Host display name when known. */
   host: string | null;
+  /** Host identity (lowercased email) — used to suppress the self-ring. */
+  hostId: string | null;
   /** Space the meeting was started from, when the host knew it (2026-08-12). */
   spaceName: string | null;
   /** Epoch ms the meeting went live (0 when unknown). */

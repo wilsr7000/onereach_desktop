@@ -1074,6 +1074,7 @@ export const CYPHER = {
            coalesce(m.title, 'Meeting') AS title,
            m.joinUrl AS joinUrl,
            m.host AS host,
+           coalesce(m.hostId, '') AS hostId,
            m.spaceName AS spaceName,
            coalesce(m.startedAt, 0) AS startedAtMs
     ORDER BY m.startedAt DESC
@@ -2804,11 +2805,13 @@ export class SdkSpacesClient {
         const id = optString(row, 'id');
         if (id === undefined || id.length === 0) continue;
         const startedAtMs = optNumber(row, 'startedAtMs');
+        const hostId = optString(row, 'hostId') ?? '';
         out.push({
           id,
           title: optString(row, 'title') ?? 'Meeting',
           joinUrl: optString(row, 'joinUrl') ?? null,
           host: optString(row, 'host') ?? null,
+          hostId: hostId.length > 0 ? hostId : null,
           spaceName: optString(row, 'spaceName') ?? null,
           startedAtMs:
             startedAtMs !== undefined && Number.isFinite(startedAtMs) ? startedAtMs : 0,
