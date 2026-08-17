@@ -262,6 +262,49 @@ const ACTION_REGISTRY = {
     },
   },
 
+  'open-gps-for-life': {
+    category: 'windows',
+    description: 'Open GPS for Life (queue + merged calendars web app)',
+    execute: () => {
+      const { BrowserWindow } = require('electron');
+      const GPSFL_URL =
+        'https://files.staging.api.onereach.ai/public/48cc49ef-ab05-4d51-acc6-559c7ff22150/chorequest/index.html';
+      const existing = BrowserWindow.getAllWindows().find(
+        (w) => !w.isDestroyed() && w.webContents.getURL().startsWith(GPSFL_URL)
+      );
+      if (existing) {
+        existing.focus();
+        return { success: true, message: 'GPS for Life focused' };
+      }
+      // Kick a calendar sync so the window opens with fresh merged
+      // events (the hourly loop covers steady state).
+      try { require('./lib/gps-for-life/ics-sync').syncOnce().catch(() => {}); } catch { /* best-effort */ }
+      // Identity hand-off: the app is signed in, the web app is not —
+      // pass the display name for task attribution (author.js reads
+      // ?author=). ADR-068: derive from the primary email's local part
+      // when no display name is set; never pass a +tagged form.
+      let author = '';
+      try {
+        const sm = global.settingsManager;
+        const display = sm?.get('userDisplayName');
+        if (typeof display === 'string' && display.trim()) {
+          author = display.trim();
+        } else {
+          const email = String(sm?.get('userEmail') || '').trim().toLowerCase();
+          const local = email.split('@')[0]?.split('+')[0] || '';
+          if (local) author = local.charAt(0).toUpperCase() + local.slice(1);
+        }
+      } catch { /* attribution is best-effort */ }
+      const win = new BrowserWindow({
+        width: 1180, height: 800, title: 'GPS for Life', show: false,
+        webPreferences: { nodeIntegration: false, contextIsolation: true },
+      });
+      win.once('ready-to-show', () => { win.show(); });
+      win.loadURL(author ? `${GPSFL_URL}?author=${encodeURIComponent(author)}` : GPSFL_URL);
+      return { success: true, message: 'GPS for Life opened' };
+    },
+  },
+
   'open-meeting-history': {
     category: 'windows',
     description: 'Open Meeting History (timeline of past meetings with transcript summaries)',

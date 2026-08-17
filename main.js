@@ -1402,6 +1402,17 @@ app.whenReady().then(() => {
       console.error('[Startup] Error initializing presence:', error);
     }
 
+    // GPS for Life — external-calendar sync (Google ICS → Edison KV).
+    // The desktop fetches because browsers can't (no CORS on Google ICS
+    // feeds); the web/phone dashboards read the published merge. Hourly
+    // loop, immediate first pass, best-effort by construction.
+    try {
+      require('./lib/gps-for-life/ics-sync').start();
+      console.log('GPS for Life calendar sync started');
+    } catch (error) {
+      console.error('[Startup] Error starting GPS for Life calendar sync:', error);
+    }
+
     // Initialize module manager
     try {
       moduleManager = new ModuleManager();

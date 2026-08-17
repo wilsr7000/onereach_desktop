@@ -702,6 +702,14 @@ function _buildToolsMenu(_showTestMenu) {
           executeAction('open-live-activity');
         },
       },
+      {
+        label: 'GPS for Life',
+        accelerator: 'CommandOrControl+Shift+L',
+        click: () => {
+          const { executeAction } = require('./action-executor');
+          executeAction('open-gps-for-life');
+        },
+      },
       { type: 'separator' },
       {
         label: 'Manage Tools...',
