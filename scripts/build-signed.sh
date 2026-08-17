@@ -60,6 +60,36 @@ npm run package:mac
 # The app should now be signed automatically by electron-builder
 echo "✅ Build complete! App is signed."
 
+# ── AMFI gate (2026-08-17, ported from Lite's release pipeline) ──────
+# A RESTRICTED entitlement (keychain-access-groups) signed into the app
+# without Contents/embedded.provisionprofile = AMFI SIGKILL at launch
+# on users' machines (exit 137, empty output; Gatekeeper cannot
+# override). This bricked Lite 0.0.63–0.0.70 for auto-updaters.
+# preAutoEntitlements is disabled in electron-builder.yml; this gate
+# catches ANY regression path (config drift, electron-builder upgrades)
+# BEFORE notarization time is burned or an artifact ships.
+echo "🔎 AMFI gate: checking signed entitlements vs embedded profile..."
+APP_BUNDLE=$(find dist -maxdepth 3 -name "*.app" -type d | head -1)
+if [ -z "$APP_BUNDLE" ]; then
+    echo "❌ AMFI gate: no .app found under dist/ to inspect"
+    exit 1
+fi
+ENTITLEMENTS=$(codesign -d --entitlements - "$APP_BUNDLE" 2>/dev/null || true)
+if echo "$ENTITLEMENTS" | grep -q "keychain-access-groups"; then
+    if [ ! -f "$APP_BUNDLE/Contents/embedded.provisionprofile" ]; then
+        echo "❌ AMFI gate FAILED: $APP_BUNDLE carries keychain-access-groups"
+        echo "   with NO Contents/embedded.provisionprofile. macOS will SIGKILL"
+        echo "   this build at launch on users' machines."
+        echo "   Fix: keep mac.preAutoEntitlements=false in electron-builder.yml,"
+        echo "   or embed a provisioning profile authorizing the keychain group"
+        echo "   for THIS bundle id."
+        exit 1
+    fi
+    echo "✅ AMFI gate: entitlement present AND profile embedded — authorized."
+else
+    echo "✅ AMFI gate: no restricted keychain entitlement — clean."
+fi
+
 # Notarize the app manually (unless skipped)
 if [ "$SKIP_NOTARIZE" = false ]; then
     echo ""

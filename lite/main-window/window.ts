@@ -37,7 +37,7 @@ import {
 import type { Rectangle } from 'electron';
 import { dirname, join } from 'node:path';
 import { readHomeUrl, resolveHomeUrl } from './home-url-store.js';
-import { attachChromeParity } from './browser-parity.js';
+import { attachChromeParity, chromeParityUserAgent } from './browser-parity.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
@@ -1349,6 +1349,15 @@ function attachRemoteHome(win: BrowserWindow): void {
       partition: HOME_REMOTE_PARTITION,
     },
   });
+  // 2026-08-17: Google serves OAuth a 403 (disallowed_useragent) to
+  // browsers it doesn't recognize — Electron's default UA included.
+  // Tabs (ADR-063) and the auth window (ADR-041) already present a
+  // Chrome-shaped UA; the Home view never did, so "Sign in with
+  // Google" on the Home IDW's login 403'd in place. Session-level so
+  // popups in this partition inherit it too.
+  view.webContents.session.setUserAgent(chromeParityUserAgent());
+  view.webContents.setUserAgent(chromeParityUserAgent());
+
   // 2026-08-15: the Home surface is now an IDW (gsx-expert), and IDWs
   // sign in via SSO. The old handler shipped EVERY https popup to the
   // OS browser — silently, unlogged — so "Sign in with Google" opened
