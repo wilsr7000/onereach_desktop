@@ -219,7 +219,7 @@ let _instance: KVApi | null = null;
  * Get the singleton KV API. Lazily instantiates on first call.
  *
  * Default backing implementation is `FlowHttpKVClient` -- direct
- * HTTP to `https://em.edison.api.onereach.ai/http/{accountId}/keyvalue`,
+ * HTTP to `https://em.edison.api.onereach.ai/http/{accountId}/keyvalue2`,
  * authenticated with a FLOW token cached from the per-account
  * `/refresh_token` flow. (The previous `@or-sdk/key-value-storage`
  * transport rejected the OAuth `mult` cookie with `wrong keyId`; the
@@ -267,7 +267,7 @@ export function _setKVApiForTesting(api: KVApi): void {
 
 /**
  * Default client config for the per-account flow KV transport. The
- * service URL is fixed (`em.edison.api.onereach.ai/http/{accountId}/keyvalue`);
+ * service URL is fixed (`em.edison.api.onereach.ai/http/{accountId}/keyvalue2`);
  * the per-account `refresh_token` flow at the same host issues a FLOW
  * token that the client caches and prefixes onto every request.
  *
@@ -283,7 +283,7 @@ export function _setKVApiForTesting(api: KVApi): void {
  * `@or-sdk/key-value-storage` requires a "user-level platform token"
  * that the lite OAuth flow does not produce -- it rejects the
  * captured `mult` cookie with `Token was not accepted: wrong keyId`.
- * The `/http/{accountId}/keyvalue` flow accepts a per-account FLOW
+ * The `/http/{accountId}/keyvalue2` flow accepts a per-account FLOW
  * token from a public `/refresh_token` flow and is the same transport
  * the full app's tickets / signaling clients use successfully.
  */

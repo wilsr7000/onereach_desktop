@@ -15,7 +15,7 @@ Wraps `@or-sdk/discovery` so other Lite modules can resolve OneReach service URL
 import { getDiscoveryApi } from '../discovery/api.js';
 
 const kvUrl = await getDiscoveryApi().resolve('key-value-storage');
-// 'https://...sdk-api.onereach.ai/keyvalue'
+// 'https://...sdk-api.onereach.ai/keyvalue2'
 ```
 
 `resolve()` requires a signed-in user (token is read from `getAuthApi().getToken('edison')`). Signed-out callers see `DISCOVERY_NOT_AUTHENTICATED`.

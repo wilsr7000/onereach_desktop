@@ -67,7 +67,7 @@ async function main() {
   }
 
   // 3. Build the static page with the KV endpoint baked in
-  const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
+  const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue2');
   const html = buildGuestPageHTML({ kvUrl });
 
   // 4. Stage to a temp dir

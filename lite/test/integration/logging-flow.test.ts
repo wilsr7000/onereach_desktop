@@ -79,7 +79,7 @@ describe('Logging integration: events flow into the central queue', () => {
 describe('Logging integration: bug-report module routes through the central queue', () => {
   it('BugReportStore.save() emits store-level info logs through the logging API', async () => {
     const kv = new EdisonKVClient({
-      url: `${server.url}/keyvalue`,
+      url: `${server.url}/keyvalue2`,
       timeoutMs: 1000,
     });
     // The store's `logger` callback exists to delegate -- wire it
@@ -102,7 +102,7 @@ describe('Logging integration: bug-report module routes through the central queu
 
   it('BugReportStore.save() failure routes an error-level log through the queue', async () => {
     const kv = new EdisonKVClient({
-      url: `${server.url}/keyvalue`,
+      url: `${server.url}/keyvalue2`,
       timeoutMs: 500,
     });
     const store = new BugReportStore({
@@ -128,7 +128,7 @@ describe('Logging integration: bug-report module routes through the central queu
 describe('Logging integration: kv module routes through the central queue', () => {
   it('EdisonKVClient set/get emits info-level logs through the configured logger', async () => {
     const kv = new EdisonKVClient({
-      url: `${server.url}/keyvalue`,
+      url: `${server.url}/keyvalue2`,
       timeoutMs: 1000,
       logger: (level, message, data) => {
         getLoggingApi()[level]('kv', message, data);
@@ -147,7 +147,7 @@ describe('Logging integration: kv module routes through the central queue', () =
 describe('Logging integration: spans wrap real cross-module flows', () => {
   it('a span around BugReportStore.save() captures duration + outcome', async () => {
     const kv = new EdisonKVClient({
-      url: `${server.url}/keyvalue`,
+      url: `${server.url}/keyvalue2`,
       timeoutMs: 1000,
     });
     const store = new BugReportStore({ kvApi: kv });

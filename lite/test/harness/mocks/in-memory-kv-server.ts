@@ -7,19 +7,19 @@
  *
  * Contract reproduced (see `lite/kv/client.ts` header for the source):
  *
- *   PUT    /keyvalue?id={collection}&key={key}
+ *   PUT    /keyvalue2?id={collection}&key={key}
  *     body: { id, key, itemValue: <JSON-stringified value> }
  *
- *   GET    /keyvalue?id={collection}&key={key}
+ *   GET    /keyvalue2?id={collection}&key={key}
  *     -> 200 { value: <JSON-stringified> }
  *     -> 200 { Status: "No data found." } when missing
  *
- *   POST   /keyvalue
+ *   POST   /keyvalue2
  *     body: { id: collection }
  *     -> 200 [{ key: "..." }, ...]
  *     -> 200 { Status: "No data found." } when empty
  *
- *   DELETE /keyvalue?id={collection}&key={key}
+ *   DELETE /keyvalue2?id={collection}&key={key}
  *     -> 204 / 200
  *
  * Test injection hooks:
@@ -80,7 +80,7 @@ export interface InMemoryKVServer {
  * @example
  * ```typescript
  * const server = await startInMemoryKVServer();
- * const client = new EdisonKVClient({ url: `${server.url}/keyvalue` });
+ * const client = new EdisonKVClient({ url: `${server.url}/keyvalue2` });
  * await client.set('coll', 'key', { foo: 'bar' });
  * await server.stop();
  * ```

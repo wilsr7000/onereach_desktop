@@ -425,7 +425,7 @@ Currently porting from full into lite (one at a time):
   - **Per-kind dedicated windows**: `kind-metadata.ts` grows a `windowFactory` field; click handler reads it.
   - **Per-IDW partitions**: replace shared `persist:lite-idw-browser` with `persist:lite-idw-<kind>`.
   - **New kinds**: append to `AGENT_KINDS` + `KIND_META`; menu builder, Settings section, and catalog renderer pick it up automatically.
-  - **Bearer auth on /omnidata/neon**: handled by `lite/neon/credentials.ts`'s pluggable `CredentialsProvider` (ADR-033).
+  - **Bearer auth on /omnidata/neon2**: handled by `lite/neon/credentials.ts`'s pluggable `CredentialsProvider` (ADR-033).
 - **deliberately not ported from full**:
   - Tabbed browser (separate chunk; placeholder is the seam)
   - Cmd+1..Cmd+9 accelerators (ADR-015)
@@ -668,7 +668,7 @@ Currently porting from full into lite (one at a time):
 - **error conformance**: `lite/test/unit/neon-api.test.ts` runs `runErrorConformanceContract` against `NeonError` + `NEON_ERROR_CODES` (modulePrefix `NEON_`).
 - **events conformance** (ADR-032): `lite/test/unit/event-name-conformance.test.ts` includes `neon` in MODULES with sourceFiles `[neon/client.ts, neon/main.ts, neon/api.ts]`.
 - **unit tests**: `lite/test/unit/neon-api.test.ts` (25 tests), `lite/test/unit/neon-client.test.ts` (28 tests covering happy path, every error code, span emission, and the `buildRequest` switch for both `basic-in-body` and `bearer` credential variants), `lite/test/unit/neon-credentials.test.ts` (15 tests).
-- **integration tests**: `lite/test/integration/neon-integration.test.ts` (9 tests): real `EdisonNeonClient` against an in-memory HTTP server with the exact /omnidata/neon body shape; also exercises `KVCredentialsProvider` end-to-end against the real in-memory KV server.
+- **integration tests**: `lite/test/integration/neon-integration.test.ts` (9 tests): real `EdisonNeonClient` against an in-memory HTTP server with the exact /omnidata/neon2 body shape; also exercises `KVCredentialsProvider` end-to-end against the real in-memory KV server.
 - **typed onEvent integration**: `lite/test/integration/typed-onevent.test.ts` includes a `NeonApi.onEvent typed narrowing` block (3 tests).
 - **event coverage integration**: `lite/test/integration/event-coverage.test.ts` includes a `Neon module emits spans for every op` block (5 tests).
 - **failure modes covered**:
@@ -684,7 +684,7 @@ Currently porting from full into lite (one at a time):
   - instant IPC-entry events: `neon.ipc.query`, `neon.ipc.status`, `neon.ipc.test-connection`, `neon.ipc.configure` (ADR-030)
   - all under `category=neon` on lite log server (port 47392)
 - **persistence**: KV collection `lite-neon-config`, key `default`. Schema `{ endpoint, uri, user, password, database }`. Provider abstraction (`CredentialsProvider`) hides the storage choice from the client.
-- **forward-security seam**: `lite/neon/credentials.ts` -- the `NeonCredentials` discriminated union has `'basic-in-body'` (today) and `'bearer'` (reserved) variants. `client.ts:buildRequest` switches on `creds.kind`. When the `/omnidata/neon` endpoint hardens, a new provider variant + one new `buildRequest` case lands; call sites stay unchanged.
+- **forward-security seam**: `lite/neon/credentials.ts` -- the `NeonCredentials` discriminated union has `'basic-in-body'` (today) and `'bearer'` (reserved) variants. `client.ts:buildRequest` switches on `creds.kind`. When the `/omnidata/neon2` endpoint hardens, a new provider variant + one new `buildRequest` case lands; call sites stay unchanged.
 - **deliberately not ported from full**:
   - Typed CRUD helpers (`upsertSpace`, `upsertAsset`, `ensurePerson`, `shareWith`, etc.) -- those land in feature modules (e.g. `lite/spaces/graph.ts`) when their respective ports happen, not in the transport client.
   - The full-app dual-transport (`neo4j-driver` direct path + GSX async-job polling) -- single-transport HTTP only.

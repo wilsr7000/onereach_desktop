@@ -91,7 +91,7 @@ export function discoveryResultsToMarkdown(results: DiscoveryResults): string {
     '_Not runnable from the app. Resolve with the Edison team and paste answers below._'
   );
   lines.push('');
-  lines.push('- How does an agent authenticate to `/omnidata/neon`? (TODO)');
+  lines.push('- How does an agent authenticate to `/omnidata/neon2`? (TODO)');
   lines.push(
     "- Does an agent inherit the dispatching user's ACL, or have its own identity? (TODO)"
   );

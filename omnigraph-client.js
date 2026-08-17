@@ -5,7 +5,7 @@
  * GSX ecosystem nodes: Spaces, Asset Types, and Assets.
  *
  * Backend: Neo4j Aura via Edison HTTP Cypher Proxy
- * Endpoint: POST .../omnidata/neon  (async job pattern: POST→jobId, GET→result)
+ * Endpoint: POST .../omnidata/neon2  (async job pattern: POST→jobId, GET→result)
  *
  * Follows the Temporal Graph Honor System v2.0.0:
  * - All nodes have provenance fields (created_by_*, updated_by_*, _history)
@@ -822,6 +822,11 @@ class OmniGraphClient {
    * @throws {Error} On network, query, or timeout error
    */
   async executeQuery(cypher, parameters = {}) {
+    // NEON access standard (2026-08-17): caller tag on every query —
+    // BOTH paths (direct-Aura bolt and the GSX proxy) carry it.
+    if (!String(cypher).startsWith('/* caller:')) {
+      cypher = `/* caller:onereach-desktop-omnigraph */\n${cypher}`;
+    }
     // Prefer the direct-Aura path when standard credentials are
     // configured. The GSX proxy was the original path but is currently
     // returning `POST error: no handler` for every query; direct-Aura

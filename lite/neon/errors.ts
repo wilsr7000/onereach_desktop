@@ -127,5 +127,5 @@ export function neonHttpRemediation(status: number): string {
   if (status >= 500) {
     return 'The Neon endpoint returned a server error. This is usually transient -- retry in a few seconds.';
   }
-  return 'Verify the request matches the OneReach /omnidata/neon contract; see lite/neon/README.md.';
+  return 'Verify the request matches the OneReach /omnidata/neon2 contract; see lite/neon/README.md.';
 }

@@ -11112,7 +11112,7 @@
         async _kvUrlForJoin(rawInput) {
           const fromUrl = (value) => {
             const m = /\/public\/([0-9a-f][0-9a-f-]{30,40})\//i.exec(value || '');
-            return m ? `https://em.edison.api.onereach.ai/http/${m[1]}/keyvalue` : null;
+            return m ? `https://em.edison.api.onereach.ai/http/${m[1]}/keyvalue2` : null;
           };
           const pasted = fromUrl(rawInput);
           if (pasted) return pasted;
@@ -11123,7 +11123,7 @@
           } catch {}
           const cached = fromUrl(this._guestPageUrl);
           if (cached) return cached;
-          return 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue';
+          return 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue2';
         },
 
         // Join a LiveKit meeting as a guest with full session UI (tiles,

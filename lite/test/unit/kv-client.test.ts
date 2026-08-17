@@ -18,13 +18,13 @@ function makeResponse(init: MockResponseInit): Response {
 describe('EdisonKVClient.set', () => {
   it('PUTs to ?id=collection&key=key with JSON-stringified itemValue', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     await client.set('lite-bugs', 'rec-1', { foo: 'bar' });
 
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://kv.test/keyvalue?id=lite-bugs&key=rec-1');
+    expect(url).toBe('https://kv.test/keyvalue2?id=lite-bugs&key=rec-1');
     expect(init?.method).toBe('PUT');
     const body = JSON.parse(init?.body as string);
     expect(body).toEqual({
@@ -37,7 +37,7 @@ describe('EdisonKVClient.set', () => {
 
   it('url-encodes collection and key in query string', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     await client.set('my collection', '2026-05-04T00:00:00.000Z', {});
 
@@ -49,13 +49,13 @@ describe('EdisonKVClient.set', () => {
 
   it('throws KVError on non-OK status', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: false, status: 500, text: 'oops' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     await expect(client.set('lite-bugs', 'x', {})).rejects.toThrow(KVError);
   });
 
   it('throws KVError on network failure', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     await expect(client.set('lite-bugs', 'x', {})).rejects.toThrow(KVError);
   });
 
@@ -70,7 +70,7 @@ describe('EdisonKVClient.set', () => {
       });
     });
     const client = new EdisonKVClient({
-      url: 'https://kv.test/keyvalue',
+      url: 'https://kv.test/keyvalue2',
       fetchImpl: fetchMock,
       timeoutMs: 10,
     });
@@ -83,12 +83,12 @@ describe('EdisonKVClient.get', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       makeResponse({ ok: true, status: 200, text: JSON.stringify({ value: JSON.stringify({ hello: 'world' }) }) })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     const result = await client.get('lite-bugs', 'rec-1');
 
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://kv.test/keyvalue?id=lite-bugs&key=rec-1');
+    expect(url).toBe('https://kv.test/keyvalue2?id=lite-bugs&key=rec-1');
     expect(init?.method).toBe('GET');
     expect(result).toEqual({ hello: 'world' });
   });
@@ -101,7 +101,7 @@ describe('EdisonKVClient.get', () => {
         text: JSON.stringify({ value: JSON.stringify({ name: 'John', age: 30 }) }),
       })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     const result = await client.get('users', 'user_123');
     expect(result).toEqual({ name: 'John', age: 30 });
   });
@@ -110,14 +110,14 @@ describe('EdisonKVClient.get', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       makeResponse({ ok: true, status: 200, text: '{"Status":"No data found."}' })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     const result = await client.get('lite-bugs', 'missing');
     expect(result).toBeNull();
   });
 
   it('returns null on empty body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     expect(await client.get('lite-bugs', 'missing')).toBeNull();
   });
 
@@ -125,7 +125,7 @@ describe('EdisonKVClient.get', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       makeResponse({ ok: true, status: 200, text: JSON.stringify({ value: 'plain string' }) })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     expect(await client.get('lite-bugs', 'plain')).toBe('plain string');
   });
 });
@@ -133,18 +133,18 @@ describe('EdisonKVClient.get', () => {
 describe('EdisonKVClient.delete', () => {
   it('DELETEs ?id=collection&key=key', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     await client.delete('lite-bugs', 'rec-1');
 
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://kv.test/keyvalue?id=lite-bugs&key=rec-1');
+    expect(url).toBe('https://kv.test/keyvalue2?id=lite-bugs&key=rec-1');
     expect(init?.method).toBe('DELETE');
   });
 
   it('throws KVError on non-OK status', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: false, status: 500, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     await expect(client.delete('lite-bugs', 'x')).rejects.toThrow(KVError);
   });
 });
@@ -158,12 +158,12 @@ describe('EdisonKVClient.listKeys', () => {
         text: JSON.stringify([{ key: 'a' }, { key: 'b' }, { key: 'c' }]),
       })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     const keys = await client.listKeys('lite-bugs');
 
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://kv.test/keyvalue');
+    expect(url).toBe('https://kv.test/keyvalue2');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ id: 'lite-bugs' });
     expect(keys).toEqual(['a', 'b', 'c']);
@@ -173,7 +173,7 @@ describe('EdisonKVClient.listKeys', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       makeResponse({ ok: true, status: 200, text: JSON.stringify(['key1', 'key2']) })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     expect(await client.listKeys('lite-bugs')).toEqual(['key1', 'key2']);
   });
 
@@ -181,13 +181,13 @@ describe('EdisonKVClient.listKeys', () => {
     const fetchMock = vi.fn().mockResolvedValue(
       makeResponse({ ok: true, status: 200, text: '{"Status":"No data found."}' })
     );
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     expect(await client.listKeys('lite-bugs')).toEqual([]);
   });
 
   it('returns empty on empty body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     expect(await client.listKeys('lite-bugs')).toEqual([]);
   });
 
@@ -202,7 +202,7 @@ describe('EdisonKVClient.listKeys', () => {
       });
     });
     const client = new EdisonKVClient({
-      url: 'https://kv.test/keyvalue',
+      url: 'https://kv.test/keyvalue2',
       fetchImpl: fetchMock,
       listTimeoutMs: 10,
       timeoutMs: 100000, // distinguishably different
@@ -232,7 +232,7 @@ describe('EdisonKVClient.list (listKeys + parallel get)', () => {
         makeResponse({ ok: true, status: 200, text: JSON.stringify({ value: JSON.stringify(value) }) })
       );
     });
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     const records = await client.list('lite-bugs');
     expect(records).toEqual([
@@ -258,7 +258,7 @@ describe('EdisonKVClient.list (listKeys + parallel get)', () => {
         makeResponse({ ok: true, status: 200, text: JSON.stringify({ value: JSON.stringify({ ok: true }) }) })
       );
     });
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
     const records = await client.list('lite-bugs');
     expect(records).toEqual([{ key: 'good', value: { ok: true } }]);
   });
@@ -271,7 +271,7 @@ describe('EdisonKVClient logger', () => {
       events.push({ level, message });
     };
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
-    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue', fetchImpl: fetchMock, logger });
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock, logger });
     await client.set('lite-bugs', 'k', {});
     expect(events.some((e) => e.level === 'info' && /set ok/.test(e.message))).toBe(true);
   });

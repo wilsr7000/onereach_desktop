@@ -1615,7 +1615,7 @@ Respond with JSON:
 
         // 2. Build static HTML with KV endpoint embedded
         const { buildGuestPageHTML } = require('./lib/meeting/capture-guest-page');
-        const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
+        const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue2');
         const html = buildGuestPageHTML({ kvUrl });
 
         // 3. Write to temp dir
@@ -1765,7 +1765,7 @@ Respond with JSON:
           log.warn('recorder', 'Store meeting tokens aborted', { reason: reconcile.reason });
           return { success: false, error: reconcile.error };
         }
-        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue');
+        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue2');
         const key = `wiser-room:${roomName}`;
 
         const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
@@ -1816,7 +1816,7 @@ Respond with JSON:
           log.warn('recorder', 'Clear meeting tokens aborted', { roomName, reason: reconcile.reason });
           return { success: false, error: reconcile.error };
         }
-        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue');
+        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue2');
         const key = `wiser-room:${roomName}`;
 
         const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
@@ -1847,7 +1847,7 @@ Respond with JSON:
       if (!this._activeKvRooms || this._activeKvRooms.size === 0) return;
       const refreshUrl = global.settingsManager?.get('gsxRefreshUrl');
       if (!refreshUrl) return;
-      const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue');
+      const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue2');
       for (const roomName of this._activeKvRooms) {
         const key = `wiser-room:${roomName}`;
         fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {

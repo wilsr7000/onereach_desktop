@@ -19,7 +19,7 @@
 const EXECUTE = process.argv.includes('--execute');
 const EP =
   process.env.EDISON_NEON_EP ||
-  'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon';
+  'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon2';
 // Credentials come from the environment — no baked secret in this
 // committed script (export guard would block it). Supply NEON_URI,
 // NEON_USER, NEON_PASSWORD (+ optional EDISON_NEON_EP) when running.

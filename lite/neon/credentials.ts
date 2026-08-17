@@ -4,14 +4,14 @@
  * The HTTP wrapper asks the provider for a credential bundle on every
  * request; the wrapper never holds long-lived secrets, and never
  * inspects what kind of credential it got. This is the
- * forward-security seam: when the `/omnidata/neon` endpoint hardens
+ * forward-security seam: when the `/omnidata/neon2` endpoint hardens
  * (bearer / OAuth2 / mTLS), only one new provider variant + one new
  * `buildRequest` switch case lands -- call sites stay unchanged.
  *
  * **Today** (Phase N0): `KVCredentialsProvider` returns
  *   `{ kind: 'basic-in-body', uri, user, password, database }`
  * and the client embeds those fields in the request body per the
- * current `/omnidata/neon` contract.
+ * current `/omnidata/neon2` contract.
  *
  * **Tomorrow** (Phase N3+): a `BearerCredentialsProvider` returns
  *   `{ kind: 'bearer', token, database }`
@@ -140,7 +140,7 @@ const DEFAULT_RECORD: NeonSettingsRecord = {
  *
  * This mirrors the values already present in
  * `scripts/neo4j-schema-migration.js` plus the well-known Edison
- * `/omnidata/neon` flow URL for account
+ * `/omnidata/neon2` flow URL for account
  * `35254342-4a2e-475b-aec1-18547e517e29`.
  *
  * Remove (or replace with a build-time injected value) before public
@@ -150,7 +150,7 @@ const DEFAULT_RECORD: NeonSettingsRecord = {
  */
 export const BAKED_IN_DEFAULT_GRAPH: Readonly<NeonSettingsRecord> = Object.freeze({
   endpoint:
-    'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon',
+    'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon2',
   uri: 'neo4j+s://40c812ef.databases.neo4j.io',
   user: 'neo4j',
   password: 'oCLF5bxkj66qivVDh1biePK7Byo9U1NUvFLJrHnQjzo',

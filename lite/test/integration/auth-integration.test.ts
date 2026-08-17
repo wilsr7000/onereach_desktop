@@ -158,7 +158,7 @@ describe('auth integration -- KV wire format', () => {
     const factory: AuthWindowFactory = { create: () => handle };
 
     const realKv = new EdisonKVClient({
-      url: server.url + '/keyvalue',
+      url: server.url + '/keyvalue2',
     });
 
     const store = new AuthStore({
@@ -223,7 +223,7 @@ describe('auth integration -- KV wire format', () => {
     const session = new FakeSession();
     const handle = makeHandle('https://studio.edison.onereach.ai/?accountId=' + SAMPLE_ACCOUNT_ID);
     const factory: AuthWindowFactory = { create: () => handle };
-    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
+    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue2' });
     const store = new AuthStore({
       kvApi: realKv,
       sessionFromPartition: () => session as unknown as Electron.Session,
@@ -264,7 +264,7 @@ describe('auth integration -- KV wire format', () => {
     // from the persistent partition cookie jar -- not from KV. The KV
     // namespace is anonymous and globally shared, so trusting it on
     // boot loaded every other Lite user's session.
-    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
+    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue2' });
     const session = new FakeSession();
     session.cookies.seed(multCookie());
     session.cookies.seed(orCookie({ accountId: SAMPLE_ACCOUNT_ID, email: SAMPLE_EMAIL }));
@@ -293,7 +293,7 @@ describe('auth integration -- KV wire format', () => {
     // AFTER initAuth has already started hydrating. Without this notify,
     // the placeholder shows the "Sign in" button even when partition
     // cookies hold a valid session, until the user clicks something.
-    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
+    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue2' });
     const session = new FakeSession();
     session.cookies.seed(multCookie());
     session.cookies.seed(orCookie({ accountId: SAMPLE_ACCOUNT_ID, email: SAMPLE_EMAIL }));
@@ -328,7 +328,7 @@ describe('auth integration -- KV wire format', () => {
     // historically loaded other users' sessions into this install. We
     // verify by counting POSTs to the KV server before/after multiple
     // concurrent hydrates: it should stay at zero.
-    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue' });
+    const realKv = new EdisonKVClient({ url: server.url + '/keyvalue2' });
 
     const store = new AuthStore({
       kvApi: realKv,

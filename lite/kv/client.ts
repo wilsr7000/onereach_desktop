@@ -8,10 +8,10 @@
  * Contract per the OneReach KeyValue Storage API Guide:
  * https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/IDWintegrationDocs/OMNI_KEYVALUE_STORAGE_GUIDE.md
  *
- *   PUT    /keyvalue?id={collection}&key={key}     body: { id, key, itemValue: <JSON-stringified value> }
- *   GET    /keyvalue?id={collection}&key={key}     -> { value: <stringified> } | { Status: "No data found." }
- *   POST   /keyvalue                                body: { id: collection }  -> [{ key }, ...]
- *   DELETE /keyvalue?id={collection}&key={key}     (may timeout but typically succeeds)
+ *   PUT    /keyvalue2?id={collection}&key={key}     body: { id, key, itemValue: <JSON-stringified value> }
+ *   GET    /keyvalue2?id={collection}&key={key}     -> { value: <stringified> } | { Status: "No data found." }
+ *   POST   /keyvalue2                                body: { id: collection }  -> [{ key }, ...]
+ *   DELETE /keyvalue2?id={collection}&key={key}     (may timeout but typically succeeds)
  *
  * Important: itemValue must be a JSON string (we JSON.stringify before send,
  * JSON.parse on receive). The docs are explicit about this.
@@ -28,7 +28,7 @@ import type { Span, EventRecord } from '../logging/events.js';
 import { getLoggingApi } from '../logging/api.js';
 import { isKvEvent, type KvEvent } from './events.js';
 
-const DEFAULT_KV_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue';
+const DEFAULT_KV_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue2';
 
 const DEFAULT_TIMEOUT_MS = 5000; // For set/get/delete -- block the user's save button
 const DEFAULT_LIST_TIMEOUT_MS = 2500; // For list -- runs while modal is open, must be snappy
@@ -278,7 +278,7 @@ export class EdisonKVClient {
 
   /**
    * List all records in a collection. Per the docs:
-   *   POST /keyvalue  body: { id: collection }  -> [{ key: "..." }, ...]
+   *   POST /keyvalue2  body: { id: collection }  -> [{ key: "..." }, ...]
    * The list returns KEYS only -- not values. Callers that need values
    * must follow up with `get()` per key.
    *

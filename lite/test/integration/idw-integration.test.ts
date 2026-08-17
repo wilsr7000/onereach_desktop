@@ -38,7 +38,7 @@ beforeEach(async () => {
   kvServer = await startInMemoryKVServer();
   _setKVApiForTesting(
     new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
     })
   );

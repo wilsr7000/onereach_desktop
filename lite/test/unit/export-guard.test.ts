@@ -28,7 +28,7 @@ describe('export-guard', () => {
       mkdirSync(join(dir, 'lib'));
       writeFileSync(
         join(dir, 'lib', 'x.js'),
-        'const u = "https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue";'
+        'const u = "https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue2";'
       );
       expect(run(dir)).toBe(1);
     } finally {
@@ -56,7 +56,7 @@ describe('export-guard', () => {
       mkdirSync(join(dir, 'lib'));
       writeFileSync(
         join(dir, 'lib', 'ok.js'),
-        'const key = process.env.NEON_PASSWORD;\nconst url = `${process.env.EDISON_BASE}/keyvalue`;'
+        'const key = process.env.NEON_PASSWORD;\nconst url = `${process.env.EDISON_BASE}/keyvalue2`;'
       );
       expect(run(dir)).toBe(0);
     } finally {

@@ -6,7 +6,7 @@
  * `NeonRelationship`, `NeonStatus`, and `NeonConfig` -- never against
  * the raw `client.ts` shapes.
  *
- * Wire-format note: the `/omnidata/neon` endpoint returns records
+ * Wire-format note: the `/omnidata/neon2` endpoint returns records
  * keyed by Cypher RETURN aliases. Node values are normalized at the
  * client boundary to `{ id, labels, properties }`; relationship values
  * to `{ id, type, start, end, properties }`. Primitive scalars and
@@ -68,7 +68,7 @@ export interface NeonRelationship {
  * the password.
  */
 export interface NeonStatus {
-  /** Edison /omnidata/neon flow URL, or null when unset. */
+  /** Edison /omnidata/neon2 flow URL, or null when unset. */
   endpoint: string | null;
   /** Neo4j Aura URI (`neo4j+s://...`), or null when unset. */
   uri: string | null;

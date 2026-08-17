@@ -76,7 +76,7 @@ describe('buildGuestPageHTML', () => {
   });
 
   it('interpolates the KV URL exactly where expected', () => {
-    const kvUrl = 'https://em.edison.api.onereach.ai/http/abc-1234-5678-aabb-ccdd/keyvalue';
+    const kvUrl = 'https://em.edison.api.onereach.ai/http/abc-1234-5678-aabb-ccdd/keyvalue2';
     const html = buildGuestPageHTML({ kvUrl });
     expect(html).toContain(`const KV_URL = '${kvUrl}';`);
   });

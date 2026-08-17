@@ -91,24 +91,18 @@
     <aside id="rail"><h2>Recent activity</h2><div id="rail-list"></div></aside>
   </main>
 <script>
-  // Shared dev-account access (same baked credential debt as the apps,
-  // punch-listed for rotation). This page is read-only.
-  const NEON = 'https://em.edison.api.onereach.ai/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon';
-  const NEON_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon';
-  const KV_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue';
-  const CREDS = {
-    neonUri: 'neo4j+s://40c812ef.databases.neo4j.io',
-    neonUser: 'neo4j',
-    neonPassword: 'oCLF5bxkj66qivVDh1biePK7Byo9U1NUvFLJrHnQjzo',
-    database: 'neo4j',
-  };
+  // neon2 proxy holds graph credentials server-side — this page carries none.
+  // This page is read-only.
+  const NEON_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon2';
+  const KV_URL = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/keyvalue2';
   const ACTIVE_MS = 3 * 60 * 1000, IDLE_MS = 30 * 60 * 1000;
 
   async function cypher(q, parameters) {
+    if (!q.startsWith('/* caller:')) q = '/* caller:live-activity-web */\n' + q;
     const res = await fetch(NEON_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cypher: q, parameters, ...CREDS }),
+      body: JSON.stringify({ cypher: q, parameters }),
     });
     if (!res.ok) throw new Error('graph HTTP ' + res.status);
     const body = await res.json().catch(() => null);

@@ -102,7 +102,7 @@ afterEach(async () => {
 describe('Event coverage: KV module emits spans for every op', () => {
   function makeKv(): EdisonKVClient {
     return new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
       logger: (level, message, data) => {
         getLoggingApi()[level]('kv', message, data);
@@ -186,7 +186,7 @@ describe('Event coverage: KV module emits spans for every op', () => {
 describe('Event coverage: bug-report module emits spans for every op', () => {
   function makeStore(): BugReportStore {
     const kv = new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
       logger: (level, message, data) => {
         getLoggingApi()[level]('kv', message, data);
@@ -276,7 +276,7 @@ describe('Event coverage: bug-report module emits spans for every op', () => {
 describe('Event coverage: cross-module ordering', () => {
   it('bug-report.save.start fires before nested kv.set.start', async () => {
     const kv = new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
       spanEmitter: (name, data) => getLoggingApi().start(name, data),
     });
@@ -296,7 +296,7 @@ describe('Event coverage: cross-module ordering', () => {
 
   it('all spans have unique spanIds across the trace', async () => {
     const kv = new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
       spanEmitter: (name, data) => getLoggingApi().start(name, data),
     });

@@ -4,7 +4,7 @@ Public surface: `getNeonApi()` from `./api.ts`. Renderer surface:
 `window.lite.neon`.
 
 This module gives Lite first-class, App-API access to a OneReach Neon
-(Neo4j Aura) database via the Edison `/omnidata/neon` flow. **It is
+(Neo4j Aura) database via the Edison `/omnidata/neon2` flow. **It is
 NOT the full app's `omnigraph-client.js`.** OmniGraph is never
 imported, never referenced. Phase N0 ships a minimal transport;
 typed CRUD helpers (e.g. `upsertSpace`, `upsertAsset`) arrive with
@@ -51,7 +51,7 @@ Persisted in KV collection `lite-neon-config`, key `default`:
 
 ```typescript
 {
-  endpoint: string;   // e.g. https://em.edison.api.onereach.ai/http/35254342-.../omnidata/neon
+  endpoint: string;   // e.g. https://em.edison.api.onereach.ai/http/35254342-.../omnidata/neon2
   uri: string;        // neo4j+s://40c812ef.databases.neo4j.io
   user: string;       // 'neo4j'
   password: string;   // <secret>
@@ -110,7 +110,7 @@ Names (full catalog in `./events.ts`):
 
 **Today**: credentials travel in the request body
 (`neonUri`, `neonUser`, `neonPassword`, `database`). The Edison
-`/omnidata/neon` flow accepts this shape. The renderer can run any
+`/omnidata/neon2` flow accepts this shape. The renderer can run any
 Cypher (read or write) -- same trust boundary as
 `window.lite.kv.set()`.
 
@@ -145,7 +145,7 @@ changes:
   (e.g. `lite/spaces/graph.ts`), not here
 - **Cypher escape-string utility** -- callers use bound `parameters`,
   never string concatenation
-- **Async-job polling pattern** -- `/omnidata/neon` is inline; if a
+- **Async-job polling pattern** -- `/omnidata/neon2` is inline; if a
   future endpoint switches, add it then
 - **Result chunking for large payloads** -- not needed for graph CRUD
 - **Settings UI** -- already exists via `lite/settings/sections/neon.ts`

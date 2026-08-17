@@ -179,7 +179,7 @@ async function initialLoad(): Promise<void> {
   await refreshInstalled();
 
   // 3. Fetch catalog from Neon. The query is tuned to fit inside the
-  // Edison `/omnidata/neon` flow's ~29s server-side budget:
+  // Edison `/omnidata/neon2` flow's ~29s server-side budget:
   //   - Multi-label match `(n:IDW|Agent)` uses label indexes (OR forces
   //     a full scan); requires Neo4j 5 (Aura default).
   //   - No `ORDER BY` -- sorting forces full materialization on the

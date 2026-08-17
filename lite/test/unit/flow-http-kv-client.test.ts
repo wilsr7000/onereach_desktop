@@ -4,7 +4,7 @@
  * Verifies the per-account flow KV transport:
  *   - Fetches a FLOW token from /refresh_token before each call (cached).
  *   - Prefixes "FLOW " on the Authorization header.
- *   - Hits the right URL shape (`/http/{accountId}/keyvalue`).
+ *   - Hits the right URL shape (`/http/{accountId}/keyvalue2`).
  *   - Maps server responses to the same KVApi semantics as the SDK client.
  *   - Reclassifies stale-token errors and fires onAuthRejected.
  *
@@ -175,7 +175,7 @@ describe('FlowHttpKVClient token acquisition', () => {
     const refreshes = stub.requests.filter((r) => r.url.endsWith('/refresh_token'));
     expect(refreshes).toHaveLength(2);
     // Second KV call should use the new token.
-    const kvCalls = stub.requests.filter((r) => r.url.includes('/keyvalue'));
+    const kvCalls = stub.requests.filter((r) => r.url.includes('/keyvalue2'));
     expect(kvCalls[1]?.headers['Authorization']).toBe('FLOW second');
   });
 
@@ -243,7 +243,7 @@ describe('FlowHttpKVClient token acquisition', () => {
 // ─── KV operation wire format ──────────────────────────────────────────────
 
 describe('FlowHttpKVClient.set', () => {
-  it('PUTs to /keyvalue?id=...&key=... with the value JSON-encoded as a string', async () => {
+  it('PUTs to /keyvalue2?id=...&key=... with the value JSON-encoded as a string', async () => {
     const { client, stub } = makeClient();
     stub.responses = [
       { body: { token: 'abc' } },
@@ -253,7 +253,7 @@ describe('FlowHttpKVClient.set', () => {
     const req = stub.requests[1];
     expect(req?.method).toBe('PUT');
     expect(req?.url).toBe(
-      `https://em.edison.api.onereach.ai/http/${ACCOUNT_ID}/keyvalue?id=lite-tool-entries&key=default`
+      `https://em.edison.api.onereach.ai/http/${ACCOUNT_ID}/keyvalue2?id=lite-tool-entries&key=default`
     );
     // The value is sent under `itemValue` (the field the flow actually
     // stores) as a JSON STRING, plus `n` for older flow versions. Sending
@@ -375,7 +375,7 @@ describe('FlowHttpKVClient.get', () => {
 });
 
 describe('FlowHttpKVClient.listKeys', () => {
-  it('POSTs to /keyvalue with body { id: collection } and parses records[]', async () => {
+  it('POSTs to /keyvalue2 with body { id: collection } and parses records[]', async () => {
     const { client, stub } = makeClient();
     stub.responses = [
       { body: { token: 'abc' } },
@@ -392,7 +392,7 @@ describe('FlowHttpKVClient.listKeys', () => {
 });
 
 describe('FlowHttpKVClient.delete', () => {
-  it('DELETEs /keyvalue?id=...&key=...', async () => {
+  it('DELETEs /keyvalue2?id=...&key=...', async () => {
     const { client, stub } = makeClient();
     stub.responses = [
       { body: { token: 'abc' } },
@@ -468,7 +468,7 @@ describe('FlowHttpKVClient onAuthRejected', () => {
     await client.set('c', 'k', {});
     const refreshes = stub.requests.filter((r) => r.url.endsWith('/refresh_token'));
     expect(refreshes).toHaveLength(2);
-    const kvCalls = stub.requests.filter((r) => r.url.includes('/keyvalue'));
+    const kvCalls = stub.requests.filter((r) => r.url.includes('/keyvalue2'));
     expect(kvCalls[1]?.headers['Authorization']).toBe('FLOW second');
   });
 });

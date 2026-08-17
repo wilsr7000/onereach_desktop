@@ -25,7 +25,7 @@ import { EdisonKVClient } from '../../kv/client.js';
  */
 function makeLegacyReader(seed: Record<string, unknown>): EdisonKVClient {
   return new EdisonKVClient({
-    url: 'https://legacy.test/keyvalue',
+    url: 'https://legacy.test/keyvalue2',
     fetchImpl: ((url: string, init?: RequestInit) => {
       // Parse `?id=collection&key=key`.
       const u = new URL(url);
@@ -155,7 +155,7 @@ describe('runKvMigration', () => {
     // sentinel.
     let callCount = 0;
     const legacyReader = new EdisonKVClient({
-      url: 'https://legacy.test/keyvalue',
+      url: 'https://legacy.test/keyvalue2',
       fetchImpl: ((url: string) => {
         callCount += 1;
         const u = new URL(url);

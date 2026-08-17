@@ -7,7 +7,7 @@
  * `credentials.ts`, or any other internal file.
  *
  * The Neon module provides Cypher access to a OneReach Neo4j (Neon)
- * Aura instance via the `/omnidata/neon` Edison flow. Phase N0 ships
+ * Aura instance via the `/omnidata/neon2` Edison flow. Phase N0 ships
  * a minimal surface (`query`, `ping`, `status`, `configure`,
  * `onEvent`); typed CRUD helpers and write-blocking land later as
  * separate ports per `lite/PORTING.md` "chunk: neon".

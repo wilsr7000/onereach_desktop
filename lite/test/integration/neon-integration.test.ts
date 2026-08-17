@@ -1,7 +1,7 @@
 /**
  * Neon integration tests -- real EdisonNeonClient against an
  * in-memory HTTP server. Exercises the actual wire format
- * (POST /omnidata/neon with `neonUri`/`neonUser`/`neonPassword`
+ * (POST /omnidata/neon2 with `neonUri`/`neonUser`/`neonPassword`
  * in the body) so the harness catches wire-format regressions
  * that pure mocks miss.
  *
@@ -74,7 +74,7 @@ async function startFakeNeonServer(): Promise<FakeNeonServer> {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const addr = server.address();
   if (addr === null || typeof addr === 'string') throw new Error('failed to bind');
-  const url = `http://127.0.0.1:${addr.port}/omnidata/neon`;
+  const url = `http://127.0.0.1:${addr.port}/omnidata/neon2`;
 
   return {
     url,
@@ -107,7 +107,7 @@ describe('EdisonNeonClient + StaticCredentialsProvider against fake endpoint', (
     await neon.stop();
   });
 
-  it('sends the exact /omnidata/neon body shape on query()', async () => {
+  it('sends the exact /omnidata/neon2 body shape on query()', async () => {
     const provider = new StaticCredentialsProvider({
       endpoint: neon.url,
       uri: 'neo4j+s://abc.databases.neo4j.io',
@@ -210,7 +210,7 @@ describe('KVCredentialsProvider end-to-end with real KV server', () => {
     neonServer = await startFakeNeonServer();
     _setKVApiForTesting(
       new EdisonKVClient({
-        url: `${kvServer.url}/keyvalue`,
+        url: `${kvServer.url}/keyvalue2`,
         timeoutMs: 1000,
       })
     );

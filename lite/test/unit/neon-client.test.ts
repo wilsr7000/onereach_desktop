@@ -64,7 +64,8 @@ describe('EdisonNeonClient.query happy path', () => {
     expect(url).toBe(ENDPOINT);
     expect(init?.method).toBe('POST');
     const body = JSON.parse(init?.body as string);
-    expect(body.cypher).toBe('RETURN 1 AS ok');
+    // ADR-070: the client stamps its caller tag as the first line.
+    expect(body.cypher).toBe('/* caller:onereach-lite */\nRETURN 1 AS ok');
     expect(body.parameters).toEqual({});
     expect(body.neonUri).toBe('neo4j+s://abc.databases.neo4j.io');
     expect(body.neonUser).toBe('neo4j');
@@ -285,7 +286,8 @@ describe('EdisonNeonClient.ping', () => {
     });
     expect(await client.ping()).toBe(true);
     const body = JSON.parse(fetchMock.mock.calls[0]![1]?.body as string);
-    expect(body.cypher).toBe('RETURN 1 AS ok');
+    // ADR-070: the client stamps its caller tag as the first line.
+    expect(body.cypher).toBe('/* caller:onereach-lite */\nRETURN 1 AS ok');
   });
 
   it('returns false when ok is missing or wrong', async () => {

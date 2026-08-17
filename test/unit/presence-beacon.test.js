@@ -27,7 +27,7 @@ function buildStub({ kvValue = null, presenceRows = [] } = {}) {
   const cypher = [];
   const kv = [];
   const fetchImpl = async (url, init = {}) => {
-    if (String(url).includes('/omnidata/neon')) {
+    if (String(url).includes('/omnidata/neon2')) {
       const body = JSON.parse(init.body);
       cypher.push(body);
       return { ok: true, json: async () => ({ records: presenceRows }) };

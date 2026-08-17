@@ -14,7 +14,7 @@
    meeting. Treat that credential as public. (It remains in place as the
    deliberately-retained legacy fallback — §2 mode 3 — until rotation.)
 2. **Unauthenticated KV writes.** Meeting tokens are distributed through the
-   GSX KeyValue HTTP endpoint (`…/http/{accountId}/keyvalue`, collection
+   GSX KeyValue HTTP endpoint (`…/http/{accountId}/keyvalue2`, collection
    `wiser:meeting:tokens`, key `wiser-room:<room>`), which accepts PUT and
    DELETE with no authentication. Anyone reading the public join page source
    could overwrite a room's payload and redirect guests' camera/mic streams

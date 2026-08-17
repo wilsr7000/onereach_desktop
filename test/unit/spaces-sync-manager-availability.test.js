@@ -67,7 +67,7 @@ describe('spaces-sync-manager._isGraphAvailable', () => {
 
   it('returns false when endpoint is set but Neo4j password is missing (regression for the 2-week silent-failure bug)', () => {
     const restore = withOmniClient({
-      endpoint: 'https://em.edison.api.onereach.ai/http/x/omnidata/neon',
+      endpoint: 'https://em.edison.api.onereach.ai/http/x/omnidata/neon2',
       neo4jPassword: null,
     });
     try {
@@ -80,7 +80,7 @@ describe('spaces-sync-manager._isGraphAvailable', () => {
 
   it('returns true only when BOTH endpoint AND password are configured', () => {
     const restore = withOmniClient({
-      endpoint: 'https://em.edison.api.onereach.ai/http/x/omnidata/neon',
+      endpoint: 'https://em.edison.api.onereach.ai/http/x/omnidata/neon2',
       neo4jPassword: 'aura-instance-secret',
     });
     try {

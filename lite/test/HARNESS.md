@@ -181,7 +181,7 @@ let store: FooStore;
 
 beforeEach(async () => {
   server = await startInMemoryKVServer();
-  const kv = new EdisonKVClient({ url: `${server.url}/keyvalue` });
+  const kv = new EdisonKVClient({ url: `${server.url}/keyvalue2` });
   store = new FooStore({ kvApi: kv });
 });
 

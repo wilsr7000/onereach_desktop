@@ -100,7 +100,7 @@ afterEach(async () => {
 describe('KvApi.onEvent typed narrowing (ADR-032)', () => {
   function makeKv(): EdisonKVClient {
     return new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
       spanEmitter: (name, data) => getLoggingApi().start(name, data),
     });
@@ -201,7 +201,7 @@ describe('KvApi.onEvent typed narrowing (ADR-032)', () => {
 describe('BugReportApi.onEvent typed narrowing', () => {
   function makeStore(): BugReportStore {
     const kv = new EdisonKVClient({
-      url: `${kvServer.url}/keyvalue`,
+      url: `${kvServer.url}/keyvalue2`,
       timeoutMs: 1000,
       spanEmitter: (name, data) => getLoggingApi().start(name, data),
     });

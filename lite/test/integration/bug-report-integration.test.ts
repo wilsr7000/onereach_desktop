@@ -24,7 +24,7 @@ beforeEach(async () => {
   server = await startInMemoryKVServer();
   // Wrap the real client as KVApi (it already conforms).
   kv = new EdisonKVClient({
-    url: `${server.url}/keyvalue`,
+    url: `${server.url}/keyvalue2`,
     timeoutMs: 1000,
     listTimeoutMs: 1000,
   });

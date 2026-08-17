@@ -6,7 +6,7 @@
  * file directly -- consume `getNeonApi()` from `./api.ts` (Rule 11 in
  * `lite/LITE-RULES.md`).
  *
- * Wire contract per the OneReach `/omnidata/neon` proxy:
+ * Wire contract per the OneReach `/omnidata/neon2` proxy:
  *
  *   POST  <endpoint>
  *   body: {
@@ -57,6 +57,15 @@ export interface NeonClientConfig {
   credentials: CredentialsProvider;
   /** Per-request timeout in milliseconds. Default 30000. */
   timeoutMs?: number;
+  /**
+   * Caller tag stamped as a Cypher comment on every query
+   * (`/* caller:<tag> *\/`). NEON access standard, 2026-08-17: during
+   * the Lambda-concurrency incident nothing on the wire said WHO was
+   * querying — SHOW TRANSACTIONS and the Aura query log showed anonymous
+   * Cypher. The tag makes every query self-attributing at zero cost.
+   * Default 'onereach-lite'.
+   */
+  callerTag?: string;
   /** Optional fetch implementation override (for tests). Defaults to global fetch. */
   fetchImpl?: typeof fetch;
   /** Optional logger -- structured events for diagnostics. */
@@ -78,6 +87,7 @@ export interface NeonClientConfig {
 export class EdisonNeonClient {
   private readonly credentials: CredentialsProvider;
   private readonly timeoutMs: number;
+  private readonly callerTag: string;
   private readonly fetchImpl: typeof fetch;
   private readonly log: NonNullable<NeonClientConfig['logger']>;
   private readonly spanEmitter: NonNullable<NeonClientConfig['spanEmitter']> | null;
@@ -85,6 +95,7 @@ export class EdisonNeonClient {
   constructor(config: NeonClientConfig) {
     this.credentials = config.credentials;
     this.timeoutMs = config.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.callerTag = config.callerTag ?? 'onereach-lite';
     this.fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.log =
       config.logger ??
@@ -196,6 +207,14 @@ export class EdisonNeonClient {
     cypher: string,
     parameters: Record<string, unknown>
   ): Promise<NeonRecord[]> {
+    // NEON access standard: every query leaves this process wearing its
+    // caller tag — visible verbatim in SHOW TRANSACTIONS and the Aura
+    // query log, so the next "something is calling like crazy" names
+    // itself in one look. Comments are legal Cypher; the flow proxies
+    // the string untouched.
+    if (!cypher.startsWith('/* caller:')) {
+      cypher = `/* caller:${this.callerTag} */\n${cypher}`;
+    }
     const [endpoint, creds] = await this.resolveConfig(op, cypher);
 
     const controller = new AbortController();

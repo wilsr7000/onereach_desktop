@@ -4,7 +4,7 @@
  * The OneReach KV service that the user's account actually has access
  * to is the per-account flow KV at
  *
- *   https://em.edison.api.onereach.ai/http/{accountId}/keyvalue
+ *   https://em.edison.api.onereach.ai/http/{accountId}/keyvalue2
  *
  * It accepts the token returned from the public per-account
  * `refresh_token` flow:
@@ -91,7 +91,7 @@ interface CachedToken {
 const DEFAULT_BASE_URL = 'https://em.edison.api.onereach.ai';
 
 /**
- * KV client that talks the full app's `/http/{accountId}/keyvalue`
+ * KV client that talks the full app's `/http/{accountId}/keyvalue2`
  * protocol. Public surface mirrors `KVApi`; consumers go through
  * `getKVApi()` from `./api.ts`.
  *
@@ -274,7 +274,7 @@ export class FlowHttpKVClient {
 
   /** Per-account KV endpoint URL. */
   private kvUrl(accountId: string): string {
-    return `${this.baseUrl}/http/${accountId}/keyvalue`;
+    return `${this.baseUrl}/http/${accountId}/keyvalue2`;
   }
 
   /** Per-account `refresh_token` flow URL. Public; no auth needed. */
