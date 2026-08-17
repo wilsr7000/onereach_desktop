@@ -13,6 +13,7 @@ const { BrowserWindow, ipcMain, systemPreferences, app, desktopCapturer, webCont
 const path = require('path');
 const fs = require('fs');
 const getLogger = require('./event-logger');
+const kvClient = require('./lib/kv-client');
 // capture-signaling.js no longer needed -- LiveKit handles signaling
 const { getLogQueue } = require('./lib/log-event-queue');
 const log = getLogQueue();
@@ -1615,7 +1616,7 @@ Respond with JSON:
 
         // 2. Build static HTML with KV endpoint embedded
         const { buildGuestPageHTML } = require('./lib/meeting/capture-guest-page');
-        const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue2');
+        const kvUrl = kvClient.kvUrlFromRefreshUrl(refreshUrl);
         const html = buildGuestPageHTML({ kvUrl });
 
         // 3. Write to temp dir
@@ -1692,16 +1693,7 @@ Respond with JSON:
       });
       const sig = await linkKeys.signPayload(payload);
       const joinKey = await linkKeys.getPublicKeyB64u();
-      const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: KV_COLLECTION,
-          key,
-          itemValue: JSON.stringify({ v: 2, payload, sig }),
-        }),
-      });
-      if (!resp.ok) throw new Error(`KV PUT failed: ${resp.status}`);
+      await kvClient.kvPut(KV_COLLECTION, key, { v: 2, payload, sig }, { url: kvUrl });
       return joinKey;
     };
 
@@ -1765,7 +1757,7 @@ Respond with JSON:
           log.warn('recorder', 'Store meeting tokens aborted', { reason: reconcile.reason });
           return { success: false, error: reconcile.error };
         }
-        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue2');
+        const kvUrl = kvClient.kvUrlFromRefreshUrl(reconcile.refreshUrl);
         const key = `wiser-room:${roomName}`;
 
         const expiresAt = Date.now() + 24 * 60 * 60 * 1000;
@@ -1816,7 +1808,7 @@ Respond with JSON:
           log.warn('recorder', 'Clear meeting tokens aborted', { roomName, reason: reconcile.reason });
           return { success: false, error: reconcile.error };
         }
-        const kvUrl = reconcile.refreshUrl.replace('/refresh_token', '/keyvalue2');
+        const kvUrl = kvClient.kvUrlFromRefreshUrl(reconcile.refreshUrl);
         const key = `wiser-room:${roomName}`;
 
         const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
@@ -1847,7 +1839,7 @@ Respond with JSON:
       if (!this._activeKvRooms || this._activeKvRooms.size === 0) return;
       const refreshUrl = global.settingsManager?.get('gsxRefreshUrl');
       if (!refreshUrl) return;
-      const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue2');
+      const kvUrl = kvClient.kvUrlFromRefreshUrl(refreshUrl);
       for (const roomName of this._activeKvRooms) {
         const key = `wiser-room:${roomName}`;
         fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
