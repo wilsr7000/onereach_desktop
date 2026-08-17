@@ -158,6 +158,22 @@ echo -e "${GREEN}Cleaned${NC}"
 echo ""
 
 # ---------------------------------------------------------------------------
+# Provisioning profile (2026-08-17): the profile is GIT-IGNORED, so a
+# fresh release WORKTREE lacks it — and the mac config then silently
+# drops mac.provisioningProfile while osx-sign STILL auto-injects the
+# restricted keychain-access-groups (webauthn) entitlement. That
+# combination is AMFI-killed at exec on launch (POSIX 163 / SIGKILL) —
+# it bricked 0.0.63..0.0.70 for updating users and caused this
+# machine's "phantom exec kills". Resolve the profile from the MAIN
+# checkout when this build runs in a linked worktree.
+if [ -z "${LITE_PROVISIONING_PROFILE:-}" ] && [ ! -f "lite/build/Onereach_Lite_DeveloperID.provisionprofile" ]; then
+    MAIN_CHECKOUT=$(git worktree list | head -1 | awk '{print $1}')
+    if [ -f "$MAIN_CHECKOUT/lite/build/Onereach_Lite_DeveloperID.provisionprofile" ]; then
+        cp "$MAIN_CHECKOUT/lite/build/Onereach_Lite_DeveloperID.provisionprofile" lite/build/
+        echo -e "${GREEN}✓ Provisioning profile copied from main checkout for worktree build.${NC}"
+    fi
+fi
+
 # Step 2: Build (esbuild + lib-pin + electron-builder)
 #
 # Slim bundle (ADR-047): lite ships only the 4 deps declared in
@@ -196,6 +212,21 @@ echo -e "${GREEN}Build completed in ${BUILD_DURATION} seconds${NC}"
 echo ""
 
 # ---------------------------------------------------------------------------
+# Restricted-entitlement tripwire (2026-08-17): keychain-access-groups
+# on the outer app WITHOUT an embedded provisioning profile is an
+# AMFI-killed binary — unshippable, no matter how it happened.
+APP_BUNDLE=$(find "${MAC_OUT_DIR:-dist-lite/mac-arm64}" -maxdepth 1 -name "*.app" | head -1)
+if [ -n "$APP_BUNDLE" ]; then
+    if codesign -d --entitlements - "$APP_BUNDLE" 2>/dev/null | grep -q "keychain-access-groups"; then
+        if [ ! -f "$APP_BUNDLE/Contents/embedded.provisionprofile" ]; then
+            echo -e "${RED}✗ FATAL: restricted entitlement (keychain-access-groups) present but NO embedded.provisionprofile.${NC}"
+            echo -e "${RED}  This binary is AMFI-killed at launch on users' machines. Aborting.${NC}"
+            exit 1
+        fi
+        echo -e "${GREEN}✓ Restricted entitlement is paired with an embedded provisioning profile.${NC}"
+    fi
+fi
+
 # Step 3: Verify build files
 # ---------------------------------------------------------------------------
 echo -e "${YELLOW}Step 3: Verifying build artifacts...${NC}"
