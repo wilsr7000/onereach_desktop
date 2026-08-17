@@ -341,3 +341,50 @@ describe('a hung fetch cannot freeze a cache key (2026-08-17)', () => {
   });
 });
 
+
+describe('outage backoff — a failing backend is not refreshed at full cadence (2026-08-17)', () => {
+  it('skips refresh ticks exponentially with the failure streak and recovers to full cadence', async () => {
+    vi.useFakeTimers();
+    try {
+      const cache = new SpacesCache({
+        ttlMs: 0,
+        refreshIntervalMs: 1000,
+        logger: { warn: () => {}, info: () => {}, error: () => {} },
+      });
+      let calls = 0;
+      let failing = true;
+      const fetcher = (): Promise<string> => {
+        calls++;
+        return failing ? Promise.reject(new Error('503')) : Promise.resolve('ok');
+      };
+      // Seed the entry (first call fails: streak = 1).
+      await cache.getOrFetch('k', fetcher).catch(() => undefined);
+      expect(calls).toBe(1);
+
+      cache.startRefreshTimer();
+      // Tick 1: streak 1 → full cadence, refresh runs (streak becomes 2).
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(calls).toBe(2);
+      // Streak now ≥2 → skipFactor 2: of the next 2 ticks only one refreshes.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(calls).toBe(3);
+      // Streak grows → skipFactor rises; over the next 8 ticks at streak≥4
+      // (factor 8) at most 2 more refreshes happen instead of 8.
+      await vi.advanceTimersByTimeAsync(8000);
+      expect(calls).toBeLessThanOrEqual(5);
+      const callsDuringOutage = calls;
+
+      // Recovery: one successful refresh resets the streak; cadence returns
+      // to every-tick.
+      failing = false;
+      await vi.advanceTimersByTimeAsync(8000); // at most one skip cycle until a success lands
+      const afterRecoveryBase = calls;
+      expect(calls).toBeGreaterThan(callsDuringOutage);
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(calls).toBe(afterRecoveryBase + 3);
+      cache.stopRefreshTimer();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

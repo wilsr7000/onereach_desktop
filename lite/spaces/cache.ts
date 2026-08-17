@@ -229,12 +229,31 @@ export class SpacesCache {
     if (this.refreshTimer !== null) return;
     if (this.refreshIntervalMs <= 0) return;
     this.refreshTimer = setInterval(() => {
+      // Outage backoff (2026-08-17 Lambda-concurrency incident): when
+      // every recent refresh has failed, refreshing at full cadence
+      // just adds load to a backend that is already down — the client
+      // half of the same lesson as the flow-watcher backoff. Skip
+      // ticks exponentially with the failure streak (2, 4, up to 8×
+      // the interval), so a sustained outage sees ~1/8 the traffic
+      // while recovery is still detected within a few minutes. The
+      // staleness banner (maxConsecutiveFailures) is unaffected.
+      const failures = this.maxConsecutiveFailures();
+      if (failures >= 2) {
+        this.backoffTicks += 1;
+        const skipFactor = Math.min(2 ** Math.min(failures - 1, 3), 8);
+        if (this.backoffTicks % skipFactor !== 0) return;
+      } else {
+        this.backoffTicks = 0;
+      }
       this.refreshAll();
     }, this.refreshIntervalMs);
     // Don't keep the process alive just for the cache timer.
     const unref = (this.refreshTimer as { unref?: () => void }).unref;
     if (typeof unref === 'function') unref.call(this.refreshTimer);
   }
+
+  /** Tick counter for the outage backoff above. @internal */
+  private backoffTicks = 0;
 
   /** Stop the periodic refresh. Idempotent. */
   stopRefreshTimer(): void {
