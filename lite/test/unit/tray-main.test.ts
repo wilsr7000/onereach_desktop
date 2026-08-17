@@ -436,9 +436,11 @@ describe('trayIconCandidates', () => {
     expect(candidates.length).toBeGreaterThanOrEqual(2);
     // The first two candidates must be siblings of the bundle
     // (highest-priority lookup path), regardless of ordering.
+    // First two are dist-lite/build template siblings: the pre-sized 22pt
+    // asset (full-app parity) then the 44px template.
     const firstTwo = candidates.slice(0, 2);
+    expect(firstTwo.some((p) => /tray-icon-22Template\.png$/.test(p))).toBe(true);
     expect(firstTwo.some((p) => /tray-iconTemplate\.png$/.test(p))).toBe(true);
-    expect(firstTwo.some((p) => /tray-icon\.png$/.test(p))).toBe(true);
   });
 
   it('includes an <appPath>/assets fallback after the dist-lite siblings', () => {
@@ -452,7 +454,8 @@ describe('trayIconCandidates', () => {
     // light-on-dark), so it stays legible on any bar -- the fix for the
     // washed-out color mark on a light menu bar.
     const candidates = trayIconCandidates();
-    expect(candidates[0]).toMatch(/tray-iconTemplate\.png$/);
+    // The pre-sized 22pt template — the exact asset the full app renders.
+    expect(candidates[0]).toMatch(/tray-icon-22Template\.png$/);
   });
 
   it('LITE_TRAY_COLOR=1 forces the full-color tray-icon.png to the front', () => {

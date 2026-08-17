@@ -138,20 +138,29 @@ export function initTray(opts: InitTrayOptions): TrayHandle | null {
   // fixes. The trade-off (template auto-fits to ~22pt, so it can't be made
   // arbitrarily larger) is the right one for a status item. Set
   // `LITE_TRAY_COLOR=1` to force the old full-color path.
-  const isTemplateAsset = /tray-iconTemplate\.png$/i.test(iconPath);
+  // Both template variants qualify: the 44px `tray-iconTemplate.png`
+  // (resized in code) and the pre-sized 22pt `tray-icon-22Template.png`
+  // (the full app's asset — used as-is).
+  const isTemplateAsset = /tray-icon(-22)?Template\.png$/i.test(iconPath);
+  // The pre-sized 22pt asset is already at TRAY_ICON_SIZE and ships an
+  // @2x sibling; resizing it would flatten to a single rep and blur
+  // Retina menu bars. Use it as-is — exactly what the full app does.
+  const isPreSized22 = /tray-icon-22Template\.png$/i.test(iconPath);
   // The template flag is meaningful only on macOS; on Windows/Linux it's a
   // harmless no-op. Apply it whenever we actually loaded the template asset.
   const useTemplate = isTemplateAsset;
 
   // Resize to the configured size BEFORE setting the template flag.
   // resize() returns a fresh NativeImage with the template flag
-  // cleared, so the order matters.
-  try {
-    icon = icon.resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE });
-  } catch (err) {
-    log.warn('tray: icon resize failed -- continuing at native size', {
-      error: (err as Error).message,
-    });
+  // cleared, so the order matters. Skip for the pre-sized 22pt asset.
+  if (!isPreSized22) {
+    try {
+      icon = icon.resize({ width: TRAY_ICON_SIZE, height: TRAY_ICON_SIZE });
+    } catch (err) {
+      log.warn('tray: icon resize failed -- continuing at native size', {
+        error: (err as Error).message,
+      });
+    }
   }
 
   if (useTemplate) {
@@ -530,8 +539,12 @@ export function trayIconCandidates(): string[] {
   // esbuild-copied siblings in dist-lite/build/ first.
   if (preferColor) {
     candidates.push(path.join(__dirname, 'tray-icon.png'));
+    candidates.push(path.join(__dirname, 'tray-icon-22Template.png'));
     candidates.push(path.join(__dirname, 'tray-iconTemplate.png'));
   } else {
+    // Prefer the pre-sized 22pt template first — the exact asset the
+    // full app renders, so the menu-bar icon matches (2026-08-15).
+    candidates.push(path.join(__dirname, 'tray-icon-22Template.png'));
     candidates.push(path.join(__dirname, 'tray-iconTemplate.png'));
     candidates.push(path.join(__dirname, 'tray-icon.png'));
   }
@@ -546,8 +559,10 @@ export function trayIconCandidates(): string[] {
   }
   if (preferColor) {
     candidates.push(path.join(appPath, 'assets', 'tray-icon.png'));
+    candidates.push(path.join(appPath, 'assets', 'tray-icon-22Template.png'));
     candidates.push(path.join(appPath, 'assets', 'tray-iconTemplate.png'));
   } else {
+    candidates.push(path.join(appPath, 'assets', 'tray-icon-22Template.png'));
     candidates.push(path.join(appPath, 'assets', 'tray-iconTemplate.png'));
     candidates.push(path.join(appPath, 'assets', 'tray-icon.png'));
   }

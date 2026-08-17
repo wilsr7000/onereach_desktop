@@ -69,6 +69,11 @@ const ASSETS_TO_COPY = [
   // enables macOS menu-bar auto-adapt; the @2x sibling auto-loads
   // when present so Retina menu bars render crisp; regular icon is
   // the fallback for non-template builds.
+  // Pre-sized 22pt template pair — the SAME asset the full app renders
+  // (main.js prefers tray-icon-22Template.png first). Copied + preferred
+  // first in lite/tray so the menu-bar icon is identical across both apps.
+  { from: 'assets/tray-icon-22Template.png', to: 'tray-icon-22Template.png' },
+  { from: 'assets/tray-icon-22Template@2x.png', to: 'tray-icon-22Template@2x.png' },
   { from: 'assets/tray-iconTemplate.png', to: 'tray-iconTemplate.png' },
   { from: 'assets/tray-iconTemplate@2x.png', to: 'tray-iconTemplate@2x.png' },
   { from: 'assets/tray-icon.png', to: 'tray-icon.png' },
