@@ -257,24 +257,43 @@ else
         echo -e "${RED}✗ Packaged binary not found — cannot boot-smoke. Aborting.${NC}"
         exit 1
     fi
-    BOOT_LOG=$(mktemp)
-    "$APP_BIN" > "$BOOT_LOG" 2>&1 &
-    BOOT_PID=$!
-    BOOTED=0
-    for _ in $(seq 1 25); do
-        if grep -q "\[LITE\] Onereach.ai Lite v" "$BOOT_LOG"; then BOOTED=1; break; fi
-        # The single-instance exit is ALSO a pass: that line prints from
-        # code that runs only after every top-level require succeeded —
-        # the exact integrity the smoke verifies (0.0.46 died at require
-        # time, before any output). Happens whenever the user's installed
-        # app is running during a cut.
-        if grep -q "Another instance is already running" "$BOOT_LOG"; then BOOTED=2; break; fi
-        if ! kill -0 "$BOOT_PID" 2>/dev/null; then break; fi
+    # One smoke attempt: launch, wait for a banner/handoff, clean up ONLY
+    # our own child (an exact-path pkill — the old broad pattern killed
+    # the USER'S INSTALLED APP and any concurrent cut's smoke child).
+    run_boot_smoke() {
+        BOOT_LOG=$(mktemp)
+        "$APP_BIN" > "$BOOT_LOG" 2>&1 &
+        BOOT_PID=$!
+        BOOTED=0
+        SMOKE_KILLED=0
+        for _ in $(seq 1 25); do
+            if grep -q "\[LITE\] Onereach.ai Lite v" "$BOOT_LOG"; then BOOTED=1; break; fi
+            # The single-instance exit is ALSO a pass: that line prints from
+            # code that runs only after every top-level require succeeded —
+            # the exact integrity the smoke verifies (0.0.46 died at require
+            # time, before any output). Happens whenever the user's installed
+            # app is running during a cut.
+            if grep -q "Another instance is already running" "$BOOT_LOG"; then BOOTED=2; break; fi
+            if ! kill -0 "$BOOT_PID" 2>/dev/null; then
+                # Child gone without a verdict. SIGKILL (137) = an EXTERNAL
+                # kill (a concurrent session's app-restart pkill), not a
+                # boot failure — the caller may retry once.
+                wait "$BOOT_PID" 2>/dev/null
+                [ "$?" = "137" ] && SMOKE_KILLED=1
+                break
+            fi
+            sleep 1
+        done
+        kill "$BOOT_PID" 2>/dev/null || true
         sleep 1
-    done
-    kill "$BOOT_PID" 2>/dev/null || true
-    sleep 1
-    pkill -9 -f "Contents/MacOS/Onereach.ai Lite" 2>/dev/null || true
+        pkill -9 -f "$APP_BIN" 2>/dev/null || true
+    }
+    run_boot_smoke
+    if [ "$BOOTED" = "0" ] && [ "$SMOKE_KILLED" = "1" ]; then
+        echo -e "${YELLOW}⚠ Smoke child was KILLED externally (concurrent session's pkill) — retrying once in 10s.${NC}"
+        sleep 10
+        run_boot_smoke
+    fi
     # A booting app with a dead updater is 0.0.47's silent failure —
     # treat the updater's own unavailability log as a smoke failure.
     if grep -q "electron-updater not available" "$BOOT_LOG"; then
