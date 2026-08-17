@@ -1438,6 +1438,7 @@ export function buildSpaceContextEntries(
     editObjective: () => void;
     convertShared: () => void;
     convertUser: () => void;
+    deleteSpace: () => void;
   }
 ): CtxEntry[] {
   const isOpen = space.visibility !== 'restricted';
@@ -1488,6 +1489,13 @@ export function buildSpaceContextEntries(
         },
       ],
     },
+    { type: 'separator' },
+    // Delete lived only in the row "⋯" menu after the action
+    // consolidation moved everything else here — the discoverable
+    // gesture lacked it ("Can I not delete spaces?", 2026-08-16).
+    // Soft delete + confirm + undo; assets move to Uncategorized.
+    { type: 'action', label: 'Delete space…', run: handlers.deleteSpace },
+    { type: 'separator' },
     {
       type: 'submenu',
       label: 'Info',
@@ -1715,6 +1723,9 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     },
     convertShared: () => void toggleSpaceKind(space.id),
     convertUser: () => void toggleSpaceKind(space.id),
+    deleteSpace: () => {
+      void performSoftDelete(space.id);
+    },
   });
   openContextMenu(event.clientX, event.clientY, entries);
 }

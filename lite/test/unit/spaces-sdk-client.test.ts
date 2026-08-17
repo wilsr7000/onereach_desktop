@@ -3991,7 +3991,8 @@ describe('ADR-062: live-meeting ring reads', () => {
         title: 'Weekly Sync',
         joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
         host: 'Robb',
-        spaceName: null,
+        hostId: null,
+          spaceName: null,
           startedAtMs: 1786500000000,
       },
       { id: '', title: 'junk row dropped' },
@@ -4004,7 +4005,8 @@ describe('ADR-062: live-meeting ring reads', () => {
         title: 'Weekly Sync',
         joinUrl: 'https://guest/join.html?room=weekly-sync-a1b2c3#k=PUB',
         host: 'Robb',
-        spaceName: null,
+        hostId: null,
+          spaceName: null,
           startedAtMs: 1786500000000,
       },
     ]);
@@ -4017,7 +4019,8 @@ describe('ADR-062: live-meeting ring reads', () => {
     stub.setResponse('MATCH (m:MeetingLive)', [{ id: 'live_x', title: 'X' }]);
     const client = makeClient(stub);
     const out = await client.listLiveMeetings();
-    expect(out[0]).toEqual({ id: 'live_x', title: 'X', joinUrl: null, host: null, spaceName: null,
+    expect(out[0]).toEqual({ id: 'live_x', title: 'X', joinUrl: null, host: null, hostId: null,
+          spaceName: null,
           startedAtMs: 0 });
     const call = stub.calls.find((c) => c.cypher.includes('MATCH (m:MeetingLive)'));
     expect(call?.parameters).toMatchObject({ ttlMs: 30 * 60_000 });

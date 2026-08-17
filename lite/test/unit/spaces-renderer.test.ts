@@ -1623,7 +1623,7 @@ describe('space description editability (2026-08-13 report)', () => {
       { id: 's1', name: 'S', visibility: 'open' } as never,
       {
         share: noop, unshare: noop, addPeople: noop, upload: noop,
-        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop,
+        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop, deleteSpace: noop,
       }
     );
     const labels = entries
@@ -1673,5 +1673,27 @@ describe('identity gate — sign in right away (2026-08-13)', () => {
     const preload = readFileSync(resolve(__dirname, '../../preload-lite.ts'), 'utf-8');
     expect(preload).toContain("'lite:spaces:auth:signIn'");
     expect(preload).toContain('requestSignIn');
+  });
+});
+
+describe('space context menu — Delete space (2026-08-16)', () => {
+  it('carries a Delete space… action that fires the handler', async () => {
+    let fired = 0;
+    const mod = await import('../../spaces/spaces');
+    const entries = mod.buildSpaceContextEntries(
+      { id: 's1', name: 'X', visibility: 'open', kind: 'user' } as never,
+      {
+        share: () => undefined, unshare: () => undefined, addPeople: () => undefined,
+        upload: () => undefined, rename: () => undefined, editObjective: () => undefined,
+        convertShared: () => undefined, convertUser: () => undefined,
+        deleteSpace: () => { fired += 1; },
+      }
+    );
+    const del = entries.find(
+      (e: { type: string; label?: string }) => e.type === 'action' && e.label === 'Delete space…'
+    );
+    expect(del).toBeDefined();
+    (del as { run: () => void }).run();
+    expect(fired).toBe(1);
   });
 });
