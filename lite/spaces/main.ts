@@ -23,6 +23,7 @@ import { registry } from '../menu/registry.js';
 import {
   _setSpacesApiForTesting,
   _resetSpacesApiForTesting,
+  getSpacesApi,
   type SpacesApi,
   type SpacesItemsApi,
   type SpacesTicketsApi,
@@ -303,6 +304,10 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
           preloadPath: initOptions.preloadPath,
         });
         presenceBeat({ tool: 'spaces' });
+        // Boot-burst consolidation (2026-08-17): the full pre-warm now
+        // happens HERE, on first window open — the moment the data is
+        // actually about to be looked at — instead of at app launch.
+        ensureFullPrewarm(getSpacesApi(), log);
         log.info('spaces window opened', {});
       } catch (err) {
         log.error('failed to open spaces window', { error: (err as Error).message });
@@ -347,13 +352,21 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
   // otherwise the pre-warm below runs under the wrong identity and the
   // user sees zero of their own Spaces (2026-08-15 incident). Chained,
   // not raced, ahead of the pre-warm.
+  //
+  // Boot-burst consolidation (2026-08-17, "why 30 requests"): app
+  // launch seeds ONLY listSpaces — one query. It is the one entry the
+  // background refresh needs so the cache-update stream (which the
+  // ADR-062 meeting ring rides) keeps exactly its old cadence. The
+  // remaining pre-warm (uncategorized + the six Home rollups) runs on
+  // FIRST WINDOW OPEN via ensureFullPrewarm — the data warms when the
+  // human is about to look at it, not when the app boots.
   void primeAttributionEmailCache()
     .catch((err) =>
       log.warn('attribution cache prime failed', {
         error: err instanceof Error ? err.message : String(err),
       })
     )
-    .then(() => prewarmSpacesCache(api, log));
+    .then(() => api.listSpaces().catch(() => undefined));
 
   if (registered) return handle;
 
@@ -1405,22 +1418,59 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
  *
  * Soft-fails per query -- a single bad fetcher doesn't stall the others.
  */
-function prewarmSpacesCache(api: SpacesApi, log: NonNullable<InitSpacesOptions['logger']>): void {
-  const tasks: Array<Promise<unknown>> = [
-    api.listSpaces().catch(() => undefined),
-    api.getUncategorizedCount().catch(() => undefined),
-    api.getEntityCounts().catch(() => undefined),
-    api.listRecentItems().catch(() => undefined),
-    api.topContributors().catch(() => undefined),
-    api.listRecentEvents().catch(() => undefined),
-    api.listAgentsSample().catch(() => undefined),
-    api.getPermissionSummary().catch(() => undefined),
-  ];
-  void Promise.allSettled(tasks).then(() => {
+/**
+ * Run async tasks with bounded concurrency. Exported for tests. The
+ * pre-warm used to fire everything in parallel — a burst of eight
+ * simultaneous graph queries at launch; two-at-a-time keeps the warm-up
+ * near-invisible on the request graph without meaningfully delaying it.
+ */
+export async function runBounded(
+  tasks: ReadonlyArray<() => Promise<unknown>>,
+  limit: number
+): Promise<void> {
+  const queue = [...tasks];
+  const workers = Array.from({ length: Math.max(1, limit) }, async () => {
+    for (;;) {
+      const task = queue.shift();
+      if (task === undefined) return;
+      await task().catch(() => undefined);
+    }
+  });
+  await Promise.all(workers);
+}
+
+// Boot-burst consolidation (2026-08-17): the full pre-warm runs once,
+// on first Spaces-window open — not at app launch. Idempotent.
+let fullPrewarmDone = false;
+
+export function ensureFullPrewarm(
+  api: SpacesApi,
+  log: NonNullable<InitSpacesOptions['logger']>
+): void {
+  if (fullPrewarmDone) return;
+  fullPrewarmDone = true;
+  void runBounded(
+    [
+      () => api.listSpaces(),
+      () => api.getUncategorizedCount(),
+      () => api.getEntityCounts(),
+      () => api.listRecentItems(),
+      () => api.topContributors(),
+      () => api.listRecentEvents(),
+      () => api.listAgentsSample(),
+      () => api.getPermissionSummary(),
+    ],
+    2
+  ).then(() => {
     log.info('spaces-cache: pre-warm complete', {
       entries: activeCache?._sizeForTesting() ?? 0,
     });
   });
+}
+
+/** @internal — reset the once-flag between tests. */
+export function _resetPrewarmForTesting(): void {
+  fullPrewarmDone = false;
 }
 
 /**

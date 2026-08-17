@@ -1470,6 +1470,46 @@ function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
  */
 const collapsedSpaceTrees = new Set<string>();
 
+/**
+ * Boot-burst consolidation (2026-08-17, "why 30 requests"): defer a
+ * tree's items fetch until its holder is actually VISIBLE. Trees render
+ * open by default, so the old immediate fetch fired one items.list per
+ * space the moment the sidebar painted — most of them below the fold.
+ * On-screen trees still hydrate instantly (the observer fires in the
+ * same frame); off-screen ones hydrate on scroll. Environments without
+ * IntersectionObserver (jsdom) fall back to the immediate fetch.
+ * Exported for tests.
+ */
+export function whenTreeVisible(el: HTMLElement, hydrate: () => void): void {
+  const IO = (window as { IntersectionObserver?: typeof IntersectionObserver })
+    .IntersectionObserver;
+  if (IO === undefined) {
+    hydrate();
+    return;
+  }
+  // Once-guard independent of observer semantics: hydrating twice is
+  // the exact double-fetch this helper exists to prevent.
+  let hydratedOnce = false;
+  const observer = new IO(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          observer.disconnect();
+          if (!hydratedOnce) {
+            hydratedOnce = true;
+            hydrate();
+          }
+          return;
+        }
+      }
+    },
+    // Hydrate a little before the tree scrolls into view so the
+    // "Loading…" flash is rare in normal scrolling.
+    { rootMargin: '200px' }
+  );
+  observer.observe(el);
+}
+
 function buildSpaceChildren(spaceId: string): HTMLLIElement {
   const holder = document.createElement('li');
   holder.className = 'spaces-tree-children-holder';
@@ -1481,7 +1521,7 @@ function buildSpaceChildren(spaceId: string): HTMLLIElement {
   loading.textContent = 'Loading…';
   ul.appendChild(loading);
   holder.appendChild(ul);
-  void loadSpaceChildren(spaceId, ul);
+  whenTreeVisible(holder, () => void loadSpaceChildren(spaceId, ul));
   return holder;
 }
 
