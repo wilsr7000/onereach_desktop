@@ -248,6 +248,15 @@ echo -e "${GREEN}✓ Packaged-boot sanity: asar contains the boot-critical modul
 # 0.0.46 taught that the hard way. Launch the freshly packaged binary and
 # require its boot banner before anything uploads. SKIP_BOOT_SMOKE=1 to
 # bypass in emergencies — loudly.
+#
+# CONCURRENT SESSIONS (the 0.0.57 + first-0.0.69 aborts): any
+# install/relaunch snippet that pkills by an UNANCHORED pattern — e.g.
+#   pkill -f "Onereach.ai Lite.app/Contents/MacOS"
+# — ALSO matches this step's worktree smoke child and kills the cut.
+# The safe pattern is anchored to the installed app:
+#   pkill -f "/Applications/Onereach.ai Lite.app/Contents/MacOS"
+# The smoke tolerates ONE external SIGKILL (retry below); a second
+# kill fails the cut.
 # ---------------------------------------------------------------------------
 if [ "${SKIP_BOOT_SMOKE:-0}" = "1" ]; then
     echo -e "${YELLOW}⚠ SKIP_BOOT_SMOKE=1 — shipping WITHOUT booting the package.${NC}"
@@ -257,6 +266,22 @@ else
         echo -e "${RED}✗ Packaged binary not found — cannot boot-smoke. Aborting.${NC}"
         exit 1
     fi
+    # 2026-08-15: macOS SIGKILLs fresh copies of the Developer-ID-signed
+    # UNNOTARIZED bundle identity at exec (instant 137, empty log, no
+    # syspolicy line) once its heuristics trip — while the blessed
+    # /Applications install keeps running. Four cuts died this way. The
+    # smoke's job is MODULE INTEGRITY (requires + boot path), which is
+    # signature-independent — so smoke an AD-HOC-signed COPY and ship
+    # the Developer ID original untouched.
+    SMOKE_DIR=$(mktemp -d)
+    cp -R "$(dirname "$(dirname "$(dirname "$APP_BIN")")")" "$SMOKE_DIR/smoke.app"
+    codesign -f -s - --deep "$SMOKE_DIR/smoke.app" >/dev/null 2>&1
+    APP_BIN=$(find "$SMOKE_DIR/smoke.app" -maxdepth 3 -type f -path "*Contents/MacOS/*" | head -1)
+    if [ -z "$APP_BIN" ]; then
+        echo -e "${RED}✗ Smoke copy failed — no binary in the ad-hoc copy. Aborting.${NC}"
+        exit 1
+    fi
+
     # One smoke attempt: launch, wait for a banner/handoff, clean up ONLY
     # our own child (an exact-path pkill — the old broad pattern killed
     # the USER'S INSTALLED APP and any concurrent cut's smoke child).
@@ -309,8 +334,9 @@ else
     if [ "$BOOTED" = "2" ]; then
         echo -e "${GREEN}✓ Boot smoke: module load proven via single-instance handoff (installed app is running).${NC}"
     else
-        echo -e "${GREEN}✓ Boot smoke: the packaged app boots.${NC}"
+        echo -e "${GREEN}✓ Boot smoke: the packaged app boots (ad-hoc smoke copy).${NC}"
     fi
+    rm -rf "$SMOKE_DIR"
 fi
 
 # ---------------------------------------------------------------------------
