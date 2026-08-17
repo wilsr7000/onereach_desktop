@@ -1377,6 +1377,12 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       nukeReadCache();
       return result;
     },
+    // ADR-069 — per-viewer pin mark; the read cache carries `pinned`
+    // per row, so a toggle must invalidate like any space mutation.
+    async pinSpace(id: string, pinned: boolean): Promise<void> {
+      await client.pinSpace(id, pinned);
+      nukeReadCache();
+    },
     async deleteSpace(id: string, opts?: DeleteSpaceOpts): Promise<void> {
       await client.deleteSpace(id, opts);
       nukeReadCache();

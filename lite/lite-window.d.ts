@@ -644,6 +644,8 @@ interface LiteSpace {
    * the sidebar RECENT ranking.
    */
   lastActivity?: string;
+  /** ADR-069 — true when the viewer has pinned this Space. */
+  pinned?: boolean;
   /** 'user' (default) or 'shared' (AI-managed). */
   kind?: LiteSpaceKind;
   /** ADR-051 — 'open' (default) or 'restricted' (members-only). */
@@ -1090,6 +1092,12 @@ interface LiteSpacesBridge {
     opts?: LiteSpacesDeleteSpaceOpts
   ): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   undeleteSpace(id: string): Promise<LiteSpacesIpcResult<LiteSpace>>;
+  /**
+   * ADR-069 — toggle the viewer's pin mark on a Space. Pin state is a
+   * per-user graph edge ((Person)-[:PINNED]->(Space)), so it follows
+   * the human across devices; `pinned` on LiteSpace reflects it.
+   */
+  pinSpace(id: string, pinned: boolean): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   /**
    * Phase 4 — shared spaces. Toggles a Space between 'user' (default,
    * user-managed) and 'shared' (AI-managed dashboard layout).

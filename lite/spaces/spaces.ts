@@ -275,7 +275,9 @@ const state: SpacesRendererState = {
   loadingItems: false,
   loadingDetail: false,
   searchQuery: '',
-  sortMode: 'name',
+  // ADR-069 — activity is the resting order (data speaks); A→Z stays
+  // one select away for people who think alphabetically.
+  sortMode: 'recent',
   lastDiscovery: null,
   discoveryInFlight: false,
   home: {
@@ -847,6 +849,9 @@ function wireSidebarSearch(): void {
 function wireSidebarSort(): void {
   const select = document.getElementById('spaces-sidebar-sort-select');
   if (!(select instanceof HTMLSelectElement)) return;
+  // ADR-069 — the select must reflect the state default ('recent':
+  // data speaks; alphabetical is a choice, not the resting order).
+  select.value = state.sortMode;
   select.addEventListener('change', () => {
     const value = select.value;
     if (value === 'name' || value === 'recent') {
@@ -1009,17 +1014,23 @@ function wireSidebarToolbar(): void {
   const collapseAll = document.getElementById('spaces-sidebar-collapse-all');
   if (collapseAll !== null) {
     collapseAll.addEventListener('click', () => {
-      for (const name of ['search', 'recent', 'intake', 'spaces']) {
+      for (const name of ['pinned', 'search', 'recent', 'intake', 'spaces']) {
         setSectionCollapsed(name, true);
       }
     });
   }
   // ⌘F / Ctrl+F — the VS Code reflex. Search here means the sidebar
   // search, not a find-in-page (the window has no such affordance).
+  // ⌘K / Ctrl+K — ADR-069 jump palette: past a certain scale humans
+  // don't scan menus, they type three letters.
   document.addEventListener('keydown', (event: KeyboardEvent): void => {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') {
       event.preventDefault();
       expandAndFocusSearch();
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      openSpacesPalette();
     }
   });
 }
@@ -1108,6 +1119,208 @@ function renderRecentSpaces(): void {
       list.appendChild(buildSpaceChildren(space.id));
     }
   }
+}
+
+// ─── ADR-069 — Pinned tier, jump palette, machine-name nudge ───────────
+
+/**
+ * The human's chosen working set: pinned Spaces stay visible no matter
+ * how quiet they go. Section stays `hidden` until the first pin so an
+ * empty header never takes sidebar room.
+ */
+function renderPinnedSpaces(): void {
+  const section = document.querySelector<HTMLElement>('[data-side-section="pinned"]');
+  const list = document.getElementById('spaces-list-pinned');
+  if (section === null || list === null) return;
+  const pinned = state.spaces.filter((s) => s.pinned === true);
+  if (pinned.length === 0) {
+    section.hidden = true;
+    list.replaceChildren();
+    return;
+  }
+  section.hidden = false;
+  list.replaceChildren();
+  const ordered = sortSpaces(pinned, 'name');
+  for (const space of ordered) {
+    const li = document.createElement('li');
+    li.className = 'spaces-row spaces-row-pinned';
+    li.setAttribute('data-scope-id', space.id);
+    li.setAttribute('role', 'button');
+    li.setAttribute('tabindex', '0');
+    li.addEventListener('contextmenu', (ev) => openSpaceContextMenu(ev, space));
+    const dot = document.createElement('span');
+    dot.className = 'spaces-row-dot';
+    const safeColor = safeCssColor(space.color);
+    if (safeColor !== null) dot.style.background = safeColor;
+    li.appendChild(dot);
+    const name = document.createElement('span');
+    name.className = 'spaces-row-name';
+    name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+    li.appendChild(name);
+    list.appendChild(li);
+  }
+}
+
+/**
+ * A Space name that no human ever chose: empty, a bare uuid/hex blob,
+ * or the "Space a7671f80" shape machine writers mint. Pure; pinned by
+ * unit tests — widen carefully, a false positive nags a real name.
+ */
+export function looksMachineNamed(name: string): boolean {
+  const n = name.trim();
+  if (n.length === 0) return true;
+  if (/^space[\s_-]*[0-9a-f]{6,}$/i.test(n)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(n)) return true;
+  if (/^[0-9a-f]{16,}$/i.test(n)) return true;
+  return false;
+}
+
+/**
+ * Jump-palette candidate list. Pure. Ranking: with no query, pinned
+ * Spaces lead and the rest follow in activity order (the working set);
+ * with a query, name-prefix matches beat substring matches, each group
+ * keeping that same underlying order. Capped for keyboard reach.
+ */
+export function spacesPaletteEntries(
+  spaces: ReadonlyArray<RendererSpace>,
+  query: string
+): RendererSpace[] {
+  const ranked = sortSpaces(spaces, 'recent');
+  const base = [
+    ...ranked.filter((s) => s.pinned === true),
+    ...ranked.filter((s) => s.pinned !== true),
+  ];
+  const q = query.trim().toLowerCase();
+  if (q.length === 0) return base.slice(0, 12);
+  const starts: RendererSpace[] = [];
+  const contains: RendererSpace[] = [];
+  for (const s of base) {
+    const name = (s.name ?? '').toLowerCase();
+    if (name.startsWith(q)) starts.push(s);
+    else if (name.includes(q)) contains.push(s);
+  }
+  return [...starts, ...contains].slice(0, 12);
+}
+
+let paletteEl: HTMLElement | null = null;
+
+function closeSpacesPalette(): void {
+  if (paletteEl !== null) {
+    paletteEl.remove();
+    paletteEl = null;
+  }
+}
+
+/**
+ * ⌘K jump-to-space. Portaled to <body> (same technique as the wizard
+ * typeahead — fixed position, above menus/toast, below the identity
+ * gate). Type to filter, ↑/↓ to move, Enter to jump, Esc to close.
+ */
+function openSpacesPalette(): void {
+  closeSpacesPalette();
+  const overlay = document.createElement('div');
+  overlay.className = 'spaces-palette-backdrop';
+  overlay.addEventListener('mousedown', (ev) => {
+    if (ev.target === overlay) closeSpacesPalette();
+  });
+
+  const panel = document.createElement('div');
+  panel.className = 'spaces-palette';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Jump to space');
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'spaces-palette-input';
+  input.placeholder = 'Jump to space…';
+  input.setAttribute('aria-label', 'Type a space name');
+  panel.appendChild(input);
+
+  const list = document.createElement('ul');
+  list.className = 'spaces-palette-list';
+  panel.appendChild(list);
+
+  let selected = 0;
+  let entries: RendererSpace[] = [];
+
+  const paint = (): void => {
+    entries = spacesPaletteEntries(state.spaces, input.value);
+    if (selected >= entries.length) selected = Math.max(0, entries.length - 1);
+    list.replaceChildren();
+    if (entries.length === 0) {
+      const empty = document.createElement('li');
+      empty.className = 'spaces-palette-empty';
+      empty.textContent = 'No matching spaces';
+      list.appendChild(empty);
+      return;
+    }
+    entries.forEach((space, index) => {
+      const li = document.createElement('li');
+      li.className = 'spaces-palette-row';
+      if (index === selected) li.classList.add('is-selected');
+      const dot = document.createElement('span');
+      dot.className = 'spaces-row-dot';
+      const safeColor = safeCssColor(space.color);
+      if (safeColor !== null) dot.style.background = safeColor;
+      li.appendChild(dot);
+      const name = document.createElement('span');
+      name.className = 'spaces-palette-name';
+      name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+      li.appendChild(name);
+      if (space.pinned === true) {
+        const pin = document.createElement('span');
+        pin.className = 'spaces-palette-pin';
+        pin.textContent = '⤒';
+        pin.title = 'Pinned';
+        li.appendChild(pin);
+      }
+      li.addEventListener('mousedown', (ev) => {
+        ev.preventDefault();
+        jumpTo(space);
+      });
+      list.appendChild(li);
+    });
+  };
+
+  const jumpTo = (space: RendererSpace): void => {
+    closeSpacesPalette();
+    setActiveScope(space.id);
+  };
+
+  input.addEventListener('input', () => {
+    selected = 0;
+    paint();
+  });
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      closeSpacesPalette();
+      return;
+    }
+    if (ev.key === 'ArrowDown') {
+      ev.preventDefault();
+      selected = Math.min(selected + 1, Math.max(0, entries.length - 1));
+      paint();
+      return;
+    }
+    if (ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      selected = Math.max(selected - 1, 0);
+      paint();
+      return;
+    }
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      const space = entries[selected];
+      if (space !== undefined) jumpTo(space);
+    }
+  });
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+  paletteEl = overlay;
+  paint();
+  input.focus();
 }
 
 // ─── Global search — Space names + item content, grouped results ───────
@@ -1439,6 +1652,7 @@ export function buildSpaceContextEntries(
     convertShared: () => void;
     convertUser: () => void;
     deleteSpace: () => void;
+    togglePin: () => void;
   }
 ): CtxEntry[] {
   const isOpen = space.visibility !== 'restricted';
@@ -1459,6 +1673,14 @@ export function buildSpaceContextEntries(
       run: handlers.unshare,
     },
     { type: 'separator' },
+    // ADR-069 — the human's override in the attention tiers: a pinned
+    // Space stays in the sidebar's working set no matter how quiet it
+    // goes. Per-viewer graph edge; follows you across devices.
+    {
+      type: 'action',
+      label: space.pinned === true ? 'Unpin from sidebar' : 'Pin to sidebar',
+      run: handlers.togglePin,
+    },
     // The graph-backed member picker — the answer to "how do I add
     // somebody to an existing space" (2026-08-12 user report).
     { type: 'action', label: 'Add people…', run: handlers.addPeople },
@@ -1725,6 +1947,21 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     convertUser: () => void toggleSpaceKind(space.id),
     deleteSpace: () => {
       void performSoftDelete(space.id);
+    },
+    togglePin: () => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const next = space.pinned !== true;
+        const envelope = await bridge.pinSpace(space.id, next);
+        showToast(
+          envelope.ok
+            ? next
+              ? `Pinned "${space.name}"`
+              : `Unpinned "${space.name}"`
+            : envelope.error.message
+        );
+        if (envelope.ok) await loadSpaces();
+      })();
     },
   });
   openContextMenu(event.clientX, event.clientY, entries);
@@ -3418,14 +3655,46 @@ function applyActiveRow(scopeId: string): void {
  */
 let renderedSpacesSignature: string | null = null;
 
+// ADR-069 — drawer state for the Spaces section. Session-sticky: an
+// explicit More… stays open for the window's lifetime (repaints must
+// not silently re-fold the list the user just expanded).
+const SPACES_ACTIVE_LIMIT = 8;
+const SPACES_FOLD_SLACK = 2;
+let spacesDrawerOpen = false;
+
+function buildSpacesDrawerRow(hiddenCount: number, opensDrawer: boolean): HTMLLIElement {
+  const li = document.createElement('li');
+  li.className = 'spaces-drawer-row';
+  li.setAttribute('role', 'button');
+  li.setAttribute('tabindex', '0');
+  li.textContent = opensDrawer
+    ? `More… ${hiddenCount} space${hiddenCount === 1 ? '' : 's'}`
+    : 'Show fewer';
+  const toggle = (): void => {
+    spacesDrawerOpen = opensDrawer;
+    renderedSpacesSignature = null;
+    renderSpaceList();
+  };
+  li.addEventListener('click', toggle);
+  li.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      toggle();
+    }
+  });
+  return li;
+}
+
 function spacesSidebarSignature(): string {
   const rows = sortSpaces(state.spaces, state.sortMode)
     .map(
       (s) =>
-        `${s.id}:${s.updatedAt ?? ''}:${s.name}:${s.itemCount ?? 0}:${s.visibility ?? ''}:${s.kind ?? ''}`
+        `${s.id}:${s.updatedAt ?? ''}:${s.lastActivity ?? ''}:${s.name}:${s.itemCount ?? 0}:${s.visibility ?? ''}:${s.kind ?? ''}:${s.pinned === true ? 'P' : ''}`
     )
     .join('|');
-  return `${state.sortMode}§${rows}`;
+  // Drawer state is part of the paint (ADR-069): toggling More… must
+  // repaint even when the data itself didn't change.
+  return `${state.sortMode}§${spacesDrawerOpen ? 'open' : 'closed'}§${rows}`;
 }
 
 function renderSpaceList(): void {
@@ -3457,16 +3726,24 @@ function renderSpaceList(): void {
     hint.appendChild(cta);
 
     list.appendChild(hint);
-    // RECENT must not keep rows for Spaces that no longer exist
-    // (2026-08-08 review): refresh it on this branch too.
+    // RECENT/PINNED must not keep rows for Spaces that no longer exist
+    // (2026-08-08 review): refresh them on this branch too.
     renderRecentSpaces();
+    renderPinnedSpaces();
     return;
   }
   // Sort BEFORE row construction so the DOM order matches state.
   // Uncategorized is its own pinned row in a separate list and isn't
   // touched by the sort.
   const ordered = sortSpaces(state.spaces, state.sortMode);
-  for (const space of ordered) {
+  // ADR-069 — the More… drawer: past the threshold the list shows the
+  // working set and folds the long tail behind one row, instead of the
+  // sidebar growing without bound. Never fold when the tail would be
+  // tiny (a "More… (1)" row costs more than it saves).
+  const folded =
+    !spacesDrawerOpen && ordered.length > SPACES_ACTIVE_LIMIT + SPACES_FOLD_SLACK;
+  const visible = folded ? ordered.slice(0, SPACES_ACTIVE_LIMIT) : ordered;
+  for (const space of visible) {
     const row = buildSpaceRow(space, space.id === state.activeScopeId);
     list.appendChild(row);
     // Trees render OPEN by default; a re-render must respect only an
@@ -3475,8 +3752,14 @@ function renderSpaceList(): void {
       list.appendChild(buildSpaceChildren(space.id));
     }
   }
-  // The Recent section mirrors the same state; keep it in lockstep.
+  if (folded) {
+    list.appendChild(buildSpacesDrawerRow(ordered.length - SPACES_ACTIVE_LIMIT, true));
+  } else if (spacesDrawerOpen && ordered.length > SPACES_ACTIVE_LIMIT + SPACES_FOLD_SLACK) {
+    list.appendChild(buildSpacesDrawerRow(0, false));
+  }
+  // The Recent + Pinned sections mirror the same state; keep in lockstep.
   renderRecentSpaces();
+  renderPinnedSpaces();
   // Re-apply any standing search filter so a load doesn't break the
   // currently-typed query.
   applySidebarFilter();
@@ -3617,6 +3900,23 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
     badge.title = 'Shared space — AI-managed';
     badge.textContent = 'AI';
     li.appendChild(badge);
+  }
+
+  // ADR-069 — machine-named nudge: a Space nobody ever named gets a
+  // quiet "name?" affordance that opens the existing inline rename.
+  // One click retires the "Space a7671f80" clutter at its source.
+  if (looksMachineNamed(space.name)) {
+    const nudge = document.createElement('button');
+    nudge.type = 'button';
+    nudge.className = 'spaces-row-name-nudge';
+    nudge.textContent = 'name?';
+    nudge.title = 'This space never got a real name — click to rename it';
+    nudge.setAttribute('aria-label', `Rename ${space.name}`);
+    nudge.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      startInlineRename(space.id);
+    });
+    li.appendChild(nudge);
   }
 
   // ADR-051: members-only spaces get a lock pill so it's obvious at a

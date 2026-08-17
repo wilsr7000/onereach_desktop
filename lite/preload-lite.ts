@@ -139,6 +139,7 @@ const SPACES_HOME_PERMISSION_SUMMARY = 'lite:spaces:home:permissionSummary';
 const SPACES_CREATE_SPACE = 'lite:spaces:create';
 const SPACES_RENAME_SPACE = 'lite:spaces:rename';
 const SPACES_UPDATE_SPACE = 'lite:spaces:update';
+const SPACES_PIN_SPACE = 'lite:spaces:pin';
 const SPACES_DELETE_SPACE = 'lite:spaces:delete';
 const SPACES_UNDELETE_SPACE = 'lite:spaces:undelete';
 // Cache refresh broadcast: fires when an entry in the main-process
@@ -970,6 +971,8 @@ interface SpacesBridge {
     opts?: SpacesDeleteSpaceOptsView
   ): Promise<SpacesIpcResultView<{ ok: true }>>;
   undeleteSpace(id: string): Promise<SpacesIpcResultView<unknown>>;
+  /** ADR-069 — toggle the viewer's pin mark on a Space. */
+  pinSpace(id: string, pinned: boolean): Promise<SpacesIpcResultView<{ ok: true }>>;
   /** Phase 4 — shared spaces (playbooks + tickets). */
   setSpaceKind(
     id: string,
@@ -1810,6 +1813,10 @@ const spaces: SpacesBridge = {
   updateSpace: (id, patch) =>
     ipcRenderer.invoke(SPACES_UPDATE_SPACE, { id, patch }) as Promise<
       SpacesIpcResultView<unknown>
+    >,
+  pinSpace: (id, pinned) =>
+    ipcRenderer.invoke(SPACES_PIN_SPACE, { id, pinned }) as Promise<
+      SpacesIpcResultView<{ ok: true }>
     >,
   deleteSpace: (id, opts) =>
     ipcRenderer.invoke(SPACES_DELETE_SPACE, {

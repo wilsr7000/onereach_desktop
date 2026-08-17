@@ -223,6 +223,9 @@ function buildStubConsumer(): {
         name: input.name,
       }),
     renameSpace: async (id, name) => maybeFail<Space>({ id, name }),
+    pinSpace: async (_id, _pinned) => {
+      /* stub: contract only needs the method to exist */
+    },
     updateSpace: async (id, patch) => {
       const next: Space = { id, name: '' };
       if (patch.description !== undefined) next.description = patch.description;

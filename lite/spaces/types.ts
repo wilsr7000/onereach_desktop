@@ -109,6 +109,13 @@ export interface Space {
    */
   lastActivity?: string;
   /**
+   * ADR-069 — true when the VIEWER has pinned this Space (per-user
+   * `(Person)-[:PINNED]->(Space)` edge, cross-device). The human
+   * override in the attention tiers: pinned Spaces stay in the working
+   * set no matter how quiet they go.
+   */
+  pinned?: boolean;
+  /**
    * Curation model. Defaults to `'user'` for existing Spaces (the SDK
    * coalesces `s.kind` so rows written before this property existed
    * still parse). `'shared'` flips the renderer into the AI-managed

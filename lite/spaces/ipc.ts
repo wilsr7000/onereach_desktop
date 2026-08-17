@@ -97,6 +97,7 @@ export const SPACES_IPC = {
   CREATE_SPACE: 'lite:spaces:create',
   RENAME_SPACE: 'lite:spaces:rename',
   UPDATE_SPACE: 'lite:spaces:update',
+  PIN_SPACE: 'lite:spaces:pin',
   DELETE_SPACE: 'lite:spaces:delete',
   UNDELETE_SPACE: 'lite:spaces:undelete',
   /** Phase 4 — shared spaces (playbooks + tickets). */
@@ -747,6 +748,23 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         const patch = coerceUpdateSpaceInput(payload?.patch);
         const value = await getSpacesApi().updateSpace(id, patch);
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.PIN_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; pinned?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const pinned = payload?.pinned === true;
+        await getSpacesApi().pinSpace(id, pinned);
+        return { ok: true, value: { ok: true } };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

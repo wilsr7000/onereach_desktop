@@ -368,7 +368,7 @@ describe('sidebar context menus', () => {
     const noop = (): void => undefined;
     const handlers = {
       share: noop, unshare: noop, addPeople: noop, upload: noop, rename: noop,
-      editObjective: noop, convertShared: noop, convertUser: noop, deleteSpace: noop,
+      editObjective: noop, convertShared: noop, convertUser: noop, deleteSpace: noop, togglePin: noop,
     };
     const entries = mod.buildSpaceContextEntries(
       { id: 's1', name: 'Open user space', visibility: 'open', kind: 'user',
@@ -532,7 +532,7 @@ describe('space context menu — Add people', () => {
         editObjective: noop,
         convertShared: noop,
         convertUser: noop,
-        deleteSpace: noop,
+        deleteSpace: noop, togglePin: noop,
       }
     );
     const labels = entries

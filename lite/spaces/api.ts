@@ -781,6 +781,14 @@ export interface SpacesApi {
   updateSpace(id: string, patch: UpdateSpaceInput): Promise<Space>;
 
   /**
+   * ADR-069 — toggle the viewer's pin mark on a Space. The pin is a
+   * per-user `(Person)-[:PINNED]->(Space)` edge (cross-device); a
+   * missing viewer identity is a harmless no-op. Mutates the read
+   * cache (the `pinned` flag rides `listSpaces()` rows).
+   */
+  pinSpace(id: string, pinned: boolean): Promise<void>;
+
+  /**
    * Delete a Space. Defaults to a soft delete (sets `deletedAt`); the
    * Space disappears from `listSpaces()` but its items keep their
    * `[:BELONGS_TO]` edges and can be restored via `undeleteSpace()`.
@@ -1079,6 +1087,10 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async updateSpace(_id: string, _patch: UpdateSpaceInput): Promise<Space> {
     throw notInitialized('updateSpace');
+  }
+
+  async pinSpace(_id: string, _pinned: boolean): Promise<void> {
+    throw notInitialized('pinSpace');
   }
 
   async deleteSpace(_id: string, _opts?: DeleteSpaceOpts): Promise<void> {

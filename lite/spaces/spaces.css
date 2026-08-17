@@ -9254,3 +9254,120 @@ body {
   font-size: 12px;
   color: #f87171;
 }
+
+/* ─── ADR-069 — attention tiers: pinned rows, More… drawer, name nudge,
+   ⌘K jump palette. Palette sits at z 2800: above menus (2600) and
+   toast (2700), below the identity gate (3000) — the gate stays king. */
+
+.spaces-row-pinned .spaces-row-name {
+  font-weight: 600;
+}
+
+.spaces-drawer-row {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px 6px 28px;
+  color: var(--or-text-muted, #8a8a93);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: var(--or-radius-sm, 6px);
+}
+.spaces-drawer-row:hover {
+  color: var(--or-text-secondary, #b8b8bf);
+  background: var(--or-bg-elevated, #1b1b20);
+}
+
+.spaces-row-name-nudge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--or-text-muted, #8a8a93);
+  background: transparent;
+  border: 1px dashed var(--or-text-muted, #8a8a93);
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.spaces-row-name-nudge:hover {
+  color: var(--or-accent, #a78bfa);
+  border-color: var(--or-accent, #a78bfa);
+}
+
+.spaces-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2800;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+}
+
+.spaces-palette {
+  width: min(480px, calc(100vw - 48px));
+  background: var(--or-bg-elevated, #1b1b20);
+  border: 1px solid var(--or-border, #2a2a31);
+  border-radius: var(--or-radius-lg, 12px);
+  box-shadow: var(--or-shadow-lg, 0 18px 50px rgba(0, 0, 0, 0.55));
+  overflow: hidden;
+}
+
+.spaces-palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: var(--or-text-primary, #e8e8ea);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--or-border, #2a2a31);
+  outline: none;
+}
+
+.spaces-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.spaces-palette-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--or-radius-sm, 6px);
+  cursor: pointer;
+  color: var(--or-text-primary, #e8e8ea);
+  font-size: 13px;
+}
+.spaces-palette-row:hover {
+  background: var(--or-bg-canvas, #0f1115);
+}
+.spaces-palette-row.is-selected {
+  background: var(--or-accent-soft, rgba(139, 92, 246, 0.18));
+}
+
+.spaces-palette-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spaces-palette-pin {
+  color: var(--or-text-muted, #8a8a93);
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.spaces-palette-empty {
+  padding: 12px;
+  color: var(--or-text-muted, #8a8a93);
+  font-size: 13px;
+  text-align: center;
+}

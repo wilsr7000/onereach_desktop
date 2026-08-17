@@ -349,6 +349,9 @@ export const CYPHER = {
          CASE WHEN coalesce(memberActivityMs, 0) > ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')}
               THEN memberActivityMs
               ELSE ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')} END AS lastActivityMs
+    // ADR-069 — the viewer's pin mark (human override for the attention
+    // tiers). Absent viewer identity simply never matches.
+    OPTIONAL MATCH (:Person {id: $viewerId})-[pin:PINNED]->(s)
     RETURN s.id AS id,
            coalesce(s.name, s.id) AS name,
            coalesce(s.description, '') AS description,
@@ -359,8 +362,28 @@ export const CYPHER = {
            itemCount AS itemCount,
            coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
            coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt,
-           lastActivityMs AS lastActivityMs
+           lastActivityMs AS lastActivityMs,
+           pin IS NOT NULL AS pinned
     ORDER BY toLower(coalesce(s.name, s.id, '')) ASC
+  `,
+
+  /**
+   * ADR-069 — pin/unpin a Space for the viewer. The pin is a per-user
+   * graph edge (cross-device, identity-true); MATCH-only on the Person
+   * so a missing identity is a no-op rather than a bare-node mint.
+   */
+  PIN_SPACE: `
+    MATCH (p:Person {id: $viewerId})
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE}
+    MERGE (p)-[r:PINNED]->(s)
+      ON CREATE SET r.pinnedAt = timestamp()
+    RETURN s.id AS id
+  `,
+  UNPIN_SPACE: `
+    MATCH (:Person {id: $viewerId})-[r:PINNED]->(s:Space {id: $spaceId})
+    DELETE r
+    RETURN $spaceId AS id
   `,
   UNCATEGORIZED_COUNT: `
     MATCH (a)
@@ -3168,6 +3191,22 @@ export class SdkSpacesClient {
    * `{ soft: false }` to hard-remove. Hard delete refuses if the
    * Space still has items so data can't orphan accidentally.
    */
+  /**
+   * ADR-069 — pin/unpin a Space for the current viewer. Pin state is a
+   * per-user graph edge, so it follows the human across devices. A
+   * missing viewer identity makes both calls harmless no-ops (the
+   * Person MATCH simply finds nothing).
+   */
+  async pinSpace(id: string, pinned: boolean): Promise<void> {
+    return this.withSpan(pinned ? 'spaces.pin' : 'spaces.unpin', async () => {
+      const validId = validateSpaceId(id);
+      await this.run(pinned ? CYPHER.PIN_SPACE : CYPHER.UNPIN_SPACE, {
+        spaceId: validId,
+        viewerId: this.viewerParam(),
+      });
+    });
+  }
+
   async deleteSpace(id: string, opts: DeleteSpaceOpts = {}): Promise<void> {
     return this.withSpan('spaces.delete', async () => {
       const validId = validateSpaceId(id);
@@ -5437,6 +5476,8 @@ function toSpace(row: Record<string, unknown>): Space {
   if (kind === 'shared' || kind === 'user') space.kind = kind;
   const visibility = optString(row, 'visibility');
   if (visibility === 'open' || visibility === 'restricted') space.visibility = visibility;
+  // ADR-069 — viewer's pin mark (only ever true from the graph edge).
+  if (row['pinned'] === true) space.pinned = true;
   return space;
 }
 

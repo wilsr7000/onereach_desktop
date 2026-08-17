@@ -485,6 +485,24 @@
             </ul>
           </div>
 
+          <!-- ADR-069 — the human's chosen working set. Hidden entirely
+               until at least one Space is pinned (an empty "Pinned"
+               header would just be noise). -->
+          <section class="spaces-side-section" data-side-section="pinned" hidden>
+            <button
+              type="button"
+              class="spaces-side-header"
+              data-side-toggle="pinned"
+              aria-expanded="true"
+            >
+              <span class="spaces-side-chevron" aria-hidden="true">▸</span>
+              <span class="spaces-side-header-label">Pinned</span>
+            </button>
+            <div class="spaces-side-body">
+              <ul class="spaces-list spaces-side-tree" id="spaces-list-pinned"></ul>
+            </div>
+          </section>
+
           <section class="spaces-side-section" data-side-section="search">
             <button
               type="button"
