@@ -21,6 +21,7 @@ import { getFilesApi, FilesError } from '../files/api.js';
 
 const IPC_CAPTURE = 'lite:bug-report:capture';
 const IPC_GET_PREFILL = 'lite:bug-report:get-prefill';
+const IPC_OPEN = 'lite:bug-report:open';
 const IPC_SAVE = 'lite:bug-report:save';
 const IPC_CLOSE = 'lite:bug-report:close';
 const IPC_LIST = 'lite:bug-report:list';
@@ -71,6 +72,12 @@ export function initBugReport(opts: InitOptions): void {
   // install failures hand a structured trail through this).
   ipcMain.handle(IPC_GET_PREFILL, () => {
     const value = pendingPrefill;
+  // Renderer-triggered open (2026-08-17): the outage banner's "Report
+  // issue" action. Prefill is plain text, length-capped.
+  ipcMain.handle(IPC_OPEN, (_event, prefill?: unknown) => {
+    openBugReportModal(typeof prefill === 'string' ? prefill.slice(0, 2000) : undefined);
+    return { ok: true };
+  });
     pendingPrefill = null;
     return { prefill: value };
   });

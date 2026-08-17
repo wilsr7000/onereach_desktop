@@ -35,6 +35,7 @@
  */
 
 import type { Span, EventRecord } from '../logging/events.js';
+import { reportServiceDown, reportServiceUp } from '../health/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { KVError, KV_ERROR_CODES, type KVRecord } from './client.js';
 import { isAuthRejectedMessage } from './sdk-client.js';
@@ -426,6 +427,7 @@ export class FlowHttpKVClient {
     try {
       const result = await fn();
       if (this.breakerConsecutive > 0) {
+        reportServiceUp('onereach');
         this.log('info', 'kv-flow: backend recovered — breaker reset', {
           afterFailures: this.breakerConsecutive,
         });
@@ -443,6 +445,7 @@ export class FlowHttpKVClient {
           // Half-open: one more counted failure after the cooldown
           // reopens immediately.
           this.breakerConsecutive = FlowHttpKVClient.BREAKER_THRESHOLD - 1;
+          reportServiceDown('onereach', 'OneReach is returning server errors');
           this.log('warn', 'kv-flow: circuit OPENED — repeated KV server errors; failing fast 15s', {
             op,
             collection,

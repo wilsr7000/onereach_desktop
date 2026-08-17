@@ -43,6 +43,17 @@ export type {
 } from './types.js';
 export { HEALTH_SCHEMA_VERSION } from './types.js';
 
+// Service pulse (2026-08-17) — the app-wide degraded/ok signal that
+// powers the calm outage banner. Producers (the KV circuit breaker)
+// report down/up; health/main broadcasts changes to every window.
+export {
+  getPulse,
+  reportServiceDown,
+  reportServiceUp,
+  onPulseChange,
+  type ServicePulse,
+} from './pulse.js';
+
 /**
  * The public surface of the health module.
  *

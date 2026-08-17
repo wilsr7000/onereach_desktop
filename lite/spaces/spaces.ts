@@ -406,6 +406,7 @@ function wireCacheUpdates(): void {
   const sub = window.lite?.spaces?.onCacheUpdate;
   if (typeof sub !== 'function') return; // bridge not present (test env)
   cacheUpdateUnsubscribe = sub((update) => {
+    markCacheBroadcast();
     routeCacheUpdate(update.key);
   });
 }
@@ -789,6 +790,12 @@ async function loadSpaces(): Promise<void> {
     markSpacesBootSucceeded();
   } catch (err) {
     window.logging?.error?.('spaces', 'loadSpaces failed', { error: messageFrom(err) });
+    if (isServiceDegraded()) {
+      // The pulse banner owns the outage story; keep last-good content
+      // instead of painting this pane red.
+      state.loadingSpaces = false;
+      return;
+    }
     state.loadingSpaces = false;
     renderSpaceListError(messageFrom(err));
   }
@@ -6207,6 +6214,100 @@ function applyActiveCard(grid: HTMLElement, itemId: string | null): void {
  * `is-active`, and the `data-item-id` attribute are preserved so the
  * existing wiring + tests still find the right hooks.
  */
+// ─── Service pulse: the calm outage banner (2026-08-17) ───────────────
+// An outage used to paint every pane red at once. The contract now:
+// panes keep last-good content (the cache serves stale), ONE amber
+// banner explains, errors hush while degraded, and recovery heals
+// silently (+refresh). The pulse arrives from main (the KV circuit
+// breaker is the producer) over lite:health:pulse.
+
+export interface RendererServicePulse {
+  status: 'ok' | 'degraded';
+  services: Array<{ service: string; reason: string; downSinceMs: number }>;
+  degradedSinceMs: number | null;
+}
+
+let servicePulseDegraded = false;
+
+/** True while the backend is having a moment — error paths soften. */
+export function isServiceDegraded(): boolean {
+  return servicePulseDegraded;
+}
+
+/** @internal test seam */
+export function _setServiceDegradedForTesting(v: boolean): void {
+  servicePulseDegraded = v;
+}
+
+/**
+ * The one calm banner. Amber, not red; explains what the user sees
+ * (recent data), what the app is doing (retrying), and offers a quiet
+ * "Report issue" that opens the feedback modal prefilled with context.
+ */
+export function buildServicePulseBanner(
+  pulse: RendererServicePulse,
+  onReport?: () => void
+): HTMLElement {
+  const bar = document.createElement('div');
+  bar.className = 'spaces-pulse-banner';
+  bar.setAttribute('role', 'status');
+
+  const dot = document.createElement('span');
+  dot.className = 'spaces-pulse-dot';
+  bar.appendChild(dot);
+
+  const text = document.createElement('span');
+  text.className = 'spaces-pulse-text';
+  const since =
+    pulse.degradedSinceMs !== null ? formatRelativeTime(new Date(pulse.degradedSinceMs).toISOString()) : '';
+  text.textContent =
+    `OneReach is having a moment${since.length > 0 ? ` (since ${since})` : ''} — ` +
+    'showing recent data, retrying automatically.';
+  bar.appendChild(text);
+
+  const report = document.createElement('button');
+  report.type = 'button';
+  report.className = 'spaces-pulse-report';
+  report.textContent = 'Report issue';
+  report.addEventListener('click', () => {
+    if (onReport !== undefined) {
+      onReport();
+      return;
+    }
+    const reasons = pulse.services.map((sv) => `${sv.service}: ${sv.reason}`).join('; ');
+    void window.lite?.bugReport?.open?.(
+      `[outage] Service degraded${since.length > 0 ? ` since ${since}` : ''} — ${reasons}. ` +
+        'What I was doing when I hit it: '
+    );
+  });
+  bar.appendChild(report);
+  return bar;
+}
+
+/** Mount/unmount the banner + drive the degraded flag. Called at init. */
+function attachServicePulse(): void {
+  const health = window.lite?.health;
+  if (health === undefined || typeof health.onPulse !== 'function') return;
+  const apply = (raw: unknown): void => {
+    const pulse = raw as RendererServicePulse;
+    const wasDegraded = servicePulseDegraded;
+    servicePulseDegraded = pulse.status === 'degraded';
+    document.getElementById('spaces-pulse-banner-host')?.remove();
+    if (servicePulseDegraded) {
+      const host = document.createElement('div');
+      host.id = 'spaces-pulse-banner-host';
+      host.appendChild(buildServicePulseBanner(pulse));
+      document.body.appendChild(host);
+    } else if (wasDegraded) {
+      // Recovery: refresh quietly so stale panes heal without ceremony.
+      showToast('Back online — refreshing');
+      void loadSpaces();
+    }
+  };
+  health.onPulse(apply);
+  void health.getPulse?.().then((p: unknown) => apply(p)).catch(() => undefined);
+}
+
 // ─── Recency organization (2026-08-11) ─────────────────────────────────
 // "Subtle organize by last edit time": the grid is already served
 // newest-edit-first; these helpers make that order LEGIBLE — thin
@@ -13660,6 +13761,7 @@ function wireMutationsUI(): void {
   wireNewSharedSpaceButton();
   wireRefreshButton();
   wireRefreshOnFocus();
+  wireStalenessWatchdog();
   wireNewSpaceDialog();
   wireRowMenuTriggers();
   wireRowMenu();
@@ -13732,7 +13834,16 @@ async function refreshFromGraph(trigger: 'button' | 'focus'): Promise<void> {
     button.classList.add('is-refreshing');
   }
   try {
-    const result = await bridge.refresh();
+    // A hung IPC would leave refreshInFlight stuck true forever,
+    // silently disabling focus-refresh AND the staleness watchdog
+    // (observed live 2026-08-17: exactly one watchdog attempt, then
+    // nothing). The race guarantees the flag always clears.
+    const result = await Promise.race([
+      bridge.refresh(),
+      new Promise<{ ok: false; error: { message: string } }>((resolve) => {
+        setTimeout(() => resolve({ ok: false, error: { message: 'refresh timed out' } }), 20_000);
+      }),
+    ]);
     if (result.ok === false && trigger === 'button') {
       showToast(`Couldn't refresh: ${result.error.message}`);
       return;
@@ -13777,6 +13888,66 @@ function wireRefreshOnFocus(): void {
     lastFocusRefreshAt = now;
     void refreshFromGraph('focus');
   });
+  // Focus only fires on TRANSITIONS — a window sitting frontmost never
+  // re-triggers it. visibilitychange covers un-minimize / space-switch
+  // arrivals that don't change focus (2026-08-16: a member grant never
+  // surfaced in an already-open window).
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const now = Date.now();
+    if (now - lastFocusRefreshAt < FOCUS_REFRESH_THROTTLE_MS) return;
+    lastFocusRefreshAt = now;
+    void refreshFromGraph('focus');
+  });
+}
+
+// ─── Staleness watchdog (2026-08-16) ────────────────────────────────────
+//
+// The 60s background cache refresh fails SILENTLY when the graph
+// endpoint flakes (Edison 503s observed live): the cache serves stale
+// data, no broadcast arrives, and an open window can miss changes made
+// from other machines — "I added a user to a Space but it didn't show
+// up until they reopened Spaces." The watchdog makes that state
+// visible and self-healing: if no cache-updated broadcast lands for
+// 3× the refresh interval while the page is visible, show a subtle
+// hint and force a refresh; any successful update clears it.
+
+/** Epoch ms of the last cache-updated broadcast (any key). */
+let lastCacheBroadcastAt = Date.now();
+/** 3× the main-process refresh interval (60s). */
+const STALE_AFTER_MS = 180_000;
+const WATCHDOG_TICK_MS = 30_000;
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+
+function markCacheBroadcast(): void {
+  lastCacheBroadcastAt = Date.now();
+  const hint = document.getElementById('spaces-stale-hint');
+  if (hint !== null) hint.remove();
+}
+
+function showStaleHint(): void {
+  if (document.getElementById('spaces-stale-hint') !== null) return;
+  const sidebar = document.getElementById('spaces-sidebar');
+  if (sidebar === null) return;
+  const hint = document.createElement('div');
+  hint.id = 'spaces-stale-hint';
+  hint.className = 'spaces-stale-hint';
+  hint.setAttribute('role', 'status');
+  hint.textContent = 'Having trouble reaching the graph — data may be out of date. Retrying…';
+  sidebar.appendChild(hint);
+}
+
+function wireStalenessWatchdog(): void {
+  if (watchdogTimer !== null) clearInterval(watchdogTimer);
+  lastCacheBroadcastAt = Date.now();
+  watchdogTimer = setInterval(() => {
+    if (document.visibilityState !== 'visible') return;
+    if (Date.now() - lastCacheBroadcastAt < STALE_AFTER_MS) return;
+    showStaleHint();
+    // Self-heal: force a real refetch (throttle-free — the watchdog
+    // itself ticks at 30s, and refreshFromGraph coalesces in-flight).
+    void refreshFromGraph('focus');
+  }, WATCHDOG_TICK_MS);
 }
 
 function wireNewSharedSpaceButton(): void {
@@ -16305,6 +16476,7 @@ bootRenderer({
   title: 'Spaces failed to load',
   init: (ctx) => {
     markSpacesBootSucceeded = ctx.markBootSucceeded;
+    attachServicePulse();
     return init();
   },
 });

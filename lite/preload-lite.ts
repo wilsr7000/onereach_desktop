@@ -17,6 +17,9 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 
+const HEALTH_PULSE_EVENT = 'lite:health:pulse';
+const HEALTH_PULSE_GET = 'lite:health:pulse-get';
+const BUG_REPORT_OPEN = 'lite:bug-report:open';
 const BUG_REPORT_CAPTURE = 'lite:bug-report:capture';
 const BUG_REPORT_GET_PREFILL = 'lite:bug-report:get-prefill';
 const BUG_REPORT_SAVE = 'lite:bug-report:save';
@@ -1017,6 +1020,9 @@ interface TelemetryBridge {
 }
 
 interface HealthBridge {
+  /** Service pulse (2026-08-17) — the calm-outage-banner signal. */
+  getPulse(): Promise<unknown>;
+  onPulse(cb: (pulse: unknown) => void): () => void;
   /**
    * Build a fresh "what is true right now?" snapshot across
    * documented lite modules. Best-effort -- missing or failing
@@ -1392,6 +1398,7 @@ interface BugReportAttachmentView {
 }
 
 interface BugReportBridge {
+  open(prefill?: string): Promise<{ ok: true }>;
   capture(userDescription: string): Promise<{
     payload: unknown;
     payloadJson: string;
@@ -1472,6 +1479,8 @@ const logging: LoggingBridge = {
 };
 
 const bugReport: BugReportBridge = {
+  /** Open the modal from any lite renderer (outage banner's Report). */
+  open: (prefill?: string) => ipcRenderer.invoke(BUG_REPORT_OPEN, prefill),
   capture: (userDescription: string) => ipcRenderer.invoke(BUG_REPORT_CAPTURE, userDescription),
   getPrefill: () =>
     ipcRenderer.invoke(BUG_REPORT_GET_PREFILL) as Promise<{ prefill: string | null }>,
@@ -1957,6 +1966,12 @@ const spaces: SpacesBridge = {
 };
 
 const health: HealthBridge = {
+  getPulse: () => ipcRenderer.invoke(HEALTH_PULSE_GET),
+  onPulse: (cb: (pulse: unknown) => void) => {
+    const listener = (_e: unknown, pulse: unknown): void => cb(pulse);
+    ipcRenderer.on(HEALTH_PULSE_EVENT, listener as never);
+    return () => ipcRenderer.removeListener(HEALTH_PULSE_EVENT, listener as never);
+  },
   snapshot: () => ipcRenderer.invoke(HEALTH_SNAPSHOT) as Promise<LiteAppHealthSnapshotView>,
 };
 
@@ -2795,6 +2810,7 @@ const bootChat: BootChatBridge = {
 };
 
 contextBridge.exposeInMainWorld('lite', {
+  bugReport,
   ...liteMetadata,
   homeUrl: {
     get: () =>

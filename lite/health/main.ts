@@ -16,8 +16,9 @@
  * `window.lite.health.snapshot()`).
  */
 
-import { ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { _setHealthApiForTesting, _resetHealthApiForTesting, makeHealthApi } from './api.js';
+import { getPulse, onPulseChange, type ServicePulse } from './pulse.js';
 import type { AppHealthSnapshot } from './types.js';
 import { getAuthApi } from '../auth/api.js';
 import { getTotpApi } from '../totp/api.js';
@@ -57,6 +58,19 @@ let registered = false;
  * `HealthApi` singleton. Safe to call multiple times -- idempotent.
  */
 export function initHealth(opts: InitHealthOptions): HealthHandle {
+  // Service-pulse broadcast (2026-08-17): one channel, every window.
+  // The renderer shows ONE calm banner instead of per-pane red errors.
+  onPulseChange((pulse: ServicePulse) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        if (!win.isDestroyed()) win.webContents.send('lite:health:pulse', pulse);
+      } catch {
+        /* best-effort */
+      }
+    }
+  });
+  ipcMain.handle('lite:health:pulse-get', () => getPulse());
+
   const log = opts.logger ?? {
     info: () => undefined,
     warn: () => undefined,

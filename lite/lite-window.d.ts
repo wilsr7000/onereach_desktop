@@ -378,6 +378,13 @@ interface LiteTelemetryBridge {
 }
 
 interface LiteHealthBridge {
+  /** Service pulse (2026-08-17) — the calm-outage-banner signal. */
+  getPulse?(): Promise<{
+    status: 'ok' | 'degraded';
+    services: Array<{ service: string; reason: string; downSinceMs: number }>;
+    degradedSinceMs: number | null;
+  }>;
+  onPulse?(cb: (pulse: unknown) => void): () => void;
   /**
    * Build a fresh snapshot of "what is true right now" across
    * documented lite modules. Best-effort: missing or failing
@@ -1553,6 +1560,8 @@ interface LiteAiBridge {
 }
 
 interface LiteWindowBridge {
+  /** Feedback modal opener (outage banner's Report action). */
+  bugReport?: { open(prefill?: string): Promise<{ ok: true }> };
   version?: string;
   platform?: string;
   appTag?: 'lite';

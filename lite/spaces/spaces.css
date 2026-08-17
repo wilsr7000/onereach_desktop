@@ -9371,3 +9371,42 @@ body {
   font-size: 13px;
   text-align: center;
 }
+
+/* Staleness watchdog hint (2026-08-16): shown when background cache
+ * refreshes have gone silent (graph unreachable) so stale data never
+ * masquerades as current. Removed on the next successful broadcast. */
+.spaces-stale-hint {
+  margin: 8px 10px;
+  padding: 7px 10px;
+  border: 1px solid rgba(240, 164, 75, 0.35);
+  border-radius: 8px;
+  background: rgba(240, 164, 75, 0.08);
+  color: #ffca92;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+/* ── Service pulse banner (2026-08-17): ONE calm amber strip during an
+   outage — panes keep recent data; no per-pane red. ── */
+#spaces-pulse-banner-host { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 9500; }
+.spaces-pulse-banner {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 12px; border-radius: 999px;
+  background: rgba(205, 155, 60, 0.14);
+  border: 1px solid rgba(205, 155, 60, 0.45);
+  color: #e8d5ae; font-size: 12.5px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.28);
+  backdrop-filter: blur(6px);
+}
+.spaces-pulse-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: none;
+  background: #d9a648; animation: spaces-pulse-throb 1.6s ease-in-out infinite;
+}
+@keyframes spaces-pulse-throb { 0%,100% { opacity: 0.5; } 50% { opacity: 1; } }
+.spaces-pulse-text { white-space: nowrap; }
+.spaces-pulse-report {
+  appearance: none; border: 1px solid rgba(232, 213, 174, 0.4);
+  background: transparent; color: #e8d5ae; border-radius: 999px;
+  padding: 2px 10px; font-size: 11.5px; cursor: pointer; flex: none;
+}
+.spaces-pulse-report:hover { background: rgba(232, 213, 174, 0.12); }
