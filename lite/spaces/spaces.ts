@@ -4302,8 +4302,12 @@ function renderSharedSpaceDashboard(
 
   wrap.appendChild(body);
 
-  // Fire-and-forget refresh.
-  void loadSharedSpaceDashboard(space.id);
+  // Fire-and-forget refresh — ONLY when the cache is stale. Rendering
+  // must never unconditionally trigger a fetch: this function is
+  // re-entered by the repaint at the end of that very fetch.
+  if (sharedDashboardIsStale(space.id)) {
+    void loadSharedSpaceDashboard(space.id);
+  }
 }
 
 function buildSharedMembersRow(
@@ -4815,9 +4819,35 @@ function buildTicketCard(ticket: RendererItem): HTMLElement {
  * beats blank), records the message in `errors`, and logs; the section
  * builders render a distinct error banner from it.
  */
+/**
+ * Spaces whose dashboard fetch is in flight. WITHOUT this, the render
+ * path is an infinite network loop: renderSharedSpaceDashboard fires
+ * loadSharedSpaceDashboard, which on BOTH success and failure calls
+ * renderItemList, which re-dispatches to renderSharedSpaceDashboard,
+ * which fires the fetch again — three (now four) Neon queries per
+ * lap, at network speed, for as long as a shared Space is on screen.
+ * Reported live 2026-08-17 as "connection issues to NEON" + climbing
+ * bandwidth + having to force-quit; the 503s were self-inflicted.
+ */
+const sharedDashboardInFlight = new Set<string>();
+
+/** Don't refetch a dashboard more often than this (ms). */
+const SHARED_DASHBOARD_TTL_MS = 30_000;
+
+/** True when the cached dashboard is missing or older than the TTL. */
+function sharedDashboardIsStale(spaceId: string): boolean {
+  const cached = state.sharedDashboards.get(spaceId);
+  if (cached === undefined) return true;
+  return Date.now() - cached.fetchedAt > SHARED_DASHBOARD_TTL_MS;
+}
+
 async function loadSharedSpaceDashboard(spaceId: string): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
+  // Re-entrancy guard: the render→fetch→render cycle above means this
+  // can be called again while the first call is still awaiting.
+  if (sharedDashboardInFlight.has(spaceId)) return;
+  sharedDashboardInFlight.add(spaceId);
   const prior = state.sharedDashboards.get(spaceId);
   try {
     const [playbookRes, ticketsRes, membersRes] = await Promise.all([
@@ -4889,6 +4919,8 @@ async function loadSharedSpaceDashboard(spaceId: string): Promise<void> {
       errors: { playbook: message, tickets: message, members: message },
     });
     renderItemList({});
+  } finally {
+    sharedDashboardInFlight.delete(spaceId);
   }
 }
 
@@ -11005,6 +11037,18 @@ async function toggleChecklistItem(
 /** Attach-or-create panel, in the house inline-panel shell. */
 // ─── Checklist library (Space manager, ADR-055 addendum) ───────────────
 
+/**
+ * Checklist library cache. This section is rebuilt on EVERY dashboard
+ * render, so an uncached fetch here added a fourth Neon query to the
+ * render→fetch→render loop (2026-08-17 bandwidth incident). Same TTL
+ * contract as the dashboard itself; mutations pass force=true.
+ */
+const checklistLibraryCache = new Map<
+  string,
+  { items: LiteChecklistView[]; fetchedAt: number }
+>();
+const checklistLibraryInFlight = new Set<string>();
+
 /** The Space's checklist library: list, view items, new, edit, delete. */
 export function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
   const section = document.createElement('section');
@@ -11023,7 +11067,7 @@ export function buildSharedDashboardChecklists(space: RendererSpace): HTMLElemen
   newBtn.addEventListener('click', () => {
     // A throw here used to mean "nothing happened" with no trace.
     try {
-      openChecklistEditorPanel({ spaceId: space.id, onSaved: () => refresh() });
+      openChecklistEditorPanel({ spaceId: space.id, onSaved: () => refresh(true) });
       if (document.querySelector('.spaces-checklist-editor') === null) {
         window.logging?.warn?.('spaces', 'checklist editor did not mount', { spaceId: space.id });
         showToast('Couldn’t open the checklist editor — see Help → Report issue.');
@@ -11044,33 +11088,61 @@ export function buildSharedDashboardChecklists(space: RendererSpace): HTMLElemen
   host.textContent = 'Loading…';
   section.appendChild(host);
 
-  const refresh = (): void => {
+  const paint = (lists: LiteChecklistView[]): void => {
+    host.replaceChildren();
+    if (lists.length === 0) {
+      const none = document.createElement('p');
+      none.className = 'spaces-checklist-empty';
+      none.textContent =
+        'No checklists yet. A checklist is a reusable, versioned artifact that runs on tickets at a pause point.';
+      host.appendChild(none);
+      return;
+    }
+    for (const c of lists) {
+      host.appendChild(buildChecklistLibraryCard(space, c, () => refresh(true)));
+    }
+  };
+
+  const refresh = (force = false): void => {
+    // Bridge check FIRST: a cached list must never mask a missing
+    // bridge, or a torn build silently shows stale checklists that
+    // cannot be opened, created, or run.
+    if (window.lite?.spaces?.checklists === undefined) {
+      // The kernel lacks the checklists bridge (older/torn build) —
+      // say so instead of spinning "Loading…" forever (2026-08-08).
+      host.textContent = 'Checklists need a newer build of Lite — update to enable them.';
+      return;
+    }
+    const cached = checklistLibraryCache.get(space.id);
+    if (force) {
+      checklistLibraryCache.delete(space.id);
+    } else if (
+      cached !== undefined &&
+      Date.now() - cached.fetchedAt <= SHARED_DASHBOARD_TTL_MS
+    ) {
+      paint(cached.items);
+      return;
+    }
+    if (checklistLibraryInFlight.has(space.id)) return;
+    checklistLibraryInFlight.add(space.id);
     void (async () => {
       const bridge = window.lite?.spaces;
       if (bridge?.checklists === undefined) {
-        // The kernel lacks the checklists bridge (older/torn build) —
-        // say so instead of spinning "Loading…" forever (2026-08-08).
-        host.textContent = 'Checklists need a newer build of Lite — update to enable them.';
+        // Re-checked for type narrowing; the guard above already
+        // handled the user-facing message.
+        checklistLibraryInFlight.delete(space.id);
         return;
       }
       try {
         const envelope = await bridge.checklists.list(space.id);
-        host.replaceChildren();
         const lists = envelope.ok === true ? envelope.value : [];
-        if (lists.length === 0) {
-          const none = document.createElement('p');
-          none.className = 'spaces-checklist-empty';
-          none.textContent =
-            'No checklists yet. A checklist is a reusable, versioned artifact that runs on tickets at a pause point.';
-          host.appendChild(none);
-          return;
-        }
-        for (const c of lists) {
-          host.appendChild(buildChecklistLibraryCard(space, c, refresh));
-        }
+        checklistLibraryCache.set(space.id, { items: lists, fetchedAt: Date.now() });
+        paint(lists);
       } catch (err) {
         window.logging?.warn?.('spaces', 'checklist library load failed', { error: messageFrom(err) });
         host.textContent = 'Could not load checklists.';
+      } finally {
+        checklistLibraryInFlight.delete(space.id);
       }
     })();
   };

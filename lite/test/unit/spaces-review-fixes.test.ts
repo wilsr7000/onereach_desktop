@@ -617,3 +617,55 @@ describe('loadSharedSpaceDashboard wiring (source-level)', () => {
     expect(body).toMatch(/'shared-dashboard load threw'/);
   });
 });
+
+describe('shared-dashboard fetch loop (2026-08-17 bandwidth incident)', () => {
+  const source = (): string => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    if (found === undefined) throw new Error('spaces.ts not found');
+    return fs.readFileSync(found, 'utf8');
+  };
+
+  it('rendering never unconditionally triggers a dashboard fetch', () => {
+    // The loop: renderSharedSpaceDashboard → loadSharedSpaceDashboard →
+    // (success AND failure) renderItemList → renderSharedSpaceDashboard →
+    // fetch again. Three-to-four Neon queries per lap at network speed,
+    // for as long as a shared Space is on screen. Reported live as
+    // "connection issues to NEON" + rising bandwidth + forced quit.
+    const src = source();
+    const start = src.indexOf('function renderSharedSpaceDashboard');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('\n}', start));
+    // The fetch must be INSIDE the staleness guard, not beside it.
+    expect(body).toMatch(
+      /if \(sharedDashboardIsStale\(space\.id\)\) \{\s*\n\s*void loadSharedSpaceDashboard\(space\.id\);/
+    );
+  });
+
+  it('the loader is re-entrancy guarded and always releases', () => {
+    const src = source();
+    const start = src.indexOf('async function loadSharedSpaceDashboard');
+    const body = src.slice(start, src.indexOf('\nasync function cycleTicketStatus', start));
+    expect(body).toContain('sharedDashboardInFlight.has(spaceId)');
+    expect(body).toContain('sharedDashboardInFlight.add(spaceId)');
+    // Released in a finally so a throw can't wedge the guard forever.
+    expect(body).toMatch(/finally \{\s*\n\s*sharedDashboardInFlight\.delete\(spaceId\);/);
+  });
+
+  it('the checklist library is cached, not refetched per render', () => {
+    const src = source();
+    expect(src).toContain('checklistLibraryCache');
+    expect(src).toContain('checklistLibraryInFlight');
+    const start = src.indexOf('export function buildSharedDashboardChecklists');
+    const body = src.slice(start, start + 3000);
+    // Serves from cache inside the TTL…
+    expect(body).toContain('SHARED_DASHBOARD_TTL_MS');
+    // …and mutations force a refetch rather than showing stale data.
+    expect(body).toContain('refresh(true)');
+  });
+});
