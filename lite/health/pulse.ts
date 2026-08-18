@@ -35,6 +35,18 @@ const down = new Map<string, { reason: string; downSinceMs: number }>();
 const listeners = new Set<PulseListener>();
 let nowFn: () => number = () => Date.now();
 
+/**
+ * Flap suppression (2026-08-17): on a lossy network the breaker cycles
+ * down→up→down every few minutes, and each cycle re-mounted the banner
+ * and fired a "Back online" toast — the user experienced it as
+ * "I still keep getting alerts for connectivity issues." A recovery
+ * only PUBLISHES after the service stays up for this long; a re-down
+ * inside the window silently cancels the pending clear, so the whole
+ * flap reads as ONE continuous episode with its original downSince.
+ */
+export const RECOVERY_STABLE_MS = 45_000;
+const pendingUp = new Map<string, ReturnType<typeof setTimeout>>();
+
 function snapshot(): ServicePulse {
   const services = [...down.entries()]
     .map(([service, d]) => ({ service, reason: d.reason, downSinceMs: d.downSinceMs }))
@@ -74,6 +86,13 @@ export function getPulse(): ServicePulse {
  * actually changed).
  */
 export function reportServiceDown(service: string, reason: string): void {
+  // A re-down during the recovery hold is the same episode continuing:
+  // cancel the pending clear and stay silent unless something changed.
+  const held = pendingUp.get(service);
+  if (held !== undefined) {
+    clearTimeout(held);
+    pendingUp.delete(service);
+  }
   const existing = down.get(service);
   if (existing !== undefined && existing.reason === reason) return;
   down.set(service, {
@@ -83,10 +102,20 @@ export function reportServiceDown(service: string, reason: string): void {
   notify();
 }
 
-/** The service recovered. No-op if it was never reported down. */
+/**
+ * The service recovered. The clear publishes only after the service
+ * stays up for RECOVERY_STABLE_MS — flapping never spams subscribers.
+ * No-op if it was never reported down.
+ */
 export function reportServiceUp(service: string): void {
-  if (!down.delete(service)) return;
-  notify();
+  if (!down.has(service)) return;
+  if (pendingUp.has(service)) return; // hold already running
+  const t = setTimeout(() => {
+    pendingUp.delete(service);
+    if (down.delete(service)) notify();
+  }, RECOVERY_STABLE_MS);
+  (t as { unref?: () => void }).unref?.();
+  pendingUp.set(service, t);
 }
 
 /** Subscribe to pulse changes. Returns an unsubscribe function. */
@@ -99,6 +128,8 @@ export function onPulseChange(cb: PulseListener): () => void {
 
 /** @internal test seams */
 export function _resetPulseForTesting(): void {
+  for (const t of pendingUp.values()) clearTimeout(t);
+  pendingUp.clear();
   down.clear();
   listeners.clear();
   nowFn = () => Date.now();

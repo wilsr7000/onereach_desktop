@@ -6357,6 +6357,9 @@ export function buildServicePulseBanner(
   return bar;
 }
 
+/** Start of the current/most-recent degraded episode (for toast gating). */
+let lastDegradedSinceMs: number | null = null;
+
 /** Mount/unmount the banner + drive the degraded flag. Called at init. */
 function attachServicePulse(): void {
   const health = window.lite?.health;
@@ -6372,10 +6375,18 @@ function attachServicePulse(): void {
       host.appendChild(buildServicePulseBanner(pulse));
       document.body.appendChild(host);
     } else if (wasDegraded) {
-      // Recovery: refresh quietly so stale panes heal without ceremony.
-      showToast('Back online — refreshing');
+      // Recovery: refresh quietly. The toast only fires after an
+      // outage a user actually noticed (≥60s) — flap cycles used to
+      // announce "Back online" every few minutes on a lossy network.
+      const downFor =
+        typeof lastDegradedSinceMs === 'number' ? Date.now() - lastDegradedSinceMs : 0;
+      if (downFor >= 60_000) showToast('Back online — refreshing');
       void loadSpaces();
     }
+    lastDegradedSinceMs =
+      pulse.status === 'degraded' && typeof pulse.degradedSinceMs === 'number'
+        ? pulse.degradedSinceMs
+        : lastDegradedSinceMs;
   };
   health.onPulse(apply);
   void health.getPulse?.().then((p: unknown) => apply(p)).catch(() => undefined);
