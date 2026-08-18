@@ -408,6 +408,24 @@ export class KVCredentialsProvider implements CredentialsProvider {
       if (this.cachedResolution !== null) {
         return this.cloneResolution(this.cachedResolution);
       }
+      // COLD START (2026-08-17 incident). Before this, a KV blip with no
+      // cache yet — i.e. the first seconds after launch — threw, and the
+      // KV circuit breaker then failed every Neon call instantly for
+      // 15s. The user saw "connection issues to NEON" while Neon itself
+      // was healthy; the app had merely failed to look up its ADDRESS.
+      // The cooldown branch a few lines above ALREADY serves the bundle
+      // default for this exact condition, so the request that tripped
+      // the failure died while the very next one survived. Same
+      // treatment here.
+      //
+      // Deliberately NOT cached: caching the fallback would mask real
+      // account config for the full 60s TTL after a one-off blip.
+      const fb = fallback();
+      if (fb.record !== null) {
+        return fb;
+      }
+      // Genuinely nothing to fall back to — fail loudly rather than
+      // pretend we have config.
       throw err;
     }
   }

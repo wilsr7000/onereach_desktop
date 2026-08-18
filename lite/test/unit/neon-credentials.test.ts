@@ -10,7 +10,7 @@
  * union) is exercised by `neon-client.test.ts:buildRequest`.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   BAKED_IN_DEFAULT_GRAPH,
   KVCredentialsProvider,
@@ -374,5 +374,103 @@ describe('config source resolution (2026-08-10 — retires the baked-default blo
     // baked creds are simply not in the path.
     expect(await p.readPublic()).toBeNull();
     expect(await p.get()).toBeNull();
+  });
+});
+
+describe('KVCredentialsProvider — cold-start fallback (2026-08-17 incident)', () => {
+  beforeEach(() => {
+    _resetKVApiForTesting();
+  });
+
+  it('serves the bundle default when KV fails and nothing is cached yet', async () => {
+    // THE BUG: before this, a KV blip in the first seconds after launch
+    // threw — and the KV circuit breaker then failed every Neon call
+    // instantly for 15s. The user saw "connection issues to NEON" while
+    // Neon was perfectly healthy; the app had merely failed to look up
+    // its ADDRESS. Log signature:
+    //   KV circuit open — failing fast (get lite-neon-config)
+    //   → 8× neon.query.fail in 0–2ms → spaces.listSpaces.fail
+    const fake = new FakeKV();
+    fake.failGet = true;
+    _setKVApiForTesting(fake);
+
+    const p = new KVCredentialsProvider({ fallbackRecord: BAKED_IN_DEFAULT_GRAPH });
+    // No prior successful read → the cache is empty. Must NOT throw.
+    const pub = await p.readPublic();
+    expect(pub).not.toBeNull();
+    expect(pub?.source).toBe('bundle-default');
+    expect(await p.getEndpoint()).toBe(BAKED_IN_DEFAULT_GRAPH.endpoint);
+  });
+
+  it('still throws when there is genuinely nothing to fall back to', async () => {
+    // Public builds (LITE_NO_BAKED_GRAPH=1) construct the provider with
+    // fallbackRecord: null. This branch is what keeps such a build
+    // failing LOUDLY instead of silently pretending it has config —
+    // do not "helpfully" soften it into a silent null return.
+    const fake = new FakeKV();
+    fake.failGet = true;
+    _setKVApiForTesting(fake);
+
+    const p = new KVCredentialsProvider();
+    await expect(p.readPublic()).rejects.toThrow();
+  });
+
+  it('a cached record still wins over the fallback during a blip', async () => {
+    // Stale-while-error: once a real read has succeeded, a later blip
+    // must serve the last-good ACCOUNT record — never silently
+    // downgrade the user to the bundle default. Uses fake timers to
+    // age past the 60s resolve TTL WITHOUT calling invalidate(), which
+    // would drop the cache and defeat the point of the test.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T00:00:00Z'));
+    const fake = new FakeKV();
+    _setKVApiForTesting(fake);
+    await fake.set('lite-neon-config', 'default', {
+      endpoint: 'https://account/neon2',
+      uri: 'neo4j+s://account',
+      user: 'neo4j',
+      password: 'pw',
+      database: 'neo4j',
+    });
+    const p = new KVCredentialsProvider({ fallbackRecord: BAKED_IN_DEFAULT_GRAPH });
+    expect(await p.getEndpoint()).toBe('https://account/neon2');
+
+    // Age past the TTL so the next read re-resolves, then make KV fail.
+    vi.setSystemTime(new Date('2026-08-17T00:01:01Z'));
+    fake.failGet = true;
+    expect(await p.getEndpoint()).toBe('https://account/neon2');
+    vi.useRealTimers();
+  });
+
+  it('does not cache the fallback — real config is picked up on recovery', async () => {
+    // Caching the fallback would mask real account config for the full
+    // 60s resolve TTL after a one-off blip. NOTE: no invalidate() here
+    // on purpose — calling it would clear the cache and make this test
+    // pass even if the fallback WERE cached, i.e. it would stop
+    // detecting the bug it exists to detect.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-17T00:00:00Z'));
+    const fake = new FakeKV();
+    fake.failGet = true;
+    _setKVApiForTesting(fake);
+    const p = new KVCredentialsProvider({ fallbackRecord: BAKED_IN_DEFAULT_GRAPH });
+    expect((await p.readPublic())?.source).toBe('bundle-default');
+
+    // KV recovers with real config. Step past the 10s failure cooldown
+    // but stay INSIDE the 60s TTL: correct behavior has an empty cache
+    // and re-reads KV; the buggy version would serve a cached fallback.
+    fake.failGet = false;
+    await fake.set('lite-neon-config', 'default', {
+      endpoint: 'https://account/neon2',
+      uri: 'neo4j+s://account',
+      user: 'neo4j',
+      password: 'pw',
+      database: 'neo4j',
+    });
+    vi.setSystemTime(new Date('2026-08-17T00:00:11Z'));
+    const after = await p.readPublic();
+    expect(after?.source).toBe('account');
+    expect(await p.getEndpoint()).toBe('https://account/neon2');
+    vi.useRealTimers();
   });
 });
