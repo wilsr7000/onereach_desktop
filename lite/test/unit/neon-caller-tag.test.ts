@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { EdisonNeonClient } from '../../neon/client.js';
-import { StaticCredentialsProvider } from '../../neon/credentials.js';
+import { StaticCredentialsProvider, normalizeNeonEndpoint } from '../../neon/credentials.js';
 
 const ENDPOINT = 'https://example.com/neon';
 
@@ -59,5 +59,23 @@ describe('ADR-070 — caller tag on the wire', () => {
     const cypher = sentCypher();
     expect(cypher.startsWith('/* caller:upstream */')).toBe(true);
     expect(cypher.match(/caller:/g)?.length).toBe(1);
+  });
+});
+
+describe('normalizeNeonEndpoint — stale stored endpoints self-heal', () => {
+  const BASE = 'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29';
+
+  it('rewrites the dead pre-migration path', () => {
+    expect(normalizeNeonEndpoint(`${BASE}/omnidata/neon`)).toBe(`${BASE}/omnidata/neon2`);
+  });
+
+  it('is idempotent on already-migrated endpoints', () => {
+    expect(normalizeNeonEndpoint(`${BASE}/omnidata/neon2`)).toBe(`${BASE}/omnidata/neon2`);
+  });
+
+  it('leaves unrelated URLs and empty strings alone', () => {
+    expect(normalizeNeonEndpoint('')).toBe('');
+    expect(normalizeNeonEndpoint(`${BASE}/keyvalue2`)).toBe(`${BASE}/keyvalue2`);
+    expect(normalizeNeonEndpoint(`${BASE}/omnidata/neonati`)).toBe(`${BASE}/omnidata/neonati`);
   });
 });

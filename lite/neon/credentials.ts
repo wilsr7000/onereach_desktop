@@ -121,6 +121,17 @@ export type ConfigSource = 'account' | 'bundle-default' | 'none';
 const KV_COLLECTION = 'lite-neon-config';
 const KV_KEY = 'default';
 
+/**
+ * Normalize a stored endpoint that predates the 2026-08-17 platform
+ * path move (`omnidata/neon` → `omnidata/neon2`). Account records win
+ * over the baked default by design, so a stale stored endpoint would
+ * silently pin an updated app to the dead path — the exact failure
+ * this release heals. Idempotent; leaves non-matching URLs alone.
+ */
+export function normalizeNeonEndpoint(endpoint: string): string {
+  return endpoint.replace(/\/omnidata\/neon(?!2)(?=$|[?/#])/, '/omnidata/neon2');
+}
+
 const DEFAULT_RECORD: NeonSettingsRecord = {
   endpoint: '',
   uri: '',
@@ -378,7 +389,7 @@ export class KVCredentialsProvider implements CredentialsProvider {
       const v = value as Partial<NeonSettingsRecord>;
       const resolved: { record: NeonSettingsRecord | null; source: ConfigSource } = {
         record: {
-          endpoint: typeof v.endpoint === 'string' ? v.endpoint : '',
+          endpoint: typeof v.endpoint === 'string' ? normalizeNeonEndpoint(v.endpoint) : '',
           uri: typeof v.uri === 'string' ? v.uri : '',
           user: typeof v.user === 'string' && v.user.length > 0 ? v.user : 'neo4j',
           password: typeof v.password === 'string' ? v.password : '',

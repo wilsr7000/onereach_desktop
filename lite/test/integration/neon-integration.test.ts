@@ -124,7 +124,8 @@ describe('EdisonNeonClient + StaticCredentialsProvider against fake endpoint', (
     expect(neon.lastRequest?.method).toBe('POST');
     const body = neon.lastRequest?.parsedBody;
     expect(body).toMatchObject({
-      cypher: 'RETURN 1 AS ok',
+      // ADR-070: every query leaves the client wearing its caller tag.
+      cypher: '/* caller:onereach-lite */\nRETURN 1 AS ok',
       parameters: {},
       neonUri: 'neo4j+s://abc.databases.neo4j.io',
       neonUser: 'neo4j',
@@ -192,7 +193,9 @@ describe('EdisonNeonClient + StaticCredentialsProvider against fake endpoint', (
 
     neon.setNext({ status: 200, body: '{"records":[{"ok":1}]}' });
     expect(await client.ping()).toBe(true);
-    expect(neon.lastRequest?.parsedBody?.['cypher']).toBe('RETURN 1 AS ok');
+    expect(neon.lastRequest?.parsedBody?.['cypher']).toBe(
+      '/* caller:onereach-lite */\nRETURN 1 AS ok'
+    );
   });
 });
 
