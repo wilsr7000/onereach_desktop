@@ -24,6 +24,7 @@ export const BUG_REPORT_EVENTS = {
   DELETE_FINISH: 'bug-report.delete.finish',
   DELETE_FAIL: 'bug-report.delete.fail',
   // IPC entry events -- one per renderer-driven channel
+  IPC_OPEN: 'bug-report.ipc.open',
   IPC_CAPTURE: 'bug-report.ipc.capture',
   IPC_SAVE: 'bug-report.ipc.save',
   IPC_CLOSE: 'bug-report.ipc.close',

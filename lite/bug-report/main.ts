@@ -72,14 +72,19 @@ export function initBugReport(opts: InitOptions): void {
   // install failures hand a structured trail through this).
   ipcMain.handle(IPC_GET_PREFILL, () => {
     const value = pendingPrefill;
-  // Renderer-triggered open (2026-08-17): the outage banner's "Report
-  // issue" action. Prefill is plain text, length-capped.
-  ipcMain.handle(IPC_OPEN, (_event, prefill?: unknown) => {
-    openBugReportModal(typeof prefill === 'string' ? prefill.slice(0, 2000) : undefined);
-    return { ok: true };
-  });
     pendingPrefill = null;
     return { prefill: value };
+  });
+
+  // Renderer-triggered open (2026-08-17): the outage banner's "Report
+  // issue" action. Prefill is plain text, length-capped. This MUST
+  // register at init — it was once nested inside the get-prefill
+  // handler by a bad merge, so the channel only existed after a modal
+  // had already opened and the banner button silently did nothing.
+  ipcMain.handle(IPC_OPEN, (_event, prefill?: unknown) => {
+    getLoggingApi().event('bug-report.ipc.open');
+    openBugReportModal(typeof prefill === 'string' ? prefill.slice(0, 2000) : undefined);
+    return { ok: true };
   });
 
   ipcMain.handle(IPC_CAPTURE, async (_event, userDescription: string) => {
