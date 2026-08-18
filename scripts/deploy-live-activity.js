@@ -7,13 +7,19 @@
  *
  * The page itself is static (web/live-activity.html) and read-only —
  * it queries the shared graph + KV directly from the browser (CORS is
- * open on both flows; credentials are the same baked dev-account debt
- * as the apps, punch-listed for rotation).
+ * open on both flows; the neon2 proxy holds credentials server-side,
+ * so the page carries none).
  */
 const { app } = require('electron');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+
+// Read the packaged app's encrypted settings: same app name + userData
+// so safeStorage decrypts with the same "Onereach.ai Safe Storage" key.
+const APP_NAME = 'Onereach.ai';
+app.setName(APP_NAME);
+app.setPath('userData', path.join(app.getPath('appData'), APP_NAME));
 
 const FILES_BASE = 'https://files.edison.api.onereach.ai/public';
 const REMOTE_DIR = 'live-activity';
@@ -21,8 +27,8 @@ const REMOTE_DIR = 'live-activity';
 app.whenReady().then(async () => {
   try {
     const { getSettingsManager } = require('../settings-manager');
-    const { getGSXFileSync } = require('../lib/gsx-file-sync');
-    const { reconcileGsxAccount } = require('../lib/gsx-account');
+    const { getGSXFileSync } = require('../gsx-file-sync');
+    const { _reconcileGsxAccount: reconcileGsxAccount } = require('../recorder');
 
     const settings = getSettingsManager();
     global.settingsManager = settings;
