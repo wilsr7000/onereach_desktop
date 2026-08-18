@@ -10995,7 +10995,7 @@ async function toggleChecklistItem(
 // ─── Checklist library (Space manager, ADR-055 addendum) ───────────────
 
 /** The Space's checklist library: list, view items, new, edit, delete. */
-function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
+export function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
   const section = document.createElement('section');
   section.className = 'spaces-dashboard-section spaces-checklist-library';
 
@@ -11010,7 +11010,20 @@ function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
   newBtn.className = 'spaces-items-new spaces-checklist-new';
   newBtn.textContent = '+ New checklist';
   newBtn.addEventListener('click', () => {
-    openChecklistEditorPanel({ spaceId: space.id, onSaved: () => refresh() });
+    // A throw here used to mean "nothing happened" with no trace.
+    try {
+      openChecklistEditorPanel({ spaceId: space.id, onSaved: () => refresh() });
+      if (document.querySelector('.spaces-checklist-editor') === null) {
+        window.logging?.warn?.('spaces', 'checklist editor did not mount', { spaceId: space.id });
+        showToast('Couldn’t open the checklist editor — see Help → Report issue.');
+      }
+    } catch (err) {
+      window.logging?.error?.('spaces', 'checklist editor threw', {
+        spaceId: space.id,
+        error: messageFrom(err),
+      });
+      showToast(`Couldn’t open the checklist editor: ${messageFrom(err)}`);
+    }
   });
   head.appendChild(newBtn);
   section.appendChild(head);
@@ -11174,13 +11187,22 @@ function buildChecklistLibraryCard(
  * plainly: saving bumps the version and RESETS every attached ticket's
  * run state (a check against v1's items says nothing about v2's).
  */
-function openChecklistEditorPanel(opts: {
+export function openChecklistEditorPanel(opts: {
   spaceId: string;
   existing?: LiteChecklistView;
   onSaved: () => void;
 }): void {
   const bridge = window.lite?.spaces;
-  if (bridge?.checklists === undefined) return;
+  if (bridge?.checklists === undefined) {
+    // NEVER fail a click silently (2026-08-18: "clicked new checklist
+    // and nothing happened"). Say what's wrong and leave a log line.
+    window.logging?.warn?.('spaces', 'checklist editor blocked — no checklists bridge', {
+      hasLite: window.lite !== undefined,
+      hasSpaces: bridge !== undefined,
+    });
+    showToast('Checklists need a newer build of Lite — update to enable them.');
+    return;
+  }
   const { existing } = opts;
 
   document.querySelector('.spaces-checklist-editor-backdrop')?.remove();
