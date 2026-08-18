@@ -375,14 +375,15 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(focus('missing')).toBe(false);
   });
 
-  it('RECENT spaces render their item trees expanded by default', () => {
-    // "recent spaces should be expanded by default" (2026-08-08).
+  it('RECENT is a flat jump list — no trees, no chevrons (ADR-071)', () => {
+    // Supersedes the 2026-08-08 expanded-by-default rule: the item tree
+    // lives solely in the Spaces section's ONE open space. Recent rows
+    // only jump; a second explorer was half the sidebar's busy-ness.
     const body = bodyOf('function renderRecentSpaces', 3500);
-    expect(body).toContain('collapsedRecentTrees');
-    // Expanded unless explicitly folded this session…
-    expect(body).toMatch(/const expanded = !collapsedRecentTrees\.has\(space\.id\);/);
-    // …and the tree actually renders on paint, not only on click.
-    expect(body).toMatch(/if \(expanded\) \{\s*\n\s*list\.appendChild\(buildSpaceChildren\(space\.id\)\);/);
+    expect(body).toContain('spaces-row-recent');
+    expect(body).not.toContain('buildSpaceChildren');
+    expect(body).not.toContain('collapsedRecentTrees');
+    expect(body).not.toContain('spaces-row-expand');
   });
 
   it('sidebar review fixes: cache-safe trees, quiet re-renders, honest search clears', () => {

@@ -9424,3 +9424,37 @@ body {
   color: var(--or-text, #d8d8d8); font-size: 12px; cursor: pointer;
 }
 .spaces-detail-pdf-retry:hover { background: rgba(255,255,255,0.12); }
+
+/* ── ADR-071 — exclusive expansion (2026-08-17): rows rest as quiet
+   name-only lines. Chevron, count, badges, and the name? nudge stay in
+   the DOM (tests and screen readers still see them) but only surface on
+   hover, keyboard focus, selection, or the one expanded row. Structure
+   carries the hierarchy — never opacity tiers on the rows themselves
+   (the eye couldn't separate light levels; open-vs-closed it can). ── */
+.spaces-row-space .spaces-row-expand,
+.spaces-row-space .spaces-row-count,
+.spaces-row-space .spaces-row-kind-badge,
+.spaces-row-space .spaces-row-lock-badge,
+.spaces-row-space .spaces-row-name-nudge {
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.spaces-row-space:is(:hover, :focus-visible, .is-active, .is-expanded) .spaces-row-expand,
+.spaces-row-space:is(:hover, :focus-visible, .is-active, .is-expanded) .spaces-row-count,
+.spaces-row-space:is(:hover, :focus-visible, .is-active, .is-expanded) .spaces-row-kind-badge,
+.spaces-row-space:is(:hover, :focus-visible, .is-active, .is-expanded) .spaces-row-lock-badge,
+.spaces-row-space:is(:hover, :focus-visible, .is-active, .is-expanded) .spaces-row-name-nudge {
+  opacity: 1;
+}
+/* The one open space reads as a unit: its tree slides in briefly and
+   its name carries a touch more weight. */
+.spaces-tree-children-holder {
+  animation: spaces-tree-reveal 160ms ease;
+}
+@keyframes spaces-tree-reveal {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+.spaces-row-space.is-expanded .spaces-row-name {
+  font-weight: 600;
+}

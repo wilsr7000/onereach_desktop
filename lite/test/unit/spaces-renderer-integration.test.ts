@@ -296,9 +296,9 @@ describe('Uncategorized pulse dot (Phase 1d/1e)', () => {
 // toggling it inserts/removes the item-tree holder as the row's
 // sibling, and tree rows tag items with a kind glyph. The full fetch
 // path is exercised live; these pin the DOM contract a re-render must
-// preserve. Default flipped 2026-08-08: trees are OPEN by default
-// (collapsedSpaceTrees records explicit folds), so a fresh id's first
-// toggle COLLAPSES and the second re-expands.
+// preserve. ADR-071 (2026-08-17) flipped the default AGAIN: trees rest
+// COLLAPSED and at most ONE space is open — opening a space closes the
+// previous one (selection is the expansion).
 
 describe('sidebar explorer trees', () => {
   it('buildSpaceRow renders the expand chevron ahead of the dot', async () => {
@@ -312,28 +312,42 @@ describe('sidebar explorer trees', () => {
     expect(row.firstElementChild).toBe(expand);
   });
 
-  it('toggleSpaceTree folds an open-by-default tree, then re-expands it', async () => {
+  it('ADR-071: trees rest collapsed; toggling expands ONE and re-toggling closes it', async () => {
     const mod = await import('../../spaces/spaces.js');
-    document.body.innerHTML = '<ul><li id="row-a" class="spaces-row spaces-row-space is-expanded"></li></ul>';
-    const row = document.getElementById('row-a');
-    if (row === null) throw new Error('fixture row missing');
+    document.body.innerHTML =
+      '<ul>' +
+      '<li id="row-a" class="spaces-row spaces-row-space" data-scope-id="sp-x-1"></li>' +
+      '<li id="row-b" class="spaces-row spaces-row-space" data-scope-id="sp-x-2"></li>' +
+      '</ul>';
+    const rowA = document.getElementById('row-a');
+    const rowB = document.getElementById('row-b');
+    if (rowA === null || rowB === null) throw new Error('fixture rows missing');
 
-    // Fresh id = open by default → first toggle collapses.
-    mod.toggleSpaceTree('sp-tree-1', row);
-    expect(row.nextElementSibling).toBeNull();
-    expect(row.classList.contains('is-expanded')).toBe(false);
+    // Resting state is collapsed → first toggle EXPANDS.
+    mod.toggleSpaceTree('sp-x-1', rowA);
+    expect(rowA.classList.contains('is-expanded')).toBe(true);
+    expect(
+      rowA.nextElementSibling?.classList.contains('spaces-tree-children-holder')
+    ).toBe(true);
 
-    // Second toggle re-expands and inserts the holder.
-    mod.toggleSpaceTree('sp-tree-1', row);
-    const holder = row.nextElementSibling;
-    expect(holder?.classList.contains('spaces-tree-children-holder')).toBe(true);
-    expect(row.classList.contains('is-expanded')).toBe(true);
+    // Opening B closes A — exclusivity is the whole point.
+    mod.toggleSpaceTree('sp-x-2', rowB);
+    expect(rowB.classList.contains('is-expanded')).toBe(true);
+    expect(
+      rowB.nextElementSibling?.classList.contains('spaces-tree-children-holder')
+    ).toBe(true);
+    expect(rowA.classList.contains('is-expanded')).toBe(false);
+    expect(rowA.nextElementSibling).toBe(rowB);
+
+    // Re-toggling the open one closes it; nothing is expanded.
+    mod.toggleSpaceTree('sp-x-2', rowB);
+    expect(rowB.classList.contains('is-expanded')).toBe(false);
+    expect(rowB.nextElementSibling).toBeNull();
   });
 
-  it('space trees render OPEN by default on the sidebar paint', async () => {
-    // "why are assets in spaces loading only when clicked?" — the
-    // renderer must append the children holder for every space the
-    // user has NOT explicitly folded.
+  it('ADR-071: the sidebar paint renders a tree ONLY for the one expanded space', async () => {
+    // Exclusive expansion — a repaint reproduces the single open tree,
+    // never one holder per space.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('node:fs') as typeof import('node:fs');
     // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -342,7 +356,9 @@ describe('sidebar explorer trees', () => {
       .map((r) => path.resolve(r))
       .find((f) => fs.existsSync(f));
     const src = fs.readFileSync(found as string, 'utf8');
-    expect(src).toMatch(/if \(!collapsedSpaceTrees\.has\(space\.id\)\) \{\s*\n\s*list\.appendChild\(buildSpaceChildren\(space\.id\)\);/);
+    expect(src).toMatch(/if \(expandedSpaceId === space\.id\) \{\s*\n\s*list\.appendChild\(buildSpaceChildren\(space\.id\)\);/);
+    // Selection is the expansion: activating a scope syncs the tree.
+    expect(src).toMatch(/syncExclusiveExpansion\(scopeId\);/);
   });
 
   it('itemKindGlyph maps known kinds and falls back for unknown ones', async () => {

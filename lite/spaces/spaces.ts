@@ -1063,9 +1063,11 @@ export function safeCssColor(value: unknown): string | null {
   return null;
 }
 
-/** RECENT trees a user explicitly folded this session (default: open). */
-const collapsedRecentTrees = new Set<string>();
-
+/**
+ * RECENT is a flat jump list (ADR-071): rows never expand — the item
+ * tree lives solely in the Spaces section's ONE open space. Recent's
+ * job is "get me back there", not a second explorer.
+ */
 function renderRecentSpaces(): void {
   const list = document.getElementById('spaces-list-recent');
   if (list === null) return;
@@ -1085,31 +1087,6 @@ function renderRecentSpaces(): void {
     li.setAttribute('role', 'button');
     li.setAttribute('tabindex', '0');
     li.addEventListener('contextmenu', (ev) => openSpaceContextMenu(ev, space));
-    const expanded = !collapsedRecentTrees.has(space.id);
-    if (expanded) li.classList.add('is-expanded');
-    const expand = document.createElement('button');
-    expand.type = 'button';
-    expand.className = 'spaces-row-expand';
-    expand.setAttribute('aria-label', `Show items in ${space.name}`);
-    expand.textContent = '▸';
-    expand.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      const nowOpen = li.classList.toggle('is-expanded');
-      if (nowOpen) {
-        collapsedRecentTrees.delete(space.id);
-        li.insertAdjacentElement('afterend', buildSpaceChildren(space.id));
-      } else {
-        collapsedRecentTrees.add(space.id);
-        const holder = li.nextElementSibling;
-        if (
-          holder instanceof HTMLElement &&
-          holder.classList.contains('spaces-tree-children-holder')
-        ) {
-          holder.remove();
-        }
-      }
-    });
-    li.appendChild(expand);
     const dot = document.createElement('span');
     dot.className = 'spaces-row-dot';
     const safeColor = safeCssColor(space.color);
@@ -1122,9 +1099,6 @@ function renderRecentSpaces(): void {
     name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
     li.appendChild(name);
     list.appendChild(li);
-    if (expanded) {
-      list.appendChild(buildSpaceChildren(space.id));
-    }
   }
 }
 
@@ -1462,13 +1436,38 @@ function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
 // ─── Per-Space item trees — the explorer expansion ─────────────────────
 
 /**
- * Space ids whose item tree the user explicitly FOLDED this session.
- * Default flipped 2026-08-08: trees render OPEN ("why are assets in
- * spaces loading only when clicked?"), so the set records collapses —
- * the shared grid cache + signature-guarded renders make the default
- * cheap (one cache-fronted list per Space per paint, no churn after).
+ * ADR-071 — exclusive expansion: at most ONE space tree is open, ever.
+ * Clicking a space opens it and closes whichever was open (selection IS
+ * the expansion); null = everything collapsed, the resting state.
+ * Supersedes the 2026-08-08 open-by-default explorer AND ADR-069's
+ * light-based tiering attempt — the user's eye couldn't separate
+ * opacity levels ("maybe they only expand when clicked and collapse
+ * when others are clicked"). Structure carries the hierarchy now.
  */
-const collapsedSpaceTrees = new Set<string>();
+let expandedSpaceId: string | null = null;
+
+/** Remove a row's is-expanded state and its adjacent children holder. */
+function collapseTreeRow(row: HTMLElement): void {
+  row.classList.remove('is-expanded');
+  const holder = row.nextElementSibling;
+  if (
+    holder instanceof HTMLElement &&
+    holder.classList.contains('spaces-tree-children-holder')
+  ) {
+    holder.remove();
+  }
+}
+
+/** Collapse whichever tree is open, wherever its row(s) live. */
+function collapseExpandedTree(): void {
+  if (expandedSpaceId === null) return;
+  const safeId = expandedSpaceId.replace(/"/g, '\\"');
+  const rows = document.querySelectorAll<HTMLElement>(
+    `.spaces-row[data-scope-id="${safeId}"]`
+  );
+  for (const row of Array.from(rows)) collapseTreeRow(row);
+  expandedSpaceId = null;
+}
 
 /**
  * Boot-burst consolidation (2026-08-17, "why 30 requests"): defer a
@@ -2088,20 +2087,14 @@ function refreshSpaceTree(spaceId: string): void {
 }
 
 export function toggleSpaceTree(spaceId: string, row: HTMLElement): void {
-  const holder = row.nextElementSibling;
-  const isOpen = !collapsedSpaceTrees.has(spaceId);
-  if (isOpen) {
-    collapsedSpaceTrees.add(spaceId);
-    row.classList.remove('is-expanded');
-    if (
-      holder instanceof HTMLElement &&
-      holder.classList.contains('spaces-tree-children-holder')
-    ) {
-      holder.remove();
-    }
+  // ADR-071 — exclusive: re-toggling the open space closes it; opening
+  // a different one closes the previous first. All in place, no repaint.
+  if (expandedSpaceId === spaceId) {
+    collapseExpandedTree();
     return;
   }
-  collapsedSpaceTrees.delete(spaceId);
+  collapseExpandedTree();
+  expandedSpaceId = spaceId;
   row.classList.add('is-expanded');
   row.insertAdjacentElement('afterend', buildSpaceChildren(spaceId));
 }
@@ -3626,6 +3619,9 @@ function setActiveScope(scopeId: string): void {
   if (scopeId === state.activeScopeId) return;
   state.activeScopeId = scopeId;
   applyActiveRow(scopeId);
+  // ADR-071 — selection IS the expansion: the activated space's tree
+  // opens and whatever was open closes; non-space scopes close all.
+  syncExclusiveExpansion(scopeId);
   applyScopeRegions(scopeId);
   // Switching scope clears the open detail rail.
   state.activeItemId = null;
@@ -3698,6 +3694,31 @@ function applyActiveRow(scopeId: string): void {
   for (const row of rows) {
     const id = row.getAttribute('data-scope-id');
     row.classList.toggle('is-active', id === scopeId);
+  }
+}
+
+/**
+ * ADR-071 — make the activated scope the ONE expanded space, in place.
+ * Non-space scopes (Home, Uncategorized) collapse everything. A space
+ * whose row is folded behind More… just records the intent; the next
+ * paint that renders the row honors it.
+ */
+function syncExclusiveExpansion(scopeId: string): void {
+  const isSpace = state.spaces.some((s) => s.id === scopeId);
+  if (!isSpace) {
+    collapseExpandedTree();
+    return;
+  }
+  if (expandedSpaceId === scopeId) return;
+  collapseExpandedTree();
+  expandedSpaceId = scopeId;
+  const safeId = scopeId.replace(/"/g, '\\"');
+  const row = document.querySelector<HTMLElement>(
+    `#spaces-list-spaces .spaces-row[data-scope-id="${safeId}"]`
+  );
+  if (row !== null) {
+    row.classList.add('is-expanded');
+    row.insertAdjacentElement('afterend', buildSpaceChildren(scopeId));
   }
 }
 
@@ -3805,9 +3826,9 @@ function renderSpaceList(): void {
   for (const space of visible) {
     const row = buildSpaceRow(space, space.id === state.activeScopeId);
     list.appendChild(row);
-    // Trees render OPEN by default; a re-render must respect only an
-    // explicit fold, never silently collapse the explorer.
-    if (!collapsedSpaceTrees.has(space.id)) {
+    // ADR-071 — exclusive expansion: only the ONE open space renders
+    // its tree; a re-render reproduces the current open state exactly.
+    if (expandedSpaceId === space.id) {
       list.appendChild(buildSpaceChildren(space.id));
     }
   }
@@ -3926,7 +3947,7 @@ export function buildSpaceRow(space: RendererSpace, active: boolean): HTMLLIElem
   expand.className = 'spaces-row-expand';
   expand.setAttribute('aria-label', `Show items in ${space.name}`);
   expand.textContent = '▸';
-  if (!collapsedSpaceTrees.has(space.id)) li.classList.add('is-expanded');
+  if (expandedSpaceId === space.id) li.classList.add('is-expanded');
   expand.addEventListener('click', (ev) => {
     ev.stopPropagation();
     toggleSpaceTree(space.id, li);
