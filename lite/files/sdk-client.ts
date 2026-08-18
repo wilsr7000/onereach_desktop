@@ -200,7 +200,7 @@ export class SdkFilesClient {
    */
   async getDownloadUrl(key: string, options: FilesDownloadOptions = {}): Promise<string> {
     this.assertNonEmpty(key, 'key');
-    return this.runRequest('download', key, async () => {
+    return this.runRequestWithRebuild('download', key, async () => {
       const sdk = this.getSdk();
       const isPublic = wantsPublicBucket(options);
       return await sdk.getDownloadUrl(key, isPublic, options.expiresMs);
@@ -234,7 +234,7 @@ export class SdkFilesClient {
    */
   async get(key: string, options: FilesDownloadOptions = {}): Promise<FilesItem | null> {
     this.assertNonEmpty(key, 'key');
-    return this.runRequest('get', key, async () => {
+    return this.runRequestWithRebuild('get', key, async () => {
       const sdk = this.getSdk();
       const isPublic = wantsPublicBucket(options);
       try {
@@ -252,7 +252,7 @@ export class SdkFilesClient {
    * Empty prefix lists from the bucket root.
    */
   async list(prefix: string, options: FilesListOptions = {}): Promise<FilesItem[]> {
-    return this.runRequest('list', prefix, async () => {
+    return this.runRequestWithRebuild('list', prefix, async () => {
       const sdk = this.getSdk();
       const isPublic = wantsPublicBucket(options);
       const raw = await sdk.getItemsList(prefix, isPublic);
@@ -455,6 +455,26 @@ export class SdkFilesClient {
         this.mintedToken = null;
         this.onAuthRejected?.();
       }
+      // Poisoned-discovery self-heal (2026-08-18): the @or-sdk Files
+      // instance runs its internal service discovery ONCE. A transient
+      // DNS blip at that moment (live: ENOTFOUND on the discovery host
+      // at boot) leaves the instance permanently answering "serviceUrl
+      // is not defined or not discovered" in ~1ms — which the detail
+      // pane then presents as "file may have been removed" for files
+      // that are perfectly intact. Drop the cached SDK so the NEXT op
+      // rebuilds it (fresh discovery); callers' single retry then
+      // succeeds within the same user click.
+      const msg = wrapped.message.toLowerCase();
+      if (
+        msg.includes('serviceurl is not defined') ||
+        msg.includes('not discovered') ||
+        msg.includes('enotfound') ||
+        msg.includes('eai_again')
+      ) {
+        this.sdk = null;
+        this.sdkForAccountId = null;
+        this.log('warn', 'files-client: discovery looked poisoned — SDK dropped for rebuild', { op });
+      }
       this.log('error', `files-client: ${op} failed`, {
         key,
         code: wrapped.code,
@@ -462,6 +482,27 @@ export class SdkFilesClient {
       });
       span?.fail(wrapped);
       throw wrapped;
+    }
+  }
+
+  /**
+   * Run an op; on a poisoned-discovery failure the cached SDK was
+   * dropped by runRequest — retry ONCE against a freshly built one so
+   * the user's original click succeeds instead of the next one.
+   */
+  private async runRequestWithRebuild<T>(
+    op: string,
+    key: string | undefined,
+    fn: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await this.runRequest(op, key, fn);
+    } catch (err) {
+      if (this.sdk === null && err instanceof FilesError && err.code === FILES_ERROR_CODES.NETWORK) {
+        this.log('info', 'files-client: retrying once after SDK rebuild', { op });
+        return await this.runRequest(op, key, fn);
+      }
+      throw err;
     }
   }
 

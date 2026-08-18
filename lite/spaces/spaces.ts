@@ -3236,9 +3236,21 @@ export function buildPdfViewer(
   } else {
     const note = document.createElement('p');
     note.className = 'spaces-detail-pdf-note';
+    // Honest wording (2026-08-18): a failed READ is usually the app's
+    // reach (network/discovery), not the file's existence — "may have
+    // been removed" sent the user hunting a deletion that never
+    // happened. Say what we know, offer the retry.
     note.textContent =
-      'This file couldn’t be read from storage — it may have been removed. The reference still exists, but there is nothing to preview.';
+      'This file couldn’t be loaded right now — storage may be unreachable, or the file may have been removed. Reopening the asset retries.';
     box.appendChild(note);
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.className = 'spaces-detail-pdf-retry';
+    retry.textContent = 'Try again';
+    retry.addEventListener('click', () => {
+      if (state.activeItemId !== null) void loadItemDetail(state.activeItemId);
+    });
+    box.appendChild(retry);
   }
 
   const actions = document.createElement('div');

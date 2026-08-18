@@ -379,3 +379,63 @@ describe('upload prefix normalization (SDK concatenation bug)', () => {
     expect(captured[1]!['prefix']).toBe('lite-bugs/attachments/');
   });
 });
+
+// ── Poisoned-discovery self-heal (2026-08-18) ────────────────────────
+// The @or-sdk Files instance discovers its serviceUrl ONCE; a DNS blip
+// at that moment poisoned it permanently ("serviceUrl is not defined
+// or not discovered" in ~1ms forever — presented to the user as "file
+// may have been removed"). The client must drop the poisoned SDK and
+// retry once against a fresh one, healing within the same click.
+import { SdkFilesClient } from '../../files/sdk-client.js';
+
+describe('files sdk — poisoned-discovery self-heal', () => {
+  it('drops the cached SDK on a discovery-shaped failure and retries once, succeeding', async () => {
+    let constructions = 0;
+    class FakeSdk {
+      constructor() {
+        constructions += 1;
+      }
+      async getDownloadUrl(): Promise<string> {
+        if (constructions === 1) {
+          throw new Error('serviceUrl is not defined or not discovered');
+        }
+        return 'https://files.example/signed/abc.pdf';
+      }
+    }
+    const client = new SdkFilesClient({
+      token: () => 'tok',
+      accountId: () => 'acct-1',
+      discoveryUrl: 'https://discovery.example',
+      sdkCtor: FakeSdk as never,
+      log: () => undefined,
+    } as never);
+
+    const url = await client.getDownloadUrl('lite-spaces/assets/deck.pdf', {});
+    expect(url).toBe('https://files.example/signed/abc.pdf');
+    expect(constructions).toBe(2); // poisoned instance dropped, fresh one succeeded
+  });
+
+  it('a genuine 404 does NOT trigger the rebuild-retry (one construction, one failure)', async () => {
+    let constructions = 0;
+    class FakeSdk {
+      constructor() {
+        constructions += 1;
+      }
+      async getDownloadUrl(): Promise<string> {
+        const err = new Error('Not Found') as Error & { status?: number };
+        err.status = 404;
+        throw err;
+      }
+    }
+    const client = new SdkFilesClient({
+      token: () => 'tok',
+      accountId: () => 'acct-1',
+      discoveryUrl: 'https://discovery.example',
+      sdkCtor: FakeSdk as never,
+      log: () => undefined,
+    } as never);
+
+    await expect(client.getDownloadUrl('missing.pdf', {})).rejects.toBeTruthy();
+    expect(constructions).toBe(1);
+  });
+});
