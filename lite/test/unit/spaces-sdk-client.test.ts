@@ -4128,3 +4128,33 @@ describe('ADR-068 — Person logs GSX identity (multiUserId + account id)', () =
     expect(q).toContain('p.gsxMultiUserId AS gsxMultiUserId');
   });
 });
+
+describe('MEMBER_LIBRARY_SEARCH — junk filter (2026-08-18)', () => {
+  it('excludes service/demo/presence Persons; keeps real people and Agents; email-first rank', () => {
+    const src = CYPHER.MEMBER_LIBRARY_SEARCH;
+    for (const marker of [
+      "NOT member.id STARTS WITH 'usr_'",
+      "NOT member.id STARTS WITH 'system'",
+      "NOT member.id STARTS WITH 'anonymous@'",
+      "NOT member.id STARTS WITH 'person-'",
+      "NOT coalesce(member.email, '') ENDS WITH '@example.com'",
+      "member.id =~ '[0-9a-fA-F-]{36}'",
+    ]) {
+      expect(src).toContain(marker);
+    }
+    // Agents bypass the person-junk predicates (they have no email).
+    expect(src).toContain('member:Agent OR (');
+    // Real-email people rank above email-less ids.
+    expect(src).toContain("CASE WHEN coalesce(member.email, '') <> '' THEN 0 ELSE 1 END");
+  });
+
+  it('searchLibrary still matches by id/email so "rich" finds rich@onereach.com', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('member:Person OR member:Agent', [
+      { kind: 'Person', id: 'rich@onereach.com', name: 'rich@onereach.com', email: 'rich@onereach.com' },
+    ]);
+    const client = makeClient(stub);
+    const rows = await client.searchMemberLibrary('rich', 8);
+    expect(rows[0]?.id).toBe('rich@onereach.com');
+  });
+});

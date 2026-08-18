@@ -1734,6 +1734,20 @@ export const CYPHER = {
   MEMBER_LIBRARY_SEARCH: `
     MATCH (member)
     WHERE (member:Person OR member:Agent)
+      // Junk filter (2026-08-18): the Person table accumulates service
+      // accounts, demo seeds, and bare-UUID presence nodes. With an
+      // empty query the picker shows the alphabetical HEAD — which was
+      // all junk, burying real people ("cryptic names; rich missing").
+      // A member candidate must be a real human (an email that isn't a
+      // demo domain, or a non-service name) or an Agent.
+      AND (member:Agent OR (
+            NOT member.id STARTS WITH 'usr_'
+        AND NOT member.id STARTS WITH 'system'
+        AND NOT member.id STARTS WITH 'anonymous@'
+        AND NOT member.id STARTS WITH 'person-'
+        AND NOT coalesce(member.email, '') ENDS WITH '@example.com'
+        AND NOT (coalesce(member.email, '') = '' AND member.id =~ '[0-9a-fA-F-]{36}')
+      ))
       AND ($q = ''
            OR toLower(coalesce(member.name, member.title, '')) CONTAINS toLower($q)
            OR toLower(coalesce(member.email, '')) CONTAINS toLower($q)
@@ -1743,6 +1757,7 @@ export const CYPHER = {
            coalesce(member.name, member.title, member.id) AS name,
            coalesce(member.email, '') AS email
     ORDER BY CASE WHEN member:Person THEN 0 ELSE 1 END,
+             CASE WHEN coalesce(member.email, '') <> '' THEN 0 ELSE 1 END,
              toLower(coalesce(member.name, member.id, '')) ASC
     LIMIT toInteger($limit)
   `,
