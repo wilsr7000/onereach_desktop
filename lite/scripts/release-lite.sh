@@ -347,6 +347,19 @@ else
         pkill -9 -f "$APP_BIN" 2>/dev/null || true
     }
     run_boot_smoke
+    # Final-read race (2026-08-18): the loop breaks the moment the child
+    # exits — WITHOUT re-reading the log. An app that prints its banner
+    # and exits inside the same 1s window therefore "failed" while the
+    # proof sat in the log (observed live on 0.0.76: the failure message
+    # printed the banner it claimed was missing). The log is the
+    # evidence; read it once more before believing the process clock.
+    if [ "$BOOTED" = "0" ] && [ -f "$BOOT_LOG" ]; then
+        if grep -q "\[LITE\] Onereach.ai Lite v" "$BOOT_LOG"; then
+            BOOTED=1
+        elif grep -q "Another instance is already running" "$BOOT_LOG"; then
+            BOOTED=2
+        fi
+    fi
     if [ "$BOOTED" = "0" ] && [ "$SMOKE_KILLED" = "1" ]; then
         echo -e "${YELLOW}⚠ Smoke child was KILLED externally (concurrent session's pkill) — retrying once in 10s.${NC}"
         sleep 10
