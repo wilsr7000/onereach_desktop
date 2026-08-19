@@ -572,17 +572,39 @@ describe('shared-dashboard sections — a failed read is not an empty list', () 
     expect(section.textContent).toContain('No tickets yet');
   });
 
-  it('playbook: error renders a banner, never the "No playbook set" coaching', () => {
+  it('playbook: error renders a banner, never the empty-state coaching', () => {
     const section = dashboardBuilders().buildSharedDashboardPlaybook(SPACE, null, 'nope');
     const banner = section.querySelector('.spaces-banner-error');
     expect(banner?.textContent).toContain("Couldn't load the playbook");
-    expect(section.textContent).not.toContain('No playbook set');
+    expect(section.querySelector('.spaces-shared-playbook-empty')).toBeNull();
   });
 
   it('playbook: a successful null read keeps the coaching empty state', () => {
     const section = dashboardBuilders().buildSharedDashboardPlaybook(SPACE, null);
     expect(section.querySelector('.spaces-banner-error')).toBeNull();
-    expect(section.textContent).toContain('No playbook set');
+    expect(section.querySelector('.spaces-shared-playbook-empty')).not.toBeNull();
+  });
+
+  // 2026-08-18, live: a playbook was open in the Data Bricks space while
+  // this section said "No playbook set. Add a plan to this space and
+  // promote it to playbook." Two failures at once: the section's own
+  // title collided with the asset kind, and the remedy named a "plan"
+  // and a "promote" the UI has never had. The section is about the ONE
+  // designated playbook; say so, and name the button that sets it.
+  it('playbook: the empty state never contradicts a playbook the user is looking at', () => {
+    const section = dashboardBuilders().buildSharedDashboardPlaybook(SPACE, null);
+    const text = section.textContent ?? '';
+    // The heading disambiguates the two senses of "playbook".
+    expect(section.querySelector('.spaces-shared-section-heading')?.textContent).toBe(
+      'Current playbook'
+    );
+    // Never assert the space has no playbook — it may hold several.
+    expect(text).not.toContain('No playbook set');
+    // Never invent vocabulary the UI doesn't use.
+    expect(text).not.toMatch(/\bpromote\b/i);
+    expect(text).not.toMatch(/\badd a plan\b/i);
+    // Name the real affordance, verbatim.
+    expect(text).toContain('Set as playbook');
   });
 });
 

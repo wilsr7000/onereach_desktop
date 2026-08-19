@@ -4588,7 +4588,11 @@ function buildSharedDashboardPlaybook(
 
   const heading = document.createElement('h3');
   heading.className = 'spaces-shared-section-heading';
-  heading.textContent = 'Playbook';
+  // "Current playbook", never bare "Playbook" (2026-08-18): a Space can
+  // hold many playbook-kind assets while designating none of them, so a
+  // section titled "Playbook" saying "No playbook set" reads as a flat
+  // contradiction to someone looking straight at one.
+  heading.textContent = 'Current playbook';
   section.appendChild(heading);
 
   if (loadError !== undefined) {
@@ -4602,8 +4606,13 @@ function buildSharedDashboardPlaybook(
       const empty = document.createElement('div');
       empty.className = 'spaces-shared-playbook-empty';
       const msg = document.createElement('p');
+      // Name the REAL path and the REAL button. The old copy ("add a
+      // plan… promote it") invented two words the UI never uses and told
+      // people who already had playbooks here to go make one.
       msg.textContent =
-        'No playbook set. Add a plan to this space and promote it to playbook.';
+        'This space hasn\u2019t chosen a current playbook yet. Open an asset here \u2014 ' +
+        'a playbook or any other \u2014 and choose \u201cSet as playbook\u201d to make it ' +
+        'the plan agents work against.';
       empty.appendChild(msg);
       section.appendChild(empty);
     }
