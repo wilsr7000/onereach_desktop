@@ -606,6 +606,7 @@ describe('shared-dashboard sections — a failed read is not an empty list', () 
     // Name the real affordance, verbatim.
     expect(text).toContain('Set as playbook');
   });
+
 });
 
 describe('loadSharedSpaceDashboard wiring (source-level)', () => {
@@ -620,6 +621,31 @@ describe('loadSharedSpaceDashboard wiring (source-level)', () => {
     return fs.readFileSync(found, 'utf8');
   };
 
+  // 2026-08-18 (user: "I click on data bricks space and see no assets in
+  // the middle panel"). A shared Space rendered the ops dashboard INSTEAD
+  // of its contents: four playbooks sat in Data Bricks with no home in
+  // the main pane, because the dashboard's only lists are tickets
+  // (:Asset type='ticket') and checklists. A Space is a container — its
+  // own view must always show what is in it, and BOTH kinds must render
+  // that from ONE implementation or they drift apart again.
+  it('every Space renders its contents, shared included, from one implementation', () => {
+    const src = source();
+    expect(
+      src.match(/function appendSpaceContents\(/g)?.length,
+      'exactly one contents implementation — no lookalike copy'
+    ).toBe(1);
+    const slice = (decl: string, chars: number): string => {
+      const at = src.indexOf(decl);
+      expect(at, `${decl} not found — renamed?`).toBeGreaterThan(-1);
+      return src.slice(at, at + chars);
+    };
+    // The user-space path delegates to it…
+    expect(slice('function renderItemList', 3000)).toContain('appendSpaceContents(wrap, opts)');
+    // …and the shared dashboard appends the same grid under a heading.
+    const dash = slice('function renderSharedSpaceDashboard', 3500);
+    expect(dash).toContain('appendSpaceContents(');
+    expect(dash).toContain("'Contents'");
+  });
   it('records per-section envelope failures, logs them, and keeps prior data', () => {
     const src = source();
     const start = src.indexOf('async function loadSharedSpaceDashboard');

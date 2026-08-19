@@ -4089,6 +4089,23 @@ function renderItemList(opts: RenderItemListOpts): void {
     return;
   }
 
+  // Every Space shows its contents — see appendSpaceContents.
+  appendSpaceContents(wrap, opts);
+}
+
+/**
+ * The Space CONTENTS grid: filter chips, hidden-items chip, bulk bar,
+ * recency bands, and the asset tiles themselves.
+ *
+ * Extracted 2026-08-18 (user: "I click on data bricks space and see no
+ * assets in the middle panel"). A shared Space rendered the ops
+ * dashboard INSTEAD of its contents, so four playbooks sitting in the
+ * space were unreachable from the space's own view. A Space is a
+ * container; its view must always show what is in it. One function, so
+ * both kinds get the SAME tiles, filters, and affordances rather than a
+ * lookalike second implementation that drifts.
+ */
+function appendSpaceContents(wrap: HTMLElement, opts: RenderItemListOpts): void {
   // Sprint 3: when a search is active, replace the timeline with a
   // search-result list. The search bypasses the timeline merge entirely
   // — it's a direct asset hit-list, not a chronological feed.
@@ -4299,6 +4316,21 @@ function renderSharedSpaceDashboard(
   // still happen on tickets at their pause points; this is where the
   // artifacts themselves are created, revised, and retired.
   body.appendChild(buildSharedDashboardChecklists(space));
+
+  // CONTENTS — the same grid a user Space shows, same tiles, same
+  // filters (2026-08-18). Before this, a shared Space replaced its
+  // contents with the ops dashboard, so anything that wasn't a ticket,
+  // a checklist, or THE designated playbook simply had no home in the
+  // main pane. The ops sections are an ADDITION for shared spaces, not
+  // a substitute for the space itself.
+  const contents = document.createElement('section');
+  contents.className = 'spaces-shared-section spaces-shared-section-contents';
+  const contentsHeading = document.createElement('h3');
+  contentsHeading.className = 'spaces-shared-section-heading';
+  contentsHeading.textContent = 'Contents';
+  contents.appendChild(contentsHeading);
+  appendSpaceContents(contents, { loading: busy });
+  body.appendChild(contents);
 
   wrap.appendChild(body);
 
