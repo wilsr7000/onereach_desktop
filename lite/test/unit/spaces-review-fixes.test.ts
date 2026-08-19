@@ -744,3 +744,53 @@ describe('shared-dashboard fetch loop (2026-08-17 bandwidth incident)', () => {
     expect(body).toContain('refresh(true)');
   });
 });
+
+describe('auto-enrich covers EVERY create path (2026-08-17 metadata audit)', () => {
+  const source = (): string => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    if (found === undefined) throw new Error('spaces.ts not found');
+    return fs.readFileSync(found, 'utf8');
+  };
+
+  it('both agent sub-paths enrich despite returning early', () => {
+    // Audit against live data found agent 0/1 with ai_*, while
+    // knowledge 1/1, journey 1/1, document 4/5 all had it. Cause: the
+    // agent branch returns before the shared autoEnrichOnCreate call
+    // at the end of submitNewAsset, so it silently opted out.
+    const src = source();
+    const start = src.indexOf("if (newAssetMode === 'agent')");
+    expect(start).toBeGreaterThan(-1);
+    const branch = src.slice(start, src.indexOf("if (newAssetMode === 'knowledge')", start));
+    const calls = branch.match(/autoEnrichOnCreate\(/g) ?? [];
+    // One for the library pick, one for the OKF paste.
+    expect(calls.length, 'both agent sub-paths must enrich').toBe(2);
+    expect(branch).toContain("kind: 'agent'");
+  });
+
+  it('enrichment stays fire-and-forget everywhere — never blocks a create', () => {
+    const src = source();
+    // Every call site is `void autoEnrichOnCreate(...)`; an awaited one
+    // would put a model round-trip in front of the dialog closing.
+    const bare = src.match(/(?<!void )\bautoEnrichOnCreate\(/g) ?? [];
+    // The function's own declaration is the only non-`void` occurrence.
+    expect(bare.length, 'all call sites must be fire-and-forget').toBe(1);
+    expect(src).toContain('async function autoEnrichOnCreate(');
+  });
+
+  it('agents are enrichment-eligible (OKF body counts as content)', async () => {
+    // isAutoEnrichEligibleRenderer gates on content/image/pdf/text-mime;
+    // agents pass via hasContent, which is why the call sites pass true.
+    const src = source();
+    const fn = src.slice(
+      src.indexOf('function isAutoEnrichEligibleRenderer'),
+      src.indexOf('function isAutoEnrichEligibleRenderer') + 900
+    );
+    expect(fn).toContain('if (opts.hasContent) return true;');
+  });
+});
