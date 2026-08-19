@@ -43,6 +43,20 @@
         "5175"
       ],
       "port": 5175
+    },
+    {
+      "name": "journey-map-builder",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "http-server",
+        "/Users/richardwilson/Capablity Projects/journey Map Builder",
+        "-p",
+        "4173",
+        "-c-1",
+        "--silent"
+      ],
+      "port": 4173
     }
   ]
 }

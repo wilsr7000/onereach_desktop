@@ -55,6 +55,26 @@ export {
 export { makeBugReportPayload } from './fixtures/bug-report.js';
 
 // ---------------------------------------------------------------------------
+// The AI credentials the APP is configured with (Settings → AI keychain,
+// then env, then ai-config.json). Any test that needs a real model must
+// resolve its key through here rather than reading an env var directly.
+// ---------------------------------------------------------------------------
+
+export {
+  LITE_PRODUCT_NAME,
+  liteUserDataDir,
+  readAppSettingsAiKey,
+  readAiConfigFileJson,
+  fingerprintSecret,
+  buildAppAiCredentials,
+  resolveAppAiConfig,
+  resolveAppClaudeConfig,
+  describeAiCredentials,
+  type AiKeySource,
+  type AppAiCredentials,
+} from './ai-key.js';
+
+// ---------------------------------------------------------------------------
 // App-level harness (boot the built lite app, drive menus/IPCs, query
 // log server, snapshot userData). See lite/test/harness/README.md.
 // ---------------------------------------------------------------------------

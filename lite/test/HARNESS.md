@@ -10,22 +10,43 @@ For the **architectural rationale** (why this exists), see ADR-023 (general harn
 
 ## Tier model
 
-Lite tests are organized into four tiers, each with a different speed / coverage tradeoff. Run the tier appropriate to what changed:
+Lite tests are organized into five tiers, each with a different speed / coverage tradeoff. Run the tier appropriate to what changed:
 
 | Tier | Path | Speed | Coverage | Run via |
 |---|---|---|---|---|
 | **Unit** | `test/unit/` | <1ms per test | Pure logic with mocks. No Electron, no HTTP. | `npm run lite:test:unit` |
-| **Contract** | (filtered subset of unit) | <1ms per test | Conformance contracts -- proves every module's `api.ts` passes the uniform shape. | `npm run lite:test:contract` |
+| **Contract** | (filtered subset of unit) | <1ms per test | Conformance contracts -- proves every module's `api.ts` passes the uniform shape. | (runs inside `lite:test:unit`) |
 | **Integration** | `test/integration/` | 50-150ms per test | Real HTTP via in-memory KV server, real `BugReportStore` against real `EdisonKVClient`. Catches wire-format drift. | `npm run lite:test:integration` |
+| **Live AI** | `test/live/` | 30-60s per test | A REAL model call on the key the app is configured with. Catches prompt rot and output-cap truncation, which no stub can see. | `npm run lite:test:live` |
 | **E2E** | `test/e2e/` | 2-10s per test | Built signed Electron app, Playwright drives menus + IPC + windows. Catches real regressions before ship. | `npm run lite:test:e2e` (requires `npm run lite:package:mac` first) |
 
 Quick combinations:
 
-- **Pre-commit** -- `lite:test:unit` (~3s)
-- **PR gate** -- `lite:test:all` (typecheck + dep-check + unit + integration; ~6s)
-- **Release** -- `lite:test:all` + `lite:test:e2e` (~30s)
+- **Pre-commit** -- `lite:test:unit` (~6s)
+- **PR gate** -- `lite:test` (typecheck + dep-check + unit + integration; ~15s)
+- **Release** -- `lite:test:full` (the gate + live AI) then `lite:test:e2e`
 
 Vitest runs both unit and integration in parallel; the integration tier adds ~500ms because of the real HTTP server.
+
+### The Live AI tier
+
+`test/live/` is the only tier that spends money and needs the network, so it sits outside the PR gate and is run deliberately. Its key comes from **the app's own settings**, resolved by `harness/ai-key.ts` in the same order `lite/ai/api.ts` uses at boot:
+
+1. the OS keychain (**Settings → AI** — what a real user configures),
+2. `ANTHROPIC_API_KEY`,
+3. `{userData}/ai-config.json`.
+
+Precedence is not re-implemented: the harness feeds those three inputs to `resolveAiConfig()`, the app's own function. A test needing a model resolves it through the harness — never by reading an env var itself, which would test a configuration the user never uses.
+
+```typescript
+import { resolveAppClaudeConfig, describeAiCredentials } from '../harness/ai-key.js';
+
+const credentials = await resolveAppClaudeConfig();
+
+describe.skipIf(credentials === null)('my live thing', () => { /* ... */ });
+```
+
+With no key configured anywhere the tier skips itself and says how to configure one. Keys never reach a log line: `fingerprintSecret()` reports a truncated hash so a run can say *which* key it used without revealing any part of it.
 
 ---
 
@@ -362,12 +383,15 @@ lite:test
   -> lite:test:integration  (real HTTP wire format)
 ```
 
-E2E is not in `lite:test` because it requires a built signed app (`npm run lite:package:mac`). Run before release:
+Two tiers stay out of the gate, for different reasons. **Live AI** is non-deterministic, costs money and needs the network; **E2E** needs a built signed app. Both run before release:
 
 ```bash
+npm run lite:test:live    # ~40s (real model call on the app's key)
 npm run lite:package:mac  # ~30s
 npm run lite:test:e2e     # ~30s (smoke + updater)
 ```
+
+`lite:test:full` chains the gate and the live tier in one command.
 
 Ports that introduce a new UI flow add a smoke spec under `test/e2e/<port>-smoke.spec.ts` and a helper layer under `harness/<port>/`.
 

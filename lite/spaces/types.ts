@@ -1206,6 +1206,24 @@ export interface JourneyPhase {
 }
 
 /** An AI-drafted journey map, before it becomes an asset. */
+/**
+ * Asset-grounded journey suggestions (2026-08-18): objectives the Space
+ * seems to be driving at, and journey ideas whose subjects feed
+ * straight into `journeys.draft`. Both optional-empty — an empty Space
+ * yields no suggestions and the composer falls back to free text.
+ */
+export interface JourneySuggestions {
+  objectives: string[];
+  ideas: Array<{
+    /** Card heading, e.g. "First-agent onboarding". */
+    title: string;
+    /** The "whose journey, doing what" phrasing draft() expects. */
+    subject: string;
+    /** Which assets ground this idea — shown so the choice is legible. */
+    why: string;
+  }>;
+}
+
 export interface JourneyDraft {
   /** Asset title. */
   title: string;

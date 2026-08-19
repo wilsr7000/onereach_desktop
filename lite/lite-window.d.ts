@@ -1126,6 +1126,8 @@ interface LiteSpacesBridge {
     onNewJourney?(cb: () => void): () => void;
     draft(prompt: string): Promise<LiteSpacesIpcResult<unknown>>;
     create(spaceId: string, draft: unknown): Promise<LiteSpacesIpcResult<unknown>>;
+    /** Asset-grounded objective + idea picks; empty on any failure. */
+    suggest?(spaceId: string): Promise<LiteSpacesIpcResult<unknown>>;
   };
   /**
    * Subscribe to cache-refresh events from the main process. The

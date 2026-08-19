@@ -49,24 +49,41 @@ contextBridge.exposeInMainWorld('journeySpaces', {
   },
 
   /**
-   * Journey maps in a Space (or across all of them when spaceId is
-   * omitted). Returns summaries — call `load` for the content.
+   * Journey maps in a Space — or across every Space the person can
+   * see, when spaceId is omitted. Returns summaries; call `load` for
+   * the content.
+   *
+   * Lite's list channel is per-scope with no "everything" mode, so the
+   * omitted case fans out over the Space list. Each row carries its
+   * `spaceId` because the Builder needs it to save back into the same
+   * Space it opened from.
    */
   listJourneys: async (
     spaceId?: string
-  ): Promise<Array<{ id: string; title: string; spaceId?: string; updatedAt?: string }>> => {
-    const env = (await ipcRenderer.invoke(ITEMS_LIST, { spaceId })) as Envelope<
-      Array<{ id: string; title: string; kind: string; updatedAt?: string }>
-    >;
+  ): Promise<Array<{ id: string; title: string; spaceId: string; updatedAt?: string }>> => {
+    const inSpace = async (id: string): Promise<
+      Array<{ id: string; title: string; spaceId: string; updatedAt?: string }>
+    > => {
+      const env = (await ipcRenderer.invoke(ITEMS_LIST, { scopeId: id })) as Envelope<
+        Array<{ id: string; title: string; kind: string; updatedAt?: string }>
+      >;
+      if (env.ok !== true || env.value === undefined) return [];
+      return env.value
+        .filter((i) => i.kind === 'journey')
+        .map((i) => ({
+          id: i.id,
+          title: i.title,
+          spaceId: id,
+          ...(i.updatedAt !== undefined ? { updatedAt: i.updatedAt } : {}),
+        }));
+    };
+
+    if (typeof spaceId === 'string' && spaceId.length > 0) return inSpace(spaceId);
+
+    const env = (await ipcRenderer.invoke(SPACES_LIST)) as Envelope<Array<{ id: string }>>;
     if (env.ok !== true || env.value === undefined) return [];
-    return env.value
-      .filter((i) => i.kind === 'journey')
-      .map((i) => ({
-        id: i.id,
-        title: i.title,
-        ...(spaceId !== undefined ? { spaceId } : {}),
-        ...(i.updatedAt !== undefined ? { updatedAt: i.updatedAt } : {}),
-      }));
+    const perSpace = await Promise.all(env.value.map((s) => inSpace(s.id)));
+    return perSpace.flat();
   },
 
   /** One journey's full record, including its markdown `content`. */

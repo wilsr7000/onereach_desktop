@@ -76,7 +76,8 @@
       entries open the agent browser; empty state points to Manage Agents.
 - [ ] **Tools menu** — curated tools open in browser windows; `Spaces…` entry;
       `Manage Tools…` opens the manager.
-- [ ] **Planning menu** — WISER Playbooks launcher opens.
+- [ ] **Planning menu** — three entries in order: WISER Playbooks, Journey Map
+      Builder, New Journey Map… (quick). Each opens its own surface.
 - [ ] **Agentic University menu** — Open LMS, Quick Starts, View All
       Tutorials, AI Run Times, Wiser Method each open their surface.
 - [ ] **Help menu** — help window opens (three-pane docs).
@@ -257,6 +258,34 @@ shows the previous user's data; kill -9 + relaunch loses no persisted state.*
 - [ ] **Detail button** — paper-primary "Open in WISER Playbooks" in the
       playbook detail rail; absent on non-playbook kinds and on preloads
       without the bridge.
+
+### Journey maps (ADR-072) — **NEW** 2026-08-18
+Automated cover: `journey-map-window`, `preload-journey-map`,
+`spaces-journey`, `spaces-journey-asset`, `spaces-journey-schema` (unit)
+and `test/live/journey-map-ai.test.ts` (real model). What still needs eyes:
+
+- [ ] **Quick composer** — Planning → New Journey Map…, or right-click a
+      Space → New journey map…: describe a journey, preview, save. The
+      asset lands in the Space you RIGHT-CLICKED, not the active one.
+- [ ] ☠ **A realistic subject survives** — describe a detailed journey
+      (a full support-escalation flow, not "buying coffee"). It must
+      produce phases, NOT "The AI reply was not valid JSON". The 2000-token
+      output cap truncated exactly this case; `maxTokens` is now sized to
+      the prompt's own 6-phase × 4-touchpoint contract.
+- [ ] **Renders as a journey** — the tile shows the stage flow (phase
+      headings parse), touchpoints carry emotion/thought/agent
+      opportunity, and a Delegation points section ranks the hand-offs.
+- [ ] **Builder opens** — Planning → Journey Map Builder loads the
+      deployed app; a second click focuses that window rather than
+      opening a second one.
+- [ ] **Open in Builder** — "Open in Journey Map Builder" on a journey
+      asset opens the Builder ON that journey. With the Builder already
+      open, clicking a DIFFERENT journey retargets the live window.
+- [ ] **Round-trip** — save from the Builder into a Space; it appears in
+      Lite as a journey asset. Edit in Lite; the Builder reloads it.
+- [ ] **Containment** — external links from the Builder open in the OS
+      browser; the window never navigates off the Builder origin, and
+      `window.lite` is undefined inside it (only `window.journeySpaces`).
 
 ### Session expiry handling (2026-08-11 — the "login broken AGAIN" fix)
 - [ ] ☠ **Server-dead session never re-injects** — with a stale session,

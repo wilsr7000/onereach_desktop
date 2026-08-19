@@ -22,6 +22,7 @@ import type {
   JourneyPhase,
   JourneyTouchpoint,
   JourneyConfidence,
+  JourneySuggestions,
 } from './types.js';
 
 /**
@@ -169,4 +170,109 @@ export function journeyDescription(draft: JourneyDraft): string {
   );
   const shape = `${draft.phases.length} phases · ${moments} touchpoints · ${delegations} agent hand-offs`;
   return draft.journey.length > 0 ? `${draft.journey} — ${shape}` : shape;
+}
+
+// ─── Asset-grounded suggestions (2026-08-18) ────────────────────────────
+// "Can it offer the user choices of objectives and journey ideas based
+// on the space assets" — the composer opens with picks instead of a
+// blank prompt. The digest is deliberately compact and the output is
+// sanitized with hard caps: the model is not trusted.
+
+export const JOURNEY_SUGGEST_SYSTEM_PROMPT = [
+  'You are an AI experience designer. You will receive a digest of the',
+  'assets inside a project Space (one line per asset: title, kind, gist).',
+  'Propose journey-mapping work GROUNDED in those assets — never generic.',
+  'Return ONLY a JSON object:',
+  '{"objectives": [string (<=120), 3-4 items — outcomes this Space seems to',
+  'be driving toward], "ideas": [{"title": string (<=80, a name for the map),',
+  '"subject": string (<=160, phrased as WHOSE journey doing WHAT, e.g.',
+  '"a new admin setting up their first agent"), "why": string (<=140,',
+  'which assets in the digest ground this idea)}, 3-4 items]}.',
+  'Every idea must trace to something in the digest. If the digest is too',
+  'thin to ground anything, return {"objectives": [], "ideas": []}.',
+].join(' ');
+
+/** One asset line for the digest; every field defensively trimmed. */
+export interface DigestibleAsset {
+  title: string;
+  kind: string;
+  gist: string;
+}
+
+const DIGEST_MAX_ASSETS = 24;
+const DIGEST_MAX_LINE = 160;
+const DIGEST_MAX_TOTAL = 4000;
+
+/** Compact, capped digest of a Space's assets for the suggest prompt. */
+export function buildSpaceAssetDigest(assets: ReadonlyArray<DigestibleAsset>): string {
+  const lines: string[] = [];
+  let total = 0;
+  for (const a of assets.slice(0, DIGEST_MAX_ASSETS)) {
+    const title = str(a.title, 60);
+    if (title.length === 0) continue;
+    const line = `- ${title} (${str(a.kind, 16) || 'other'})${
+      a.gist.trim().length > 0 ? `: ${str(a.gist, DIGEST_MAX_LINE - 24 - title.length)}` : ''
+    }`.slice(0, DIGEST_MAX_LINE);
+    if (total + line.length > DIGEST_MAX_TOTAL) break;
+    total += line.length + 1;
+    lines.push(line);
+  }
+  return lines.join('\n');
+}
+
+const MAX_SUGGESTIONS = 4;
+
+/** Strict caps on the model's suggestions; empty results are valid. */
+export function sanitizeJourneySuggestions(parsed: unknown): JourneySuggestions {
+  const r = (parsed ?? {}) as Record<string, unknown>;
+  const objectives: string[] = [];
+  if (Array.isArray(r.objectives)) {
+    for (const o of r.objectives) {
+      const v = str(o, 120);
+      if (v.length > 0 && !objectives.includes(v)) objectives.push(v);
+      if (objectives.length >= MAX_SUGGESTIONS) break;
+    }
+  }
+  const ideas: JourneySuggestions['ideas'] = [];
+  if (Array.isArray(r.ideas)) {
+    for (const raw of r.ideas) {
+      const i = (raw ?? {}) as Record<string, unknown>;
+      const subject = str(i.subject, 160);
+      if (subject.length === 0) continue; // an idea IS its subject
+      ideas.push({
+        title: str(i.title, 80) || subject.slice(0, 80),
+        subject,
+        why: str(i.why, 140),
+      });
+      if (ideas.length >= MAX_SUGGESTIONS) break;
+    }
+  }
+  return { objectives, ideas };
+}
+
+/**
+ * Salvage a JSON object from a model reply (2026-08-18: "it just
+ * errored and did not retry. Poorly formatted JSON. Should have fixed
+ * itself"). Models occasionally wrap JSON in code fences or prose even
+ * in json mode. Tries: direct parse → fence-stripped parse → first-{
+ * to last-} slice parse. Returns null only when nothing parses; the
+ * caller then retries the model once with a corrective nudge before
+ * surfacing any error to the user.
+ */
+export function extractJsonObject(text: string): unknown | null {
+  const attempts: string[] = [text];
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced?.[1] !== undefined) attempts.push(fenced[1]);
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first !== -1 && last > first) attempts.push(text.slice(first, last + 1));
+  for (const candidate of attempts) {
+    try {
+      const parsed: unknown = JSON.parse(candidate.trim());
+      if (typeof parsed === 'object' && parsed !== null) return parsed;
+    } catch {
+      /* next attempt */
+    }
+  }
+  return null;
 }

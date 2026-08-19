@@ -39,6 +39,10 @@ import {
   sanitizeJourneyDraft,
   journeyToMarkdown,
   journeyDescription,
+  extractJsonObject,
+  JOURNEY_SUGGEST_SYSTEM_PROMPT,
+  buildSpaceAssetDigest,
+  sanitizeJourneySuggestions,
 } from './journey.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
@@ -226,6 +230,7 @@ import type {
   ItemMetadata,
   AssetViewer,
   JourneyDraft,
+  JourneySuggestions,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
@@ -1211,20 +1216,38 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
           context: { op: 'journeys.draft' },
         });
       }
-      const result = await getAiApi().chat({
-        system: JOURNEY_SYSTEM_PROMPT,
-        messages: [{ role: 'user', content: trimmed }],
-        jsonMode: true,
-        maxTokens: 2000,
-        feature: 'spaces-journey-draft',
-      });
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(result.content);
-      } catch {
+      // Salvage-then-retry (2026-08-18): a malformed model reply used
+      // to surface "not valid JSON" straight to the user with no
+      // second attempt. Now: extract JSON from fences/prose; if that
+      // fails, retry ONCE with a corrective nudge; only then error.
+      const askModel = async (corrective: boolean): Promise<unknown | null> => {
+        const result = await getAiApi().chat({
+          system: JOURNEY_SYSTEM_PROMPT,
+          messages: [
+            { role: 'user', content: trimmed },
+            ...(corrective
+              ? [{
+                  role: 'user' as const,
+                  content:
+                    'Your previous reply was not parseable JSON. Return ONLY the JSON object — no prose, no code fences.',
+                }]
+              : []),
+          ],
+          jsonMode: true,
+          maxTokens: 2000,
+          feature: 'spaces-journey-draft',
+        });
+        return extractJsonObject(result.content);
+      };
+      let parsed = await askModel(false);
+      if (parsed === null) {
+        getLoggingApi().warn('spaces', 'journeys.draft: unparseable reply — retrying once', {});
+        parsed = await askModel(true);
+      }
+      if (parsed === null) {
         throw new SpacesError({
           code: 'SPACES_INVALID_INPUT',
-          message: 'The AI reply was not valid JSON — try rephrasing the subject.',
+          message: 'The AI reply was not valid JSON twice in a row — try rephrasing the subject.',
           context: { op: 'journeys.draft' },
         });
       }
@@ -1237,6 +1260,63 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         });
       }
       return draft;
+    },
+
+    // 2026-08-18 — "offer the user choices of objectives and journey
+    // ideas based on the space assets." Digest the Space's items, ask
+    // the model for grounded picks, sanitize hard. Empty Space (or an
+    // unusable reply after the salvage+retry) yields EMPTY suggestions,
+    // never an error — the composer falls back to free text.
+    async suggest(spaceId: string): Promise<JourneySuggestions> {
+      const id = typeof spaceId === 'string' ? spaceId.trim() : '';
+      if (id.length === 0) return { objectives: [], ideas: [] };
+      let items: ItemSummary[] = [];
+      try {
+        items = await client.listItems({ kind: 'space', spaceId: id }, { limit: 40 });
+      } catch (err) {
+        getLoggingApi().warn('spaces', 'journeys.suggest: item fetch failed — no suggestions', {
+          error: (err as Error).message,
+        });
+        return { objectives: [], ideas: [] };
+      }
+      if (items.length === 0) return { objectives: [], ideas: [] };
+      const digest = buildSpaceAssetDigest(
+        items.map((it) => ({
+          title: it.title,
+          kind: it.kind,
+          gist: (it.description ?? '').length > 0 ? (it.description ?? '') : (it.excerpt ?? ''),
+        }))
+      );
+      if (digest.length === 0) return { objectives: [], ideas: [] };
+      const ask = async (corrective: boolean): Promise<unknown | null> => {
+        const result = await getAiApi().chat({
+          system: JOURNEY_SUGGEST_SYSTEM_PROMPT,
+          messages: [
+            { role: 'user', content: digest },
+            ...(corrective
+              ? [{
+                  role: 'user' as const,
+                  content:
+                    'Your previous reply was not parseable JSON. Return ONLY the JSON object — no prose, no code fences.',
+                }]
+              : []),
+          ],
+          jsonMode: true,
+          maxTokens: 900,
+          feature: 'spaces-journey-suggest',
+        });
+        return extractJsonObject(result.content);
+      };
+      try {
+        let parsed = await ask(false);
+        if (parsed === null) parsed = await ask(true);
+        return parsed === null ? { objectives: [], ideas: [] } : sanitizeJourneySuggestions(parsed);
+      } catch (err) {
+        getLoggingApi().warn('spaces', 'journeys.suggest: model call failed — no suggestions', {
+          error: (err as Error).message,
+        });
+        return { objectives: [], ideas: [] };
+      }
     },
 
     async create(spaceId: string, draft: JourneyDraft): Promise<Item> {

@@ -280,4 +280,66 @@ describe('seedKernelMenu', () => {
     registry.get('planning:wiser-playbooks')?.click?.();
     expect(count).toBe(1);
   });
+
+  // ADR-072 — Planning gained two journey-map entries: the deployed
+  // Builder and the in-app quick composer. Each is gated on its own
+  // handler, and all three planning entries share `top:planning`, so the
+  // interesting failures are a menu that appears with no host wiring, a
+  // second upsert clobbering the first, and the two journey items
+  // landing in the wrong order.
+  it('registers the Journey Map Builder under Planning when its handler is provided', () => {
+    seedKernelMenu({ ...handlers, onOpenJourneyMapBuilder: noop });
+    expect(registry.get('top:planning')?.label).toBe('Planning');
+    const item = registry.get('planning:journey-map-builder');
+    expect(item?.label).toBe('Journey Map Builder');
+    expect(item?.parentId).toBe('top:planning');
+    expect(item?.click).toBeDefined();
+    expect(item?.role).toBeUndefined();
+    expect(item?.accelerator).toBeUndefined();
+  });
+
+  it('registers the quick composer under Planning when its handler is provided', () => {
+    seedKernelMenu({ ...handlers, onNewJourneyMap: noop });
+    const item = registry.get('planning:journey-map');
+    // `label` may be a lazy getter (the registry allows either).
+    const label = typeof item?.label === 'function' ? item.label() : (item?.label ?? '');
+    expect(label.startsWith('New Journey Map')).toBe(true);
+    expect(item?.parentId).toBe('top:planning');
+    expect(item?.click).toBeDefined();
+  });
+
+  it('leaves Planning unregistered when no planning handler is wired', () => {
+    seedKernelMenu(handlers);
+    expect(registry.has('top:planning')).toBe(false);
+    expect(registry.has('planning:journey-map-builder')).toBe(false);
+    expect(registry.has('planning:journey-map')).toBe(false);
+  });
+
+  it('all three planning entries coexist, Builder before the quick composer', () => {
+    seedKernelMenu({
+      ...handlers,
+      onOpenWiserPlaybooks: noop,
+      onOpenJourneyMapBuilder: noop,
+      onNewJourneyMap: noop,
+    });
+    // Three upserts of top:planning must still leave ONE menu.
+    expect(registry.getChildren().filter((e) => e.id === 'top:planning')).toHaveLength(1);
+    expect(registry.getChildren('top:planning').map((e) => e.id)).toEqual([
+      'planning:wiser-playbooks',
+      'planning:journey-map-builder',
+      'planning:journey-map',
+    ]);
+  });
+
+  it('each journey entry invokes its OWN handler — the two are not crossed', () => {
+    const fired: string[] = [];
+    seedKernelMenu({
+      ...handlers,
+      onOpenJourneyMapBuilder: () => fired.push('builder'),
+      onNewJourneyMap: () => fired.push('quick'),
+    });
+    registry.get('planning:journey-map-builder')?.click?.();
+    registry.get('planning:journey-map')?.click?.();
+    expect(fired).toEqual(['builder', 'quick']);
+  });
 });

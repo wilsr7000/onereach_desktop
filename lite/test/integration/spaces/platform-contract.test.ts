@@ -259,6 +259,7 @@ function buildStubConsumer(): {
       grantSelfAccessInternal: async () => false,
     },
     journeys: {
+    suggest: async () => ({ objectives: [], ideas: [] }),
       draft: async (_prompt: string) =>
         maybeFail({ title: 'Journey map', journey: '', phases: [] }),
       create: async (_spaceId: string, _draft: never) => maybeFail({} as never),

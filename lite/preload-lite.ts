@@ -88,6 +88,7 @@ const SPACES_ITEMS_ADD_TAG = 'lite:spaces:items:addTag';
 const SPACES_ITEMS_REMOVE_TAG = 'lite:spaces:items:removeTag';
 const SPACES_ITEMS_RECENT_COMMITS = 'lite:spaces:items:recentCommits';
 const SPACES_JOURNEYS_DRAFT = 'lite:spaces:journeys:draft';
+const SPACES_JOURNEYS_SUGGEST = 'lite:spaces:journeys:suggest';
 const SPACES_JOURNEYS_CREATE = 'lite:spaces:journeys:create';
 const SPACES_ITEMS_RECORD_VIEW = 'lite:spaces:items:recordView';
 const SPACES_ITEMS_VIEWERS = 'lite:spaces:items:viewers';
@@ -941,6 +942,7 @@ interface SpacesBridge {
     /** Menu → composer trigger (ADR-072). Returns unsubscribe. */
     onNewJourney(cb: () => void): () => void;
     draft(prompt: string): Promise<SpacesIpcResultView<unknown>>;
+    suggest(spaceId: string): Promise<SpacesIpcResultView<unknown>>;
     create(spaceId: string, draft: unknown): Promise<SpacesIpcResultView<unknown>>;
   };
   /** Open (or focus) the Spaces window. */
@@ -1942,6 +1944,10 @@ const spaces: SpacesBridge = {
     },
     draft: (prompt: string) =>
       ipcRenderer.invoke(SPACES_JOURNEYS_DRAFT, { prompt }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    suggest: (spaceId: string) =>
+      ipcRenderer.invoke(SPACES_JOURNEYS_SUGGEST, { spaceId }) as Promise<
         SpacesIpcResultView<unknown>
       >,
     create: (spaceId: string, draft: unknown) =>

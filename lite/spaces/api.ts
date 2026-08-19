@@ -74,6 +74,7 @@ import type {
   AssetVersionSummary,
   AssetViewer,
   JourneyDraft,
+  JourneySuggestions,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -556,6 +557,11 @@ export interface SpacesJourneysApi {
   draft(prompt: string): Promise<JourneyDraft>;
   /** Persist a draft as a `journey` asset; returns the new item. */
   create(spaceId: string, draft: JourneyDraft): Promise<Item>;
+  /**
+   * Asset-grounded picks for the composer (2026-08-18). Fail-soft:
+   * every failure mode returns EMPTY suggestions, never throws.
+   */
+  suggest(spaceId: string): Promise<JourneySuggestions>;
 }
 
 export interface SpacesChecklistsApi {
@@ -980,6 +986,9 @@ class UninitializedSpacesApi implements SpacesApi {
     },
     async create(_spaceId: string, _draft: JourneyDraft): Promise<Item> {
       throw notInitialized('journeys.create');
+    },
+    async suggest(_spaceId: string): Promise<JourneySuggestions> {
+      throw notInitialized('journeys.suggest');
     },
   };
 

@@ -133,6 +133,7 @@ export const SPACES_IPC = {
   CHECKLISTS_DRAFT: 'lite:spaces:checklists:draft',
   /** ADR-072 — journey maps (Planning). */
   JOURNEYS_DRAFT: 'lite:spaces:journeys:draft',
+  JOURNEYS_SUGGEST: 'lite:spaces:journeys:suggest',
   JOURNEYS_CREATE: 'lite:spaces:journeys:create',
   CHECKLISTS_REMOVE: 'lite:spaces:checklists:remove',
   CHECKLISTS_ATTACH: 'lite:spaces:checklists:attach',
@@ -1001,6 +1002,23 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
   );
 
   // ADR-072 — journey maps.
+  handleSpacesIpc(
+    SPACES_IPC.JOURNEYS_SUGGEST,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown }
+    ): Promise<SpacesIpcResult<unknown>> => {
+      try {
+        const spaceId =
+          payload !== undefined && typeof payload.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().journeys.suggest(spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
   handleSpacesIpc(
     SPACES_IPC.JOURNEYS_DRAFT,
     async (
