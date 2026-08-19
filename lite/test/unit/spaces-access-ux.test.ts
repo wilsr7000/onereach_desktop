@@ -12,6 +12,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { accessState, accessLabel, accessPresetToIso } from '../../spaces/spaces.js';
 
 const NOW = Date.parse('2026-08-06T12:00:00.000Z');
@@ -102,5 +104,49 @@ describe('accessPresetToIso', () => {
     const iso = accessPresetToIso('7d', NOW) as string;
     expect(accessState({ accessExpiresAt: iso }, NOW)).toBe('active');
     expect(accessLabel({ accessExpiresAt: iso }, NOW)).toBe('until 13 Aug');
+  });
+});
+
+// ── 2026-08-18: confirms + tooltips must not lie about access ────────
+describe('access controls tell the truth (ADR-065 fallout)', () => {
+  // Same resolution the sibling source-scan suites use: vitest's cwd
+  // differs between the lite project and the repo root.
+  const src = (): string => {
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((p) => resolve(p))
+      .find((p) => existsSync(p));
+    if (found === undefined) throw new Error('spaces.ts not found');
+    return readFileSync(found, 'utf8');
+  };
+
+  it('the visibility toggle no longer claims account-wide sight', () => {
+    const s = src();
+    // The pre-ADR-065 copy promised everyone in the account could see it.
+    expect(s).not.toContain('Everyone in the account sees this Space');
+    expect(s).not.toContain('Click to open it to everyone in the account');
+    // and points at the control that actually grants access
+    expect(s).toContain('Add people…');
+  });
+
+  it('marking a Space open is confirmed AND says it does not grant access', () => {
+    const s = src();
+    const i = s.indexOf("'Mark as open?'");
+    expect(i).toBeGreaterThan(-1);
+    const block = s.slice(i, i + 700);
+    expect(block).toContain('MEMBERSHIP');
+    expect(block).toContain('does NOT let anyone else see it');
+  });
+
+  it('removing a member is confirmed and states the consequence', () => {
+    const s = src();
+    const i = s.indexOf('async function removeMember(');
+    expect(i).toBeGreaterThan(-1);
+    const block = s.slice(i, i + 1200);
+    // The confirm must come BEFORE the revoke call.
+    const confirmAt = block.indexOf('askToConfirm(');
+    const revokeAt = block.indexOf('members.remove(');
+    expect(confirmAt).toBeGreaterThan(-1);
+    expect(revokeAt).toBeGreaterThan(confirmAt);
+    expect(block).toContain('loses access');
   });
 });

@@ -1950,10 +1950,25 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     share: () => {
       void (async () => {
         if (bridge === undefined) return;
+        // The old copy claimed this made the Space "visible to the
+        // account". Since ADR-065 that is FALSE: visibility is governed
+        // solely by creator + [:HAS_ACCESS] membership, and this flag
+        // is carried for join/discovery semantics not yet designed.
+        // Saying so beats a confident lie on a security-shaped control
+        // (2026-08-18 user question: "what does open to account do?").
+        const ok = await askToConfirm(
+          'Mark as open?',
+          'Who can see this Space is decided by MEMBERSHIP — the people you add, ' +
+            'plus you as its creator. Marking it open records the intent, but on ' +
+            'its own it does NOT let anyone else see it.\n\n' +
+            'To actually share it, use "Add people…".',
+          'Mark as open'
+        );
+        if (!ok) return;
         const envelope = await bridge.updateSpace(space.id, { visibility: 'open' });
         showToast(
           envelope.ok
-            ? `"${space.name}" is now visible to the account`
+            ? `"${space.name}" marked open — add people to share it`
             : envelope.error.message
         );
         if (envelope.ok) await loadSpaces();
@@ -4613,7 +4628,7 @@ function buildMemberChip(
   remove.textContent = '×';
   remove.setAttribute('aria-label', `Remove ${member.name}`);
   remove.addEventListener('click', () => {
-    void removeMember(spaceId, member.id, refresh);
+    void removeMember(spaceId, member.id, refresh, member.name);
   });
   chip.appendChild(remove);
   return chip;
@@ -5605,10 +5620,24 @@ export function buildMemberPickerRow(
 async function removeMember(
   spaceId: string,
   memberId: string,
-  refresh?: () => Promise<void>
+  refresh?: () => Promise<void>,
+  memberName?: string
 ): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
+  // Revoking access was a SILENT one-click action (2026-08-18 audit):
+  // no confirm, no undo, and — post ADR-065 — membership is the ONLY
+  // thing granting visibility, so this is the single most consequential
+  // control in the pane. It now says what it takes away.
+  const who = memberName !== undefined && memberName.length > 0 ? memberName : 'this member';
+  const ok = await askToConfirm(
+    `Remove ${who}?`,
+    `${who} loses access to this Space and everything in it. ` +
+      'Nothing is deleted, and you can add them again — but they will not ' +
+      'see the Space until you do.',
+    'Remove'
+  );
+  if (!ok) return;
   try {
     const envelope = await bridge.members.remove(spaceId, memberId);
     if (envelope.ok === false) {
@@ -5645,9 +5674,12 @@ function buildSpaceVisibilityRow(space: RendererSpace): HTMLElement {
   // State is carried by the ::before dot (amber = restricted) plus
   // these words. The old 🔓/🔒 pair was indistinguishable at 11px.
   toggle.textContent = restricted ? 'Members only' : 'Open to account';
+  // ADR-065: membership decides visibility, not this flag. The old
+  // tooltip promised account-wide sight in both directions — a
+  // security-shaped claim the code has not honoured since 2026-08-13.
   toggle.title = restricted
-    ? 'Only members see this Space. Click to open it to everyone in the account.'
-    : 'Everyone in the account sees this Space. Click to restrict it to members.';
+    ? 'Members only. Visibility is granted by adding people — use "Add people…".'
+    : 'Marked open. People still only see this Space once you add them ("Add people…").';
   toggle.addEventListener('click', () => {
     void toggleSpaceVisibility(space);
   });
