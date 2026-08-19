@@ -59,11 +59,19 @@ const SCORES = {
   'pb-bad': { title: 'Draft', s: 0.2 },
 };
 
+/**
+ * Every caller must establish access — the default resolver fails
+ * closed, so a test that omits this correctly gets an empty answer.
+ * The fixtures all live in space 'ops'.
+ */
+const ALLOW_OPS = { visibleSpaceIds: async () => new Set(['ops']) };
+
 function deps(overrides = {}) {
   return {
     playbookSearch: fakeSearch(),
     ai: fakeAi(SCORES),
     verdictStore: qa.createMemoryVerdictStore(),
+    access: ALLOW_OPS,
     ...overrides,
   };
 }
@@ -225,5 +233,103 @@ describe('answerPlaybookQuestion — the agent entry point', () => {
     expect(out.evaluated).toBe(0);
     expect(out.answer).toMatch(/could be assessed|evaluations failed/i);
     expect(out.answer).not.toMatch(/0 scored 0\.8/);
+  });
+});
+
+// ── Permissions ────────────────────────────────────────────────────────────
+//
+// A corpus agent is an exfiltration surface: one question can return
+// titles, previews and critiques of every playbook on the graph. These
+// pin the posture — filter BEFORE reading, and fail CLOSED.
+
+const MIXED = [
+  { id: 'pb-open', spaceId: 'open-space', title: 'Deploy Runbook', content: '# Deploy\n1. Build' },
+  { id: 'pb-secret', spaceId: 'locked-space', title: 'Layoff Plan', content: 'confidential' },
+];
+
+function accessDeps(access, rows = MIXED) {
+  return {
+    playbookSearch: {
+      searchPlaybooks: vi.fn(async () => rows),
+      agenticSearchPlaybooks: vi.fn(async () => ({
+        matches: rows.map((r) => ({ ...r, confidence: 0.9, reason: 'match' })),
+        evaluated: rows.length,
+        totalCandidates: rows.length,
+      })),
+    },
+    ai: fakeAi(SCORES),
+    verdictStore: qa.createMemoryVerdictStore(),
+    access,
+  };
+}
+
+const OPEN_ONLY = { visibleSpaceIds: vi.fn(async () => new Set(['open-space'])) };
+const UNDETERMINED = { visibleSpaceIds: vi.fn(async () => null) };
+
+describe('permissions — filter before reading, fail closed', () => {
+  it('never EVALUATES a playbook the viewer cannot see', async () => {
+    const d = accessDeps(OPEN_ONLY);
+    const out = await qa.answerPlaybookQuestion('which are well written?', {}, d);
+    expect(out.results.map((r) => r.id)).toEqual(['pb-open']);
+    expect(out.withheld).toBe(1);
+    // The restricted playbook was never sent to the model or cached.
+    const prompts = d.ai.json.mock.calls.map((c) => c[0]).join('\n');
+    expect(prompts).not.toContain('Layoff Plan');
+    expect(prompts).not.toContain('confidential');
+  });
+
+  it('fails CLOSED when access cannot be determined — answers about nothing', async () => {
+    const d = accessDeps(UNDETERMINED);
+    const out = await qa.answerPlaybookQuestion('which are well written?', {}, d);
+    expect(out.results).toEqual([]);
+    expect(out.accessUndetermined).toBe(true);
+    expect(d.ai.json).not.toHaveBeenCalled();
+    expect(out.answer).toMatch(/could not be established/i);
+  });
+
+  it('says WHY it is empty rather than implying the corpus is bad', async () => {
+    const d = accessDeps({ visibleSpaceIds: vi.fn(async () => new Set()) });
+    const out = await qa.answerPlaybookQuestion('which are well written?', {}, d);
+    expect(out.answer).toMatch(/outside your access/i);
+    expect(out.answer).not.toMatch(/0 scored/);
+  });
+
+  it('gates RETRIEVAL too — a match leaks a title and a reason', async () => {
+    const d = accessDeps(OPEN_ONLY);
+    const out = await qa.answerPlaybookQuestion('which playbook covers deploys?', {}, d);
+    expect(out.mode).toBe('retrieval');
+    expect(out.results.map((r) => r.id)).toEqual(['pb-open']);
+    expect(JSON.stringify(out)).not.toContain('Layoff Plan');
+  });
+
+  it('retrieval fails closed as well', async () => {
+    const out = await qa.answerPlaybookQuestion('the deploy runbook', {}, accessDeps(UNDETERMINED));
+    expect(out.results).toEqual([]);
+    expect(out.answer).toMatch(/could not be established/i);
+  });
+
+  it('a row with no spaceId is dropped — unplaceable cannot be shown allowed', async () => {
+    const rows = [{ id: 'pb-orphan', title: 'Orphan', content: 'x' }];
+    const out = await qa.answerPlaybookQuestion(
+      'which are well written?',
+      {},
+      accessDeps(OPEN_ONLY, rows)
+    );
+    expect(out.results).toEqual([]);
+    expect(out.withheld).toBe(1);
+  });
+
+  it('the viewer is passed to the resolver, not assumed', async () => {
+    const d = accessDeps(OPEN_ONLY);
+    await qa.answerPlaybookQuestion('which are well written?', { viewer: { id: 'robb@onereach.com' } }, d);
+    expect(OPEN_ONLY.visibleSpaceIds).toHaveBeenCalledWith({ id: 'robb@onereach.com' });
+  });
+
+  it('filterByAccess is fail-closed on a resolver that throws shape', async () => {
+    const out = await qa.filterByAccess(MIXED, null, {
+      access: { visibleSpaceIds: async () => undefined },
+    });
+    expect(out.visible).toEqual([]);
+    expect(out.undetermined).toBe(true);
   });
 });

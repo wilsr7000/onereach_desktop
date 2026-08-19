@@ -158,3 +158,67 @@ describe('POST /playbook-qa', () => {
     expect(res.status).not.toBe(404);
   });
 });
+
+describe('POST /playbook-qa — viewer scoping', () => {
+  it('passes viewerId from the body through as the viewer', async () => {
+    const answer = vi.fn(async () => ({ mode: 'quality', answer: '', results: [] }));
+    _setQa({ answerPlaybookQuestion: answer });
+    await _serve(_reloadGateway());
+    await _post(server, '/playbook-qa', { question: 'rate these', viewerId: 'robb@onereach.com' });
+    expect(answer.mock.calls[0][1].viewer).toEqual({ id: 'robb@onereach.com' });
+  });
+
+  it('accepts the X-Viewer-Id header for callers that cannot shape a body', async () => {
+    const answer = vi.fn(async () => ({ mode: 'quality', answer: '', results: [] }));
+    _setQa({ answerPlaybookQuestion: answer });
+    await _serve(_reloadGateway());
+
+    const addr = server.address();
+    const payload = JSON.stringify({ question: 'rate these' });
+    const res = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: addr.address,
+          port: addr.port,
+          method: 'POST',
+          path: '/playbook-qa',
+          headers: {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+            'X-Viewer-Id': 'melanie@onereach.com',
+          },
+        },
+        async (r) => resolve({ status: r.statusCode, body: await _readJson(r) })
+      );
+      req.on('error', reject);
+      req.write(payload);
+      req.end();
+    });
+    expect(res.status).toBe(200);
+    expect(answer.mock.calls[0][1].viewer).toEqual({ id: 'melanie@onereach.com' });
+  });
+
+  it('no viewer means NO viewer — never a default that widens access', async () => {
+    const answer = vi.fn(async () => ({ mode: 'quality', answer: '', results: [] }));
+    _setQa({ answerPlaybookQuestion: answer });
+    await _serve(_reloadGateway());
+    await _post(server, '/playbook-qa', { question: 'rate these' });
+    expect(answer.mock.calls[0][1].viewer).toBeUndefined();
+  });
+
+  it('relays the withheld count so a caller knows the answer is scoped', async () => {
+    _setQa({
+      answerPlaybookQuestion: vi.fn(async () => ({
+        mode: 'quality',
+        answer: '2 were outside your access and were not assessed.',
+        results: [],
+        withheld: 2,
+        accessUndetermined: false,
+      })),
+    });
+    await _serve(_reloadGateway());
+    const res = await _post(server, '/playbook-qa', { question: 'rate these' });
+    expect(res.body.withheld).toBe(2);
+    expect(res.body.answer).toContain('outside your access');
+  });
+});
