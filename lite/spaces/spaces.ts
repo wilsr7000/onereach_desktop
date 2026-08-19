@@ -997,11 +997,20 @@ function wireSidebarSections(): void {
 }
 
 function expandAndFocusSearch(): void {
-  setSectionCollapsed('search', false);
-  const input = document.getElementById('spaces-sidebar-search-input');
+  // ⌘F means "search content", and content search lives in the main
+  // pane now. The sidebar box is a nav FILTER, not a search.
+  const input = document.getElementById('spaces-items-search-input');
   if (input instanceof HTMLInputElement) {
     input.focus();
     input.select();
+    return;
+  }
+  // No main-pane box on this surface — fall back to the sidebar filter.
+  setSectionCollapsed('search', false);
+  const filter = document.getElementById('spaces-sidebar-search-input');
+  if (filter instanceof HTMLInputElement) {
+    filter.focus();
+    filter.select();
   }
 }
 
@@ -5882,20 +5891,66 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   const actions = document.createElement('div');
   actions.className = 'spaces-view-header-actions';
 
-  // Sprint 3: items-scoped search input. Available everywhere except
-  // Home (Home has its own discovery affordances).
-  if (state.activeScopeId !== HOME_SCOPE_ID) {
+  // THE content search (2026-08-19). One box, in the wide pane where
+  // results have room, with scope as a CONTROL rather than as a second
+  // input somewhere else. Previously the narrow sidebar hosted the BROAD
+  // cross-space search (results crammed into a tree, hidden behind a
+  // collapsed section) while this wide pane hosted the narrowest one —
+  // the scopes were inverted and neither box was "the" search. Home gets
+  // it too now: Home is not a Space, so it simply searches everything.
+  {
+    const onHome = state.activeScopeId === HOME_SCOPE_ID;
+    const searchWrap = document.createElement('div');
+    searchWrap.className = 'spaces-items-search-wrap';
+
+    const scopedToSpace = state.itemsSearchScope === 'space' && !onHome;
     const search = document.createElement('input');
     search.type = 'search';
     search.className = 'spaces-items-search';
     search.id = 'spaces-items-search-input';
-    search.placeholder = 'Search this space…';
-    search.setAttribute('aria-label', 'Search assets in this space');
+    search.placeholder = scopedToSpace ? 'Search this space…' : 'Search all spaces…';
+    search.setAttribute(
+      'aria-label',
+      scopedToSpace ? 'Search assets in this space' : 'Search assets in all spaces'
+    );
     search.value = state.itemsSearchQuery;
     search.addEventListener('input', () => {
       onItemsSearchChange(search.value);
     });
-    actions.appendChild(search);
+    searchWrap.appendChild(search);
+
+    // Scope toggle — only meaningful when there IS a space to narrow to.
+    if (!onHome) {
+      const scope = document.createElement('div');
+      scope.className = 'spaces-items-search-scope';
+      scope.setAttribute('role', 'group');
+      scope.setAttribute('aria-label', 'Search scope');
+      const options: ReadonlyArray<{ key: 'space' | 'all'; label: string }> = [
+        { key: 'space', label: 'This space' },
+        { key: 'all', label: 'All spaces' },
+      ];
+      for (const opt of options) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'spaces-items-search-scope-btn';
+        btn.textContent = opt.label;
+        const on = state.itemsSearchScope === opt.key;
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (on) btn.classList.add('is-on');
+        btn.addEventListener('click', () => {
+          if (state.itemsSearchScope === opt.key) return;
+          state.itemsSearchScope = opt.key;
+          // Re-run against the new scope when a query is standing —
+          // the seq guard supersedes whatever the old scope had in
+          // flight. Otherwise just repaint so the toggle reflects it.
+          if (state.itemsSearchQuery.trim().length > 0) void runItemsSearch();
+          else renderItemList({});
+        });
+        scope.appendChild(btn);
+      }
+      searchWrap.appendChild(scope);
+    }
+    actions.appendChild(searchWrap);
   }
 
   // Sprint 1: "+ New" button to open the new-asset modal. Available
@@ -16809,9 +16864,18 @@ async function submitNewAsset(): Promise<void> {
           return;
         }
         const pickedName = agentLibrarySelection.name;
+        const libraryAgentId = envelope.value.id;
         closeNewAssetDialog();
         showToast(`Added agent "${pickedName}" from the library`);
         await loadItems();
+        // Agents were the ONE create path that never enriched: both
+        // agent sub-paths return early, before the shared
+        // autoEnrichOnCreate call at the end of this function (audit
+        // 2026-08-17: agent 0/1 had ai_*, while knowledge/journey/
+        // document/upload/paste all did). An agent's OKF body is
+        // exactly what a "what does this agent do?" summary should be
+        // built from, so enrich it like any other content asset.
+        void autoEnrichOnCreate(libraryAgentId, { kind: 'agent', hasContent: true });
         return;
       }
       const agentInput = document.getElementById('spaces-new-asset-agent-input');
@@ -16860,9 +16924,13 @@ async function submitNewAsset(): Promise<void> {
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
+      const createdAgentId = envelope.value.id;
       closeNewAssetDialog();
       showToast(`Added agent "${agentName}"`);
       await loadItems();
+      // Same as the library path above — the OKF text is the content
+      // Claude should summarize.
+      void autoEnrichOnCreate(createdAgentId, { kind: 'agent', hasContent: true });
       return;
     }
     if (newAssetMode === 'knowledge') {

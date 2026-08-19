@@ -399,9 +399,13 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src).toMatch(/let renderedSpacesSignature/);
     const render = bodyOf('function renderSpaceList(): void {', 400);
     expect(render).toContain('if (nextSignature === renderedSpacesSignature) return;');
-    // F3: both clear paths supersede in-flight searches.
-    const sched = bodyOf('function scheduleGlobalItemSearch', 900);
-    expect(sched).toMatch(/globalSearchSeq\+\+;[\s\S]{0,120}renderGlobalSearchResults\(null\)/);
+    // F3: a cleared (or re-scoped) box supersedes in-flight searches.
+    // 2026-08-19: the sidebar's global search was retired for ONE
+    // main-pane search with a scope control, so the invariant moved to
+    // runItemsSearch — the hazard is identical and now front and centre.
+    const run = bodyOf('async function runItemsSearch', 1600);
+    expect(run).toMatch(/const seq = \+\+itemsSearchSeq;/);
+    expect(run).toMatch(/if \(seq !== itemsSearchSeq\) return;/);
     // F4: keyboard activation for role=button rows.
     expect(src).toContain("if (event.key !== 'Enter' && event.key !== ' ') return;");
     // Scope switch cancels a stale pending tile focus.

@@ -427,8 +427,8 @@
               type="button"
               id="spaces-sidebar-search-toggle"
               class="spaces-toolbar-icon-button"
-              title="Search spaces and items (⌘F)"
-              aria-label="Search spaces and items"
+              title="Filter spaces by name"
+              aria-label="Filter spaces by name"
             >⌕</button>
             <button
               type="button"
@@ -511,21 +511,24 @@
               aria-expanded="false"
             >
               <span class="spaces-side-chevron" aria-hidden="true">▸</span>
-              <span class="spaces-side-header-label">Search</span>
+              <span class="spaces-side-header-label">Filter</span>
             </button>
             <div class="spaces-side-body">
+              <!-- A FILTER, not a search (2026-08-19). It narrows the
+                   lists below by Space name. Content search lives in the
+                   main pane with a scope control; this box used to do
+                   both and rendered results into a cramped tree here. -->
               <div class="spaces-sidebar-search">
                 <input
                   type="search"
                   id="spaces-sidebar-search-input"
                   class="spaces-sidebar-search-input"
-                  placeholder="Search spaces + items…"
+                  placeholder="Filter spaces by name…"
                   autocomplete="off"
                   spellcheck="false"
-                  aria-label="Search spaces by name and items by content"
+                  aria-label="Filter spaces by name"
                 />
               </div>
-              <ul class="spaces-side-tree" id="spaces-search-results"></ul>
             </div>
           </section>
 
