@@ -642,6 +642,27 @@ body {
   color: #8b8e9c;
 }
 .spaces-view-header-members-avatars { display: inline-flex; }
+/* Named mode (<= 7 people): avatar + name pairs, so who is here reads
+   at a glance without opening the People panel. Avatars stop overlapping
+   here — a name needs the gap that stacked faces deliberately remove. */
+.spaces-view-header-members-avatars:has(.spaces-view-header-member) { gap: 10px; }
+.spaces-view-header-member {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.spaces-view-header-members-avatars .spaces-view-header-member .spaces-avatar {
+  margin-left: 0;
+}
+.spaces-view-header-member-name {
+  font-size: 12px;
+  color: #d8d8d8;
+  max-width: 13ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .spaces-view-header-members-avatars .spaces-avatar { margin-left: -6px; }
 .spaces-view-header-members-avatars .spaces-avatar:first-child { margin-left: 0; }
 .spaces-view-header-members-summary { font-size: 12px; color: #8b8e9c; }

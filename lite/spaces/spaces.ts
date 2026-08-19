@@ -5707,6 +5707,21 @@ export const machineNamedLast = <T extends { name: string }>(entries: T[]): T[] 
   return [...entries].sort((a, b) => Number(uuidish(a.name)) - Number(uuidish(b.name)));
 };
 
+/**
+ * Display name for the header People strip. Real name when we have one,
+ * else the id (which is an email under ADR-068); the @domain is trimmed
+ * because a header chip has no room for it and the avatar's tooltip
+ * already carries the full value.
+ */
+export function personShortName(member: { id: string; name: string }): string {
+  const raw = (member.name.trim().length > 0 ? member.name : member.id).trim();
+  const at = raw.indexOf('@');
+  // A leading '@' leaves nothing to show — fall back rather than
+  // rendering a bare domain as if it were somebody's name.
+  const short = (at >= 0 ? raw.slice(0, at) : raw).trim();
+  return short.length > 0 ? short : member.id;
+}
+
 export function personInitials(name: string): string {
   const clean = name.includes('@') ? name.split('@')[0] ?? name : name;
   const parts = clean
@@ -5741,6 +5756,9 @@ function buildPersonAvatar(member: { id: string; name: string }, size: 'sm' | 'm
  * header ("needs to be more obvious who is part of it", 2026-08-12).
  * Async-populated; clicking anywhere opens the People panel.
  */
+/** Show real names on the header strip up to this many people. */
+const HEADER_MEMBER_NAMES_MAX = 7;
+
 function buildSpaceMembersStrip(space: RendererSpace): HTMLElement {
   const strip = document.createElement('button');
   strip.type = 'button';
@@ -5774,17 +5792,40 @@ function buildSpaceMembersStrip(space: RendererSpace): HTMLElement {
       }
       const members = envelope.value;
       holder.replaceChildren();
-      for (const member of members.slice(0, 8)) {
-        holder.appendChild(buildPersonAvatar(member, 'sm'));
+      // Names, not just faces (2026-08-19: "I want to see the names of
+      // the people in the space without clicking unless it a large
+      // number like more than 7"). A small team is the interesting case
+      // and it fits — so spell it out. Past the threshold names stop
+      // fitting on a header line, so fall back to stacked avatars plus a
+      // count, and the People panel carries the full roster.
+      const named = members.length > 0 && members.length <= HEADER_MEMBER_NAMES_MAX;
+      if (named) {
+        for (const member of members) {
+          const person = document.createElement('span');
+          person.className = 'spaces-view-header-member';
+          person.appendChild(buildPersonAvatar(member, 'sm'));
+          const nameEl = document.createElement('span');
+          nameEl.className = 'spaces-view-header-member-name';
+          nameEl.textContent = personShortName(member);
+          person.appendChild(nameEl);
+          holder.appendChild(person);
+        }
+      } else {
+        for (const member of members.slice(0, 8)) {
+          holder.appendChild(buildPersonAvatar(member, 'sm'));
+        }
+        if (members.length > 8) {
+          const more = document.createElement('span');
+          more.className = 'spaces-avatar spaces-avatar-sm spaces-avatar-more';
+          more.textContent = `+${members.length - 8}`;
+          holder.appendChild(more);
+        }
       }
-      if (members.length > 8) {
-        const more = document.createElement('span');
-        more.className = 'spaces-avatar spaces-avatar-sm spaces-avatar-more';
-        more.textContent = `+${members.length - 8}`;
-        holder.appendChild(more);
-      }
-      summary.textContent =
-        members.length === 0
+      // With names on screen the count is noise; keep it only when the
+      // roster is collapsed to faces (or empty).
+      summary.textContent = named
+        ? ''
+        : members.length === 0
           ? 'Nobody yet — add people'
           : `${members.length} ${members.length === 1 ? 'person' : 'people'}`;
     } catch {
