@@ -1697,6 +1697,7 @@ export function buildSpaceContextEntries(
     editObjective: () => void;
     convertShared: () => void;
     convertUser: () => void;
+    setPlaybook: () => void;
     deleteSpace: () => void;
     togglePin: () => void;
   }
@@ -1736,6 +1737,11 @@ export function buildSpaceContextEntries(
     // the discoverable route ("how do I redo the description after
     // creation", 2026-08-13 user report).
     { type: 'action', label: 'Edit description…', run: handlers.editObjective },
+    // Designating the plan was reachable ONLY by selecting the asset and
+    // using the detail-pane button (2026-08-18 user report: "how does a
+    // user assign a current playbook to the space?"). Here it's one
+    // right-click.
+    { type: 'action', label: 'Set current playbook…', run: handlers.setPlaybook },
     { type: 'separator' },
     {
       type: 'submenu',
@@ -1991,6 +1997,9 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     },
     convertShared: () => void toggleSpaceKind(space.id),
     convertUser: () => void toggleSpaceKind(space.id),
+    setPlaybook: () => {
+      void openSetPlaybookPicker(space.id, space.name);
+    },
     deleteSpace: () => {
       void performSoftDelete(space.id);
     },
@@ -5186,6 +5195,141 @@ async function openCreateTicketPrompt(spaceId: string): Promise<void> {
     await loadSharedSpaceDashboard(spaceId);
   } catch (err) {
     window.logging?.error?.('spaces', 'createTicket failed', { spaceId, error: messageFrom(err) });
+    showToast(messageFrom(err));
+  }
+}
+
+/**
+ * "Set current playbook…" picker (2026-08-18). Until now the ONLY way
+ * to designate a plan was to find the asset, select it, and use the
+ * detail-pane button — archaeology, not an affordance. This lists the
+ * Space's assets (playbook-shaped first, the current one marked) and
+ * designates the chosen one.
+ *
+ * Works on any Space from the sidebar's right-click, including one that
+ * isn't the active scope, so it fetches rather than reading `state`.
+ */
+async function openSetPlaybookPicker(spaceId: string, spaceName: string): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  document.querySelector('.spaces-member-picker-backdrop')?.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-member-picker-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-member-picker';
+  const head = document.createElement('div');
+  head.className = 'spaces-member-picker-head';
+  const title = document.createElement('span');
+  title.textContent = `Current playbook — ${spaceName}`;
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'spaces-member-picker-close';
+  close.setAttribute('aria-label', 'Close');
+  close.textContent = '×';
+  const dismiss = (): void => backdrop.remove();
+  close.addEventListener('click', dismiss);
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  const list = document.createElement('div');
+  list.className = 'spaces-member-picker-list';
+  const loading = document.createElement('p');
+  loading.className = 'spaces-member-picker-empty';
+  loading.textContent = 'Loading assets…';
+  list.appendChild(loading);
+  panel.appendChild(list);
+  backdrop.appendChild(panel);
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) dismiss();
+  });
+  document.body.appendChild(backdrop);
+
+  let items: RendererItemSummary[] = [];
+  let currentId: string | null = null;
+  try {
+    const [listed, current] = await Promise.all([
+      bridge.items.list(spaceId),
+      bridge.playbooks.current(spaceId),
+    ]);
+    if (listed.ok === true) items = listed.value as RendererItemSummary[];
+    if (current.ok === true && current.value !== null) {
+      currentId = (current.value as { id?: string }).id ?? null;
+    }
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'playbook picker load failed', {
+      spaceId,
+      error: messageFrom(err),
+    });
+  }
+
+  list.replaceChildren();
+  if (items.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-member-picker-empty';
+    empty.textContent = 'This Space has no assets yet — add one first.';
+    list.appendChild(empty);
+    return;
+  }
+
+  // Playbook-shaped assets lead: they're what a user is looking for.
+  // Any kind remains selectable — promoting a note IS the feature.
+  const ordered = [...items].sort((a, b) => {
+    const ap = a.kind === 'playbook' ? 0 : 1;
+    const bp = b.kind === 'playbook' ? 0 : 1;
+    if (ap !== bp) return ap - bp;
+    return a.title.localeCompare(b.title);
+  });
+
+  for (const item of ordered) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'spaces-member-picker-row';
+    const name = document.createElement('span');
+    name.className = 'spaces-member-picker-name';
+    name.textContent = item.title.length > 0 ? item.title : '(untitled)';
+    row.appendChild(name);
+    const meta = document.createElement('span');
+    meta.className = 'spaces-member-picker-email';
+    meta.textContent = item.id === currentId ? 'current playbook' : kindLabel(item.kind);
+    row.appendChild(meta);
+    if (item.id === currentId) {
+      row.disabled = true;
+      row.classList.add('is-current');
+    } else {
+      row.addEventListener('click', () => {
+        dismiss();
+        void setSpacePlaybook(spaceId, item.id, item.title);
+      });
+    }
+    list.appendChild(row);
+  }
+}
+
+/** Designate an asset as the Space's current playbook (picker path). */
+async function setSpacePlaybook(
+  spaceId: string,
+  itemId: string,
+  title: string
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.playbooks.set(spaceId, itemId);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(`"${title}" is now the current playbook`);
+    if (state.activeScopeId === spaceId) {
+      await Promise.all([loadItems(), loadSharedSpaceDashboard(spaceId)]);
+    }
+  } catch (err) {
+    window.logging?.error?.('spaces', 'setSpacePlaybook failed', {
+      spaceId,
+      error: messageFrom(err),
+    });
     showToast(messageFrom(err));
   }
 }

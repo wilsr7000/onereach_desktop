@@ -1623,7 +1623,7 @@ describe('space description editability (2026-08-13 report)', () => {
       { id: 's1', name: 'S', visibility: 'open' } as never,
       {
         share: noop, unshare: noop, addPeople: noop, upload: noop,
-        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop, deleteSpace: noop, togglePin: noop,
+        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop, deleteSpace: noop, togglePin: noop,
       }
     );
     const labels = entries
@@ -1686,6 +1686,7 @@ describe('space context menu — Delete space (2026-08-16)', () => {
         share: () => undefined, unshare: () => undefined, addPeople: () => undefined,
         upload: () => undefined, rename: () => undefined, editObjective: () => undefined,
         convertShared: () => undefined, convertUser: () => undefined,
+        setPlaybook: () => undefined,
         deleteSpace: () => { fired += 1; }, togglePin: () => undefined,
       }
     );
@@ -1695,5 +1696,58 @@ describe('space context menu — Delete space (2026-08-16)', () => {
     expect(del).toBeDefined();
     (del as { run: () => void }).run();
     expect(fired).toBe(1);
+  });
+});
+
+describe('space context menu — every action is wired (coverage contract)', () => {
+  it('fires the matching handler for EVERY action entry, so none can ship dead', async () => {
+    const mod = await import('../../spaces/spaces');
+    const fired: string[] = [];
+    const h = (name: string) => (): void => {
+      fired.push(name);
+    };
+    const handlers = {
+      share: h('share'),
+      unshare: h('unshare'),
+      addPeople: h('addPeople'),
+      upload: h('upload'),
+      rename: h('rename'),
+      editObjective: h('editObjective'),
+      convertShared: h('convertShared'),
+      convertUser: h('convertUser'),
+      setPlaybook: h('setPlaybook'),
+      deleteSpace: h('deleteSpace'),
+      togglePin: h('togglePin'),
+    };
+    const entries = mod.buildSpaceContextEntries(
+      { id: 's1', name: 'X', visibility: 'open', kind: 'user' } as never,
+      handlers
+    );
+    // Walk actions at every depth (submenus included) and run each.
+    const runAll = (list: readonly unknown[]): number => {
+      let n = 0;
+      for (const e of list as Array<Record<string, unknown>>) {
+        if (e.type === 'action' && typeof e.run === 'function' && e.disabled !== true) {
+          (e.run as () => void)();
+          n += 1;
+        }
+        if (e.type === 'submenu' && Array.isArray(e.children)) {
+          n += runAll(e.children as unknown[]);
+        }
+      }
+      return n;
+    };
+    const ran = runAll(entries);
+    expect(ran).toBeGreaterThan(0);
+    // Every entry that ran must have reached a handler — a dead entry
+    // (run: () => undefined, or a stale closure) shows up as a gap here.
+    expect(fired.length).toBe(ran);
+    // And the actions a user reaches for must exist by name.
+    const labels = entries
+      .filter((e) => (e as { type: string }).type === 'action')
+      .map((e) => (e as { label: string }).label);
+    for (const needed of ['Add people…', 'Rename', 'Set current playbook…', 'Delete space…']) {
+      expect(labels, `missing menu action: ${needed}`).toContain(needed);
+    }
   });
 });
