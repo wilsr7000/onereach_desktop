@@ -153,3 +153,37 @@ describe('ADR-074 — every graph WRITE is role-gated or justified', () => {
     expect(block).toContain('hasAccessRoleValues');
   });
 });
+
+// ── ADR-074 UI: setting a role is confirmed in BOTH directions ───────
+describe('ADR-074 — the role toggle', () => {
+  const rendererSrc = (): string => {
+    const found = ['spaces/spaces.ts', 'lite/spaces/spaces.ts']
+      .map((p) => resolve(p))
+      .find((p) => existsSync(p));
+    if (found === undefined) throw new Error('spaces.ts not found');
+    return readFileSync(found, 'utf8');
+  };
+
+  it('renders the current role as the control, with a visible reader pill', () => {
+    const s = rendererSrc();
+    expect(s).toContain('spaces-member-role');
+    expect(s).toContain("role === 'reader' ? 'read-only'");
+    // Flipping targets the OPPOSITE role — a toggle, not a one-way trip.
+    expect(s).toContain("role === 'reader' ? 'writer' : 'reader'");
+  });
+
+  it('confirms in both directions — granting write is as consequential as removing it', () => {
+    const s = rendererSrc();
+    const i = s.indexOf('async function changeMemberRole(');
+    expect(i).toBeGreaterThan(-1);
+    const block = s.slice(i, i + 1800);
+    const confirmAt = block.indexOf('askToConfirm(');
+    const writeAt = block.indexOf('members.add(');
+    expect(confirmAt).toBeGreaterThan(-1);
+    expect(writeAt).toBeGreaterThan(confirmAt); // confirm precedes the write
+    // Copy wraps across lines in source — assert the halves.
+    expect(block).toContain('can no longer add');
+    expect(block).toContain('edit or delete anything in it');
+    expect(block).toContain('including things other people put here');
+  });
+});

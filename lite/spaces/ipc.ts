@@ -1159,7 +1159,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     SPACES_IPC.MEMBERS_ADD,
     async (
       _event: IpcMainInvokeEvent,
-      payload?: { spaceId?: unknown; memberId?: unknown; expiresAt?: unknown }
+      payload?: { spaceId?: unknown; memberId?: unknown; expiresAt?: unknown; role?: unknown }
     ): Promise<SpacesIpcResult<SpaceMember>> => {
       try {
         const spaceId = typeof payload?.spaceId === 'string' ? payload.spaceId : '';
@@ -1186,11 +1186,16 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           );
         }
         const expiresAt = (rawExpiry ?? null) as string | null;
-        const value = await getSpacesApi().members.add(
-          spaceId,
-          memberId,
-          hasExpiry ? { expiresAt } : {}
-        );
+        // ADR-074 — role rides the same three-intent contract: only
+        // forwarded when the caller set it, and only when it is one of
+        // the two legal values (an unknown string must not reach the
+        // SDK, which would reject it as an error the user never caused).
+        const rawRole = payload?.role;
+        const hasRole = rawRole === 'reader' || rawRole === 'writer';
+        const value = await getSpacesApi().members.add(spaceId, memberId, {
+          ...(hasExpiry ? { expiresAt } : {}),
+          ...(hasRole ? { role: rawRole } : {}),
+        });
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

@@ -4454,6 +4454,49 @@ function promptAccessDuration(who: string): Promise<string | null | undefined> {
   });
 }
 
+/**
+ * ADR-074 — flip a member between read-only and full access. Confirms
+ * in BOTH directions: restricting takes something away, and granting
+ * write hands someone the ability to change or delete this Space's
+ * contents. Neither should happen on an unexplained click.
+ */
+async function changeMemberRole(
+  spaceId: string,
+  member: LiteSpacesMemberView,
+  next: 'reader' | 'writer',
+  refresh?: () => Promise<void>
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const who = member.name.length > 0 ? member.name : member.id;
+  const ok = await askToConfirm(
+    next === 'reader' ? `Make ${who} read-only?` : `Let ${who} make changes?`,
+    next === 'reader'
+      ? `${who} keeps seeing everything in this Space, but can no longer add, ` +
+        'edit or delete anything in it. You can undo this at any time.'
+      : `${who} will be able to add, edit and delete this Space's contents — ` +
+        'including things other people put here.',
+    next === 'reader' ? 'Make read-only' : 'Allow edits'
+  );
+  if (!ok) return;
+  try {
+    const envelope = await bridge.members.add(spaceId, member.id, { role: next });
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(next === 'reader' ? `${who} is now read-only` : `${who} can make changes`);
+    if (refresh !== undefined) await refresh();
+    else await loadSharedSpaceDashboard(spaceId);
+  } catch (err) {
+    window.logging?.error?.('spaces', 'changeMemberRole failed', {
+      spaceId,
+      error: messageFrom(err),
+    });
+    showToast(messageFrom(err));
+  }
+}
+
 /** Change (or renew) a member's access duration. */
 async function changeMemberAccess(
   spaceId: string,
@@ -4536,6 +4579,25 @@ function buildMemberChip(
     void changeMemberAccess(spaceId, member, refresh);
   });
   chip.appendChild(access);
+
+  // ADR-074 — read-only members. Same affordance grammar as access
+  // duration: the CURRENT state is the button, clicking flips it. A
+  // writer shows nothing loud (writing is the norm); a reader wears a
+  // visible "read-only" pill so the restriction is never a surprise.
+  const role = member.role === 'reader' ? 'reader' : 'writer';
+  const roleBtn = document.createElement('button');
+  roleBtn.type = 'button';
+  roleBtn.className = `spaces-member-role spaces-member-role-${role}`;
+  roleBtn.textContent = role === 'reader' ? 'read-only' : '✎';
+  roleBtn.title =
+    role === 'reader'
+      ? `${member.name || member.id} can see everything here but change nothing — click to allow edits`
+      : `${member.name || member.id} can add and change things — click to make read-only`;
+  roleBtn.setAttribute('aria-label', roleBtn.title);
+  roleBtn.addEventListener('click', () => {
+    void changeMemberRole(spaceId, member, role === 'reader' ? 'writer' : 'reader', refresh);
+  });
+  chip.appendChild(roleBtn);
 
   const remove = document.createElement('button');
   remove.type = 'button';
@@ -15783,8 +15845,17 @@ function onItemsSearchChange(query: string): void {
   }, 200);
 }
 
+/**
+ * Supersedes in-flight searches. Carried over from the global search
+ * this box replaced (2026-08-08: "honest search clears") — clearing the
+ * box or switching scope must not let an older response paint over the
+ * result. Now the ONLY search, so the hazard is front and centre.
+ */
+let itemsSearchSeq = 0;
+
 async function runItemsSearch(): Promise<void> {
   const query = state.itemsSearchQuery.trim();
+  const seq = ++itemsSearchSeq;
   if (query.length === 0) {
     state.itemsSearchResults = null;
     renderItemList({});
@@ -15804,6 +15875,7 @@ async function runItemsSearch(): Promise<void> {
       ...(spaceId !== undefined ? { spaceId } : {}),
       limit: 50,
     });
+    if (seq !== itemsSearchSeq) return; // superseded — never paint stale
     if (envelope.ok === false) {
       state.itemsSearchResults = [];
       renderItemList({ error: envelope.error.message });
@@ -15812,6 +15884,7 @@ async function runItemsSearch(): Promise<void> {
     state.itemsSearchResults = envelope.value as RendererItemSummary[];
     renderItemList({});
   } catch (err) {
+    if (seq !== itemsSearchSeq) return;
     window.logging?.warn?.('spaces', 'items search failed', { error: messageFrom(err) });
     state.itemsSearchResults = [];
     renderItemList({ error: messageFrom(err) });

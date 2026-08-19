@@ -620,6 +620,33 @@ body {
   letter-spacing: 0.2px;
 }
 
+/* THE content search: one box in the main pane, scope as a control. */
+.spaces-items-search-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.spaces-items-search-scope {
+  display: inline-flex;
+  border: 1px solid #262833;
+  border-radius: 999px;
+  overflow: hidden;
+  flex: none;
+}
+.spaces-items-search-scope-btn {
+  appearance: none;
+  background: transparent;
+  border: none;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  color: #8b8e9c;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.spaces-items-search-scope-btn:hover { background: #1d1f28; color: #d8d8d8; }
+.spaces-items-search-scope-btn.is-on { background: #2a2440; color: #c4b5fd; }
+
 /* What's happened in this space — a dense metadata list in the header's
    orientation zone. Deliberately NOT the Home timeline's shape: no dot,
    no excerpt, no space chip, one line each. The merged chat-style feed
@@ -9566,3 +9593,19 @@ body {
 .spaces-journey-confidence.conf-high { color: #6fd39b; }
 .spaces-journey-confidence.conf-medium { color: #d9b45c; }
 .spaces-journey-confidence.conf-low { color: #d98d8d; }
+
+/* ── ADR-074: member role pill ─────────────────────────────────────── */
+.spaces-member-role {
+  appearance: none; border: 1px solid transparent; background: transparent;
+  border-radius: 999px; padding: 1px 7px; font-size: 10px; cursor: pointer;
+  color: var(--or-text-muted, rgba(255,255,255,0.4)); line-height: 1.4;
+}
+.spaces-member-role-writer:hover {
+  border-color: rgba(255,255,255,0.2); color: var(--or-text, #ddd);
+}
+/* A restriction must never be a surprise: readers wear a visible pill. */
+.spaces-member-role-reader {
+  border-color: rgba(217,180,92,0.5); background: rgba(217,180,92,0.12);
+  color: #e2c684; letter-spacing: 0.02em;
+}
+.spaces-member-role-reader:hover { background: rgba(217,180,92,0.22); }

@@ -915,7 +915,7 @@ interface SpacesMembersBridge {
      * Omit to leave an existing grant's expiry alone; `null` for
      * permanent; an ISO instant to time-limit it.
      */
-    opts?: { expiresAt?: string | null }
+    opts?: { expiresAt?: string | null; role?: 'reader' | 'writer' }
   ): Promise<SpacesIpcResultView<SpacesMemberView>>;
   /** Search the account's people + agents for the add-member picker. */
   searchLibrary(
@@ -1908,6 +1908,8 @@ const spaces: SpacesBridge = {
         // and a value are three different intents (leave / permanent
         // / expire) all the way down to the Cypher.
         ...(opts !== undefined && 'expiresAt' in opts ? { expiresAt: opts.expiresAt } : {}),
+        // ADR-074 — same three-intent discipline for role.
+        ...(opts !== undefined && 'role' in opts ? { role: opts.role } : {}),
       }) as Promise<SpacesIpcResultView<{ kind: string; id: string; name: string; accessExpiresAt?: string }>>,
     searchLibrary: (q, limit) =>
       ipcRenderer.invoke(SPACES_MEMBERS_SEARCH_LIBRARY, {

@@ -1161,6 +1161,8 @@ interface LiteSpacesIdentityBridge {
 }
 
 interface LiteSpacesMemberView {
+  /** ADR-074 — 'writer' (default) or 'reader' (sees all, changes nothing). */
+  role?: 'reader' | 'writer';
   /** 'Person' or 'Agent'. */
   kind: string;
   id: string;
@@ -1257,7 +1259,7 @@ interface LiteSpacesMembersBridge {
      * permanent access, or an ISO instant to time-limit it. The three
      * are distinct intents all the way to the Cypher.
      */
-    opts?: { expiresAt?: string | null }
+    opts?: { expiresAt?: string | null; role?: 'reader' | 'writer' }
   ): Promise<LiteSpacesIpcResult<LiteSpacesMemberView>>;
   /** Revoke access. No-op when already absent. */
   remove(spaceId: string, memberId: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
