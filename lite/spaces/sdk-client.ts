@@ -248,6 +248,40 @@ const OTHER_SPACE_VISIBLE = `(
         )
       )`;
 
+/**
+ * ADR-074 — read-only members (2026-08-18).
+ *
+ * `[:HAS_ACCESS]` grants SIGHT. Whether a member may also CHANGE things
+ * is carried as `role` on that same edge — a property, deliberately not
+ * a second edge type, so every visibility predicate stays untouched and
+ * there is exactly one place a person's standing is recorded.
+ *
+ *   role = 'writer' (or absent) -> full access. Absent means writer so
+ *                                  every pre-ADR-074 grant keeps working.
+ *   role = 'reader'             -> sees everything, changes nothing.
+ *
+ * The Space's CREATOR is always a writer, with or without an edge:
+ * otherwise marking yourself read-only would lock you out of your own
+ * Space with no way back.
+ *
+ * SPACE_WRITABLE is the mirror of SPACE_VISIBLE and belongs in the
+ * WHERE clause of every mutation that touches a Space or its contents.
+ * `spaces-write-guard.test.ts` enumerates every write query and fails
+ * on any that carries neither the guard nor a written exemption — the
+ * same shape as the read-side visibility inventory, because a
+ * permission enforced on 38 of 39 queries is not a permission.
+ */
+const SPACE_WRITABLE = `(
+        $viewerId <> '' AND (
+          coalesce(s.createdBy, '') = $viewerId
+          OR EXISTS {
+            MATCH (:Person {id: $viewerId})-[w:HAS_ACCESS]->(s)
+            WHERE ${GRANT_LIVE.replace(/r\./g, 'w.')}
+              AND coalesce(w.role, 'writer') <> 'reader'
+          }
+        )
+      )`;
+
 const SPACE_VISIBLE = `(
         $viewerId <> '' AND (
           coalesce(s.createdBy, '') = $viewerId
@@ -264,6 +298,37 @@ const SPACE_VISIBLE = `(
  * space the viewer can see. An item in both a restricted space and an
  * open one is visible — it genuinely lives in the open space.
  */
+/**
+ * ADR-074 — the asset-level mirror of SPACE_WRITABLE. An asset may be
+ * CHANGED when the viewer created it and it lives in no Space (their
+ * own uncategorized note), or when it belongs to at least one Space the
+ * viewer can write. Sight is not enough: a reader on the only Space
+ * holding an asset sees it and cannot touch it.
+ */
+const ASSET_WRITABLE = `(
+        (NOT EXISTS {
+          MATCH (a)-[:BELONGS_TO]->(anyLive:Space)
+          WHERE anyLive.deletedAt IS NULL
+        }
+        AND $viewerId <> ''
+        AND EXISTS {
+          MATCH (:Person {id: $viewerId})-[:CREATED]->(a)
+        })
+        OR EXISTS {
+          MATCH (a)-[:BELONGS_TO]->(ws:Space)
+          WHERE ws.deletedAt IS NULL
+            AND $viewerId <> ''
+            AND (
+              coalesce(ws.createdBy, '') = $viewerId
+              OR EXISTS {
+                MATCH (:Person {id: $viewerId})-[wr:HAS_ACCESS]->(ws)
+                WHERE (wr.expiresUnixMs IS NULL OR wr.expiresUnixMs > $nowMs)
+                  AND coalesce(wr.role, 'writer') <> 'reader'
+              }
+            )
+        }
+      )`;
+
 const ASSET_VISIBLE = `(
         (NOT EXISTS {
           MATCH (a)-[:BELONGS_TO]->(anyLive:Space)
@@ -531,6 +596,7 @@ export const CYPHER = {
    */
   UPDATE_ITEM: `
     MATCH (a:Asset {id: $id})
+      WHERE ${ASSET_WRITABLE}
     FOREACH (x IN CASE WHEN $doSnapshot THEN [1] ELSE [] END |
       CREATE (v:AssetVersion {
         id: $versionId,
@@ -629,7 +695,7 @@ export const CYPHER = {
   RESTORE_ASSET_VERSION: `
     MATCH (a:Asset {id: $id})-[:HAS_VERSION]->(v:AssetVersion {seq: $seq})
       WHERE a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     CREATE (cur:AssetVersion {
       id: $versionId,
       assetId: a.id,
@@ -676,7 +742,7 @@ export const CYPHER = {
    */
   ANNOTATE_VERSION_BY_HASH: `
     MATCH (a:Asset {id: $id})-[:HAS_VERSION]->(v:AssetVersion {contentHash: $prevHash})
-      WHERE ${ASSET_VISIBLE}
+      WHERE ${ASSET_WRITABLE}
     WITH v ORDER BY v.seq DESC LIMIT 1
     SET v.changeSummary = $summary
     RETURN v.seq AS seq
@@ -701,6 +767,7 @@ export const CYPHER = {
    */
   ADD_TAG: `
     MATCH (a:Asset {id: $id})
+      WHERE ${ASSET_WRITABLE}
     MERGE (t:Tag {name: $tag})
     MERGE (a)-[:TAGGED_AS]->(t)
     RETURN a.id AS id, t.name AS tag
@@ -712,6 +779,7 @@ export const CYPHER = {
    */
   REMOVE_TAG: `
     MATCH (a:Asset {id: $id})-[r:TAGGED_AS]->(t:Tag {name: $tag})
+      WHERE ${ASSET_WRITABLE}
     DELETE r
     RETURN a.id AS id, t.name AS tag
   `,
@@ -1169,6 +1237,7 @@ export const CYPHER = {
   CREATE_AGENT_FROM_LIBRARY: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+          AND ${SPACE_WRITABLE}
     MATCH (g:Agent {id: $agentId})
     // OKF lives on the ASSET for Lite-created agents (the :Agent node
     // never carries okf/definition) — fall back to any existing
@@ -1278,7 +1347,7 @@ export const CYPHER = {
   RENAME_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     OPTIONAL MATCH (other:Space)
       WHERE other.id <> $id
         AND toLower(coalesce(other.name, '')) = toLower($name)
@@ -1310,7 +1379,7 @@ export const CYPHER = {
   UPDATE_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     SET s.updatedAt = $now
     FOREACH (_ IN CASE WHEN $writeDescription THEN [1] ELSE [] END |
       SET s.description = $description
@@ -1402,7 +1471,7 @@ export const CYPHER = {
   SOFT_DELETE_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     SET s.deletedAt = $now,
         s.updatedAt = $now
     RETURN s.id AS id
@@ -1417,7 +1486,7 @@ export const CYPHER = {
    */
   HARD_DELETE_SPACE: `
     MATCH (s:Space {id: $id})
-      WHERE ${SPACE_VISIBLE}
+      WHERE ${SPACE_WRITABLE}
     DELETE s
   `,
 
@@ -1430,7 +1499,7 @@ export const CYPHER = {
   UNDELETE_SPACE: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NOT NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
@@ -1460,6 +1529,7 @@ export const CYPHER = {
   SET_SPACE_KIND: `
     MATCH (s:Space {id: $id})
       WHERE s.deletedAt IS NULL
+        AND ${SPACE_WRITABLE}
     SET s.kind = $kind,
         s.updatedAt = $now
     RETURN s.id AS id, coalesce(s.kind, 'user') AS kind
@@ -1499,6 +1569,7 @@ export const CYPHER = {
   SET_CURRENT_PLAYBOOK: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+          AND ${SPACE_WRITABLE}
     OPTIONAL MATCH (pbAsset:Asset {id: $playbookId})
     OPTIONAL MATCH (pbPlaybook:Playbook {id: $playbookId})
     WITH s, coalesce(pbAsset, pbPlaybook) AS pb
@@ -1591,6 +1662,7 @@ export const CYPHER = {
   CREATE_TICKET: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+          AND ${SPACE_WRITABLE}
     CREATE (a:Asset {
       id: $id,
       type: 'ticket',
@@ -1628,7 +1700,7 @@ export const CYPHER = {
   UPDATE_TICKET: `
     MATCH (a:Asset {id: $id})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     SET a.name = coalesce($title, a.name),
         a.title = coalesce($title, a.title),
         a.description = coalesce($description, a.description),
@@ -1696,7 +1768,8 @@ export const CYPHER = {
     // stays listed so the owner can see WHY someone lost sight of the
     // Space and renew them. Silently dropping the row turns an expired
     // grant into an unexplained disappearance.
-    RETURN head(labels(member)) AS kind,
+    RETURN coalesce(r.role, 'writer') AS role,
+           head(labels(member)) AS kind,
            member.id AS id,
            coalesce(member.name, member.title, '') AS name,
            r.expiresUnixMs AS expiresUnixMs
@@ -1712,7 +1785,7 @@ export const CYPHER = {
   ADD_SPACE_MEMBER: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     MATCH (member {id: $memberId})
       WHERE member:Person OR member:Agent
     MERGE (member)-[r:HAS_ACCESS]->(s)
@@ -1721,6 +1794,13 @@ export const CYPHER = {
     // permanent" ($expiresUnixMs null), so re-adding a member without
     // specifying an expiry never silently extends or revokes an
     // existing grant.
+    // ADR-074 — role rides the same edge, with the same discipline:
+    // $writeRole distinguishes "no role requested" (leave it) from a
+    // deliberate change, so re-adding a member never silently promotes
+    // a reader to writer.
+    FOREACH (_ IN CASE WHEN $writeRole THEN [1] ELSE [] END |
+      SET r.role = $role
+    )
     FOREACH (_ IN CASE WHEN $writeExpiry THEN [1] ELSE [] END |
       SET r.expiresUnixMs = $expiresUnixMs
     )
@@ -1779,7 +1859,7 @@ export const CYPHER = {
    */
   REMOVE_SPACE_MEMBER: `
     MATCH (s:Space {id: $spaceId})
-      WHERE ${SPACE_VISIBLE}
+      WHERE ${SPACE_WRITABLE}
     MATCH (member {id: $memberId})-[r:HAS_ACCESS]->(s)
       WHERE member:Person OR member:Agent
     DELETE r
@@ -1815,6 +1895,7 @@ export const CYPHER = {
   CONVERT_INLINE_ASSET_TO_FILE: `
     MATCH (a:Asset {id: $id})
     WHERE a.deletedAt IS NULL
+        AND ${ASSET_WRITABLE}
     SET a.url = $fileKey,
         a.size = $size,
         a.content = null,
@@ -1837,6 +1918,7 @@ export const CYPHER = {
   CREATE_ASSET: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+          AND ${SPACE_WRITABLE}
     CREATE (a:Asset {
       id: $id,
       type: $kind,
@@ -1925,6 +2007,7 @@ export const CYPHER = {
   CREATE_AGENT: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+          AND ${SPACE_WRITABLE}
     CREATE (a:Asset {
       id: $id,
       type: 'agent',
@@ -2000,6 +2083,7 @@ export const CYPHER = {
   SOFT_DELETE_ASSET: `
     MATCH (a {id: $id})
       WHERE ${SPACE_MEMBER}
+          AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
     SET a.deletedAt = $now,
         a.updatedAt = $now
@@ -2013,6 +2097,7 @@ export const CYPHER = {
   RESTORE_ASSET: `
     MATCH (a:Asset {id: $id})
       WHERE a.deletedAt IS NOT NULL
+          AND ${ASSET_WRITABLE}
     SET a.deletedAt = null,
         a.updatedAt = $now
     RETURN a.id AS id
@@ -2025,6 +2110,7 @@ export const CYPHER = {
    */
   HARD_DELETE_ASSET: `
     MATCH (a:Asset {id: $id})
+      WHERE ${ASSET_WRITABLE}
     DETACH DELETE a
   `,
 
@@ -2042,6 +2128,7 @@ export const CYPHER = {
   MOVE_ASSET_TO_SPACE: `
     MATCH (a {id: $id})
       WHERE ${SPACE_MEMBER}
+          AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
@@ -2065,6 +2152,7 @@ export const CYPHER = {
   ADD_ASSET_TO_SPACE: `
     MATCH (a {id: $id})
       WHERE ${SPACE_MEMBER}
+          AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
@@ -2084,6 +2172,7 @@ export const CYPHER = {
   REMOVE_ASSET_FROM_SPACE: `
     MATCH (a {id: $id})-[r:BELONGS_TO]->(s:Space {id: $spaceId})
       WHERE ${SPACE_MEMBER}
+        AND ${SPACE_WRITABLE}
         AND a.deletedAt IS NULL
     OPTIONAL MATCH (s)-[c:CONTAINS]->(a)
     DELETE r, c
@@ -2098,6 +2187,7 @@ export const CYPHER = {
   SET_METADATA: `
     MATCH (a:Asset {id: $id})
       WHERE a.deletedAt IS NULL
+          AND ${ASSET_WRITABLE}
     SET a.metadata = $metadata,
         a.updatedAt = $now
     RETURN a.id AS id
@@ -2175,7 +2265,7 @@ export const CYPHER = {
   CREATE_CHECKLIST: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     CREATE (c:Checklist {
       id: $id,
       name: $name,
@@ -2221,7 +2311,7 @@ export const CYPHER = {
   UPDATE_CHECKLIST: `
     MATCH (c:Checklist {id: $id})-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     SET c.name = $name,
         c.mode = $mode,
         c.pausePoint = $pausePoint,
@@ -2267,7 +2357,7 @@ export const CYPHER = {
   DELETE_CHECKLIST: `
     MATCH (c:Checklist {id: $id})-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
-        AND ${SPACE_VISIBLE}
+        AND ${SPACE_WRITABLE}
     DETACH DELETE c
   `,
 
@@ -2279,7 +2369,7 @@ export const CYPHER = {
     MATCH (a:Asset {id: $ticketId})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
         AND a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
       WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
              OR ($viewerId <> '' AND EXISTS {
@@ -2298,7 +2388,7 @@ export const CYPHER = {
     MATCH (a:Asset {id: $ticketId})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
         AND a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
       WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
              OR ($viewerId <> '' AND EXISTS {
@@ -2357,7 +2447,7 @@ export const CYPHER = {
   SET_CHECKLIST_ITEM_PREFLIGHT: `
     MATCH (a:Asset {id: $ticketId})
       WHERE a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     MATCH (a)-[r:PREFLIGHT_CHECKLIST]->(c:Checklist {id: $checklistId})
     SET r.checkedIdx =
       CASE WHEN $checked
@@ -2380,7 +2470,7 @@ export const CYPHER = {
   SET_CHECKLIST_ITEM_POSTFLIGHT: `
     MATCH (a:Asset {id: $ticketId})
       WHERE a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     MATCH (a)-[r:POSTFLIGHT_CHECKLIST]->(c:Checklist {id: $checklistId})
     SET r.checkedIdx =
       CASE WHEN $checked
@@ -2427,7 +2517,7 @@ export const CYPHER = {
   DETACH_CHECKLIST_PREFLIGHT: `
     MATCH (a:Asset {id: $ticketId})
       WHERE a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     MATCH (a)-[r:PREFLIGHT_CHECKLIST]->(:Checklist {id: $checklistId})
     DELETE r
     RETURN $checklistId AS id
@@ -2436,7 +2526,7 @@ export const CYPHER = {
   DETACH_CHECKLIST_POSTFLIGHT: `
     MATCH (a:Asset {id: $ticketId})
       WHERE a.deletedAt IS NULL
-        AND ${ASSET_VISIBLE}
+        AND ${ASSET_WRITABLE}
     MATCH (a)-[r:POSTFLIGHT_CHECKLIST]->(:Checklist {id: $checklistId})
     DELETE r
     RETURN $checklistId AS id
@@ -2456,6 +2546,21 @@ export const CYPHER = {
         rt.updatedAt = $now
     RETURN cs.entity AS entity
   `,
+
+  /**
+   * ADR-074 — register the access ROLE in the graph's own schema
+   * registry, so any other writer (the full app, agents, a future
+   * service) can discover that HAS_ACCESS carries a role and what the
+   * values mean, instead of inferring it from our queries.
+   */
+  ENSURE_ACCESS_ROLE_SCHEMA: `
+    MERGE (rt:Schema {entity: '_RelationshipTypes'})
+    SET rt.hasAccess = $hasAccessDoc,
+        rt.hasAccessRoleValues = $roleValues,
+        rt.updatedAt = $now
+    RETURN rt.entity AS entity
+  `,
+
 
 } as const;
 
@@ -4541,11 +4646,24 @@ export class SdkSpacesClient {
         opts.expiresAt === undefined || opts.expiresAt === null
           ? null
           : parseGrantExpiry(opts.expiresAt, this.now());
+      // ADR-074 — same three-intent discipline for the role: absent
+      // leaves it, 'reader'/'writer' sets it. Anything else is refused
+      // rather than silently coerced (a typo must not grant writes).
+      const writeRole = 'role' in opts && opts.role !== undefined;
+      if (writeRole && opts.role !== 'reader' && opts.role !== 'writer') {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: "role must be 'reader' or 'writer'",
+          context: { role: String(opts.role) },
+        });
+      }
       const rows = await this.run(CYPHER.ADD_SPACE_MEMBER, {
         spaceId: validSpaceId,
         memberId,
         writeExpiry,
         expiresUnixMs,
+        writeRole,
+        role: writeRole ? opts.role : null,
       });
       const row = rows[0] as Record<string, unknown> | undefined;
       if (row === undefined) {
@@ -4944,6 +5062,29 @@ export class SdkSpacesClient {
    * ADR-055 — write the Checklist entity + both relationship types into
    * the graph's `(:Schema)` registry. Idempotent; runs at init.
    */
+  /**
+   * ADR-074 — publish the access-role contract into the graph's own
+   * (:Schema) registry, so other writers discover it instead of
+   * reverse-engineering our Cypher. Best-effort and idempotent, exactly
+   * like ensureChecklistSchema.
+   */
+  async ensureAccessRoleSchema(): Promise<void> {
+    try {
+      await this.run(CYPHER.ENSURE_ACCESS_ROLE_SCHEMA, {
+        hasAccessDoc:
+          '(:Person|:Agent)-[:HAS_ACCESS {grantedAt, expiresUnixMs, role}]->(:Space). ' +
+          'The edge grants SIGHT of the Space and its assets. `role` decides whether ' +
+          'the holder may also CHANGE them: absent or "writer" = full access ' +
+          '(the pre-2026-08-18 default, so old grants keep working), "reader" = ' +
+          'read-only. A Space creator always writes, edge or not.',
+        roleValues: ['writer', 'reader'],
+        now: new Date(this.now()).toISOString(),
+      });
+    } catch {
+      /* registry docs are best-effort; never fail a boot over them */
+    }
+  }
+
   async ensureChecklistSchema(): Promise<void> {
     try {
       await this.run(CYPHER.ENSURE_CHECKLIST_SCHEMA, {

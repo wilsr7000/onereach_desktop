@@ -867,6 +867,10 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // ADR-055 — register the Checklist entity + relationship types in the
   // graph's (:Schema) registry. Idempotent, best-effort, non-blocking.
   void client.ensureChecklistSchema();
+  // ADR-074 — publish the HAS_ACCESS role contract to the (:Schema)
+  // registry alongside it, so other graph writers discover read-only
+  // members instead of inferring the property from our queries.
+  void client.ensureAccessRoleSchema();
   // ADR-057 — register AssetVersion + HAS_VERSION the same way.
   void client.ensureVersionSchema();
 

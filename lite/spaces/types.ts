@@ -910,6 +910,8 @@ export interface PersonUpsertInput {
  * shared spaces.
  */
 export interface SpaceMember {
+  /** ADR-074 — 'writer' (default) or 'reader' (sees all, changes nothing). */
+  role?: SpaceMemberRole;
   /** 'Person' or 'Agent'. */
   kind: string;
   /** Stable id. */
@@ -925,7 +927,20 @@ export interface SpaceMember {
 }
 
 /** Options for `members.add(spaceId, memberId, opts)`. */
+/**
+ * ADR-074 — a member's standing on a Space. Carried as `role` on the
+ * `[:HAS_ACCESS]` edge; absent means 'writer' so every grant made
+ * before 2026-08-18 keeps working unchanged.
+ */
+export type SpaceMemberRole = 'reader' | 'writer';
+
 export interface AddSpaceMemberOptions {
+  /**
+   * ADR-074 — read-only vs full access. Omit to leave an existing
+   * member's role untouched (the same three-intent discipline
+   * `expiresAt` uses).
+   */
+  role?: SpaceMemberRole;
   /**
    * When the grant should lapse (ISO-8601).
    *

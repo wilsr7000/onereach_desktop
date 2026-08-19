@@ -4124,7 +4124,14 @@ describe('ADR-065 second pass — whole-app NEON scoping audit (2026-08-14)', ()
   it('every CREATED-stamping create falls back to the injected viewer', () => {
     // A create with a missing creatorId must never produce an item
     // invisible to everyone (uncategorized items are creator-gated).
-    const stamped = Object.values(CYPHER).filter((q) => q.includes('[:CREATED]->(a)'));
+    // Queries that STAMP the edge — not ones that merely MATCH it. The
+    // ADR-074 write guards read `(:Person {id: $viewerId})-[:CREATED]->(a)`
+    // to decide ownership, so a substring match now catches every
+    // guarded mutation and this assertion would demand a creatorId
+    // they have no business carrying.
+    const stamped = Object.values(CYPHER).filter((q) =>
+      /(MERGE|CREATE) \([a-z]+\)-\[:CREATED\]->\(a\)/.test(q)
+    );
     expect(stamped.length).toBeGreaterThanOrEqual(4);
     for (const q of stamped) {
       if (q.includes('OPTIONAL MATCH (p:Person {id:')) {

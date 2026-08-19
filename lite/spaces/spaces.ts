@@ -4563,6 +4563,19 @@ async function changeMemberAccess(
   const who = member.name.length > 0 ? member.name : member.id;
   const choice = await promptAccessDuration(who);
   if (choice === undefined) return;
+  // A duration change is an ACCESS change: shortening one silently
+  // schedules a revoke, and post-ADR-065 membership is the only thing
+  // granting visibility. Confirm when access will end (2026-08-18
+  // confirm audit); "permanent" needs no warning.
+  if (choice !== null) {
+    const ok = await askToConfirm(
+      `Limit ${who}'s access?`,
+      `${who} loses access to this Space when it expires (${accessLabel({ accessExpiresAt: choice })}). ` +
+        'Nothing is deleted, and you can extend or renew at any time.',
+      'Set duration'
+    );
+    if (!ok) return;
+  }
   try {
     const envelope = await bridge.members.add(spaceId, member.id, { expiresAt: choice });
     if (envelope.ok === false) {
@@ -9284,7 +9297,20 @@ function buildSetAsPlaybookAffordance(
     ? 'Make this the plan agents work against for this space'
     : 'Promote this asset to be the current playbook for this space';
   btn.addEventListener('click', () => {
-    void promoteToPlaybook(spaceId, itemId, btn);
+    void (async () => {
+      // Designating a playbook REDIRECTS the agents working this Space
+      // — the highest-consequence action on the detail pane, and it
+      // fired on a single unexplained click (2026-08-18 confirm audit).
+      const ok = await askToConfirm(
+        'Make this the current playbook?',
+        'Agents working this Space switch to this plan. The previous playbook ' +
+          'stays in the Space and keeps its tickets — you can switch back at ' +
+          'any time.',
+        'Set as playbook'
+      );
+      if (!ok) return;
+      await promoteToPlaybook(spaceId, itemId, btn);
+    })();
   });
   wrap.appendChild(btn);
   return wrap;
@@ -15673,6 +15699,23 @@ async function toggleSpaceKind(spaceId: string): Promise<void> {
     return;
   }
   const nextKind: 'user' | 'shared' = space.kind === 'shared' ? 'user' : 'shared';
+  // Converting changes what the Space IS: a shared space is worked by
+  // AGENTS against its current playbook and renders as a dashboard; a
+  // user-managed space is a folder you curate. Nothing is deleted
+  // either way, but people deserve to know which mode they're entering
+  // (2026-08-18 confirm audit).
+  const ok = await askToConfirm(
+    nextKind === 'shared' ? 'Make this a shared space?' : 'Make this user-managed?',
+    nextKind === 'shared'
+      ? 'Agents work this Space against its current playbook, and it renders as a ' +
+        'dashboard of tickets instead of an asset grid. Your assets stay exactly ' +
+        'where they are — you can convert back at any time.'
+      : 'This Space goes back to a plain asset grid that you curate by hand. ' +
+        'Agents stop working it, its tickets and playbook stay in place, and you ' +
+        'can convert back at any time.',
+    nextKind === 'shared' ? 'Make shared' : 'Make user-managed'
+  );
+  if (!ok) return;
   try {
     const envelope = await bridge.setSpaceKind(spaceId, nextKind);
     if (envelope.ok === false) {
