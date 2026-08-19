@@ -1127,6 +1127,20 @@ app
       onOpenActiveTabDevTools: () => openActiveTabDevTools(),
       onOpenAllDevTools: () => openAllWindowDevTools(),
       onOpenWiserPlaybooks: () => openWiserPlaybooksWindow(),
+      // ADR-072 — journey maps live in Spaces (they're assets), so the
+      // menu opens Spaces and asks the renderer to start the composer.
+      onNewJourneyMap: () => {
+        try {
+          spacesHandle?.open();
+          for (const win of BrowserWindow.getAllWindows()) {
+            if (!win.isDestroyed()) win.webContents.send('lite:spaces:new-journey');
+          }
+        } catch (err) {
+          getLoggingApi().warn('spaces', 'journey composer open failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      },
       onSignInOrAccount: () => {
         const session = getAuthApi().getSession('edison');
         if (session !== null) {

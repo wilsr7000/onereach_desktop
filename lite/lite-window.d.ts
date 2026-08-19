@@ -1121,6 +1121,12 @@ interface LiteSpacesBridge {
   identity: LiteSpacesIdentityBridge;
   members: LiteSpacesMembersBridge;
   checklists: LiteSpacesChecklistsBridge;
+  /** ADR-072 — journey maps (Planning). */
+  journeys?: {
+    onNewJourney?(cb: () => void): () => void;
+    draft(prompt: string): Promise<LiteSpacesIpcResult<unknown>>;
+    create(spaceId: string, draft: unknown): Promise<LiteSpacesIpcResult<unknown>>;
+  };
   /**
    * Subscribe to cache-refresh events from the main process. The
    * Spaces cache pre-warms at app launch and refreshes on a background

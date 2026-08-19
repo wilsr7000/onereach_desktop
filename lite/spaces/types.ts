@@ -1155,6 +1155,50 @@ export interface ChecklistItemSpec {
 }
 
 /** An AI-drafted checklist, pending human review in the editor. */
+/**
+ * ADR-072 — Agent-enabled journey map (Planning). Ported from the main
+ * app's WISER discovery template (`templates/export/01-agent-journey-map.json`),
+ * where it lived as in-memory placeholder handlers that never persisted.
+ * In Lite a journey map is a first-class `journey` ASSET in a Space:
+ * the graph stores it, the journey tile already renders its stages, and
+ * versions/【Viewed by】/download all work for free.
+ *
+ * The shape is the template's: phases → touchpoints, each touchpoint
+ * carrying what the user does, feels, and thinks, plus the WISER
+ * payload — where an AGENT could take the work over, and how confident
+ * we are handing it off.
+ */
+export interface JourneyTouchpoint {
+  /** What the person is doing at this moment. */
+  action: string;
+  /** How it feels (one word/short phrase: "Overwhelmed", "Confident"). */
+  emotion: string;
+  /** Their inner monologue — the quote that makes the pain legible. */
+  thought: string;
+  /** Where an agent could take this over or assist. */
+  agentOpportunity: string;
+  /** How safely this could be delegated today. */
+  delegationConfidence: JourneyConfidence;
+}
+
+/** Delegation confidence, ordered: the template's High/Medium/Low. */
+export type JourneyConfidence = 'High' | 'Medium' | 'Low';
+
+/** One stage of the journey, holding its touchpoints in order. */
+export interface JourneyPhase {
+  name: string;
+  touchpoints: JourneyTouchpoint[];
+}
+
+/** An AI-drafted journey map, before it becomes an asset. */
+export interface JourneyDraft {
+  /** Asset title. */
+  title: string;
+  /** One-line description of whose journey this is. */
+  journey: string;
+  phases: JourneyPhase[];
+}
+
 export interface ChecklistDraft {
   name: string;
   mode: ChecklistMode;

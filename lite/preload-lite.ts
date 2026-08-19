@@ -86,6 +86,8 @@ const SPACES_ITEMS_UPDATE = 'lite:spaces:items:update';
 const SPACES_ITEMS_ADD_TAG = 'lite:spaces:items:addTag';
 const SPACES_ITEMS_REMOVE_TAG = 'lite:spaces:items:removeTag';
 const SPACES_ITEMS_RECENT_COMMITS = 'lite:spaces:items:recentCommits';
+const SPACES_JOURNEYS_DRAFT = 'lite:spaces:journeys:draft';
+const SPACES_JOURNEYS_CREATE = 'lite:spaces:journeys:create';
 const SPACES_ITEMS_RECORD_VIEW = 'lite:spaces:items:recordView';
 const SPACES_ITEMS_VIEWERS = 'lite:spaces:items:viewers';
 const SPACES_SET_SPACE_KIND = 'lite:spaces:setKind';
@@ -932,6 +934,13 @@ interface SpacesCacheUpdateView {
 }
 
 interface SpacesBridge {
+  /** ADR-072 — journey maps (Planning). */
+  journeys: {
+    /** Menu → composer trigger (ADR-072). Returns unsubscribe. */
+    onNewJourney(cb: () => void): () => void;
+    draft(prompt: string): Promise<SpacesIpcResultView<unknown>>;
+    create(spaceId: string, draft: unknown): Promise<SpacesIpcResultView<unknown>>;
+  };
   /** Open (or focus) the Spaces window. */
   open(): Promise<{ ok: true }>;
   /**
@@ -1911,6 +1920,22 @@ const spaces: SpacesBridge = {
     remove: (spaceId, memberId) =>
       ipcRenderer.invoke(SPACES_MEMBERS_REMOVE, { spaceId, memberId }) as Promise<
         SpacesIpcResultView<{ ok: true }>
+      >,
+  },
+  /** ADR-072 — journey maps (Planning). */
+  journeys: {
+    onNewJourney: (cb: () => void) => {
+      const listener = (): void => cb();
+      ipcRenderer.on('lite:spaces:new-journey', listener);
+      return () => ipcRenderer.removeListener('lite:spaces:new-journey', listener);
+    },
+    draft: (prompt: string) =>
+      ipcRenderer.invoke(SPACES_JOURNEYS_DRAFT, { prompt }) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    create: (spaceId: string, draft: unknown) =>
+      ipcRenderer.invoke(SPACES_JOURNEYS_CREATE, { spaceId, draft }) as Promise<
+        SpacesIpcResultView<unknown>
       >,
   },
   checklists: {

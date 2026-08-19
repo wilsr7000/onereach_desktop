@@ -57,6 +57,7 @@ import type {
   SearchItemsOpts,
   ItemMetadata,
   AssetViewer,
+  JourneyDraft,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import { openWiserPlaybooksWindow } from '../wiser-playbooks-window.js';
@@ -123,6 +124,9 @@ export const SPACES_IPC = {
   CHECKLISTS_LIST: 'lite:spaces:checklists:list',
   CHECKLISTS_UPDATE: 'lite:spaces:checklists:update',
   CHECKLISTS_DRAFT: 'lite:spaces:checklists:draft',
+  /** ADR-072 — journey maps (Planning). */
+  JOURNEYS_DRAFT: 'lite:spaces:journeys:draft',
+  JOURNEYS_CREATE: 'lite:spaces:journeys:create',
   CHECKLISTS_REMOVE: 'lite:spaces:checklists:remove',
   CHECKLISTS_ATTACH: 'lite:spaces:checklists:attach',
   CHECKLISTS_FOR_TICKET: 'lite:spaces:checklists:forTicket',
@@ -972,6 +976,44 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
       try {
         const prompt = typeof payload?.prompt === 'string' ? payload.prompt : '';
         const value = await getSpacesApi().checklists.draft(prompt);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ADR-072 — journey maps.
+  handleSpacesIpc(
+    SPACES_IPC.JOURNEYS_DRAFT,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { prompt?: unknown }
+    ): Promise<SpacesIpcResult<JourneyDraft>> => {
+      try {
+        const prompt =
+          payload !== undefined && typeof payload.prompt === 'string' ? payload.prompt : '';
+        const value = await getSpacesApi().journeys.draft(prompt);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.JOURNEYS_CREATE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; draft?: unknown }
+    ): Promise<SpacesIpcResult<Item>> => {
+      try {
+        const spaceId =
+          payload !== undefined && typeof payload.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().journeys.create(
+          spaceId,
+          (payload?.draft ?? {}) as JourneyDraft
+        );
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

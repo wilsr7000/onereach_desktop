@@ -475,7 +475,11 @@ describe('required/optional items + AI drafting + accordions (2026-08-08)', () =
       .map((r) => path.resolve(r))
       .find((f) => fs.existsSync(f));
     const src = fs.readFileSync(found as string, 'utf8');
-    const start = src.indexOf('async draft(prompt: string)');
+    // Anchored on the RETURN TYPE: ADR-072 added a sibling
+    // `async draft(prompt: string): Promise<JourneyDraft>` that the bare
+    // signature matched first, so this scan silently read the wrong
+    // function body.
+    const start = src.indexOf('async draft(prompt: string): Promise<ChecklistDraft>');
     const body = src.slice(start, start + 3200);
     expect(body).toContain('sanitizeChecklistItems(');
     expect(body).toContain('jsonMode: true');

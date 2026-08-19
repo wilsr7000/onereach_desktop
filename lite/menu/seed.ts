@@ -48,6 +48,8 @@ export interface SeedHandlers {
   onOpenAllDevTools?: () => void;
   /** Called when the user clicks Open WISER Playbooks (opens the web app in a dedicated Lite window). */
   onOpenWiserPlaybooks?: () => void;
+  /** ADR-072 — open the journey-map composer (Planning menu). */
+  onNewJourneyMap?: () => void;
   /**
    * Called when the user clicks "Sign In / Account…". Signed out →
    * starts the sign-in flow; signed in → opens Settings (account).
@@ -326,6 +328,26 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
       label: 'WISER Playbooks',
       order: 0,
       click: openWiser,
+    });
+  }
+
+  // ADR-072 — journey maps. Registered only when the host supplies a
+  // handler, same contract as WISER Playbooks above.
+  if (handlers.onNewJourneyMap !== undefined) {
+    const openJourney = handlers.onNewJourneyMap;
+    registry.upsert({
+      id: 'top:planning',
+      type: 'top-level',
+      label: 'Planning',
+      order: 85,
+    });
+    registry.upsert({
+      id: 'planning:journey-map',
+      type: 'item',
+      parentId: 'top:planning',
+      label: 'New Journey Map…',
+      order: 10,
+      click: openJourney,
     });
   }
 

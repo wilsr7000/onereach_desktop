@@ -4978,7 +4978,13 @@ async function cycleTicketStatus(ticket: RendererItem): Promise<void> {
 function askToConfirm(
   title: string,
   body: string,
-  confirmLabel: string
+  confirmLabel: string,
+  /**
+   * Optional rich detail rendered under the body — lets a confirm show
+   * WHAT is about to be saved (ADR-072's journey preview) instead of
+   * asking the user to approve a thing they cannot see.
+   */
+  detail?: HTMLElement
 ): Promise<boolean> {
   return new Promise((resolve) => {
     document.querySelector('.spaces-confirm-backdrop')?.remove();
@@ -5024,6 +5030,12 @@ function askToConfirm(
       text.appendChild(p);
     }
     panel.appendChild(text);
+    if (detail !== undefined) {
+      const scroll = document.createElement('div');
+      scroll.className = 'spaces-confirm-detail';
+      scroll.appendChild(detail);
+      panel.appendChild(scroll);
+    }
 
     const actions = document.createElement('div');
     actions.className = 'spaces-text-prompt-actions';
@@ -6431,6 +6443,147 @@ function attachServicePulse(): void {
   };
   health.onPulse(apply);
   void health.getPulse?.().then((p: unknown) => apply(p)).catch(() => undefined);
+}
+
+// ─── ADR-072: journey maps (Planning) ──────────────────────────────────
+//
+// Ported from the main app's WISER discovery template, where journeys
+// lived in an in-memory Map that never persisted. Here the composer
+// drafts with AI, shows the map BEFORE anything is written, and saves
+// it as an ordinary `journey` asset — so the existing journey tile,
+// version history, download and the view audit all apply unchanged.
+
+interface RendererJourneyDraft {
+  title: string;
+  journey: string;
+  phases: Array<{
+    name: string;
+    touchpoints: Array<{
+      action: string;
+      emotion: string;
+      thought: string;
+      agentOpportunity: string;
+      delegationConfidence: string;
+    }>;
+  }>;
+}
+
+/**
+ * Read-only preview of a drafted journey: phases as a numbered spine,
+ * each touchpoint showing the moment, the feeling, and the agent
+ * hand-off with its confidence. Pure — no bridge calls.
+ */
+export function buildJourneyPreview(draft: RendererJourneyDraft): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-journey-preview';
+
+  if (draft.journey.length > 0) {
+    const sub = document.createElement('p');
+    sub.className = 'spaces-journey-preview-sub';
+    sub.textContent = draft.journey;
+    wrap.appendChild(sub);
+  }
+
+  draft.phases.forEach((phase, i) => {
+    const sec = document.createElement('section');
+    sec.className = 'spaces-journey-phase';
+    const h = document.createElement('div');
+    h.className = 'spaces-journey-phase-name';
+    h.textContent = `${i + 1}. ${phase.name}`;
+    sec.appendChild(h);
+    for (const tp of phase.touchpoints) {
+      const row = document.createElement('div');
+      row.className = 'spaces-journey-touchpoint';
+      const act = document.createElement('div');
+      act.className = 'spaces-journey-action';
+      act.textContent = tp.action;
+      row.appendChild(act);
+      if (tp.emotion.length > 0 || tp.thought.length > 0) {
+        const feel = document.createElement('div');
+        feel.className = 'spaces-journey-feel';
+        const bits: string[] = [];
+        if (tp.emotion.length > 0) bits.push(tp.emotion);
+        if (tp.thought.length > 0) bits.push(`\u201C${tp.thought}\u201D`);
+        feel.textContent = bits.join(' · ');
+        row.appendChild(feel);
+      }
+      if (tp.agentOpportunity.length > 0) {
+        const agent = document.createElement('div');
+        agent.className = 'spaces-journey-agent';
+        const chip = document.createElement('span');
+        chip.className = `spaces-journey-confidence conf-${tp.delegationConfidence.toLowerCase()}`;
+        chip.textContent = tp.delegationConfidence;
+        agent.appendChild(chip);
+        const text = document.createElement('span');
+        text.textContent = tp.agentOpportunity;
+        agent.appendChild(text);
+        row.appendChild(agent);
+      }
+      sec.appendChild(row);
+    }
+    wrap.appendChild(sec);
+  });
+  return wrap;
+}
+
+/**
+ * The Planning → Journey map composer. Asks what journey to map, drafts
+ * it, previews it, and (on Save) writes it into the active Space.
+ */
+export async function openJourneyComposer(): Promise<void> {
+  const bridge = window.lite?.spaces;
+  const journeys = bridge?.journeys;
+  if (bridge === undefined || journeys === undefined) {
+    showToast('Journey maps need a newer app build');
+    return;
+  }
+  const spaceId = state.activeScopeId;
+  const space = state.spaces.find((sp) => sp.id === spaceId);
+  if (space === undefined) {
+    showToast('Open a Space first — the journey map is saved into it');
+    return;
+  }
+  const subject = await askForText(
+    'New journey map',
+    'Whose journey, doing what? e.g. "a new admin setting up their first agent"'
+  );
+  if (subject === null || subject.trim().length === 0) return;
+
+  showToast('Mapping the journey…');
+  let draft: RendererJourneyDraft;
+  try {
+    const envelope = await journeys.draft(subject.trim());
+    if (envelope.ok !== true) {
+      showToast(envelope.error.message);
+      return;
+    }
+    draft = envelope.value as RendererJourneyDraft;
+  } catch (err) {
+    showToast(messageFrom(err));
+    return;
+  }
+
+  const ok = await askToConfirm(
+    draft.title,
+    `${draft.phases.length} phases · ` +
+      `${draft.phases.reduce((n, p) => n + p.touchpoints.length, 0)} touchpoints. ` +
+      `Save to "${space.name}"?`,
+    'Save',
+    buildJourneyPreview(draft)
+  );
+  if (!ok) return;
+
+  try {
+    const envelope = await journeys.create(spaceId, draft);
+    if (envelope.ok !== true) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(`Saved "${draft.title}"`);
+    await loadItems();
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
 }
 
 // ─── Recency organization (2026-08-11) ─────────────────────────────────
@@ -16684,6 +16837,10 @@ bootRenderer({
   init: (ctx) => {
     markSpacesBootSucceeded = ctx.markBootSucceeded;
     attachServicePulse();
+    // ADR-072 — Planning → New Journey Map… opens the composer here.
+    window.lite?.spaces?.journeys?.onNewJourney?.(() => {
+      void openJourneyComposer();
+    });
     return init();
   },
 });

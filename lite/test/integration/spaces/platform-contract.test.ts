@@ -258,6 +258,11 @@ function buildStubConsumer(): {
       findSpaceByNameInternal: async () => null,
       grantSelfAccessInternal: async () => false,
     },
+    journeys: {
+      draft: async (_prompt: string) =>
+        maybeFail({ title: 'Journey map', journey: '', phases: [] }),
+      create: async (_spaceId: string, _draft: never) => maybeFail({} as never),
+    },
     checklists: {
       draft: async () => ({
         name: 'stub',

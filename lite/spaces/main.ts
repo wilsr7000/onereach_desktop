@@ -31,8 +31,15 @@ import {
   type SpacesIdentityApi,
   type SpacesMembersApi,
   type SpacesChecklistsApi,
+  type SpacesJourneysApi,
 } from './api.js';
 import { SpacesError } from './errors.js';
+import {
+  JOURNEY_SYSTEM_PROMPT,
+  sanitizeJourneyDraft,
+  journeyToMarkdown,
+  journeyDescription,
+} from './journey.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
 import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
@@ -217,6 +224,7 @@ import type {
   SearchItemsOpts,
   ItemMetadata,
   AssetViewer,
+  JourneyDraft,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
@@ -1180,6 +1188,77 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
   };
 
+  // ADR-072 — journey maps (Planning). draft() is model-only; create()
+  // writes the asset. Split so the composer previews before any write.
+  const journeys: SpacesJourneysApi = {
+    async draft(prompt: string): Promise<JourneyDraft> {
+      const trimmed = typeof prompt === 'string' ? prompt.trim() : '';
+      if (trimmed.length === 0 || trimmed.length > 2000) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'Describe the journey in 1–2000 characters',
+          context: { op: 'journeys.draft' },
+        });
+      }
+      const result = await getAiApi().chat({
+        system: JOURNEY_SYSTEM_PROMPT,
+        messages: [{ role: 'user', content: trimmed }],
+        jsonMode: true,
+        maxTokens: 2000,
+        feature: 'spaces-journey-draft',
+      });
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(result.content);
+      } catch {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'The AI reply was not valid JSON — try rephrasing the subject.',
+          context: { op: 'journeys.draft' },
+        });
+      }
+      const draft = sanitizeJourneyDraft(parsed);
+      if (draft.phases.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'The AI returned no usable phases — try a more specific subject.',
+          context: { op: 'journeys.draft' },
+        });
+      }
+      return draft;
+    },
+
+    async create(spaceId: string, draft: JourneyDraft): Promise<Item> {
+      if (typeof spaceId !== 'string' || spaceId.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'journeys.create requires a spaceId',
+          context: { op: 'journeys.create' },
+        });
+      }
+      const safe = sanitizeJourneyDraft(draft);
+      if (safe.phases.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'A journey map needs at least one phase with a touchpoint',
+          context: { op: 'journeys.create' },
+        });
+      }
+      // A journey is an ordinary asset of kind `journey`: the tile, the
+      // detail pane, versions, download and the view audit all already
+      // understand it. Nothing bespoke to maintain.
+      const created = await client.createAsset({
+        spaceId,
+        title: safe.title,
+        kind: 'journey',
+        description: journeyDescription(safe),
+        content: journeyToMarkdown(safe),
+      });
+      nukeReadCache();
+      return created;
+    },
+  };
+
   const checklists: SpacesChecklistsApi = {
     async create(input: CreateChecklistInput): Promise<Checklist> {
       const result = await client.createChecklist(input);
@@ -1336,6 +1415,7 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     identity,
     members,
     checklists,
+    journeys,
     async setSpaceKind(id: string, kind: SpaceKind): Promise<SpaceKind> {
       const result = await client.setSpaceKind(id, kind);
       nukeReadCache();

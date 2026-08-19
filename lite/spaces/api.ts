@@ -73,6 +73,7 @@ import type {
   AssetVersion,
   AssetVersionSummary,
   AssetViewer,
+  JourneyDraft,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -545,6 +546,18 @@ export interface SpacesIdentityApi {
  * an incomplete REQUIRED postflight blocks entering `done`
  * (`SPACES_CHECKLIST_REQUIRED`).
  */
+/**
+ * ADR-072 — journey maps. `draft` is the AI call (no writes); `create`
+ * persists the draft as a `journey` asset in a Space. Split so the
+ * composer can preview a draft before anything touches the graph.
+ */
+export interface SpacesJourneysApi {
+  /** Draft a journey map from a free-text subject. Never writes. */
+  draft(prompt: string): Promise<JourneyDraft>;
+  /** Persist a draft as a `journey` asset; returns the new item. */
+  create(spaceId: string, draft: JourneyDraft): Promise<Item>;
+}
+
 export interface SpacesChecklistsApi {
   /** Create a checklist in a Space. Doctrine-validated (mode, pause point, ≤12 items). */
   create(input: CreateChecklistInput): Promise<Checklist>;
@@ -666,6 +679,8 @@ export interface SpacesApi {
 
   /** ADR-055 — checklists + ticket gating. */
   readonly checklists: SpacesChecklistsApi;
+  /** ADR-072 — agent-enabled journey maps (Planning). */
+  readonly journeys: SpacesJourneysApi;
 
   /**
    * Toggle a Space between 'user' (default) and 'shared' (AI-managed).
@@ -956,6 +971,15 @@ class UninitializedSpacesApi implements SpacesApi {
 
     async grantSelfAccessInternal(_spaceId: string): Promise<boolean> {
       throw notInitialized('identity.grantSelfAccessInternal');
+    },
+  };
+
+  readonly journeys: SpacesJourneysApi = {
+    async draft(_prompt: string): Promise<JourneyDraft> {
+      throw notInitialized('journeys.draft');
+    },
+    async create(_spaceId: string, _draft: JourneyDraft): Promise<Item> {
+      throw notInitialized('journeys.create');
     },
   };
 
