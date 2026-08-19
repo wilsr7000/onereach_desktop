@@ -2174,17 +2174,42 @@ describe('CYPHER source strings — Phase 4 (shared spaces)', () => {
 
   it('GET_CURRENT_PLAYBOOK resolves canonical edge then legacy property', () => {
     expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(
-      /OPTIONAL MATCH \(s\)-\[:CURRENT_PLAYBOOK\]->\(canonical:Asset\)/
+      /OPTIONAL MATCH \(s\)-\[:CURRENT_PLAYBOOK\]->\(canonical\)/
     );
     expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(
       /OPTIONAL MATCH \(legacy:Asset \{id: s\.currentPlaybookId\}\)/
     );
-    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(/coalesce\(canonical, legacy\)/);
+    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(
+      /coalesce\(canonical, legacy, legacyPlaybook\)/
+    );
+  });
+
+  // 2026-08-18, live (Data Bricks): the space held four WISER-authored
+  // :Playbook nodes and the dashboard reported "No playbook set" — both
+  // playbook queries required the :Asset label, which WISER playbooks
+  // don't carry. ADR-058 fixed this class for space listings and
+  // GET_ITEM; these two were missed, so a playbook could neither be
+  // SEEN as current nor SET as current. Label-agnostic, both ways.
+  it('the playbook queries see :Playbook nodes, not just :Asset (ADR-058 class)', () => {
+    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(/canonical:Asset OR canonical:Playbook/);
+    expect(CYPHER.GET_CURRENT_PLAYBOOK).toMatch(
+      /OPTIONAL MATCH \(legacyPlaybook:Playbook \{id: s\.currentPlaybookId\}\)/
+    );
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(
+      /OPTIONAL MATCH \(pbPlaybook:Playbook \{id: \$playbookId\}\)/
+    );
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/coalesce\(pbAsset, pbPlaybook\)/);
+    // The old edge must be dropped whatever the prior target's label was,
+    // or designating a :Playbook would leave two CURRENT_PLAYBOOK edges.
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(
+      /OPTIONAL MATCH \(s\)-\[old:CURRENT_PLAYBOOK\]->\(\)/
+    );
+    expect(CYPHER.SET_CURRENT_PLAYBOOK).not.toMatch(/MATCH \(pb:Asset \{id: \$playbookId\}\)/);
   });
 
   it('SET_CURRENT_PLAYBOOK drops the prior edge, MERGEs the new one, and stamps type', () => {
     expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(
-      /OPTIONAL MATCH \(s\)-\[old:CURRENT_PLAYBOOK\]->\(:Asset\)/
+      /OPTIONAL MATCH \(s\)-\[old:CURRENT_PLAYBOOK\]->\(\)/
     );
     expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/DELETE old/);
     expect(CYPHER.SET_CURRENT_PLAYBOOK).toMatch(/MERGE \(s\)-\[:CURRENT_PLAYBOOK\]->\(pb\)/);

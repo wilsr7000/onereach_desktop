@@ -1477,9 +1477,11 @@ export const CYPHER = {
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
         AND ${SPACE_VISIBLE}
-    OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]->(canonical:Asset)
+    OPTIONAL MATCH (s)-[:CURRENT_PLAYBOOK]->(canonical)
+      WHERE canonical:Asset OR canonical:Playbook
     OPTIONAL MATCH (legacy:Asset {id: s.currentPlaybookId})
-    WITH coalesce(canonical, legacy) AS pb
+    OPTIONAL MATCH (legacyPlaybook:Playbook {id: s.currentPlaybookId})
+    WITH coalesce(canonical, legacy, legacyPlaybook) AS pb
     WHERE pb IS NOT NULL
     RETURN pb.id AS playbookId
     LIMIT 1
@@ -1497,8 +1499,11 @@ export const CYPHER = {
   SET_CURRENT_PLAYBOOK: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
-    MATCH (pb:Asset {id: $playbookId})
-    OPTIONAL MATCH (s)-[old:CURRENT_PLAYBOOK]->(:Asset)
+    OPTIONAL MATCH (pbAsset:Asset {id: $playbookId})
+    OPTIONAL MATCH (pbPlaybook:Playbook {id: $playbookId})
+    WITH s, coalesce(pbAsset, pbPlaybook) AS pb
+    WHERE pb IS NOT NULL
+    OPTIONAL MATCH (s)-[old:CURRENT_PLAYBOOK]->()
     DELETE old
     WITH s, pb
     MERGE (s)-[:CURRENT_PLAYBOOK]->(pb)

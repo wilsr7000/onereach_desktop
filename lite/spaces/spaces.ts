@@ -8185,8 +8185,20 @@ function renderDetail(opts: RenderDetailOpts): void {
   //    after a demotion path; we keep the check loose so promoting
   //    any asset works — the SDK rewrites `a.type`)
   const activeSpace = state.spaces.find((s) => s.id === state.activeScopeId);
-  if (activeSpace?.kind === 'shared' && item.kind !== 'playbook') {
-    aside.appendChild(buildSetAsPlaybookAffordance(activeSpace.id, item.id));
+  if (activeSpace?.kind === 'shared') {
+    // Gate on "is this ALREADY the current playbook?", never on "is this
+    // playbook-shaped?" (2026-08-18, Data Bricks): the space held four
+    // WISER-authored :Playbook assets and designated none, yet selecting
+    // any of them HID this button — the one action the empty state told
+    // the user to take. Being a playbook and being THE playbook are
+    // different facts.
+    const currentPlaybookId =
+      state.sharedDashboards.get(activeSpace.id)?.playbook?.id ?? null;
+    if (item.id !== currentPlaybookId) {
+      aside.appendChild(
+        buildSetAsPlaybookAffordance(activeSpace.id, item.id, item.kind === 'playbook')
+      );
+    }
   }
 
   // Sprint 3: Move + Add-to-another-space affordances. Only shown
@@ -8755,14 +8767,22 @@ function buildAssetDeleteAffordance(itemId: string, title: string): HTMLElement 
  * spaces. Promotes the current asset (any kind) via
  * `bridge.playbooks.set` and refreshes the dashboard cache.
  */
-function buildSetAsPlaybookAffordance(spaceId: string, itemId: string): HTMLElement {
+function buildSetAsPlaybookAffordance(
+  spaceId: string,
+  itemId: string,
+  alreadyPlaybook = false
+): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'spaces-detail-set-playbook-wrap';
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'spaces-detail-set-playbook';
-  btn.textContent = 'Set as playbook';
-  btn.title = 'Promote this asset to be the current playbook for this space';
+  // An asset that is already playbook-shaped isn't being "promoted" —
+  // it's being designated. Say the true thing in each case.
+  btn.textContent = alreadyPlaybook ? 'Make this the current playbook' : 'Set as playbook';
+  btn.title = alreadyPlaybook
+    ? 'Make this the plan agents work against for this space'
+    : 'Promote this asset to be the current playbook for this space';
   btn.addEventListener('click', () => {
     void promoteToPlaybook(spaceId, itemId, btn);
   });
