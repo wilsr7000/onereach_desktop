@@ -5727,6 +5727,102 @@ async function populateVisibilityMembers(
   }
 }
 
+/** Events shown inline before the "Show all" expander. */
+const HEADER_ACTIVITY_ROWS = 3;
+/** Session-sticky: an explicit expand survives repaints, per Space. */
+const expandedActivityScopes = new Set<string>();
+
+/**
+ * What has happened in this Space — a dense, one-line-per-event list in
+ * the header's orientation zone, beside People.
+ *
+ * History: the per-Space view once merged events INTO the asset grid as
+ * chat-style rows and the user rejected it — "they look like Slack
+ * messages vs assets" — so events were removed from Spaces entirely and
+ * exiled to Home. But Home's activity cannot be scoped to a Space, so
+ * "what happened here?" became unanswerable anywhere in the app. The
+ * objection was to chat rows CROWDING assets, not to the information.
+ *
+ * So: events keep their own zone and their own shape. One muted line
+ * each (author · verb · object · when) — no dots, no excerpts, no space
+ * chip (we are IN the space), nothing that reads as a message. Three by
+ * default so assets are never pushed down; "Show all" expands in place.
+ * Same rule the People strip follows: show what fits, collapse the rest.
+ */
+function buildSpaceActivityStrip(): HTMLElement {
+  const scopeId = state.activeScopeId;
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-view-header-activity';
+
+  const label = document.createElement('span');
+  label.className = 'spaces-view-header-activity-label';
+  label.textContent = 'Activity';
+  wrap.appendChild(label);
+
+  const list = document.createElement('div');
+  list.className = 'spaces-view-header-activity-list';
+  wrap.appendChild(list);
+
+  const events = state.spaceEventsForScopeId === scopeId ? state.spaceEvents.value : null;
+
+  // A failed read is not an empty history — say which one it is.
+  if (events === null) {
+    const note = document.createElement('span');
+    note.className = 'spaces-view-header-activity-note';
+    note.textContent =
+      state.spaceEvents.error !== null && state.spaceEventsForScopeId === scopeId
+        ? "Couldn't load activity"
+        : 'Loading…';
+    list.appendChild(note);
+    return wrap;
+  }
+  if (events.length === 0) {
+    const note = document.createElement('span');
+    note.className = 'spaces-view-header-activity-note';
+    note.textContent = 'Nothing yet';
+    list.appendChild(note);
+    return wrap;
+  }
+
+  const expanded = expandedActivityScopes.has(scopeId);
+  const shown = expanded ? events : events.slice(0, HEADER_ACTIVITY_ROWS);
+  for (const e of shown) {
+    const line = document.createElement('div');
+    line.className = 'spaces-view-header-activity-line';
+    if (looksLikeAgentAuthor(e.author)) line.classList.add('is-agent');
+    const who = document.createElement('span');
+    who.className = 'spaces-view-header-activity-who';
+    who.textContent = prettyAuthor(e.author);
+    line.appendChild(who);
+    const what = document.createElement('span');
+    what.className = 'spaces-view-header-activity-what';
+    what.textContent = ` ${deriveVerb(e.kind)} ${deriveObject(e.kind)}`;
+    line.appendChild(what);
+    const when = document.createElement('span');
+    when.className = 'spaces-view-header-activity-when';
+    when.textContent = formatRecency(e.timestamp);
+    line.appendChild(when);
+    list.appendChild(line);
+  }
+
+  if (events.length > HEADER_ACTIVITY_ROWS) {
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'spaces-view-header-activity-toggle';
+    toggle.textContent = expanded ? 'Show less' : `Show all ${events.length}`;
+    toggle.addEventListener('click', () => {
+      if (expanded) expandedActivityScopes.delete(scopeId);
+      else expandedActivityScopes.add(scopeId);
+      // Header-local swap: rebuild this strip in place rather than
+      // repainting the grid (which would re-instantiate every preview).
+      const next = buildSpaceActivityStrip();
+      wrap.replaceWith(next);
+    });
+    wrap.appendChild(toggle);
+  }
+  return wrap;
+}
+
 function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   const header = document.createElement('header');
   header.className = 'spaces-view-header';
@@ -5763,6 +5859,8 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
       titleWrap.appendChild(buildSpaceVisibilityRow(space));
       // Who's in it, always visible (2026-08-12 UX pass).
       titleWrap.appendChild(buildSpaceMembersStrip(space));
+      // What's happened in it, always visible (2026-08-19).
+      titleWrap.appendChild(buildSpaceActivityStrip());
     }
   }
 
