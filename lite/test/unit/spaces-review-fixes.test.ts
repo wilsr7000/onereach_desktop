@@ -466,7 +466,10 @@ describe('review-fix wiring invariants (source-level)', () => {
     // arrivals that never change focus.
     const src = source();
     expect(src).toMatch(/function wireStalenessWatchdog/);
-    expect(src).toMatch(/markCacheBroadcast\(\);\s*\n\s*routeCacheUpdate\(update\.key\);/);
+    expect(src).toMatch(/markCacheBroadcast\(\);/);
+    // 2026-08-18: the changed-gate now sits between heartbeat and route;
+    // ordering is pinned by its own test below.
+    expect(src).toMatch(/routeCacheUpdate\(update\.key\);/);
     expect(src).toMatch(/document\.addEventListener\('visibilitychange'/);
     expect(src).toMatch(/wireStalenessWatchdog\(\);/);
     const start = src.indexOf('function wireStalenessWatchdog');
@@ -481,6 +484,26 @@ describe('review-fix wiring invariants (source-level)', () => {
     const body = bodyOf('async function refreshFromGraph', 2200);
     expect(body).toMatch(/Promise\.race\(/);
     expect(body).toMatch(/refresh timed out/);
+  });
+
+  it('unchanged cache heartbeats never trigger a repaint', () => {
+    // "Rather not see a flicker unless something changed" (2026-08-18):
+    // the 60s poll broadcasts on every success; the renderer must mark
+    // watchdog health on EVERY event but route to repaint only when the
+    // data actually differs.
+    const src = source();
+    const start = src.indexOf('cacheUpdateUnsubscribe = sub((update) => {');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, start + 600);
+    const markIdx = body.indexOf('markCacheBroadcast()');
+    const gateIdx = body.indexOf("if (update.changed === false) return;");
+    const routeIdx = body.indexOf('routeCacheUpdate(update.key);');
+    expect(markIdx).toBeGreaterThan(-1);
+    expect(gateIdx).toBeGreaterThan(-1);
+    expect(routeIdx).toBeGreaterThan(-1);
+    // Order matters: heartbeat first, gate before the repaint route.
+    expect(markIdx).toBeLessThan(gateIdx);
+    expect(gateIdx).toBeLessThan(routeIdx);
   });
 
   it('the existing-asset search has a supersession guard too', () => {

@@ -46,6 +46,12 @@ interface CacheEntry<T> {
   /** True after a successful fetch; gates the staleness check. */
   hasValue: boolean;
   /**
+   * JSON of the last successful value, for change detection. Null
+   * until the first success. Values here are plain data (lists of
+   * summaries), so stringify is cheap and deterministic.
+   */
+  lastValueJson: string | null;
+  /**
    * Background refreshes that failed in a row. Silent-failure guard
    * (2026-08-16): a flaky graph endpoint made every 60s refresh fail
    * with NO signal anywhere — a member grant never surfaced in an open
@@ -59,6 +65,14 @@ export interface SpacesCacheUpdate {
   key: string;
   /** Epoch ms when the refresh landed. */
   at: number;
+  /**
+   * False when the refetch returned data IDENTICAL to what the cache
+   * already held (2026-08-18: "rather not see a flicker unless
+   * something changed"). The event still fires — it doubles as the
+   * health heartbeat the staleness watchdog reads — but renderers must
+   * only repaint when this is true.
+   */
+  changed: boolean;
 }
 
 export interface SpacesCacheOptions {
@@ -153,6 +167,7 @@ export class SpacesCache {
       fetcher,
       hasValue: false,
       consecutiveFailures: 0,
+      lastValueJson: null,
     };
     entry.fetcher = fetcher;
     this.entries.set(key, entry as CacheEntry<unknown>);
@@ -174,6 +189,7 @@ export class SpacesCache {
       fetcher,
       hasValue: false,
       consecutiveFailures: 0,
+      lastValueJson: null,
     };
     entry.fetcher = fetcher;
     this.entries.set(key, entry as CacheEntry<unknown>);
@@ -322,6 +338,7 @@ export class SpacesCache {
 
   private async runFetch<T>(key: string, entry: CacheEntry<T>): Promise<T> {
     try {
+      const previousJson = entry.lastValueJson;
       const value = await Promise.race([
         entry.fetcher(),
         new Promise<never>((_resolve, reject) => {
@@ -337,8 +354,16 @@ export class SpacesCache {
       entry.hasValue = true;
       entry.fetching = null;
       entry.consecutiveFailures = 0;
+      let nextJson: string | null = null;
       try {
-        const update: SpacesCacheUpdate = { key, at: entry.fetchedAt };
+        nextJson = JSON.stringify(value) ?? null;
+      } catch {
+        nextJson = null; // non-serializable — treat every refresh as changed
+      }
+      const changed = nextJson === null || nextJson !== previousJson;
+      entry.lastValueJson = nextJson;
+      try {
+        const update: SpacesCacheUpdate = { key, at: entry.fetchedAt, changed };
         this.emitter.emit(UPDATE_EVENT, update);
       } catch (err) {
         this.log.warn('spaces-cache: onUpdate handler threw', {

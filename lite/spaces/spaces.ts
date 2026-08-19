@@ -251,6 +251,12 @@ interface SpacesRendererState {
   pollTimer: number | null;
   /** Sprint 3 — current items-search query (debounced, then filters list). */
   itemsSearchQuery: string;
+  /**
+   * Scope of the ONE content search (2026-08-19). 'space' searches the
+   * active Space, 'all' searches every Space the viewer can see. Home
+   * forces 'all' — it isn't a Space, so there is nothing to narrow to.
+   */
+  itemsSearchScope: 'space' | 'all';
   /** Debounce timer for itemsSearchQuery. */
   itemsSearchTimer: number | null;
   /** Sprint 3 — last fetched search results (when query is non-empty). */
@@ -298,6 +304,7 @@ const state: SpacesRendererState = {
   sharedDashboards: new Map(),
   pollTimer: null,
   itemsSearchQuery: '',
+  itemsSearchScope: 'space',
   itemsSearchTimer: null,
   itemsSearchResults: null,
   selectedItemIds: new Set<string>(),
@@ -406,7 +413,12 @@ function wireCacheUpdates(): void {
   const sub = window.lite?.spaces?.onCacheUpdate;
   if (typeof sub !== 'function') return; // bridge not present (test env)
   cacheUpdateUnsubscribe = sub((update) => {
+    // Every event is a health heartbeat for the staleness watchdog…
     markCacheBroadcast();
+    // …but repaints happen only when the data actually differs —
+    // the periodic graph poll must never flicker an unchanged page
+    // (2026-08-18). Missing flag (older main) = assume changed.
+    if (update.changed === false) return;
     routeCacheUpdate(update.key);
   });
 }
@@ -825,10 +837,13 @@ function wireSidebarSearch(): void {
   if (!(input instanceof HTMLInputElement)) return;
   input.addEventListener('input', () => {
     state.searchQuery = input.value;
-    // Live name filter over the Spaces sections (instant), plus the
-    // debounced cross-space item search below the input (WISER-style).
+    // A FILTER, not a search (2026-08-19). This box used to do both:
+    // narrow the nav by Space name AND run a debounced cross-space item
+    // search whose results landed in a cramped sidebar tree. Content
+    // search now lives in the main pane with a scope control, so this
+    // box does the one thing its position implies — narrow the list
+    // below it.
     applySidebarFilter();
-    scheduleGlobalItemSearch(input.value);
   });
   input.addEventListener('keydown', (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return;
@@ -836,16 +851,6 @@ function wireSidebarSearch(): void {
       input.value = '';
       state.searchQuery = '';
       applySidebarFilter();
-      // Cancel BOTH the debounce timer and any in-flight response —
-      // programmatic value='' fires no input event, so without this
-      // the pending timer painted results for a cleared box
-      // (2026-08-08 review).
-      if (globalSearchTimer !== null) {
-        window.clearTimeout(globalSearchTimer);
-        globalSearchTimer = null;
-      }
-      globalSearchSeq++;
-      renderGlobalSearchResults(null);
       event.stopPropagation();
       return;
     }
@@ -1307,62 +1312,9 @@ function openSpacesPalette(): void {
 // ─── Global search — Space names + item content, grouped results ───────
 
 /** Debounce for the cross-space item search (the name filter is live). */
-const GLOBAL_SEARCH_DEBOUNCE_MS = 250;
-let globalSearchTimer: number | null = null;
-let globalSearchSeq = 0;
 
-function scheduleGlobalItemSearch(query: string): void {
-  if (globalSearchTimer !== null) window.clearTimeout(globalSearchTimer);
-  const trimmed = query.trim();
-  if (trimmed.length < 2) {
-    // Kill anything in flight too: a late response for the PREVIOUS
-    // query passed the seq guard and resurrected the cleared panel
-    // (2026-08-08 review).
-    globalSearchSeq++;
-    renderGlobalSearchResults(null);
-    return;
-  }
-  globalSearchTimer = window.setTimeout(() => {
-    void runGlobalItemSearch(trimmed);
-  }, GLOBAL_SEARCH_DEBOUNCE_MS);
-}
 
-async function runGlobalItemSearch(query: string): Promise<void> {
-  const bridge = window.lite?.spaces;
-  if (bridge === undefined) return;
-  const seq = ++globalSearchSeq;
-  try {
-    const envelope = await bridge.items.search({ query, limit: 12 });
-    if (seq !== globalSearchSeq) return; // superseded by newer keystrokes
-    if (envelope.ok === false) {
-      // A failed search must not read as "found nothing" (2026-08-08
-      // logging review) — say it failed, and leave a trace.
-      window.logging?.warn?.('spaces', 'sidebar item search failed', {
-        error: envelope.error.message,
-      });
-      renderGlobalSearchError();
-      return;
-    }
-    renderGlobalSearchResults(envelope.value as RendererItemSummary[]);
-  } catch (err) {
-    if (seq !== globalSearchSeq) return;
-    window.logging?.warn?.('spaces', 'sidebar item search threw', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    renderGlobalSearchError();
-  }
-}
 
-/** Distinct failed-search state — an error is not an empty result. */
-function renderGlobalSearchError(): void {
-  const list = document.getElementById('spaces-search-results');
-  if (list === null) return;
-  list.replaceChildren();
-  const row = document.createElement('li');
-  row.className = 'spaces-side-tree-empty';
-  row.textContent = 'Search failed — try again';
-  list.appendChild(row);
-}
 
 /** Compact monochrome glyph per item kind for tree + result rows. */
 export function itemKindGlyph(kind: string): string {
@@ -1382,56 +1334,6 @@ export function itemKindGlyph(kind: string): string {
   }
 }
 
-/** null = no query (hide the panel); [] = query ran and found nothing. */
-function renderGlobalSearchResults(items: RendererItemSummary[] | null): void {
-  const list = document.getElementById('spaces-search-results');
-  if (list === null) return;
-  list.replaceChildren();
-  if (items === null) return;
-  const label = document.createElement('li');
-  label.className = 'spaces-side-tree-group';
-  label.textContent = 'Items';
-  list.appendChild(label);
-  if (items.length === 0) {
-    const empty = document.createElement('li');
-    empty.className = 'spaces-side-tree-empty';
-    empty.textContent = 'No matching items';
-    list.appendChild(empty);
-    return;
-  }
-  for (const item of items) {
-    const li = document.createElement('li');
-    li.className = 'spaces-tree-item spaces-search-result';
-    li.setAttribute('data-item-id', item.id);
-    li.setAttribute('role', 'button');
-    li.setAttribute('tabindex', '0');
-    const glyph = document.createElement('span');
-    glyph.className = 'spaces-tree-item-glyph';
-    glyph.textContent = itemKindGlyph(item.kind);
-    li.appendChild(glyph);
-    const title = document.createElement('span');
-    title.className = 'spaces-tree-item-title';
-    title.textContent = generateItemTitle(item);
-    li.appendChild(title);
-    const chip = item.otherSpaces[0];
-    if (chip !== undefined) {
-      const where = document.createElement('span');
-      where.className = 'spaces-tree-item-where';
-      where.textContent = friendlySpaceName(chip.name);
-      li.appendChild(where);
-    }
-    li.addEventListener('click', () => {
-      setActiveScope(chip?.id ?? UNCATEGORIZED_SPACE_ID);
-      void loadItemDetail(item.id);
-    });
-    if (chip !== undefined) {
-      li.addEventListener('contextmenu', (ev) =>
-        openItemContextMenu(ev, { id: item.id, title: item.title }, chip.id)
-      );
-    }
-    list.appendChild(li);
-  }
-}
 
 // ─── Per-Space item trees — the explorer expansion ─────────────────────
 
@@ -15890,11 +15792,12 @@ async function runItemsSearch(): Promise<void> {
   }
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
-  const spaceId =
+  // Scope is a property of the one search box, not of where you typed.
+  const scopedToSpace =
+    state.itemsSearchScope === 'space' &&
     state.activeScopeId !== HOME_SCOPE_ID &&
-    state.activeScopeId !== UNCATEGORIZED_SPACE_ID
-      ? state.activeScopeId
-      : undefined;
+    state.activeScopeId !== UNCATEGORIZED_SPACE_ID;
+  const spaceId = scopedToSpace ? state.activeScopeId : undefined;
   try {
     const envelope = await bridge.items.search({
       query,

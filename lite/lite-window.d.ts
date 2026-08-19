@@ -1140,6 +1140,8 @@ interface LiteSpacesBridge {
 }
 
 interface LiteSpacesCacheUpdateView {
+  /** False when the refresh returned identical data (no repaint). */
+  changed?: boolean;
   /** Cache key whose value just refreshed (e.g. 'spaces.listSpaces'). */
   key: string;
   /** Epoch ms when the refresh landed. */

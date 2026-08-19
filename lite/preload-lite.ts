@@ -927,6 +927,7 @@ interface SpacesMembersBridge {
 
 /** Payload of the cache-updated event broadcast by the main process. */
 interface SpacesCacheUpdateView {
+  changed?: boolean;
   /** Cache key whose value just refreshed (e.g. 'spaces.listSpaces'). */
   key: string;
   /** Epoch ms when the refresh landed. */

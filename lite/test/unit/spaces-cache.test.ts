@@ -388,3 +388,30 @@ describe('outage backoff — a failing backend is not refreshed at full cadence 
     }
   });
 });
+
+describe('change detection: unchanged refreshes are heartbeats, not repaints (2026-08-18)', () => {
+  it('flags changed=true on first fetch and real changes, changed=false on identical data', async () => {
+    const cache = new SpacesCache({
+      ttlMs: 0,
+      refreshIntervalMs: 0,
+      logger: { warn: () => {}, info: () => {}, error: () => {} },
+    });
+    const updates: Array<{ key: string; changed: boolean }> = [];
+    cache.onUpdate((u) => updates.push({ key: u.key, changed: u.changed }));
+    let value = [{ id: 's1', name: 'Alpha' }];
+    const fetcher = async (): Promise<unknown> => JSON.parse(JSON.stringify(value));
+    await cache.getOrFetch('k', fetcher);
+    expect(updates).toEqual([{ key: 'k', changed: true }]);
+    // Identical refetch → heartbeat only.
+    await cache.refreshAll();
+    expect(updates).toEqual([
+      { key: 'k', changed: true },
+      { key: 'k', changed: false },
+    ]);
+    // Real change → changed=true again.
+    value = [{ id: 's1', name: 'Alpha' }, { id: 's2', name: 'Beta' }];
+    await cache.refreshAll();
+    expect(updates[2]).toEqual({ key: 'k', changed: true });
+  });
+});
+
