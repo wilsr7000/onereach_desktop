@@ -1234,7 +1234,16 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
               : []),
           ],
           jsonMode: true,
-          maxTokens: 2000,
+          // Sized to the contract the prompt actually asks for. Up to
+          // 6 phases x 4 touchpoints, each carrying an action (<=200),
+          // a thought (<=200), an agentOpportunity (<=240) and an
+          // emotion, is ~15k characters of JSON — well past 2000
+          // output tokens. At that cap a realistic subject came back
+          // TRUNCATED mid-string: unparseable, so the salvage above
+          // finds nothing, the retry truncates identically, and the
+          // user is told to rephrase a subject that was never the
+          // problem. Caught by test/live/journey-map-ai.test.ts.
+          maxTokens: 8000,
           feature: 'spaces-journey-draft',
         });
         return extractJsonObject(result.content);

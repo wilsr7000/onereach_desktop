@@ -15,6 +15,9 @@ import {
   journeyToMarkdown,
   journeyDescription,
   JOURNEY_SYSTEM_PROMPT,
+  buildSpaceAssetDigest,
+  sanitizeJourneySuggestions,
+  extractJsonObject,
 } from '../../spaces/journey.js';
 import { buildJourneyPreview } from '../../spaces/spaces.js';
 
@@ -211,3 +214,57 @@ describe('the WISER prompt contract', () => {
     expect(JOURNEY_SYSTEM_PROMPT).toContain('delegationConfidence');
   });
 });
+
+describe('asset-grounded suggestions (2026-08-18)', () => {
+  it('buildSpaceAssetDigest caps count, line length, and total size', () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      title: `Asset number ${i} with a fairly long descriptive title`,
+      kind: 'document',
+      gist: 'g'.repeat(500),
+    }));
+    const digest = buildSpaceAssetDigest(many);
+    const lines = digest.split('\n');
+    expect(lines.length).toBeLessThanOrEqual(24);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(160);
+    expect(digest.length).toBeLessThanOrEqual(4000);
+    // Empty input → empty digest (suggest short-circuits, no AI call).
+    expect(buildSpaceAssetDigest([])).toBe('');
+  });
+
+  it('sanitizeJourneySuggestions enforces caps and drops subject-less ideas', () => {
+    const got = sanitizeJourneySuggestions({
+      objectives: ['  Grow activation  ', '', 'Grow activation', 'B', 'C', 'D', 'E'],
+      ideas: [
+        { title: 'T', subject: 'a new user activating', why: 'w' },
+        { title: 'No subject', subject: '', why: 'dropped' },
+        { subject: 's'.repeat(400), why: 'y'.repeat(400) },
+        { title: 'x', subject: 'b', why: '' },
+        { title: 'x', subject: 'c', why: '' },
+        { title: 'x', subject: 'd', why: '' },
+      ],
+    });
+    expect(got.objectives.length).toBeLessThanOrEqual(4);
+    expect(got.objectives[0]).toBe('Grow activation'); // trimmed, deduped
+    expect(got.ideas.length).toBeLessThanOrEqual(4);
+    for (const idea of got.ideas) {
+      expect(idea.subject.length).toBeGreaterThan(0);
+      expect(idea.subject.length).toBeLessThanOrEqual(160);
+      expect(idea.why.length).toBeLessThanOrEqual(140);
+    }
+    // Garbage in → empty out, never a throw.
+    expect(sanitizeJourneySuggestions(null)).toEqual({ objectives: [], ideas: [] });
+    expect(sanitizeJourneySuggestions('nope')).toEqual({ objectives: [], ideas: [] });
+  });
+
+  it('extractJsonObject salvages fenced and prose-wrapped replies', () => {
+    const obj = { title: 'X', phases: [] };
+    const clean = JSON.stringify(obj);
+    expect(extractJsonObject(clean)).toEqual(obj);
+    expect(extractJsonObject('```json\n' + clean + '\n```')).toEqual(obj);
+    expect(extractJsonObject('Sure! Here is the map:\n' + clean + '\nHope that helps.')).toEqual(obj);
+    // Nothing parseable → null (caller retries the model once).
+    expect(extractJsonObject('I could not produce the JSON, sorry.')).toBeNull();
+    expect(extractJsonObject('{broken')).toBeNull();
+  });
+});
+

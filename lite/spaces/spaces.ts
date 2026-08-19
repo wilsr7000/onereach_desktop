@@ -6936,6 +6936,189 @@ export function buildJourneyPreview(draft: RendererJourneyDraft): HTMLElement {
  * passes the Space that was clicked, which is not always the active
  * scope. Omitted (the Planning menu) it falls back to the active one.
  */
+interface RendererJourneySuggestions {
+  objectives: string[];
+  ideas: Array<{ title: string; subject: string; why: string }>;
+}
+
+/**
+ * Subject picker for the journey composer: objective chips + idea
+ * cards grounded in the Space's assets, plus a free-text field. Never
+ * blocks on the AI — the dialog opens immediately with the input and a
+ * loading note; suggestions fill in when they land (or silently don't).
+ */
+function pickJourneySubject(
+  spaceName: string,
+  spaceId: string
+): Promise<{ subject: string; objective: string | null } | null> {
+  document.querySelector('.spaces-journey-pick-backdrop')?.remove();
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'spaces-journey-pick-backdrop';
+    const panel = document.createElement('div');
+    panel.className = 'spaces-journey-pick';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'New journey map');
+
+    let chosenObjective: string | null = null;
+    let settled = false;
+    const settle = (value: { subject: string; objective: string | null } | null): void => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey);
+      backdrop.remove();
+      resolve(value);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') settle(null);
+    };
+    document.addEventListener('keydown', onKey);
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) settle(null);
+    });
+
+    const heading = document.createElement('h3');
+    heading.className = 'spaces-journey-pick-heading';
+    heading.textContent = `New journey map — ${spaceName}`;
+    panel.appendChild(heading);
+
+    const objectivesWrap = document.createElement('div');
+    objectivesWrap.className = 'spaces-journey-pick-objectives';
+    objectivesWrap.hidden = true;
+    panel.appendChild(objectivesWrap);
+
+    const ideasWrap = document.createElement('div');
+    ideasWrap.className = 'spaces-journey-pick-ideas';
+    panel.appendChild(ideasWrap);
+
+    const loading = document.createElement('p');
+    loading.className = 'spaces-journey-pick-loading';
+    loading.textContent = 'Reading this Space\u2019s assets for ideas\u2026';
+    ideasWrap.appendChild(loading);
+
+    const label = document.createElement('label');
+    label.className = 'spaces-journey-pick-label';
+    label.textContent = 'Whose journey, doing what?';
+    label.setAttribute('for', 'spaces-journey-subject-input');
+    panel.appendChild(label);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = 'spaces-journey-subject-input';
+    input.className = 'spaces-journey-pick-input';
+    input.placeholder = 'e.g. "a new admin setting up their first agent"';
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && input.value.trim().length > 0) {
+        settle({ subject: input.value.trim(), objective: chosenObjective });
+      }
+    });
+    panel.appendChild(input);
+
+    const actions = document.createElement('div');
+    actions.className = 'spaces-journey-pick-actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'spaces-journey-pick-cancel';
+    cancel.textContent = 'Cancel';
+    cancel.addEventListener('click', () => settle(null));
+    actions.appendChild(cancel);
+    const start = document.createElement('button');
+    start.type = 'button';
+    start.className = 'spaces-journey-pick-start';
+    start.textContent = 'Map this journey';
+    start.addEventListener('click', () => {
+      if (input.value.trim().length === 0) {
+        input.focus();
+        return;
+      }
+      settle({ subject: input.value.trim(), objective: chosenObjective });
+    });
+    actions.appendChild(start);
+    panel.appendChild(actions);
+
+    backdrop.appendChild(panel);
+    document.body.appendChild(backdrop);
+    input.focus();
+
+    // Suggestions fill in asynchronously; every failure mode just
+    // removes the loading note (the free-text path IS the fallback).
+    void (async () => {
+      try {
+        const suggestFn = window.lite?.spaces?.journeys?.suggest;
+        if (typeof suggestFn !== 'function') {
+          loading.remove();
+          return;
+        }
+        const envelope = await suggestFn(spaceId);
+        loading.remove();
+        if (settled || envelope.ok !== true) return;
+        const suggestions = envelope.value as RendererJourneySuggestions;
+        if (Array.isArray(suggestions.objectives) && suggestions.objectives.length > 0) {
+          objectivesWrap.hidden = false;
+          const cap = document.createElement('div');
+          cap.className = 'spaces-journey-pick-caption';
+          cap.textContent = 'Objective (optional — from this Space\u2019s assets)';
+          objectivesWrap.appendChild(cap);
+          const row = document.createElement('div');
+          row.className = 'spaces-journey-pick-chiprow';
+          for (const objective of suggestions.objectives) {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.className = 'spaces-journey-pick-chip';
+            chip.textContent = objective;
+            chip.addEventListener('click', () => {
+              const active = chip.classList.toggle('is-active');
+              chosenObjective = active ? objective : null;
+              for (const other of Array.from(row.querySelectorAll('.spaces-journey-pick-chip'))) {
+                if (other !== chip) other.classList.remove('is-active');
+              }
+              if (chosenObjective !== objective && active === false) chosenObjective = null;
+            });
+            row.appendChild(chip);
+          }
+          objectivesWrap.appendChild(row);
+        }
+        if (Array.isArray(suggestions.ideas) && suggestions.ideas.length > 0) {
+          const cap = document.createElement('div');
+          cap.className = 'spaces-journey-pick-caption';
+          cap.textContent = 'Journey ideas from this Space';
+          ideasWrap.appendChild(cap);
+          for (const idea of suggestions.ideas) {
+            const card = document.createElement('button');
+            card.type = 'button';
+            card.className = 'spaces-journey-pick-idea';
+            const t = document.createElement('span');
+            t.className = 'spaces-journey-pick-idea-title';
+            t.textContent = idea.title;
+            card.appendChild(t);
+            const subj = document.createElement('span');
+            subj.className = 'spaces-journey-pick-idea-subject';
+            subj.textContent = idea.subject;
+            card.appendChild(subj);
+            if (idea.why.length > 0) {
+              const why = document.createElement('span');
+              why.className = 'spaces-journey-pick-idea-why';
+              why.textContent = idea.why;
+              card.appendChild(why);
+            }
+            card.addEventListener('click', () => {
+              input.value = idea.subject;
+              for (const other of Array.from(ideasWrap.querySelectorAll('.spaces-journey-pick-idea'))) {
+                other.classList.toggle('is-active', other === card);
+              }
+              input.focus();
+            });
+            ideasWrap.appendChild(card);
+          }
+        }
+      } catch {
+        loading.remove();
+      }
+    })();
+  });
+}
+
 export async function openJourneyComposer(targetSpaceId?: string): Promise<void> {
   const bridge = window.lite?.spaces;
   const journeys = bridge?.journeys;
@@ -6949,11 +7132,17 @@ export async function openJourneyComposer(targetSpaceId?: string): Promise<void>
     showToast('Open a Space first — the journey map is saved into it');
     return;
   }
-  const subject = await askForText(
-    'New journey map',
-    'Whose journey, doing what? e.g. "a new admin setting up their first agent"'
-  );
-  if (subject === null || subject.trim().length === 0) return;
+  // 2026-08-18 — "offer the user choices of objectives and journey
+  // ideas based on the space assets": open a picker seeded from the
+  // Space instead of a blank prompt. Free text stays available, and
+  // when suggestions fail or the Space is empty the picker degrades to
+  // exactly the old ask.
+  const picked = await pickJourneySubject(space.name, spaceId);
+  if (picked === null || picked.subject.trim().length === 0) return;
+  const subject =
+    picked.objective !== null
+      ? `${picked.subject} — the journey's objective: ${picked.objective}`
+      : picked.subject;
 
   showToast('Mapping the journey…');
   let draft: RendererJourneyDraft;

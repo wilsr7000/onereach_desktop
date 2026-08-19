@@ -510,6 +510,42 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(gateIdx).toBeLessThan(routeIdx);
   });
 
+  it('the journey composer opens with asset-grounded picks, free text preserved', () => {
+    // 2026-08-18: "Create journey map quick, can it offer the user
+    // choices of objectives and journey ideas based on the space
+    // assets" — the composer routes through pickJourneySubject; the
+    // suggestion fetch is async and every failure mode degrades to the
+    // plain input (loading note removed, nothing else).
+    const composer = bodyOf('export async function openJourneyComposer', 2200);
+    expect(composer).toContain('pickJourneySubject(space.name, spaceId)');
+    expect(composer).not.toContain("askForText(\n    'New journey map'");
+    const picker = bodyOf('function pickJourneySubject', 6500);
+    expect(picker).toMatch(/journeys\?\.suggest/);
+    expect(picker).toContain('loading.remove()');
+    // A chosen objective threads into the draft subject.
+    expect(composer).toContain("the journey's objective");
+  });
+
+  it('journey drafts retry once on unparseable model JSON', () => {
+    // 2026-08-18 user report: "it just errored and did not retry.
+    // Poorly formatted JSON. Should have fixed itself."
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/main.ts', 'lite/spaces/main.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    expect(found).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    const start = src.indexOf('async draft(prompt: string)');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, start + 2600);
+    expect(body).toContain('extractJsonObject');
+    expect(body).toContain('askModel(true)');
+    expect(body).toContain('not valid JSON twice in a row');
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);
