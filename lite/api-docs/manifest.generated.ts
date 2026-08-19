@@ -983,7 +983,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "BUG_REPORT_EVENTS",
-        "count": 24,
+        "count": 25,
         "entries": [
           {
             "constantKey": "SAVE_START",
@@ -1058,6 +1058,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "DELETE_FAIL",
             "name": "bug-report.delete.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "IPC_OPEN",
+            "name": "bug-report.ipc.open",
             "description": ""
           },
           {
@@ -4483,5 +4488,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-17T23:08:16.226Z"
+  "generatedAt": "2026-08-19T05:23:54.737Z"
 } as const;

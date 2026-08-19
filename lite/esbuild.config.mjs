@@ -160,6 +160,21 @@ const wiserPreloadOptions = {
   external: ['electron'],
 };
 
+/**
+ * ADR-072 phase 2 — the Journey Map Builder bridge. Exposes ONLY
+ * `window.journeySpaces` (list / load / save journeys as Space assets),
+ * never `window.lite.*`. Same build shape as the wiser preload.
+ */
+const journeyMapPreloadOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'preload-journey-map.ts')],
+  outfile: resolve(outDir, 'preload-journey-map.js'),
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  external: ['electron'],
+};
+
 /** @type {esbuild.BuildOptions} */
 const bugReportModalOptions = {
   ...commonOptions,
@@ -311,7 +326,7 @@ const downloadPickerOptions = {
 const allConfigs = [
   mainProcessOptions,
   preloadOptions,
-  wiserPreloadOptions,
+  wiserPreloadOptions, journeyMapPreloadOptions,
   bugReportModalOptions,
   placeholderOptions,
   settingsOptions,

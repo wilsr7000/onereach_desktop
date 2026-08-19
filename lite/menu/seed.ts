@@ -50,6 +50,8 @@ export interface SeedHandlers {
   onOpenWiserPlaybooks?: () => void;
   /** ADR-072 — open the journey-map composer (Planning menu). */
   onNewJourneyMap?: () => void;
+  /** ADR-072 phase 2 — open the deployed Journey Map Builder app. */
+  onOpenJourneyMapBuilder?: () => void;
   /**
    * Called when the user clicks "Sign In / Account…". Signed out →
    * starts the sign-in flow; signed in → opens Settings (account).
@@ -331,6 +333,27 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
     });
   }
 
+  // ADR-072 phase 2 — the real Journey Map Builder (deployed app),
+  // opened like WISER Playbooks. The composer below stays as quick
+  // capture straight into a Space.
+  if (handlers.onOpenJourneyMapBuilder !== undefined) {
+    const openBuilder = handlers.onOpenJourneyMapBuilder;
+    registry.upsert({
+      id: 'top:planning',
+      type: 'top-level',
+      label: 'Planning',
+      order: 85,
+    });
+    registry.upsert({
+      id: 'planning:journey-map-builder',
+      type: 'item',
+      parentId: 'top:planning',
+      label: 'Journey Map Builder',
+      order: 5,
+      click: openBuilder,
+    });
+  }
+
   // ADR-072 — journey maps. Registered only when the host supplies a
   // handler, same contract as WISER Playbooks above.
   if (handlers.onNewJourneyMap !== undefined) {
@@ -345,7 +368,7 @@ export function seedKernelMenu(handlers: SeedHandlers): void {
       id: 'planning:journey-map',
       type: 'item',
       parentId: 'top:planning',
-      label: 'New Journey Map…',
+      label: 'New Journey Map…  (quick)',
       order: 10,
       click: openJourney,
     });

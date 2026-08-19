@@ -1609,6 +1609,7 @@ export function buildSpaceContextEntries(
     convertShared: () => void;
     convertUser: () => void;
     setPlaybook: () => void;
+    newJourney: () => void;
     deleteSpace: () => void;
     togglePin: () => void;
   }
@@ -1653,6 +1654,10 @@ export function buildSpaceContextEntries(
     // user assign a current playbook to the space?"). Here it's one
     // right-click.
     { type: 'action', label: 'Set current playbook…', run: handlers.setPlaybook },
+    // ADR-072 — a journey map is an ordinary asset, so it is created
+    // from the Space that will hold it, not only from the Planning
+    // menu. Same right-click reachability the playbook got.
+    { type: 'action', label: 'New journey map…', run: handlers.newJourney },
     { type: 'separator' },
     {
       type: 'submenu',
@@ -1925,6 +1930,9 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     convertUser: () => void toggleSpaceKind(space.id),
     setPlaybook: () => {
       void openSetPlaybookPicker(space.id, space.name);
+    },
+    newJourney: () => {
+      void openJourneyComposer(space.id);
     },
     deleteSpace: () => {
       void performSoftDelete(space.id);
@@ -2416,6 +2424,20 @@ function wiserOpenBridge(): ((riffId: string | null) => Promise<{ ok: true }>) |
   const spaces = window.lite?.spaces as unknown as WiserOpenBridge | undefined;
   if (spaces === undefined || typeof spaces.openWiser !== 'function') return null;
   return spaces.openWiser.bind(spaces);
+}
+
+/**
+ * Narrow view of the Spaces↔Journey Map Builder bridge
+ * (`spaces.openJourneyMap`). Same defensive shape as the WISER one.
+ */
+type JourneyOpenBridge = {
+  openJourneyMap?: (itemId: string | null) => Promise<{ ok: true }>;
+};
+
+function journeyOpenBridge(): ((itemId: string | null) => Promise<{ ok: true }>) | null {
+  const spaces = window.lite?.spaces as unknown as JourneyOpenBridge | undefined;
+  if (spaces === undefined || typeof spaces.openJourneyMap !== 'function') return null;
+  return spaces.openJourneyMap.bind(spaces);
 }
 
 /**
@@ -6906,17 +6928,22 @@ export function buildJourneyPreview(draft: RendererJourneyDraft): HTMLElement {
 }
 
 /**
- * The Planning → Journey map composer. Asks what journey to map, drafts
- * it, previews it, and (on Save) writes it into the active Space.
+ * The Journey map composer. Asks what journey to map, drafts it,
+ * previews it, and (on Save) writes it into a Space as an ordinary
+ * `journey` asset.
+ *
+ * `targetSpaceId` names the Space explicitly — the right-click entry
+ * passes the Space that was clicked, which is not always the active
+ * scope. Omitted (the Planning menu) it falls back to the active one.
  */
-export async function openJourneyComposer(): Promise<void> {
+export async function openJourneyComposer(targetSpaceId?: string): Promise<void> {
   const bridge = window.lite?.spaces;
   const journeys = bridge?.journeys;
   if (bridge === undefined || journeys === undefined) {
     showToast('Journey maps need a newer app build');
     return;
   }
-  const spaceId = state.activeScopeId;
+  const spaceId = targetSpaceId ?? state.activeScopeId;
   const space = state.spaces.find((sp) => sp.id === spaceId);
   if (space === undefined) {
     showToast('Open a Space first — the journey map is saved into it');
@@ -9871,6 +9898,33 @@ export function buildDetailPane(
       openBtn.addEventListener('click', () => {
         void openWiser(riffId).catch((err: unknown) => {
           window.logging?.warn?.('spaces', 'openWiser failed', {
+            itemId: item.id,
+            error: messageFrom(err),
+          });
+        });
+      });
+      bridgeRow.appendChild(openBtn);
+      wrap.appendChild(bridgeRow);
+    }
+  }
+
+  // ── Spaces↔Journey Map Builder bridge (journeys only) ────────────
+  // The mirror of the WISER row above: a journey asset opens in the
+  // real Builder, which reads and writes it back through the same
+  // Space. Hidden when the preload doesn't expose the bridge.
+  if (item.kind === 'journey') {
+    const openJourney = journeyOpenBridge();
+    if (openJourney !== null) {
+      const bridgeRow = document.createElement('div');
+      bridgeRow.className = 'spaces-detail-wiser';
+      const openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'spaces-detail-wiser-btn';
+      openBtn.textContent = 'Open in Journey Map Builder';
+      openBtn.title = 'Open this journey map in the Journey Map Builder';
+      openBtn.addEventListener('click', () => {
+        void openJourney(item.id).catch((err: unknown) => {
+          window.logging?.warn?.('spaces', 'openJourneyMap failed', {
             itemId: item.id,
             error: messageFrom(err),
           });

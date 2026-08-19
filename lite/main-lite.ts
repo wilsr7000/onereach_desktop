@@ -34,6 +34,7 @@ import * as fs from 'node:fs';
 
 import { initMenu } from './menu/build-menu.js';
 import { seedKernelMenu } from './menu/seed.js';
+import { openJourneyMapWindow } from './journey-map-window.js';
 import { openWiserPlaybooksWindow } from './wiser-playbooks-window.js';
 import { registry as menuRegistry } from './menu/registry.js';
 import { openBugReportModal, initBugReport } from './bug-report/main.js';
@@ -1127,6 +1128,7 @@ app
       onOpenActiveTabDevTools: () => openActiveTabDevTools(),
       onOpenAllDevTools: () => openAllWindowDevTools(),
       onOpenWiserPlaybooks: () => openWiserPlaybooksWindow(),
+      onOpenJourneyMapBuilder: () => openJourneyMapWindow(),
       // ADR-072 — journey maps live in Spaces (they're assets), so the
       // menu opens Spaces and asks the renderer to start the composer.
       onNewJourneyMap: () => {

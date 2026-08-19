@@ -2553,6 +2553,21 @@ export const CYPHER = {
    * service) can discover that HAS_ACCESS carries a role and what the
    * values mean, instead of inferring it from our queries.
    */
+  /**
+   * ADR-072 — publish the journey-map contract to the (:Schema)
+   * registry. A journey map is an ordinary :Asset with type 'journey';
+   * registering it tells every other graph writer (the Journey Map
+   * Builder, the full app, agents) the shape to read and write, so a
+   * journey created in one surface opens in the others.
+   */
+  ENSURE_JOURNEY_SCHEMA: `
+    MERGE (js:Schema {entity: 'Journey'})
+    SET js.description = $journeyDoc,
+        js.properties = $journeyProps,
+        js.updatedAt = $now
+    RETURN js.entity AS entity
+  `,
+
   ENSURE_ACCESS_ROLE_SCHEMA: `
     MERGE (rt:Schema {entity: '_RelationshipTypes'})
     SET rt.hasAccess = $hasAccessDoc,
@@ -5068,6 +5083,36 @@ export class SdkSpacesClient {
    * reverse-engineering our Cypher. Best-effort and idempotent, exactly
    * like ensureChecklistSchema.
    */
+  /** ADR-072 — register the journey-map asset contract. Best-effort. */
+  async ensureJourneySchema(): Promise<void> {
+    try {
+      await this.run(CYPHER.ENSURE_JOURNEY_SCHEMA, {
+        journeyDoc:
+          "An agent-enabled journey map. Stored as an ordinary (:Asset {type: 'journey'}) " +
+          'BELONGS_TO a (:Space), so it inherits Space visibility, versions, the view ' +
+          'audit and download. `content` is markdown: phase headings as "## N. Name" ' +
+          '(the same grammar playbook steps use, which the journey tile parses into its ' +
+          'stage flow), each touchpoint carrying the action, the emotion, the thought, ' +
+          'and the agent opportunity with a delegation confidence of High|Medium|Low. ' +
+          '`description` summarises whose journey it is plus phase/touchpoint/hand-off ' +
+          'counts. Writers: Lite Planning (quick composer) and the Journey Map Builder.',
+        journeyProps: [
+          'id',
+          'type',
+          'name',
+          'description',
+          'content',
+          'createdAt',
+          'updatedAt',
+          'createdBy',
+        ],
+        now: new Date(this.now()).toISOString(),
+      });
+    } catch {
+      /* registry docs are best-effort; never fail a boot over them */
+    }
+  }
+
   async ensureAccessRoleSchema(): Promise<void> {
     try {
       await this.run(CYPHER.ENSURE_ACCESS_ROLE_SCHEMA, {

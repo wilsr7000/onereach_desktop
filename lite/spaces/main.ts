@@ -42,6 +42,7 @@ import {
 } from './journey.js';
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
+import { registerJourneyMapTargetChannel } from '../journey-map-window.js';
 import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
@@ -379,6 +380,9 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
   if (registered) return handle;
 
   registerSpacesIpc({ onOpen: handle.open });
+  // ADR-072 — the one extra channel the Journey Map Builder's bridge
+  // needs: which journey asset the user clicked to get here.
+  registerJourneyMapTargetChannel();
 
   // ADR-050: lift any v1 inline-base64 asset stubs into GSX. Delayed
   // well past boot so sign-in (auto or manual) has a chance to settle;
@@ -871,6 +875,9 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
   // registry alongside it, so other graph writers discover read-only
   // members instead of inferring the property from our queries.
   void client.ensureAccessRoleSchema();
+  // ADR-072 — the journey-map asset contract, so the Builder and Lite
+  // read/write the same shape.
+  void client.ensureJourneySchema();
   // ADR-057 — register AssetVersion + HAS_VERSION the same way.
   void client.ensureVersionSchema();
 

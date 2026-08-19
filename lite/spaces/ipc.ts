@@ -61,12 +61,19 @@ import type {
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import { openWiserPlaybooksWindow } from '../wiser-playbooks-window.js';
+import { openJourneyMapWindow } from '../journey-map-window.js';
 import type { DiscoveryResults } from './discovery-format.js';
 
 export const SPACES_IPC = {
   OPEN: 'lite:spaces:open',
   /** Spaces↔WISER bridge: open the Playbooks window, optionally at a riff. */
   OPEN_WISER: 'lite:spaces:openWiser',
+  /**
+   * Spaces↔Journey Map Builder bridge (ADR-072): open the Builder,
+   * optionally targeting a journey asset the Builder then loads back
+   * through its own `window.journeySpaces` bridge.
+   */
+  OPEN_JOURNEY_MAP: 'lite:spaces:openJourneyMap',
   LIST_SPACES: 'lite:spaces:listSpaces',
   REFRESH: 'lite:spaces:refresh',
   ITEMS_READ_FILE_DATA: 'lite:spaces:items:readFileData',
@@ -227,6 +234,16 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           ? (payload as { riffId: string }).riffId
           : undefined;
       openWiserPlaybooksWindow(riffId === undefined ? undefined : { riffId });
+      return { ok: true };
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.OPEN_JOURNEY_MAP,
+    (_event: IpcMainInvokeEvent, payload: unknown): { ok: true } => {
+      const raw = (payload as { itemId?: unknown })?.itemId;
+      const itemId = typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+      openJourneyMapWindow(itemId === undefined ? undefined : { itemId });
       return { ok: true };
     }
   );

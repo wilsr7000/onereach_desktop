@@ -72,6 +72,7 @@ const TELEMETRY_SET_CONSENT = 'lite:telemetry:setConsent';
 // surface is bridged once Phase 1 lands real fetches.
 const SPACES_OPEN = 'lite:spaces:open';
 const SPACES_OPEN_WISER = 'lite:spaces:openWiser';
+const SPACES_OPEN_JOURNEY_MAP = 'lite:spaces:openJourneyMap';
 const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
 const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
@@ -949,6 +950,11 @@ interface SpacesBridge {
    * straight to that playbook (the hosted app consumes ?riff= on load).
    */
   openWiser(riffId: string | null): Promise<{ ok: true }>;
+  /**
+   * Open (or focus) the Journey Map Builder; with an itemId, target
+   * that journey asset (the Builder reads it back over its own bridge).
+   */
+  openJourneyMap(itemId: string | null): Promise<{ ok: true }>;
   listSpaces(): Promise<SpacesIpcResultView<unknown[]>>;
   /**
    * Drop cached reads and refetch, so Spaces created OUTSIDE this app
@@ -1640,6 +1646,8 @@ const spaces: SpacesBridge = {
   open: () => ipcRenderer.invoke(SPACES_OPEN) as Promise<{ ok: true }>,
   openWiser: (riffId: string | null) =>
     ipcRenderer.invoke(SPACES_OPEN_WISER, { riffId }) as Promise<{ ok: true }>,
+  openJourneyMap: (itemId: string | null) =>
+    ipcRenderer.invoke(SPACES_OPEN_JOURNEY_MAP, { itemId }) as Promise<{ ok: true }>,
   listSpaces: () =>
     ipcRenderer.invoke(SPACES_LIST_SPACES) as Promise<SpacesIpcResultView<unknown[]>>,
   refresh: () =>

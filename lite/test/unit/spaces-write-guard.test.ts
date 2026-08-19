@@ -38,6 +38,7 @@ const EXEMPT: Record<string, string> = {
     'exactly what read-only permits, and the edge is viewer-scoped',
   ENSURE_CHECKLIST_SCHEMA: 'registry documentation, not user data',
   ENSURE_ACCESS_ROLE_SCHEMA: 'registry documentation, not user data',
+  ENSURE_JOURNEY_SCHEMA: 'registry documentation, not user data',
   UPSERT_PERSON: 'identity plumbing — a Person node is not Space content',
   ENSURE_MEETINGS_SPACE: 'bootstrap of the shared meetings Space',
   PIN_SPACE:

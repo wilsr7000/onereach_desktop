@@ -1623,7 +1623,7 @@ describe('space description editability (2026-08-13 report)', () => {
       { id: 's1', name: 'S', visibility: 'open' } as never,
       {
         share: noop, unshare: noop, addPeople: noop, upload: noop,
-        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop, deleteSpace: noop, togglePin: noop,
+        rename: noop, editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop, newJourney: noop, deleteSpace: noop, togglePin: noop,
       }
     );
     const labels = entries
@@ -1686,7 +1686,7 @@ describe('space context menu — Delete space (2026-08-16)', () => {
         share: () => undefined, unshare: () => undefined, addPeople: () => undefined,
         upload: () => undefined, rename: () => undefined, editObjective: () => undefined,
         convertShared: () => undefined, convertUser: () => undefined,
-        setPlaybook: () => undefined,
+        setPlaybook: () => undefined, newJourney: () => undefined,
         deleteSpace: () => { fired += 1; }, togglePin: () => undefined,
       }
     );
@@ -1716,6 +1716,7 @@ describe('space context menu — every action is wired (coverage contract)', () 
       convertShared: h('convertShared'),
       convertUser: h('convertUser'),
       setPlaybook: h('setPlaybook'),
+      newJourney: h('setPlaybook'),
       deleteSpace: h('deleteSpace'),
       togglePin: h('togglePin'),
     };
