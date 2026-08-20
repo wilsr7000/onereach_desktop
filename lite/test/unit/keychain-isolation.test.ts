@@ -28,21 +28,16 @@ afterEach(() => {
 describe('LITE_NO_KEYCHAIN=1 gives every store an inert backend', () => {
   it('session vault: no session, and writes vanish', async () => {
     const mod = await import('../../auth/session-vault.js');
-    mod._resetKeychainBackendForTesting?.();
-    const backend = (mod as { _defaultKeychainBackendForTesting?: () => unknown })
-      ._defaultKeychainBackendForTesting;
-    // Reach the factory through the module's own seam when it exists,
-    // else through a fresh vault read path.
-    if (typeof backend === 'function') {
-      const b = backend() as {
-        getPassword: (s: string, a: string) => Promise<string | null>;
-        setPassword: (s: string, a: string, p: string) => Promise<void>;
-        deletePassword: (s: string, a: string) => Promise<boolean>;
-      };
-      await b.setPassword('svc', 'acct', 'secret');
-      expect(await b.getPassword('svc', 'acct')).toBeNull();
-      expect(await b.deletePassword('svc', 'acct')).toBe(false);
-    }
+    mod._resetSessionVaultBackendForTesting();
+    const vault = new mod.SessionVault();
+    const cookie = {
+      name: 'c',
+      value: 'secret',
+      domain: 'example.test',
+      path: '/',
+    } as Parameters<typeof vault.save>[1];
+    await vault.save('edison', cookie, cookie);
+    expect(await vault.load('edison')).toBeNull();
   });
 
   it('ai key store: reads null under the flag, never touching keytar', async () => {
@@ -55,10 +50,7 @@ describe('LITE_NO_KEYCHAIN=1 gives every store an inert backend', () => {
   it('totp store: reports no secret under the flag', async () => {
     const mod = await import('../../totp/store.js');
     mod._resetKeychainBackendForTesting();
-    const store = mod.createKeychainTotpStore?.() ?? null;
-    if (store !== null && typeof (store as { hasSecret?: unknown }).hasSecret === 'function') {
-      const has = await (store as { hasSecret: () => Promise<boolean> }).hasSecret();
-      expect(has).toBe(false);
-    }
+    const store = new mod.TotpStore();
+    expect(await store.hasSecret()).toBe(false);
   });
 });

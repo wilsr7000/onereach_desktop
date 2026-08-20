@@ -1212,6 +1212,15 @@ app
       });
     }
 
+    // E2E test seam (same gate as __liteMenuRegistry above): expose the
+    // live BackupManager so the backup-created spec can drive it from
+    // app.evaluate. The packaged main bundle is ESM -- `require()` does
+    // not exist inside an evaluate callback, so re-instantiating the
+    // manager there (the spec's old approach) cannot work.
+    if (process.env.LITE_TEST_MODE === 'true' && updaterHandle !== null) {
+      (globalThis as Record<string, unknown>).__liteUpdaterBackups = updaterHandle.backups;
+    }
+
     // Create the tabbed main window (replaces the legacy single
     // placeholder window per ADR-038). The factory wires its own
     // store subscription, IPC handlers, and tab-view orchestration;

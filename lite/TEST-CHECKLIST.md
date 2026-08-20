@@ -374,12 +374,14 @@ and `test/live/journey-map-ai.test.ts` (real model). What still needs eyes:
 - [ ] **Manifest sanity** — latest-mac.yml version + artifacts match the
       tag before anything uploads.
 
-### Known limitation (2026-08-10)
-- The e2e suite CANNOT run while the installed app is running: specs
-  poll the log server on the baked port 47392 and read the LIVE app
-  instead of the test instance (pure timeouts, no product errors).
-  Quit the app before `lite:test:e2e`, until ports are env-overridable
-  and threaded through lite/test/harness/launch.ts.
+### Resolved limitation (2026-08-20; was 2026-08-10)
+- The e2e suite used to be unrunnable beside the installed app: specs
+  polled the baked port 47392 and read the LIVE app instead of the test
+  instance. Fixed in the isolation pass — launchLite() now allocates a
+  free per-run port (LITE_LOG_PORT, honored by lite/main-lite.ts) and
+  sets LITE_NO_KEYCHAIN=1 so test instances never touch the user's
+  Keychain. `npm run lite:test:full` runs the whole gate including e2e
+  (requires a packaged build under dist-lite/).
 
 ### riff app (companion suite — ~/AI First Notes)
 - [ ] **Theme integrity** — after adding color classes, re-run

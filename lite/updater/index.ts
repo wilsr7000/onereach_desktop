@@ -152,6 +152,22 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
 
   const ui: UpdaterUiSurface = {
     showMessageBox: async (params) => {
+      // Test runs never show updater dialogs: parentless
+      // dialog.showMessageBox on macOS blocks the MAIN PROCESS until
+      // dismissed (NSAlert runModal under the hood), and no one can
+      // dismiss a native dialog from the e2e harness -- the whole app
+      // wedges (log server dead, IPC dead; seen 2026-08-20 when the
+      // check-flow spec's "No Updates Available" dialog froze the
+      // process). Auto-answer with the CANCEL button so suppression is
+      // always the no-op choice (never "Install", never "Download").
+      if (process.env.LITE_TEST_MODE === 'true') {
+        log.info('updater: dialog suppressed (LITE_TEST_MODE) -- auto-cancelling', {
+          title: params.title,
+        });
+        return {
+          response: params.cancelId ?? Math.max(0, params.buttons.length - 1),
+        };
+      }
       // Bring lite to the front BEFORE showing the dialog. On macOS,
       // a window-attached dialog becomes a sheet -- if the parent
       // window isn't focused (e.g., behind Cursor / a browser),
@@ -420,6 +436,19 @@ export async function verifyUpdateOnStartup(opts: {
     ...(opts.openBugReport !== undefined ? { openBugReport: opts.openBugReport } : {}),
     dialogs: {
       showFailureDialog: async (params) => {
+        // Test runs never show this dialog: it fires BEFORE any window
+        // exists, so an unanswered native dialog blocks the whole boot
+        // chain and Playwright's firstWindow() times out (there is no
+        // window to interact with, and no way to dismiss a native
+        // dialog from the harness). Behave as "Skip" -- state was
+        // already written by verify.ts, which is the contract the
+        // cross-restart e2e asserts.
+        if (process.env.LITE_TEST_MODE === 'true') {
+          opts.logger.info('updater: failure dialog suppressed (LITE_TEST_MODE) -- treating as Skip', {
+            title: params.title,
+          });
+          return 3;
+        }
         const result = await dialog.showMessageBox({
           type: 'warning',
           title: params.title,

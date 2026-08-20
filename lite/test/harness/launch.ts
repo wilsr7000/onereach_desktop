@@ -192,33 +192,53 @@ export async function launchLite(opts: LaunchOptions = {}): Promise<LiteHandle> 
 export async function closeLite(handle: LiteHandle | null | undefined): Promise<void> {
   if (handle === null || handle === undefined) return;
   const { app, userDataPath, ownsUserData } = handle;
-  try {
-    try {
-      await app.evaluate(({ app: a }) => {
-        a.quit();
-      });
-    } catch {
-      /* app may already be exiting */
-    }
-    await Promise.race([
-      app.close(),
-      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('close timeout')), 10_000)),
-    ]);
-  } catch {
-    try {
-      await app.evaluate(({ app: a }) => a.exit(0));
-    } catch {
-      /* no-op */
-    }
+
+  // Every step below is deadline-raced. A wedged app (e.g. an in-flight
+  // real-network update check that won't let Electron quit) can hang
+  // ANY of these calls -- including app.evaluate itself when the CDP
+  // connection is unresponsive -- and an unraced await here is exactly
+  // how the Playwright worker ends up burning its 60s teardown budget
+  // (seen 2026-08-20 via updater/check-flow).
+  const raced = async (step: Promise<unknown>, timeoutMs: number): Promise<boolean> => {
+    let timer: NodeJS.Timeout | undefined;
     try {
       await Promise.race([
-        app.close(),
-        new Promise<void>((_, reject) => setTimeout(() => reject(new Error('force close timeout')), 2_000)),
+        step,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('closeLite step timeout')), timeoutMs);
+        }),
       ]);
+      return true;
     } catch {
-      // eslint-disable-next-line no-console
-      console.warn('[lite-harness] App did not exit cleanly -- process will be force-killed');
+      return false;
+    } finally {
+      clearTimeout(timer);
     }
+  };
+
+  const politeQuit = await raced(
+    app.evaluate(({ app: a }) => {
+      a.quit();
+    }),
+    3_000
+  );
+  let closed = politeQuit && (await raced(app.close(), 10_000));
+  if (!closed) {
+    await raced(app.evaluate(({ app: a }) => a.exit(0)), 2_000);
+    closed = await raced(app.close(), 2_000);
+  }
+  if (!closed) {
+    // Last resort: SIGKILL our own child by PID. PID-anchored on the
+    // exact child -- never a pattern kill (see the release postmortem
+    // rule about unanchored pkills).
+    // eslint-disable-next-line no-console
+    console.warn('[lite-harness] App did not exit cleanly -- force-killing the child process');
+    try {
+      app.process().kill('SIGKILL');
+    } catch {
+      /* already dead */
+    }
+    await raced(app.close(), 2_000);
   }
 
   if (ownsUserData) {

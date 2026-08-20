@@ -5,9 +5,12 @@
  * window.updater bridge), and that calling it produces the in-flight
  * coalescing behavior (a second concurrent call returns the same result).
  *
- * No update server: in dev mode without a dev-app-update.yml the check
- * times out / errors -- which is itself the assertion that the lifecycle
- * handled it gracefully.
+ * 2026-08-20: the coalescing test is HERMETIC now -- it points the
+ * updater at a local server (LITE_DEV_UPDATE_CONFIG) serving a lower
+ * version, so the check resolves deterministically. It used to hit the
+ * REAL GitHub feed, which is unauthenticated-rate-limited (60 req/hr
+ * per IP): repeated runs stalled the check past the 60s test budget
+ * and made the tier flaky.
  */
 
 import { test, expect } from '@playwright/test';
@@ -20,21 +23,36 @@ import {
   defaultExecutablePath,
   type LiteHandle,
 } from '../../harness/index.js';
+import {
+  startUpdateServer,
+  buildYamlFixture,
+  writeDevAppUpdateYml,
+  type UpdateServerHandle,
+} from '../../harness/updater/index.js';
 
 let handle: LiteHandle | null = null;
 let userDataDir: string | null = null;
+let server: UpdateServerHandle | null = null;
+let sandbox: string | null = null;
 
 test.afterEach(async () => {
   await closeLite(handle);
   handle = null;
-  if (userDataDir !== null) {
-    try {
-      await fs.rm(userDataDir, { recursive: true, force: true });
-    } catch {
-      /* best-effort */
-    }
-    userDataDir = null;
+  if (server !== null) {
+    await server.stop();
+    server = null;
   }
+  for (const dir of [userDataDir, sandbox]) {
+    if (dir !== null) {
+      try {
+        await fs.rm(dir, { recursive: true, force: true });
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  userDataDir = null;
+  sandbox = null;
 });
 
 test('updater: window.updater.getState() returns the persisted state', async ({}, testInfo) => {
@@ -71,7 +89,21 @@ test('updater: window.updater.check() returns coalesced result when called twice
   }
 
   userDataDir = await fs.mkdtemp(path.join(tmpdir(), 'onereach-lite-test-check2-'));
-  handle = await launchLite({ userDataDir });
+
+  // Hermetic feed: serve a LOWER version from a local server so the
+  // check resolves fast as "no update" (allowDowngrade=false) without
+  // touching the network.
+  sandbox = await fs.mkdtemp(path.join(tmpdir(), 'onereach-lite-test-check2-feed-'));
+  const servingDir = path.join(sandbox, 'serving');
+  await buildYamlFixture({ version: '0.0.1', outputDir: servingDir });
+  server = await startUpdateServer({ servingDir });
+  const devCfg = path.join(sandbox, 'dev-app-update.yml');
+  await writeDevAppUpdateYml(devCfg, { serverUrl: server.baseUrl });
+
+  handle = await launchLite({
+    userDataDir,
+    env: { LITE_DEV_UPDATE_CONFIG: devCfg },
+  });
 
   // Two concurrent check calls. The runner coalesces -- both promises
   // resolve to the same shape. (We don't assert exact equality because

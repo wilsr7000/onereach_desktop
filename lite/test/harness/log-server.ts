@@ -54,6 +54,16 @@ export interface WaitForEventOptions {
   pollIntervalMs?: number;
   /** Optional secondary predicate run on each candidate match. */
   predicate?: (entry: EventLogEntry) => boolean;
+  /**
+   * Lower bound (ISO timestamp) for the server-side `since` filter.
+   * Defaults to the moment `waitForEvent()` is CALLED -- which silently
+   * excludes any event that was already enqueued before the call. If
+   * you push-then-wait (the common shape: `await client.pushEvent(...);
+   * await client.waitForEvent(...)`), capture a timestamp BEFORE the
+   * push and pass it here, or the wait can never match (2026-08-20
+   * kernel-smoke failure).
+   */
+  since?: string;
 }
 
 export interface LogStats {
@@ -294,7 +304,7 @@ export class LiteLogServerClient {
   ): Promise<EventLogEntry> {
     const timeoutMs = opts.timeoutMs ?? 5_000;
     const pollIntervalMs = opts.pollIntervalMs ?? 200;
-    const startedAt = new Date().toISOString();
+    const startedAt = opts.since ?? new Date().toISOString();
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       const events = await this.getEvents({ pattern, since: startedAt, limit: 200 });

@@ -47,14 +47,21 @@ test('updater: BackupManager.createBackup writes app-backups/v<version>/backup-m
   userDataDir = await fs.mkdtemp(path.join(tmpdir(), 'onereach-lite-test-backup-'));
   handle = await launchLite({ userDataDir });
 
-  // Trigger via the updater handle's BackupManager (exposed on globalThis
-  // for tests). Since lite doesn't expose BackupManager publicly, we
-  // re-instantiate one inside the main process and invoke it directly.
-  await handle.app.evaluate(async ({ app }, version: string) => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    const updaterModule = require('./updater/backups.js') as typeof import('../../../updater/backups.js');
-    const mgr = new updaterModule.BackupManager({ userDataPath: app.getPath('userData') });
-    await mgr.createBackup(version);
+  // Trigger via the LIVE BackupManager, exposed on globalThis by the
+  // LITE_TEST_MODE seam in main-lite.ts (same gate as __liteMenuRegistry).
+  // The packaged main bundle is ESM, so `require()` does not exist inside
+  // an evaluate callback -- re-instantiating the manager here (this
+  // spec's old approach) died with "require is not defined".
+  await handle.app.evaluate(async (_electron, version: string) => {
+    const backups = (globalThis as Record<string, unknown>).__liteUpdaterBackups as
+      | { createBackup: (v: string) => Promise<unknown> }
+      | undefined;
+    if (backups === undefined) {
+      throw new Error(
+        '__liteUpdaterBackups test seam missing -- LITE_TEST_MODE not set, or initUpdater failed'
+      );
+    }
+    await backups.createBackup(version);
   }, '0.0.1-test');
 
   const backups = await listAppBackups(handle.userDataPath);
