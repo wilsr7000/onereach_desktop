@@ -42,6 +42,7 @@ import {
 } from './note-standard';
 import { SpacesError } from './errors.js';
 import type { LearnSignals } from './learn-content.js';
+import type { SpacePresenceEntry } from './types.js';
 import type { Span } from '../logging/events.js';
 import type {
   Space,
@@ -276,7 +277,7 @@ const SPACE_WRITABLE = `(
           coalesce(s.createdBy, '') = $viewerId
           OR EXISTS {
             MATCH (:Person {id: $viewerId})-[w:HAS_ACCESS]->(s)
-            WHERE ${GRANT_LIVE.replace(/r\./g, 'w.')}
+            WHERE ${GRANT_LIVE.replace(/\br\./g, 'w.')}
               AND coalesce(w.role, 'writer') <> 'reader'
           }
         )
@@ -1428,6 +1429,26 @@ export const CYPHER = {
    * hands-on missions. Same visibility rules as every other read —
    * detection must never reveal more than the viewer can see.
    */
+  /**
+   * Live presence in a Space (2026-08-20): Presence beacons carry an
+   * activeSpaceId facet while someone has that Space open. Fresh =
+   * beaten within $freshMs (2.5× the 60s heartbeat). Self is excluded
+   * query-side — "you are here" is noise to the person standing there.
+   */
+  PRESENCE_IN_SPACE: `
+    MATCH (pr:Presence)
+    WHERE pr.activeSpaceId = $spaceId
+      AND coalesce(pr.lastSeenAt, 0) >= $nowMs - $freshMs
+      AND pr.personId <> $viewerId
+    OPTIONAL MATCH (pr)-[:PRESENCE_OF]->(p:Person)
+    RETURN pr.personId AS presencePersonId,
+           coalesce(p.name, pr.personId) AS presenceName,
+           pr.lastSeenAt AS presenceLastSeenMs,
+           coalesce(pr.appName, '') AS presenceApp
+    ORDER BY pr.lastSeenAt DESC
+    LIMIT 12
+  `,
+
   LEARN_KIND_COUNTS: `
     MATCH (a:Asset)
     WHERE a.deletedAt IS NULL
@@ -2674,6 +2695,33 @@ export class SdkSpacesClient {
       now: new Date().toISOString(),
     });
     return rows.length > 0;
+  }
+
+  async presenceInSpace(spaceId: string): Promise<SpacePresenceEntry[]> {
+    return this.withSpan('spaces.presence.inSpace', async () => {
+      const id = typeof spaceId === 'string' ? spaceId.trim() : '';
+      if (id.length === 0) return [];
+      const rows = await this.run(CYPHER.PRESENCE_IN_SPACE, {
+        spaceId: id,
+        viewerId: this.viewerParam(),
+        freshMs: 150_000,
+      });
+      const out: SpacePresenceEntry[] = [];
+      for (const r of rows) {
+        const personId = typeof r.presencePersonId === 'string' ? r.presencePersonId : '';
+        if (personId.length === 0) continue;
+        const lastSeen = Number(r.presenceLastSeenMs);
+        out.push({
+          personId,
+          name: typeof r.presenceName === 'string' && r.presenceName.length > 0
+            ? r.presenceName
+            : personId,
+          lastSeenMs: Number.isFinite(lastSeen) ? lastSeen : 0,
+          app: typeof r.presenceApp === 'string' ? r.presenceApp : '',
+        });
+      }
+      return out;
+    });
   }
 
   async learnSignals(): Promise<LearnSignals> {
