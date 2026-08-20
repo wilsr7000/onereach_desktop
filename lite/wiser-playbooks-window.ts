@@ -31,6 +31,7 @@ import { BrowserWindow, WebContentsView, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { getLoggingApi } from './logging/api.js';
 import { getAuthApi } from './auth/api.js';
+import { readAttributionEmailSync } from './spaces/identity-store.js';
 
 /**
  * The deployed WISER Playbooks build the launcher opens. This is the
@@ -71,9 +72,16 @@ function wiserViewerIdentity(): string | null {
     const email = typeof session?.email === 'string' ? session.email.trim().toLowerCase() : '';
     if (email.length > 0) return email;
   } catch {
-    /* signed-out or auth not initialized — fail closed downstream */
+    /* signed-out or auth not initialized — try the fallback below */
   }
-  return null;
+  // Session carries no email — the SAME gap as the 2026-08-15 viewer
+  // incident (14 spaces invisible): many GSX sign-ins never put an
+  // email in the `or` cookie. Without a viewer the hosted app fails
+  // closed — welcome screen, 0 playbooks, and any ?riff= deep link
+  // dies with "Deep-linked playbook not found after timeout". Fall
+  // back to the user-declared attribution email exactly like
+  // `viewerId()` in spaces/main.ts does.
+  return readAttributionEmailSync();
 }
 
 /** Keep the app view filling the window below the header strip. */
