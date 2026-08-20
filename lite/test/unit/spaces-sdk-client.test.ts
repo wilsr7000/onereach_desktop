@@ -3236,7 +3236,11 @@ describe('SdkSpacesClient.createAsset', () => {
   it('throws SPACES_NOT_FOUND when target space is missing', async () => {
     const stub = buildStubQuery();
     stub.setResponse('CREATE (a:Asset', []);
-    const client = makeClient(stub);
+    // The refusal classifier (2026-08-20) probes visibility before
+    // deciding; a signed-in viewer + an empty probe = genuinely gone.
+    // (A viewer-less client now gets the honest NOT_AUTHENTICATED —
+    // covered in spaces-write-refusal.test.ts.)
+    const client = new SdkSpacesClient({ query: stub.fn, viewerId: () => 'robb@onereach.com' });
     await expect(
       client.createAsset({ spaceId: 'sp-gone', title: 'x', content: 'y' })
     ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });
@@ -3374,7 +3378,7 @@ describe('SdkSpacesClient.moveAssetToSpace', () => {
   it('throws SPACES_NOT_FOUND when neither asset nor target matches', async () => {
     const stub = buildStubQuery();
     stub.setResponse('MERGE (a)-[:BELONGS_TO]->(target)', []);
-    const client = makeClient(stub);
+    const client = new SdkSpacesClient({ query: stub.fn, viewerId: () => 'robb@onereach.com' });
     await expect(
       client.moveAssetToSpace('i-gone', null, 'sp-2')
     ).rejects.toMatchObject({ code: 'SPACES_NOT_FOUND' });

@@ -39,6 +39,47 @@ describe('SPACE_WRITABLE at runtime', () => {
 });
 
 describe('no invisible control bytes in the query source', () => {
+  it('NO lite production source carries C0 control characters', () => {
+    // The 0x08 that broke 0.0.77 happened to land in sdk-client.ts,
+    // but an editor can materialize an escape in ANY file — a regex in
+    // the renderer or a Cypher string in a module would break just as
+    // invisibly. Scan the whole production tree; tests included costs
+    // nothing and catches fixture accidents too.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const root = ['.', 'lite']
+      .map((r) => path.resolve(r))
+      .find((r) => fs.existsSync(path.join(r, 'main-lite.ts')));
+    if (root === undefined) throw new Error('lite root not found');
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir)) {
+        if (entry === 'node_modules' || entry.startsWith('.')) continue;
+        const full = path.join(dir, entry);
+        if (fs.statSync(full).isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.(ts|mts|cts|js|mjs)$/.test(entry)) continue;
+        const bytes = fs.readFileSync(full);
+        for (let i = 0; i < bytes.length; i++) {
+          const b = bytes[i]!;
+          if (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) {
+            offenders.push(`${path.relative(root, full)}: 0x${b.toString(16)} at ${i}`);
+            break; // one report per file is enough
+          }
+        }
+      }
+    };
+    walk(root);
+    expect(
+      offenders,
+      'invisible control bytes — an editor materialized an escape sequence'
+    ).toEqual([]);
+  });
+
   it('sdk-client.ts contains no C0 control characters beyond tab/newline', () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const fs = require('node:fs') as typeof import('node:fs');

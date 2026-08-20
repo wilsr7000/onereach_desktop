@@ -851,6 +851,27 @@ export const CYPHER = {
   `,
 
   /**
+   * Why did a guarded write return nothing? (2026-08-20, the "add
+   * assets broke" report.) A SPACE_WRITABLE mutation that matches no
+   * rows used to throw "Space not found" no matter WHY — for a
+   * read-only member or a lapsed grant, that is a lie that costs a
+   * debugging session. This probe answers, within what the viewer is
+   * allowed to know (SPACE_VISIBLE-gated, so an invisible Space stays
+   * a genuine "not found"): can they write, and what role do they hold?
+   */
+  EXPLAIN_WRITE_REFUSAL: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    OPTIONAL MATCH (:Person {id: $viewerId})-[g:HAS_ACCESS]->(s)
+    RETURN ${SPACE_WRITABLE} AS canWrite,
+           coalesce(g.role, 'writer') AS role,
+           (g IS NOT NULL AND g.expiresUnixMs IS NOT NULL AND g.expiresUnixMs <= $nowMs)
+             AS grantExpired,
+           coalesce(s.name, s.id) AS name
+  `,
+
+  /**
    * WISER riff playbooks whose tile has nothing to say (2026-08-20
    * user report: "playbook tiles are not very descriptive"). Riff
    * `:Playbook` nodes carry no content and no description in the graph
@@ -3950,12 +3971,7 @@ export class SdkSpacesClient {
           spaceId: targetSpaceId,
         });
         if (rows.length === 0) {
-          throw new SpacesError({
-            code: 'SPACES_NOT_FOUND',
-            message: `Space ${targetSpaceId} not found`,
-            remediation: 'Refresh the list and try again.',
-            context: { spaceId: targetSpaceId },
-          });
+          await this.throwWriteRefusal(targetSpaceId, 'items.create');
         }
       }
       const created = await this.getItemAfterCreate(id);
@@ -4019,12 +4035,7 @@ export class SdkSpacesClient {
       commitTimestampMs: nowMs,
     });
     if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${input.spaceId} not found`,
-        remediation: 'Refresh the list and try again.',
-        context: { spaceId: input.spaceId },
-      });
+      await this.throwWriteRefusal(input.spaceId, 'items.create');
     }
     if (kvCollection !== null && kvRef !== null && this.noteKv !== null) {
       const spaceNameRaw = rows[0]?.['spaceName'];
@@ -4549,11 +4560,7 @@ export class SdkSpacesClient {
       };
       const rows = await this.run(CYPHER.MOVE_ASSET_TO_SPACE, params);
       if (rows.length === 0) {
-        throw new SpacesError({
-          code: 'SPACES_NOT_FOUND',
-          message: 'Asset or target space not found',
-          context: { id, toSpaceId },
-        });
+        await this.throwWriteRefusal(toSpaceId, 'items.moveToSpace');
       }
       const moved = await this.getItem(id);
       if (moved === null) {
@@ -4595,11 +4602,7 @@ export class SdkSpacesClient {
         now,
       });
       if (rows.length === 0) {
-        throw new SpacesError({
-          code: 'SPACES_NOT_FOUND',
-          message: 'Asset or target space not found',
-          context: { id, toSpaceId },
-        });
+        await this.throwWriteRefusal(toSpaceId, 'items.addToSpace');
       }
       const updated = await this.getItem(id);
       if (updated === null) {
@@ -4905,6 +4908,73 @@ export class SdkSpacesClient {
   private viewerParam(): string {
     const raw = this.getViewerId !== null ? this.getViewerId() : null;
     return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  }
+
+  /**
+   * A guarded mutation matched no rows — say WHY, honestly (2026-08-20:
+   * "add assets broke"; before the write-guard era the same symptom was
+   * always "not found", which sends people hunting for a missing Space
+   * when the real answer is a role or a lapsed grant).
+   *
+   * Always throws. Ordered by what the viewer is allowed to learn:
+   * signed out → NOT_AUTHENTICATED; Space invisible/absent → NOT_FOUND
+   * (unchanged for them); visible but not writable → FORBIDDEN naming
+   * the actual reason (read-only role / expired or missing grant).
+   */
+  private async throwWriteRefusal(spaceId: string, op: string): Promise<never> {
+    if (this.viewerParam() === '') {
+      throw new SpacesError({
+        code: 'SPACES_NOT_AUTHENTICATED',
+        message: 'Sign in to make changes in Spaces.',
+        remediation: 'Sign in (Settings → Account), then try again.',
+        context: { op, spaceId },
+      });
+    }
+    let rows: Array<Record<string, unknown>> = [];
+    try {
+      rows = await this.run(CYPHER.EXPLAIN_WRITE_REFUSAL, { spaceId });
+    } catch {
+      // The probe is best-effort — classification must never mask the
+      // original failure shape.
+    }
+    const row = rows[0];
+    if (row === undefined) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${spaceId} not found`,
+        remediation: 'Refresh the list and try again.',
+        context: { op, spaceId },
+      });
+    }
+    const name = typeof row['name'] === 'string' && row['name'].length > 0 ? row['name'] : spaceId;
+    if (row['canWrite'] === true) {
+      // The guard passed on the re-probe but the write matched nothing —
+      // a race or transient. Say that, not "no access".
+      throw new SpacesError({
+        code: 'SPACES_CYPHER',
+        message: `The change to "${name}" didn't land — likely a transient conflict.`,
+        remediation: 'Try again; if it repeats, refresh the Space first.',
+        context: { op, spaceId },
+      });
+    }
+    if (row['role'] === 'reader') {
+      throw new SpacesError({
+        code: 'SPACES_FORBIDDEN',
+        message: `You're a read-only member of "${name}".`,
+        remediation:
+          'Ask a writer in this Space to change your role (space header → People → role).',
+        context: { op, spaceId, role: 'reader' },
+      });
+    }
+    throw new SpacesError({
+      code: 'SPACES_FORBIDDEN',
+      message:
+        row['grantExpired'] === true
+          ? `Your access to "${name}" has expired.`
+          : `You're not a writer in "${name}".`,
+      remediation: 'Ask a member to add you: right-click the Space → Add people…',
+      context: { op, spaceId },
+    });
   }
 
 

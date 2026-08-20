@@ -13256,7 +13256,7 @@ function buildDetailTypeBlock(item: RendererItem): HTMLElement | null {
  *
  * Code spans are extracted into placeholders BEFORE bold / italic /
  * link replacements so we never interpret formatting inside `` `…` ``.
- * Placeholders are unique sentinel strings (` CS<n> `) that
+ * Placeholders are unique sentinel strings (`\u0000CS<n>\u0000`) that
  * can't collide with user content (NUL is forbidden in source) — they
  * survive the other passes intact and we restore them at the end.
  */
