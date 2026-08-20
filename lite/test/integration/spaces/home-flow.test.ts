@@ -153,6 +153,33 @@ beforeEach(() => {
   }
 });
 
+describe('Home view — time-first, space-second grouping (2026-08-20)', () => {
+  it('interleaved-space events cluster under space sub-headers within a band', async () => {
+    buildScaffold();
+    installBridge({
+      recentEvents: async () =>
+        ok([
+          { id: 'c-1', author: 'a', kind: 'item:added', timestamp: '2026-05-12T10:00:00Z', spaceId: 'sp-a', spaceName: 'Alpha' },
+          { id: 'c-2', author: 'b', kind: 'item:added', timestamp: '2026-05-12T09:59:00Z', spaceId: 'sp-b', spaceName: 'Beta' },
+          { id: 'c-3', author: 'a', kind: 'item:added', timestamp: '2026-05-12T09:58:00Z', spaceId: 'sp-a', spaceName: 'Alpha' },
+        ]),
+    });
+    await bootRenderer();
+
+    const groups = Array.from(document.querySelectorAll<HTMLElement>('.home-space-group'));
+    expect(groups.length).toBe(2);
+    const names = groups.map(
+      (g) => g.querySelector('.home-space-group-name')?.textContent ?? ''
+    );
+    expect(names).toEqual(['Alpha', 'Beta']);
+    // Alpha's two events cluster despite Beta's landing between them.
+    expect(groups[0]?.querySelectorAll('.home-timeline-row')).toHaveLength(2);
+    expect(groups[1]?.querySelectorAll('.home-timeline-row')).toHaveLength(1);
+    // Group count badge is honest.
+    expect(groups[0]?.querySelector('.home-space-group-count')?.textContent).toBe('2');
+  });
+});
+
 // ─── Populated timeline ─────────────────────────────────────────────────
 
 describe('Home view — populated timeline', () => {

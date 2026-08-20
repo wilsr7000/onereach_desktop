@@ -46,6 +46,11 @@ interface TimelineRow {
 }
 
 interface RendererTestApi {
+  groupBucketBySpace: (rows: unknown) => Array<{
+    spaceId: string | null;
+    space?: { id: string; name: string };
+    rows: Array<{ id: string }>;
+  }>;
   buildWelcomeCard: () => HTMLElement;
   buildFilterChips: (active?: HomeFilter) => HTMLElement;
   buildTimelineRow: (row: TimelineRow) => HTMLElement;
@@ -1137,3 +1142,52 @@ describe('buildPreviewUnavailable', () => {
     expect(el.querySelector('.spaces-detail-preview-unavailable-key')).toBeNull();
   });
 });
+
+describe('groupBucketBySpace — time first, space second (2026-08-20)', () => {
+  const row = (id: string, spaceId: string | null, iso: string, name = ''): Record<string, unknown> => ({
+    kind: 'event',
+    id,
+    author: 'a',
+    verb: 'added',
+    object: 'x',
+    timestamp: iso,
+    fromAgent: false,
+    ...(spaceId !== null ? { spaceId, space: { id: spaceId, name: name || spaceId } } : {}),
+  });
+
+  it('clusters rows by space, groups ordered by their newest row', () => {
+    const rows = [
+      row('e1', 'sp-a', '2026-08-20T10:00:00Z'),
+      row('e2', 'sp-b', '2026-08-20T09:59:00Z'),
+      row('e3', 'sp-a', '2026-08-20T09:00:00Z'),
+      row('e4', 'sp-b', '2026-08-20T08:00:00Z'),
+    ];
+    const groups = renderer.groupBucketBySpace(rows as never);
+    expect(groups.map((g: { spaceId: string | null }) => g.spaceId)).toEqual(['sp-a', 'sp-b']);
+    expect(groups[0]?.rows.map((r: { id: string }) => r.id)).toEqual(['e1', 'e3']);
+    expect(groups[1]?.rows.map((r: { id: string }) => r.id)).toEqual(['e2', 'e4']);
+  });
+
+  it('spaceless rows trail in one Uncategorized group', () => {
+    const rows = [
+      row('e1', null, '2026-08-20T11:00:00Z'),
+      row('e2', 'sp-a', '2026-08-20T10:00:00Z'),
+      row('e3', null, '2026-08-20T09:00:00Z'),
+    ];
+    const groups = renderer.groupBucketBySpace(rows as never);
+    // The null group is NEWEST but still trails — it has no identity
+    // header to anchor a cluster.
+    expect(groups.map((g: { spaceId: string | null }) => g.spaceId)).toEqual(['sp-a', null]);
+    expect(groups[1]?.rows).toHaveLength(2);
+  });
+
+  it('a group missing space metadata on its first row backfills from a later row', () => {
+    const first = row('e1', 'sp-a', '2026-08-20T10:00:00Z');
+    delete (first as Record<string, unknown>).space;
+    const rows = [first, row('e2', 'sp-a', '2026-08-20T09:00:00Z', 'Alpha')];
+    const groups = renderer.groupBucketBySpace(rows as never);
+    expect(groups).toHaveLength(1);
+    expect((groups[0]?.space as { name: string }).name).toBe('Alpha');
+  });
+});
+
