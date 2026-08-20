@@ -9770,3 +9770,25 @@ body {
   color: #fff;
   font-weight: 600;
 }
+
+/* AI draft in the space-details editor (2026-08-18) — parity with the
+ * creation wizard's assist. */
+.spaces-view-header-objective-ai {
+  appearance: none;
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  border-radius: 7px;
+  padding: 5px 11px;
+  font-size: 12px;
+  color: #c4b0ff;
+  background: rgba(139, 92, 246, 0.1);
+  cursor: pointer;
+}
+
+.spaces-view-header-objective-ai:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.2);
+}
+
+.spaces-view-header-objective-ai:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

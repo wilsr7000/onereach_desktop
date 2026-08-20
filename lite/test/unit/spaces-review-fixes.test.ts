@@ -546,6 +546,26 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(body).toContain('not valid JSON twice in a row');
   });
 
+  it('the space-details editor offers the same AI draft as creation', () => {
+    // 2026-08-18: "When I edit a space details there is no AI auto
+    // generate, just in creation." The inline editor now carries the
+    // wizard's spaceAssist, through the same composer so the saved
+    // format matches creation — and it only fills the textarea; nothing
+    // persists until Save.
+    const body = bodyOf('function enterSpaceObjectiveEdit', 6000);
+    expect(body).toContain('spaceAssist(purpose, space.name)');
+    expect(body).toContain('composeSpaceDescription(');
+    expect(body).toContain('Draft with AI');
+    // Fill-only: the AI handler itself must not call the update/save
+    // bridge — scope the check to the handler block, since the editor's
+    // own Save path legitimately updates.
+    const aiStart = body.indexOf('Draft with AI');
+    const aiEnd = body.indexOf('objective-hint');
+    expect(aiStart).toBeGreaterThan(-1);
+    expect(aiEnd).toBeGreaterThan(aiStart);
+    expect(body.slice(aiStart, aiEnd)).not.toMatch(/updateSpace|\.update\(/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

@@ -6278,6 +6278,52 @@ function enterSpaceObjectiveEdit(
   cancelBtn.textContent = 'Cancel';
   actions.appendChild(cancelBtn);
 
+  // 2026-08-18 — "When I edit a space details there is no AI auto
+  // generate, just in creation." Same assist as the creation wizard
+  // (ai.spaceAssist), same composer (composeSpaceDescription) so the
+  // result matches creation's format. It only FILLS the textarea —
+  // nothing persists until the user presses Save, so a bad draft costs
+  // one Cancel.
+  if (window.lite?.ai !== undefined) {
+    const aiBtn = document.createElement('button');
+    aiBtn.type = 'button';
+    aiBtn.className = 'spaces-view-header-objective-ai';
+    aiBtn.textContent = '✨ Draft with AI';
+    aiBtn.addEventListener('click', () => {
+      void (async () => {
+        const aiBridge = window.lite?.ai;
+        if (aiBridge === undefined) return;
+        const purpose =
+          textarea.value.trim().length > 0 ? textarea.value.trim() : space.name.trim();
+        if (purpose.length === 0) {
+          showToast('Give the Space a name or a rough sentence first.');
+          return;
+        }
+        aiBtn.disabled = true;
+        aiBtn.textContent = 'Drafting…';
+        try {
+          const res = await aiBridge.spaceAssist(purpose, space.name);
+          if (res.ok === false) {
+            showToast(res.error.message);
+            return;
+          }
+          textarea.value = composeSpaceDescription(
+            res.value.description,
+            res.value.objectives
+          );
+          textarea.dispatchEvent(new Event('input')); // live counter
+          textarea.focus();
+        } catch (err) {
+          showToast(messageFrom(err));
+        } finally {
+          aiBtn.disabled = false;
+          aiBtn.textContent = '✨ Draft with AI';
+        }
+      })();
+    });
+    actions.appendChild(aiBtn);
+  }
+
   const hint = document.createElement('span');
   hint.className = 'spaces-view-header-objective-hint';
   hint.textContent = '⌘↵ Save · Esc Cancel';
