@@ -427,8 +427,8 @@
               type="button"
               id="spaces-sidebar-search-toggle"
               class="spaces-toolbar-icon-button"
-              title="Filter spaces by name"
-              aria-label="Filter spaces by name"
+              title="Search spaces and assets (⌘F)"
+              aria-label="Search spaces and assets"
             >⌕</button>
             <button
               type="button"
@@ -511,23 +511,34 @@
               aria-expanded="false"
             >
               <span class="spaces-side-chevron" aria-hidden="true">▸</span>
-              <span class="spaces-side-header-label">Filter</span>
+              <span class="spaces-side-header-label">Search</span>
             </button>
             <div class="spaces-side-body">
               <!-- A FILTER, not a search (2026-08-19). It narrows the
                    lists below by Space name. Content search lives in the
                    main pane with a scope control; this box used to do
                    both and rendered results into a cramped tree here. -->
+              <!-- Typing filters the space list below (instant); Enter or
+                   Ask AI runs the ONE content search across ALL spaces,
+                   whose results render in the main pane where they have
+                   room (2026-08-20: "Search all spaces with agentic
+                   should also be in the left panel"). -->
               <div class="spaces-sidebar-search">
                 <input
                   type="search"
                   id="spaces-sidebar-search-input"
                   class="spaces-sidebar-search-input"
-                  placeholder="Filter spaces by name…"
+                  placeholder="Search spaces + all assets…"
                   autocomplete="off"
                   spellcheck="false"
-                  aria-label="Filter spaces by name"
+                  aria-label="Filter spaces by name; press Enter to search all assets"
                 />
+                <button
+                  type="button"
+                  id="spaces-sidebar-search-ai"
+                  class="spaces-sidebar-search-ai"
+                  title="Have AI judge every asset against what you mean — results open in the main pane"
+                >Ask AI</button>
               </div>
             </div>
           </section>

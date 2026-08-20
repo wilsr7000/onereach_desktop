@@ -130,6 +130,8 @@ const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
 const SPACES_ITEMS_ADD_TO_SPACE = 'lite:spaces:items:addToSpace';
 const SPACES_ITEMS_REMOVE_FROM_SPACE = 'lite:spaces:items:removeFromSpace';
 const SPACES_ITEMS_SEARCH = 'lite:spaces:items:search';
+const SPACES_ITEMS_SEARCH_AGENTIC = 'lite:spaces:items:search-agentic';
+const SPACES_ITEMS_SEARCH_AGENTIC_PROGRESS = 'lite:spaces:items:search-agentic-progress';
 const SPACES_ITEMS_VERSIONS = 'lite:spaces:items:versions';
 const SPACES_ITEMS_VERSION_GET = 'lite:spaces:items:versionGet';
 const SPACES_ITEMS_VERSION_RESTORE = 'lite:spaces:items:versionRestore';
@@ -685,6 +687,11 @@ interface SpacesItemsBridge {
     id: string,
     spaceId: string
   ): Promise<SpacesIpcResultView<unknown>>;
+  searchAgentic(payload: {
+    query: string;
+    spaceId?: string;
+  }): Promise<SpacesIpcResultView<unknown>>;
+  onSearchAgenticProgress(listener: (p: unknown) => void): () => void;
   search(opts: {
     query: string;
     spaceId?: string;
@@ -1786,6 +1793,17 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_ITEMS_SEARCH, { opts }) as Promise<
         SpacesIpcResultView<unknown[]>
       >,
+    searchAgentic: (payload: { query: string; spaceId?: string }) =>
+      ipcRenderer.invoke(SPACES_ITEMS_SEARCH_AGENTIC, payload) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    onSearchAgenticProgress: (listener: (p: unknown) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, p: unknown): void => listener(p);
+      ipcRenderer.on(SPACES_ITEMS_SEARCH_AGENTIC_PROGRESS, handler);
+      return (): void => {
+        ipcRenderer.removeListener(SPACES_ITEMS_SEARCH_AGENTIC_PROGRESS, handler);
+      };
+    },
     versions: (id: string, limit?: number) =>
       ipcRenderer.invoke(SPACES_ITEMS_VERSIONS, { id, limit }) as Promise<
         SpacesIpcResultView<unknown[]>

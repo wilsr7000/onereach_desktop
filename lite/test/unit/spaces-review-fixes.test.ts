@@ -349,7 +349,7 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src.slice(explorerClick, explorerClick + 500)).toContain('focusItemTile(item.id)');
     expect(src.slice(explorerClick, explorerClick + 500)).toContain('pendingTileFocusId = item.id');
     // renderItemList honors the pending focus after painting.
-    const render = bodyOf('function renderItemList', 9000);
+    const render = bodyOf('function appendSpaceContents', 9000);
     expect(render).toContain('pendingTileFocusId !== null && focusItemTile(pendingTileFocusId)');
   });
 

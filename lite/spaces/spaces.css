@@ -620,6 +620,50 @@ body {
   letter-spacing: 0.2px;
 }
 
+/* Search above the assets + the agentic tier (2026-08-20). */
+.spaces-items-search-above-assets { margin: 2px 0 12px; flex-wrap: wrap; }
+.spaces-items-search-ask-ai {
+  appearance: none;
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  background: rgba(139, 92, 246, 0.12);
+  color: #c4b5fd;
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 11.5px;
+  cursor: pointer;
+  flex: none;
+}
+.spaces-items-search-ask-ai:hover:not(:disabled) { background: rgba(139, 92, 246, 0.22); }
+.spaces-items-search-ask-ai:disabled { opacity: 0.6; cursor: default; }
+.spaces-items-search-progress {
+  font-size: 11.5px;
+  color: #8b8e9c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40ch;
+}
+.spaces-agentic-reason {
+  margin: 6px 10px 10px;
+  font-size: 11.5px;
+  font-style: italic;
+  color: #a78bfa;
+  line-height: 1.4;
+}
+.spaces-sidebar-search { display: flex; gap: 6px; align-items: center; }
+.spaces-sidebar-search-ai {
+  appearance: none;
+  border: 1px solid rgba(139, 92, 246, 0.5);
+  background: transparent;
+  color: #a78bfa;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
+  cursor: pointer;
+  flex: none;
+}
+.spaces-sidebar-search-ai:hover { background: rgba(139, 92, 246, 0.15); }
+
 /* THE content search: one box in the main pane, scope as a control. */
 .spaces-items-search-wrap {
   display: inline-flex;
@@ -8041,6 +8085,17 @@ body {
   background: rgba(52, 211, 153, 0.12);
 }
 
+/* WISER riff lifecycle ("Draft", "Not submitted") — quieter than the
+   progress pill: a state, not a score. */
+.spaces-card-playbook-pill.is-stage {
+  font-variant-numeric: normal;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-color: rgba(148, 163, 184, 0.35);
+  color: #a8b3c7;
+  background: rgba(148, 163, 184, 0.1);
+}
+
 .spaces-card-playbook-progress {
   display: block;
   height: 3px;
@@ -9822,4 +9877,53 @@ body {
 .spaces-presence-label {
   font-size: 12px;
   color: rgba(134, 239, 172, 0.9);
+}
+
+/* Time-first, Space-second timeline grouping (2026-08-20). */
+.home-space-group {
+  margin: 4px 0 10px;
+  padding-left: 4px;
+  border-left: 2px solid rgba(255, 255, 255, 0.06);
+}
+
+.home-space-group-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px 3px 4px;
+  margin-bottom: 2px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.home-space-group-head:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.home-space-group-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.home-space-group-name {
+  font-size: 12px;
+  font-weight: 620;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.home-space-group-count {
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+/* Inside a space group the per-row "in <space>" chip is redundant. */
+.home-space-group .home-timeline-meta-prefix,
+.home-space-group .spaces-chip {
+  display: none;
 }
