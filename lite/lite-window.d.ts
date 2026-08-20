@@ -968,6 +968,13 @@ interface LiteHomeUrlState {
   defaultUrl: string;
 }
 
+interface LiteSpacePresenceEntryView {
+  personId: string;
+  name: string;
+  lastSeenMs: number;
+  app: string;
+}
+
 interface LiteLearnSignalsView {
   spaces: number;
   otherMembers: number;
@@ -1064,6 +1071,11 @@ interface LiteSpacesBridge {
    */
   refresh(): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   getUncategorizedCount(): Promise<LiteSpacesIpcResult<number>>;
+  /** Live presence (2026-08-20): who's in a Space + scope reporting. */
+  presence?: {
+    inSpace(spaceId: string): Promise<LiteSpacesIpcResult<LiteSpacePresenceEntryView[]>>;
+    scope(spaceId: string | null, spaceName: string | null): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  };
   /** Learning Center bridge (replaces Home, 2026-08-07). */
   learn: {
     signals(): Promise<LiteSpacesIpcResult<LiteLearnSignalsView>>;

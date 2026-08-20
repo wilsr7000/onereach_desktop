@@ -566,6 +566,19 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(body.slice(aiStart, aiEnd)).not.toMatch(/updateSpace|\.update\(/);
   });
 
+  it('presence: scope beats on navigation; strip refresh rides the heartbeat, change-gated', () => {
+    // 2026-08-20: "show in a space if anyone is active in the space."
+    const src = source();
+    const scope = bodyOf('function setActiveScope', 2600);
+    expect(scope).toMatch(/presence\s*\n?\s*\?\.scope\(/);
+    const refresh = bodyOf('async function refreshSpacePresence', 2200);
+    // Zero new timers: the refresh is throttled and driven by the
+    // cache heartbeat; repaints only when the data changed.
+    expect(refresh).toContain('PRESENCE_REFRESH_MIN_MS');
+    expect(refresh).toMatch(/JSON\.stringify\(next\) === JSON\.stringify\(spacePresence\)/);
+    expect(src).toMatch(/markCacheBroadcast\(\);[\s\S]{0,200}refreshSpacePresence\(\)/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);

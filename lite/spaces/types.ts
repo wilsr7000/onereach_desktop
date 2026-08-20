@@ -1212,6 +1212,14 @@ export interface JourneyPhase {
  * straight into `journeys.draft`. Both optional-empty — an empty Space
  * yields no suggestions and the composer falls back to free text.
  */
+/** One live person in a Space (fresh Presence beacon). */
+export interface SpacePresenceEntry {
+  personId: string;
+  name: string;
+  lastSeenMs: number;
+  app: string;
+}
+
 export interface JourneySuggestions {
   objectives: string[];
   ideas: Array<{

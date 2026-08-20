@@ -78,6 +78,8 @@ const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_LEARN_SIGNALS = 'lite:spaces:learn:signals';
+const SPACES_PRESENCE_IN_SPACE = 'lite:spaces:presence:inSpace';
+const SPACES_PRESENCE_SCOPE = 'lite:spaces:presence:scope';
 const SPACES_LEARN_PROGRESS_GET = 'lite:spaces:learn:progressGet';
 const SPACES_LEARN_PROGRESS_SAVE = 'lite:spaces:learn:progressSave';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
@@ -964,6 +966,10 @@ interface SpacesBridge {
    */
   refresh(): Promise<SpacesIpcResultView<{ ok: true }>>;
   getUncategorizedCount(): Promise<SpacesIpcResultView<number>>;
+  presence: {
+    inSpace(spaceId: string): Promise<SpacesIpcResultView<LiteSpacePresenceEntryView[]>>;
+    scope(spaceId: string | null, spaceName: string | null): Promise<SpacesIpcResultView<{ ok: true }>>;
+  };
   learn: {
     signals(): Promise<SpacesIpcResultView<LiteLearnSignalsView>>;
     progressGet(): Promise<SpacesIpcResultView<LiteLearnProgressView>>;
@@ -1656,6 +1662,16 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_REFRESH) as Promise<SpacesIpcResultView<{ ok: true }>>,
   getUncategorizedCount: () =>
     ipcRenderer.invoke(SPACES_UNCATEGORIZED_COUNT) as Promise<SpacesIpcResultView<number>>,
+  presence: {
+    inSpace: (spaceId: string) =>
+      ipcRenderer.invoke(SPACES_PRESENCE_IN_SPACE, { spaceId }) as Promise<
+        SpacesIpcResultView<LiteSpacePresenceEntryView[]>
+      >,
+    scope: (spaceId: string | null, spaceName: string | null) =>
+      ipcRenderer.invoke(SPACES_PRESENCE_SCOPE, { spaceId, spaceName }) as Promise<
+        SpacesIpcResultView<{ ok: true }>
+      >,
+  },
   learn: {
     signals: () =>
       ipcRenderer.invoke(SPACES_LEARN_SIGNALS) as Promise<

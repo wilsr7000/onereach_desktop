@@ -352,6 +352,38 @@ describe('creation attribution (2026-08-07)', () => {
   });
 });
 
+describe('live presence in a Space (2026-08-20)', () => {
+  it('the query demands freshness, excludes self, and orders newest-first', () => {
+    // Gated: the Space itself must be visible to the viewer first.
+    expect(CYPHER.PRESENCE_IN_SPACE).toContain('MATCH (s:Space {id: $spaceId})');
+    expect(CYPHER.PRESENCE_IN_SPACE).toContain('pr.activeSpaceId = s.id');
+    // Stale beacons (crashed app, closed laptop) must never render as
+    // "here now" — the freshness window is the honesty guarantee.
+    expect(CYPHER.PRESENCE_IN_SPACE).toMatch(/lastSeenAt, 0\) >= \$nowMs - \$freshMs/);
+    // "You are here" is noise to the person standing there.
+    expect(CYPHER.PRESENCE_IN_SPACE).toContain('pr.personId <> $viewerId');
+    expect(CYPHER.PRESENCE_IN_SPACE).toContain('ORDER BY pr.lastSeenAt DESC');
+    expect(CYPHER.PRESENCE_IN_SPACE).toContain('LIMIT 12');
+  });
+
+  it('presenceInSpace shapes rows defensively and skips id-less ones', async () => {
+    const stub = buildStubQuery();
+    stub.setResponse('pr.activeSpaceId = s.id', [
+      { presencePersonId: 'erika@example.com', presenceName: 'Erika Hall', presenceLastSeenMs: 1000, presenceApp: 'Onereach.ai Lite' },
+      { presencePersonId: '', presenceName: 'ghost', presenceLastSeenMs: 2000, presenceApp: '' },
+      { presencePersonId: 'x@y.z', presenceName: '', presenceLastSeenMs: 'nope', presenceApp: null },
+    ]);
+    const client = new SdkSpacesClient({ query: stub.fn });
+    const rows = await client.presenceInSpace('space-1');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ personId: 'erika@example.com', name: 'Erika Hall', lastSeenMs: 1000, app: 'Onereach.ai Lite' });
+    expect(rows[1]?.name).toBe('x@y.z'); // empty name falls back to id
+    expect(rows[1]?.lastSeenMs).toBe(0); // non-numeric degrades to 0
+    // Empty space id → no query at all.
+    expect(await client.presenceInSpace('  ')).toEqual([]);
+  });
+});
+
 describe('SdkSpacesClient directory searches', () => {
   it('member library maps rows, defaults kind to Person, and skips id-less junk', async () => {
     // Review finding (2026-08-06): the mapper used requireString on

@@ -409,6 +409,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     WITH s, count(a) AS itemCount,
          max(${MEMBER_ACTIVITY_MS}) AS memberActivityMs
     WITH s, itemCount,
@@ -455,6 +456,7 @@ export const CYPHER = {
     MATCH (a)
     WHERE ${SPACE_MEMBER}
       AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
@@ -469,6 +471,7 @@ export const CYPHER = {
     MATCH (a)
     WHERE ${SPACE_MEMBER}
       AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
@@ -521,6 +524,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
         AND s.deletedAt IS NULL
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
       WHERE other.id <> s.id
@@ -561,6 +565,8 @@ export const CYPHER = {
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            a.metadata AS tileMetadata,
+           CASE WHEN a:Playbook THEN a.stage ELSE NULL END AS riffStage,
+           CASE WHEN a:Playbook THEN a.status ELSE NULL END AS riffStatus,
            [x IN otherSpacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -862,6 +868,7 @@ export const CYPHER = {
     MATCH (a {id: $id})
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
@@ -1203,6 +1210,7 @@ export const CYPHER = {
     MATCH (a:Asset)
       WHERE coalesce(a.url, a.fileUrl) = $fileKey
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     RETURN a.id AS id
     LIMIT 1
   `,
@@ -1436,8 +1444,12 @@ export const CYPHER = {
    * query-side — "you are here" is noise to the person standing there.
    */
   PRESENCE_IN_SPACE: `
+    MATCH (s:Space {id: $spaceId})
+    WHERE s.deletedAt IS NULL
+      AND ${SPACE_VISIBLE}
+    WITH s
     MATCH (pr:Presence)
-    WHERE pr.activeSpaceId = $spaceId
+    WHERE pr.activeSpaceId = s.id
       AND coalesce(pr.lastSeenAt, 0) >= $nowMs - $freshMs
       AND pr.personId <> $viewerId
     OPTIONAL MATCH (pr)-[:PRESENCE_OF]->(p:Person)
@@ -1476,6 +1488,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     RETURN count(a) AS count
   `,
 
@@ -1524,6 +1537,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     WITH s, count(a) AS itemCount
     SET s.deletedAt = null,
         s.updatedAt = $now
@@ -1619,6 +1633,7 @@ export const CYPHER = {
     MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND coalesce(a.type, a.assetType) = 'ticket'
         AND ($status IS NULL OR coalesce(a.status, 'open') = $status)
         AND ${SPACE_VISIBLE}
@@ -2106,6 +2121,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
           AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     SET a.deletedAt = $now,
         a.updatedAt = $now
     RETURN a.id AS id
@@ -2151,6 +2167,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
           AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
     OPTIONAL MATCH (a)-[old:BELONGS_TO]->(source:Space {id: $fromSpaceId})
@@ -2175,6 +2192,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
           AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
     MERGE (a)-[:BELONGS_TO]->(target)
@@ -2195,6 +2213,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
         AND ${SPACE_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     OPTIONAL MATCH (s)-[c:CONTAINS]->(a)
     DELETE r, c
     SET a.updatedAt = $now
@@ -2227,6 +2246,7 @@ export const CYPHER = {
     MATCH (a)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND (
           toLower(coalesce(a.name, a.title, '')) CONTAINS toLower($query)
           OR toLower(coalesce(a.description, '')) CONTAINS toLower($query)
@@ -2390,6 +2410,7 @@ export const CYPHER = {
     MATCH (a:Asset {id: $ticketId})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${ASSET_WRITABLE}
     MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
       WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
@@ -2409,6 +2430,7 @@ export const CYPHER = {
     MATCH (a:Asset {id: $ticketId})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${ASSET_WRITABLE}
     MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
       WHERE (coalesce(cs.visibility, 'open') <> 'restricted'

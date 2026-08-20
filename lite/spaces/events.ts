@@ -79,6 +79,9 @@ export const SPACES_EVENTS = {
   UNCATEGORIZED_COUNT_FINISH: 'spaces.uncategorizedCount.finish',
   UNCATEGORIZED_COUNT_FAIL: 'spaces.uncategorizedCount.fail',
   // ─── learn signals (Learning Center, 2026-08-07) ─────────────────────
+  PRESENCE_IN_SPACE_START: 'spaces.presence.inSpace.start',
+  PRESENCE_IN_SPACE_FINISH: 'spaces.presence.inSpace.finish',
+  PRESENCE_IN_SPACE_FAIL: 'spaces.presence.inSpace.fail',
   LEARN_SIGNALS_START: 'spaces.learn.signals.start',
   LEARN_SIGNALS_FINISH: 'spaces.learn.signals.finish',
   LEARN_SIGNALS_FAIL: 'spaces.learn.signals.fail',

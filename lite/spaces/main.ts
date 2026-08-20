@@ -1496,6 +1496,20 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       return client.learnSignals();
     },
 
+    presenceInSpace(spaceId: string) {
+      return client.presenceInSpace(spaceId);
+    },
+
+    // 2026-08-20 — "show in a space if anyone is active in the space."
+    // The renderer reports scope changes; the beacon carries the Space
+    // as facets (null clears when leaving to Home/Uncategorized).
+    presenceScope(spaceId: string | null, spaceName: string | null): void {
+      presenceBeat({
+        activeSpaceId: spaceId,
+        activeSpaceName: spaceName,
+      });
+    },
+
     learnProgressGet() {
       return readLearnProgress();
     },

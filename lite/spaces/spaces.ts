@@ -415,6 +415,8 @@ function wireCacheUpdates(): void {
   cacheUpdateUnsubscribe = sub((update) => {
     // Every event is a health heartbeat for the staleness watchdog…
     markCacheBroadcast();
+    // …and the presence strip's refresh tick (throttled internally).
+    void refreshSpacePresence();
     // …but repaints happen only when the data actually differs —
     // the periodic graph poll must never flicker an unchanged page
     // (2026-08-18). Missing flag (older main) = assume changed.
@@ -3590,6 +3592,15 @@ function setActiveScope(scopeId: string): void {
   state.items = [];
   renderedItemsSignature = null;
   renderedItemsScopeId = null;
+  // Presence (2026-08-20): stamp WHICH Space the viewer has open onto
+  // their beacon, so members see "X is here now". Home/Uncategorized
+  // clear the facet. Fire-and-forget garnish.
+  {
+    const sp = state.spaces.find((s) => s.id === scopeId);
+    void window.lite?.spaces?.presence
+      ?.scope(sp !== undefined ? sp.id : null, sp !== undefined ? sp.name : null)
+      .catch(() => undefined);
+  }
   pendingTileFocusId = null;
   // Sprint 3: clear any active items search on scope switch.
   state.itemsSearchQuery = '';
@@ -5901,6 +5912,8 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
       titleWrap.appendChild(buildSpaceMembersStrip(space));
       // What's happened in it, always visible (2026-08-19).
       titleWrap.appendChild(buildSpaceActivityStrip());
+      // Who's HERE right now (2026-08-20) — live beacons, self excluded.
+      mountPresenceStrip(titleWrap);
     }
   }
 
@@ -6855,6 +6868,88 @@ export function buildServicePulseBanner(
   });
   bar.appendChild(report);
   return bar;
+}
+
+// ─── Live presence in the open Space (2026-08-20) ───────────────────────
+// "Can you show in a space when looking at a space if anyone is active
+// in the space." Presence beacons carry activeSpaceId; the strip reads
+// fresh ones (≤150s) for the active scope. Refresh rides the cache
+// heartbeat (zero new timers, same pattern as the meeting ring) and
+// repaints ONLY on change, honoring the no-flicker contract.
+
+let spacePresence: { forSpaceId: string; entries: LiteSpacePresenceEntryView[] } | null = null;
+let presenceFetchAt = 0;
+const PRESENCE_REFRESH_MIN_MS = 45_000;
+
+function renderPresenceStrip(): void {
+  const host = document.getElementById('spaces-presence-strip');
+  if (host === null) return;
+  const entries =
+    spacePresence !== null && spacePresence.forSpaceId === state.activeScopeId
+      ? spacePresence.entries
+      : [];
+  host.replaceChildren();
+  host.hidden = entries.length === 0;
+  if (entries.length === 0) return;
+  const dot = document.createElement('span');
+  dot.className = 'spaces-presence-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  host.appendChild(dot);
+  const label = document.createElement('span');
+  label.className = 'spaces-presence-label';
+  const names = entries.map((e) => displayPersonName(e.name)).filter((n) => n.length > 0);
+  label.textContent =
+    names.length === 1
+      ? `${names[0]} is here now`
+      : names.length === 2
+        ? `${names[0]} and ${names[1]} are here now`
+        : `${names.length} people here now`;
+  label.title = names.join(', ');
+  host.appendChild(label);
+}
+
+/** Mount the live-presence host into a Space header (no-op on Home/Uncat). */
+function mountPresenceStrip(titleWrap: HTMLElement): void {
+  if (
+    state.activeScopeId === HOME_SCOPE_ID ||
+    state.activeScopeId === UNCATEGORIZED_SPACE_ID
+  ) {
+    return;
+  }
+  const presenceHost = document.createElement('div');
+  presenceHost.id = 'spaces-presence-strip';
+  presenceHost.className = 'spaces-presence-strip';
+  presenceHost.hidden = true;
+  titleWrap.appendChild(presenceHost);
+  renderPresenceStrip();
+  void refreshSpacePresence(true);
+}
+
+async function refreshSpacePresence(force = false): Promise<void> {
+  const scopeId = state.activeScopeId;
+  if (scopeId === HOME_SCOPE_ID || scopeId === UNCATEGORIZED_SPACE_ID) {
+    if (spacePresence !== null) {
+      spacePresence = null;
+      renderPresenceStrip();
+    }
+    return;
+  }
+  const now = Date.now();
+  if (!force && now - presenceFetchAt < PRESENCE_REFRESH_MIN_MS) return;
+  presenceFetchAt = now;
+  const bridge = window.lite?.spaces?.presence;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.inSpace(scopeId);
+    if (envelope.ok !== true || state.activeScopeId !== scopeId) return;
+    const next = { forSpaceId: scopeId, entries: envelope.value };
+    // No-flicker: repaint only when the data differs.
+    if (JSON.stringify(next) === JSON.stringify(spacePresence)) return;
+    spacePresence = next;
+    renderPresenceStrip();
+  } catch {
+    /* presence is garnish */
+  }
 }
 
 /** Start of the current/most-recent degraded episode (for toast gating). */
