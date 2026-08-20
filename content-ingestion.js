@@ -14,7 +14,24 @@ const fs = require('fs');
 const path = require('path');
 
 // Valid content types
-const VALID_TYPES = ['text', 'html', 'image', 'file', 'code', 'url', 'web-monitor', 'data-source'];
+//
+// 'journey' (ADR-072) is an agent-enabled journey map. It is here so the
+// Journey Map Builder can file one into a Space over the REST API the
+// same way it does through the Lite bridge. Without it `addItem` throws
+// "Invalid content type", which is why the Builder used to fall back to
+// 'data-source' — a journey then arrived indistinguishable from a CSV
+// connection and rendered as one everywhere.
+const VALID_TYPES = [
+  'text',
+  'html',
+  'image',
+  'file',
+  'code',
+  'url',
+  'web-monitor',
+  'data-source',
+  'journey',
+];
 
 // Max retry attempts for transient failures
 const MAX_RETRIES = 3;

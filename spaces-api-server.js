@@ -276,6 +276,14 @@ class SpacesAPIServer {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
+    // Chrome Private Network Access: a public HTTPS origin (the deployed
+    // playbooks app) may only fetch this local server when the preflight
+    // carrying Access-Control-Request-Private-Network is answered with
+    // Access-Control-Allow-Private-Network: true.
+    if (req.headers['access-control-request-private-network'] === 'true') {
+      res.setHeader('Access-Control-Allow-Private-Network', 'true');
+    }
+
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
