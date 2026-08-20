@@ -9569,6 +9569,25 @@
 
         // Instructions
         setInstructions(data) {
+          // A live meeting owns this window. "Start a meeting in space X"
+          // while one is running just refocuses this singleton — silently
+          // re-pointing the save target (and popping settings) mid-meeting
+          // would misfile artifacts and read as a ghost second meeting.
+          // End Session is the gate for starting the next one.
+          if (this.sessionConnected && data && data.spaceId) {
+            const currentSpace =
+              (this._activeMeeting && this._activeMeeting.spaceId) ||
+              this.elements.targetSpace?.value ||
+              null;
+            if (currentSpace && data.spaceId !== currentSpace) {
+              this.showStatus(
+                'Already in a meeting — End Session before starting one in another space',
+                'warning',
+                7000
+              );
+              return;
+            }
+          }
           this.instructions = data;
 
           if (data.instructions) {
@@ -9592,8 +9611,9 @@
             }
           }
 
-          // Auto-open settings if instructions present
-          if (data.instructions && !this.settingsOpen) {
+          // Auto-open settings if instructions present (not over a live
+          // meeting — the panel would cover the session UI)
+          if (data.instructions && !this.settingsOpen && !this.sessionConnected) {
             this.toggleSettings();
           }
         },
@@ -13867,10 +13887,14 @@
             this._offerSaveAsTemplate(this._lastCompletedMeeting);
           }
 
-          // Switch back to camera mode
+          // Land on the meeting setup, not camera mode: ending a meeting is
+          // the natural moment to start the next one — the space picker is
+          // right there. (Camera tab is one click away for solo recording.)
           document.querySelector('.main-layout')?.classList.remove('session-on');
-          this.switchMode('camera');
-          this.showStatus('Session ended', 'info');
+          this.elements.previewPlaceholder.style.display = 'none';
+          this.elements.audioMixControls.classList.remove('visible');
+          this.sessionShowSetup();
+          this.showStatus('Session ended — pick a space to start another meeting', 'info');
           this._sessionEnding = false;
         },
 
