@@ -35,6 +35,7 @@ import * as fs from 'node:fs';
 import { initMenu } from './menu/build-menu.js';
 import { seedKernelMenu } from './menu/seed.js';
 import { openJourneyMapWindow } from './journey-map-window.js';
+import { pendingKeychainCalls, drainKeychain, armKeychainFuse } from './keychain/api.js';
 import { openWiserPlaybooksWindow } from './wiser-playbooks-window.js';
 import { registry as menuRegistry } from './menu/registry.js';
 import { openBugReportModal, initBugReport } from './bug-report/main.js';
@@ -527,6 +528,16 @@ app
     // which app is running when both lite + full are open simultaneously.
     const userDataPath = app.getPath('userData');
     const banner = `[LITE] ${LITE_PRODUCT_NAME} v${LITE_VERSION} | userData=${userDataPath} | log=:${LITE_LOG_PORT}`;
+    if (
+      process.env['LITE_KEYCHAIN'] !== '1' &&
+      (process.env['LITE_NO_KEYCHAIN'] === '1' ||
+        (process.env['CLAUDECODE'] !== undefined && !app.isPackaged))
+    ) {
+      // One visible line, so "why am I signed out?" has an answer.
+      console.log(
+        '[LITE] keychain inert (agent shell / test isolation) — set LITE_KEYCHAIN=1 to use the real vault'
+      );
+    }
     // eslint-disable-next-line no-console
     console.log(banner);
     getLoggingApi().info('app', `${LITE_PRODUCT_NAME} booting`, {
@@ -1513,7 +1524,93 @@ app.on('window-all-closed', () => {
   app.quit();
 });
 
-app.on('before-quit', () => {
+/**
+ * ADR-075 — rounds of keychain draining this quit has done. Capped in
+ * the gate below so runaway keychain traffic cannot hold the door open
+ * forever. Never reset: by the time it matters the process exits.
+ */
+let keychainDrainRounds = 0;
+
+/**
+ * ADR-075 — the keychain quit gate. When keytar calls are in flight,
+ * hold THIS quit (`event.preventDefault()`), let them settle (capped),
+ * then re-quit. Returns true when the quit was held.
+ *
+ * Called from TWO checkpoints: `before-quit` (the normal door) and
+ * `will-quit` (the last event before Node teardown — catches calls
+ * issued by the teardowns themselves). Three rounds across both, so
+ * even the two-checkpoint worst case terminates.
+ */
+function keychainQuitGate(event: { preventDefault: () => void }, checkpoint: string): boolean {
+  if (keychainDrainRounds >= 3 || pendingKeychainCalls() === 0) return false;
+  keychainDrainRounds += 1;
+  event.preventDefault();
+  // stderr on purpose: the file logger flushes asynchronously and a
+  // quitting process races it — these breadcrumbs must survive.
+  process.stderr.write(
+    `[lite] quit(${checkpoint}): draining ${pendingKeychainCalls()} keychain call(s), round ${keychainDrainRounds}\n`
+  );
+  try {
+    getLoggingApi().event('app.keychain-drain', {
+      checkpoint,
+      pending: pendingKeychainCalls(),
+      round: keychainDrainRounds,
+    });
+  } catch {
+    // intentional silent fallback during shutdown
+  }
+  void drainKeychain(2000).then((result) => {
+    process.stderr.write(
+      `[lite] quit(${checkpoint}): keychain ${result.drained ? 'drained' : `NOT drained (${result.remaining} left)`}, re-quitting\n`
+    );
+    try {
+      getLoggingApi().event('app.keychain-drained', { checkpoint, ...result });
+    } catch {
+      // intentional silent fallback during shutdown
+    }
+    app.quit();
+  });
+  return true;
+}
+
+// ADR-075 — SIGTERM/SIGINT and the quit gate. Once Chromium's browser
+// main is up, IT owns the POSIX sigaction (registered after libuv's)
+// and routes both signals through Electron's normal quit — so
+// before-quit / will-quit fire and the keychain gate above runs; these
+// JS handlers never see the signal then. Verified live: SIGTERM at
+// 0.45–2.5s prints both quit crumbs, 10/10 clean exits. What these
+// handlers cover is the sliver BEFORE Chromium installs its handler
+// (module load → browser-main init), where libuv's sigaction is still
+// the live one and a bare TERM would otherwise skip the gate. `once`
+// on purpose: a second signal falls through to the OS default, so a
+// wedged quit can still be killed the hard way.
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(sig, () => {
+    process.stderr.write(`[lite] ${sig} received — quitting gracefully\n`);
+    try {
+      getLoggingApi().event('app.signal-quit', { signal: sig });
+    } catch {
+      // intentional silent fallback during shutdown
+    }
+    app.quit();
+  });
+}
+
+app.on('will-quit', (event) => {
+  // Last checkpoint before Node teardown — see keychainQuitGate. The
+  // updating guard mirrors before-quit's: never spend Squirrel's budget.
+  process.stderr.write('[lite] quit: will-quit\n');
+  if ((global as { isUpdatingApp?: boolean }).isUpdatingApp === true) return;
+  if (keychainQuitGate(event, 'will-quit')) return;
+  // Past the last gate there is nothing left to hold the door — a
+  // keychain call issued from here on would be exactly the in-flight
+  // native work whose completion aborts teardown. Fuse them: new calls
+  // reject instead of reaching keytar (ADR-075).
+  armKeychainFuse();
+});
+
+app.on('before-quit', (event) => {
+  process.stderr.write('[lite] quit: before-quit\n');
   try {
     getLoggingApi().event('app.before-quit');
   } catch {
@@ -1555,6 +1652,17 @@ app.on('before-quit', () => {
     }
     return;
   }
+
+  // ADR-075 — keychain drain. keytar runs keychain calls on the libuv
+  // threadpool; if the process exits while one is in flight, Node's
+  // environment teardown drains the pool half-dismantled and keytar's
+  // completion throws a C++ exception nothing can catch → SIGABRT →
+  // the OS "quit unexpectedly" dialog for an app that was exiting on
+  // purpose (crash report 2026-08-20-112705). Deliberately AFTER the
+  // isUpdatingApp guard: the Squirrel handoff has a 10s budget that
+  // this hold must never spend. A second checkpoint runs at will-quit
+  // for calls the teardowns below issue themselves.
+  if (keychainQuitGate(event, 'before-quit')) return;
 
   try {
     updaterHandle?.teardown();
