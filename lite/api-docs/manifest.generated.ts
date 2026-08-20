@@ -3406,7 +3406,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 118,
+        "count": 122,
         "entries": [
           {
             "constantKey": "CHECKLISTS_CREATE_START",
@@ -3646,6 +3646,21 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "UNCATEGORIZED_COUNT_FAIL",
             "name": "spaces.uncategorizedCount.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "PRESENCE_IN_SPACE_START",
+            "name": "spaces.presence.inSpace.start",
+            "description": ""
+          },
+          {
+            "constantKey": "PRESENCE_IN_SPACE_FINISH",
+            "name": "spaces.presence.inSpace.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "PRESENCE_IN_SPACE_FAIL",
+            "name": "spaces.presence.inSpace.fail",
             "description": ""
           },
           {
@@ -3996,6 +4011,11 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "GSX_MIGRATE_ITEM",
             "name": "spaces.gsxMigrate.item.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "RIFF_ENRICH_FINISH",
+            "name": "spaces.riffEnrich.finish",
             "description": ""
           }
         ]
@@ -4529,5 +4549,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-08-20T19:41:50.869Z"
+  "generatedAt": "2026-08-20T22:16:02.717Z"
 } as const;
