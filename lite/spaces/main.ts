@@ -1582,10 +1582,18 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     // 2026-08-20 — "show in a space if anyone is active in the space."
     // The renderer reports scope changes; the beacon carries the Space
     // as facets (null clears when leaving to Home/Uncategorized).
-    presenceScope(spaceId: string | null, spaceName: string | null): void {
+    presenceScope(spaceId: string | null, _spaceName: string | null): void {
+      // Release-review finding (2026-08-20, HIGH): the name facet leaked
+      // restricted-Space NAMES into the shared presence KV log, which
+      // the main app's Live Activity trail renders to any user with no
+      // visibility check — and nothing ever READS the name facet
+      // (PRESENCE_IN_SPACE matches on activeSpaceId; display names come
+      // from the viewer's own gated state). Ship the opaque id only;
+      // explicitly null the name so beacons written by the leaky build
+      // are scrubbed on the next beat.
       presenceBeat({
         activeSpaceId: spaceId,
-        activeSpaceName: spaceName,
+        activeSpaceName: null,
       });
     },
 

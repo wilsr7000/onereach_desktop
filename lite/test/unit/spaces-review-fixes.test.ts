@@ -579,6 +579,27 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src).toMatch(/markCacheBroadcast\(\);[\s\S]{0,200}refreshSpacePresence\(\)/);
   });
 
+  it('presence beacons never carry the Space NAME — ids only', () => {
+    // Release-review finding (2026-08-20, HIGH): activeSpaceName flowed
+    // into the shared presence KV log, rendered ungated by the main
+    // app's Live Activity trail — restricted Space names are exactly
+    // the sensitive part. The id is opaque; the name must never leave.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/main.ts', 'lite/spaces/main.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    expect(found).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    const start = src.indexOf('presenceScope(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, start + 900);
+    expect(body).toContain('activeSpaceName: null');
+    expect(body).not.toMatch(/activeSpaceName: spaceName|activeSpaceName: _spaceName/);
+  });
+
   it('the existing-asset search has a supersession guard too', () => {
     const body = bodyOf('async function runExistingAssetSearch');
     expect(body).toMatch(/\+\+existingSearchSeq/);
