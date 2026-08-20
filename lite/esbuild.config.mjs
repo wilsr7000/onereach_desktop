@@ -323,8 +323,24 @@ const downloadPickerOptions = {
 // into chrome.js automatically. Removed entry retired alongside the
 // boot-chat → chrome swap.
 
+// Spaces MCP server (2026-08-20): a standalone node program — NO electron
+// import — that wraps the real SdkSpacesClient so Claude (Code/Desktop)
+// gets live, viewer-gated access to Spaces. Same bundling policy as the
+// main process: pure-JS deps bundled, nothing external.
+/** @type {esbuild.BuildOptions} */
+const spacesMcpOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'mcp/spaces-mcp.ts')],
+  outfile: resolve(outDir, 'spaces-mcp.js'),
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  external: [],
+};
+
 const allConfigs = [
   mainProcessOptions,
+  spacesMcpOptions,
   preloadOptions,
   wiserPreloadOptions, journeyMapPreloadOptions,
   bugReportModalOptions,

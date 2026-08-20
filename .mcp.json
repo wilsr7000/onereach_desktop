@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "onereach-spaces": {
+      "command": "node",
+      "args": ["dist-lite/build/spaces-mcp.js"],
+      "env": {
+        "SPACES_VIEWER_ID": "robb@onereach.com"
+      }
+    }
+  }
+}
