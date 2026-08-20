@@ -508,6 +508,8 @@ export const CYPHER = {
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            a.metadata AS tileMetadata,
+           CASE WHEN a:Playbook THEN a.stage ELSE NULL END AS riffStage,
+           CASE WHEN a:Playbook THEN a.status ELSE NULL END AS riffStatus,
            [] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -846,6 +848,43 @@ export const CYPHER = {
         ON CREATE SET v.firstAt = $nowMs, v.lastAt = $nowMs, v.count = 1
         ON MATCH  SET v.lastAt = $nowMs, v.count = coalesce(v.count, 0) + 1)
     RETURN a.id AS id
+  `,
+
+  /**
+   * WISER riff playbooks whose tile has nothing to say (2026-08-20
+   * user report: "playbook tiles are not very descriptive"). Riff
+   * `:Playbook` nodes carry no content and no description in the graph
+   * — the body lives in KV (`riff:sheets`), including a real
+   * `summary.text`. This lists the candidates one Space's background
+   * enrichment pass should hydrate. Capped: enrichment fetches a
+   * multi-MB sheet per id, so the sweep works a few at a time.
+   */
+  LIST_PLAYBOOKS_NEEDING_DESCRIPTION: `
+    MATCH (p:Playbook)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND p.deletedAt IS NULL
+        AND coalesce(p.isTrashed, false) = false
+        AND trim(coalesce(p.description, '')) = ''
+        AND ${SPACE_VISIBLE}
+    RETURN p.id AS id
+    ORDER BY coalesce(p.updatedAt, p.updated_at, 0) DESC
+    LIMIT toInteger($limit)
+  `,
+
+  /**
+   * Write the KV-derived summary onto the riff node — ONLY while the
+   * description is still empty. The guard makes the write idempotent
+   * and non-clobbering: the day the riff app (or a human) writes a
+   * real description, this becomes a no-op forever. Source-stamped so
+   * the provenance is auditable in the graph.
+   */
+  SET_PLAYBOOK_DESCRIPTION: `
+    MATCH (p:Playbook {id: $id})
+      WHERE trim(coalesce(p.description, '')) = ''
+    SET p.description = $description,
+        p.descriptionSource = 'lite:riff-kv-summary',
+        p.descriptionEnrichedAtMs = $nowMs
+    RETURN p.id AS id
   `,
 
   /** The asset's viewers, most-recent first. Visibility-gated. */
@@ -3152,6 +3191,38 @@ export class SdkSpacesClient {
   async recordAssetView(id: string): Promise<void> {
     if (typeof id !== 'string' || id.length === 0) return;
     await this.run(CYPHER.RECORD_ASSET_VIEW, { id });
+  }
+
+  /**
+   * Riff playbooks in a Space still missing a description — the
+   * candidates for the KV-summary enrichment pass. See
+   * LIST_PLAYBOOKS_NEEDING_DESCRIPTION for why they are empty.
+   */
+  async listPlaybooksNeedingDescription(spaceId: string, limit = 8): Promise<string[]> {
+    if (typeof spaceId !== 'string' || spaceId.length === 0) return [];
+    const capped = clampSmallLimit(limit, 8, 25);
+    const rows = await this.run(CYPHER.LIST_PLAYBOOKS_NEEDING_DESCRIPTION, {
+      spaceId,
+      limit: capped,
+    });
+    return rows
+      .map((r) => r['id'])
+      .filter((v): v is string => typeof v === 'string' && v.length > 0);
+  }
+
+  /**
+   * Stamp a KV-derived summary onto a riff playbook node. Returns true
+   * when the write landed; false when the node already had a
+   * description (the Cypher guard) or vanished.
+   */
+  async setPlaybookDescription(id: string, description: string): Promise<boolean> {
+    const trimmed = typeof description === 'string' ? description.trim() : '';
+    if (typeof id !== 'string' || id.length === 0 || trimmed.length === 0) return false;
+    const rows = await this.run(CYPHER.SET_PLAYBOOK_DESCRIPTION, {
+      id,
+      description: trimmed.slice(0, 500),
+    });
+    return rows.length > 0;
   }
 
   /** Read an asset's viewers (who looked, when, how many times). */
@@ -5798,6 +5869,10 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
   if (description !== undefined) summary.description = description;
   const contentHead = optString(row, 'contentHead');
   if (contentHead !== undefined) summary.contentHead = contentHead;
+  const riffStage = optString(row, 'riffStage');
+  if (riffStage !== undefined) summary.riffStage = riffStage;
+  const riffStatus = optString(row, 'riffStatus');
+  if (riffStatus !== undefined) summary.riffStatus = riffStatus;
   const tileAgentType = optString(row, 'tileAgentType');
   if (tileAgentType !== undefined) summary.agentType = tileAgentType;
   const tileEndpoints = parseAgentEndpointsJson(row['tileAgentEndpoints']);

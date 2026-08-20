@@ -369,6 +369,15 @@ export interface ItemSummary {
   /** Up to ~120 char preview; nullable. */
   excerpt?: string;
   /**
+   * WISER riff lifecycle, present only on `:Playbook`-labeled members
+   * (2026-08-20). `riffStage` is the submission state
+   * (`not_submitted`/…), `riffStatus` the edit state (`draft`/…). The
+   * playbook tile shows these when it has no checkbox progress to
+   * show instead — a riff plan's stage IS its progress.
+   */
+  riffStage?: string;
+  riffStatus?: string;
+  /**
    * User-authored description, when non-blank. Distinct from `excerpt`
    * (which may be derived from description OR content): tiles that
    * need both — the playbook tile shows description + plan steps —

@@ -170,6 +170,8 @@ export const SPACES_EVENTS = {
   // conforms to the platform contract's span taxonomy — every spaces
   // event ends .start | .finish | .fail (platform-contract.test.ts).
   GSX_MIGRATE_ITEM: 'spaces.gsxMigrate.item.finish',
+  /** One riff-playbook description backfill batch landed (2026-08-20). */
+  RIFF_ENRICH_FINISH: 'spaces.riffEnrich.finish',
   // NOTE: IPC entry events are emitted dynamically as
   // `spaces.ipc.<verb>` by the wrapper in `ipc.ts` (the verb derived
   // from each `lite:spaces:*` channel). They are intentionally NOT
