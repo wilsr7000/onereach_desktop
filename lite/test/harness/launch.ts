@@ -13,11 +13,35 @@
 
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test';
 import * as path from 'node:path';
+import * as net from 'node:net';
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 export const LITE_LOG_PORT = 47392;
 export const LITE_LOG_SERVER = `http://127.0.0.1:${LITE_LOG_PORT}`;
+
+/**
+ * A free ephemeral port for THIS test instance's log server
+ * (2026-08-20): the fixed 47392 belongs to whichever real app is
+ * running — an e2e instance that boots beside it silently rebinds
+ * elsewhere while the harness keeps asserting against the REAL app.
+ * Three phantom failures and two keytar crashes traced back to this.
+ */
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      if (addr === null || typeof addr === 'string') {
+        srv.close(() => reject(new Error('could not allocate a port')));
+        return;
+      }
+      const port = addr.port;
+      srv.close(() => resolve(port));
+    });
+    srv.on('error', reject);
+  });
+}
 const LAUNCH_TIMEOUT_MS = 30_000;
 const READY_POLL_INTERVAL_MS = 250;
 const READY_POLL_MAX_ATTEMPTS = 80; // 20 s total
@@ -26,6 +50,8 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const DIST_LITE = path.join(REPO_ROOT, 'dist-lite');
 
 export interface LaunchOptions {
+  /** Fixed log-server port; default = a free ephemeral one. */
+  logPort?: number;
   /**
    * Path to the built lite executable. Defaults to the standard packaged
    * location for the current platform (dist-lite/mac-arm64/... on macOS,
@@ -60,6 +86,8 @@ export interface LiteHandle {
   mainWindow: Page;
   /** Resolved userData path used by this app instance. */
   userDataPath: string;
+  /** Base URL of THIS instance's log server (per-run port). */
+  logServerUrl: string;
   /** Lite's log-server port (always 47392 in kernel; future ports may vary). */
   logPort: number;
   /** The executable path used for launch. */
@@ -118,6 +146,11 @@ export async function launchLite(opts: LaunchOptions = {}): Promise<LiteHandle> 
   delete env.ELECTRON_RUN_AS_NODE;
   env.NODE_ENV = env.NODE_ENV ?? 'test';
   env.LITE_TEST_MODE = 'true';
+  // Isolation (2026-08-20): own log-server port; never the user's
+  // Keychain (see the keytar SIGABRT note in the app's backends).
+  const logPort = opts.logPort ?? (await freePort());
+  env.LITE_LOG_PORT = String(logPort);
+  env.LITE_NO_KEYCHAIN = env.LITE_NO_KEYCHAIN ?? '1';
 
   const args: string[] = [
     `--user-data-dir=${userDataPath}`,
@@ -135,14 +168,15 @@ export async function launchLite(opts: LaunchOptions = {}): Promise<LiteHandle> 
   await mainWindow.waitForLoadState('domcontentloaded');
 
   if (opts.skipReadyWait !== true) {
-    await waitForLogServer(LITE_LOG_PORT);
+    await waitForLogServer(logPort);
   }
 
   return {
     app,
     mainWindow,
     userDataPath,
-    logPort: LITE_LOG_PORT,
+    logPort,
+    logServerUrl: `http://127.0.0.1:${logPort}`,
     executablePath,
     ownsUserData,
   };

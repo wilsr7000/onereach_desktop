@@ -77,7 +77,13 @@ import { rescueAllWindows } from './window-rescue.js';
 /** Updater install-failure trail awaiting the bug modal (post-boot). */
 let pendingUpdaterBugReport: string | null = null;
 
-const LITE_LOG_PORT = 47392;
+// Overridable for test isolation (2026-08-20): the e2e harness assigns a
+// free per-run port so a test instance never talks to — or collides
+// with — the REAL app's log server. Two crashes and three phantom e2e
+// failures came from a fixed 47392 while the installed app was running.
+const LITE_LOG_PORT = Number(process.env['LITE_LOG_PORT']) > 0
+  ? Number(process.env['LITE_LOG_PORT'])
+  : 47392;
 // INTERNAL identity — drives app.setName(), the userData path, the
 // keychain SessionVault service, and Squirrel.Mac update pathing.
 // MUST stay 'Onereach.ai Lite': changing it moves userData (users lose

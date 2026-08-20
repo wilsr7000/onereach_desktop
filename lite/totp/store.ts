@@ -67,6 +67,22 @@ export interface KeychainBackend {
 let _defaultBackend: KeychainBackend | null = null;
 
 function defaultKeychainBackend(): KeychainBackend {
+  if (process.env['LITE_NO_KEYCHAIN'] === '1') {
+    // Keychain disabled (e2e isolation, 2026-08-20): a test-launched
+    // binary at a fresh path triggers a Keychain auth prompt nobody can
+    // answer, and keytar's native completion then throws a C++ exception
+    // that escapes the NAPI boundary — abort(), the 2026-08-12
+    // "app-killer" crash class, reproduced twice today. A test instance
+    // also has no business reading the user's REAL session tokens.
+    if (_defaultBackend === null) {
+      _defaultBackend = {
+        setPassword: async () => undefined,
+        getPassword: async () => null,
+        deletePassword: async () => false,
+      };
+    }
+    return _defaultBackend;
+  }
   if (_defaultBackend === null) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
     _defaultBackend = require('keytar') as KeychainBackend;

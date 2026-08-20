@@ -40,7 +40,6 @@ import {
   waitForBugReportModal,
   readBugReports,
   LiteLogServerClient,
-  LITE_LOG_SERVER,
   type LiteHandle,
 } from '../harness/index.js';
 
@@ -91,8 +90,11 @@ test('kernel: launches with single window and exact menu structure', async ({}, 
 
   // App menu is first and carries About (first) + Quit (last).
   const appLabels = (structure[0]?.items ?? []).map((it) => it.label);
-  expect(appLabels[0]).toBe('About Onereach.ai Lite');
-  expect(appLabels[appLabels.length - 1]).toBe('Quit Onereach.ai Lite');
+  // WISER is the DISPLAY name (2026-08-15 rebrand, display-only); the
+  // bundle identity stays 'Onereach.ai Lite'. This assertion sat broken
+  // for five days because no gate runs the e2e tier.
+  expect(appLabels[0]).toBe('About WISER');
+  expect(appLabels[appLabels.length - 1]).toBe('Quit WISER');
 
   // Help is present, is a plain labeled top-level (ADR-017: never
   // role:'help', which injects "Send Feedback to Apple…"), and carries
@@ -185,7 +187,7 @@ test('kernel: events flow through the central queue end-to-end (ADR-025)', async
   }
 
   handle = await launchLite();
-  const client = new LiteLogServerClient(LITE_LOG_SERVER);
+  const client = new LiteLogServerClient(handle.logServerUrl);
 
   // (a) + (b): push a synthetic event, verify the harness can read it back.
   // This is the load-bearing assertion that the harness's add/read API
