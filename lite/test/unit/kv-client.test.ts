@@ -131,15 +131,24 @@ describe('EdisonKVClient.get', () => {
 });
 
 describe('EdisonKVClient.delete', () => {
-  it('DELETEs ?id=collection&key=key', async () => {
+  it('DELETEs with {id, key} in the JSON body (keyvalue2 ignores query-param deletes)', async () => {
     const fetchMock = vi.fn().mockResolvedValue(makeResponse({ ok: true, status: 200, text: '' }));
     const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
 
     await client.delete('lite-bugs', 'rec-1');
 
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe('https://kv.test/keyvalue2?id=lite-bugs&key=rec-1');
+    expect(url).toBe('https://kv.test/keyvalue2');
     expect(init?.method).toBe('DELETE');
+    expect(JSON.parse(String(init?.body))).toEqual({ id: 'lite-bugs', key: 'rec-1' });
+  });
+
+  it('throws when the flow soft-errors a delete (200 + error string body)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      makeResponse({ ok: true, status: 200, text: 'Invalid collection name: cannot be undefined' })
+    );
+    const client = new EdisonKVClient({ url: 'https://kv.test/keyvalue2', fetchImpl: fetchMock });
+    await expect(client.delete('lite-bugs', 'rec-1')).rejects.toThrow(/rejected by flow/);
   });
 
   it('throws KVError on non-OK status', async () => {

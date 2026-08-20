@@ -66,8 +66,11 @@ async function main() {
     }
   }
 
-  // 3. Build the static page with the KV endpoint baked in
-  const kvUrl = refreshUrl.replace('/refresh_token', '/keyvalue2');
+  // 3. Build the static page with the KV endpoint baked in (via the ADR-070
+  // chokepoint so the URL shape — including whitespace trimming — is the
+  // single kv-client implementation, not a local copy).
+  const { kvUrlFromRefreshUrl } = require('../lib/kv-client');
+  const kvUrl = kvUrlFromRefreshUrl(refreshUrl);
   const html = buildGuestPageHTML({ kvUrl });
 
   // 4. Stage to a temp dir

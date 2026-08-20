@@ -254,11 +254,14 @@ export class EdisonKVClient {
    * should not retry indefinitely.
    */
   async delete(collection: string, key: string): Promise<void> {
-    const url = buildUrl(this.url, collection, key);
     return this.runRequest('delete', collection, key, this.timeoutMs, async (signal) => {
-      const res = await this.fetchImpl(url, {
+      // keyvalue2 contract: DELETE takes {id, key} in the JSON BODY — the
+      // query-param shape 200s with an error string and deletes nothing
+      // (live-probed 2026-08-20).
+      const res = await this.fetchImpl(this.url, {
         method: 'DELETE',
-        headers: { Accept: 'application/json' },
+        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: collection, key }),
         signal,
       });
       if (!res.ok) {
@@ -270,6 +273,19 @@ export class EdisonKVClient {
           responseBody: text,
           context: { op: 'delete', collection, key },
           remediation: kvHttpRemediation(res.status),
+        });
+      }
+      // The flow soft-errors with 200 + an error STRING when it rejects the
+      // request shape; a status check alone reads that as success.
+      const bodyText = await res.text().catch(() => '');
+      if (/invalid|error|cannot/i.test(bodyText)) {
+        throw new KVError({
+          code: KV_ERROR_CODES.HTTP,
+          message: `KV delete rejected by flow: ${bodyText.slice(0, 120)}`,
+          status: res.status,
+          responseBody: bodyText,
+          context: { op: 'delete', collection, key },
+          remediation: 'The keyvalue2 flow rejected the delete request shape; check {id, key} body contract.',
         });
       }
       return undefined;

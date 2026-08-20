@@ -111,3 +111,27 @@ describe('kvList', () => {
     }
   });
 });
+
+describe('kvDelete — keyvalue2 body contract', () => {
+  it('DELETEs the base url with {id, key} in the JSON body (query-param deletes are ignored by the flow)', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(res(200, '')));
+    await kv.kvDelete('meetings', 'room-1', { fetchImpl });
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(url).toBe(SHARED);
+    expect(init.method).toBe('DELETE');
+    expect(JSON.parse(init.body)).toEqual({ id: 'meetings', key: 'room-1' });
+    expect(init.headers['Content-Type']).toBe('application/json');
+  });
+
+  it('a 200 with the flow soft-error text THROWS — the delete did not run', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(res(200, 'Invalid collection name: cannot be undefined, empty or an object'))
+    );
+    await expect(kv.kvDelete('meetings', 'room-1', { fetchImpl })).rejects.toThrow(/rejected/);
+  });
+
+  it('404 is idempotent success (row already gone)', async () => {
+    const fetchImpl = vi.fn(() => Promise.resolve(res(404, '')));
+    await expect(kv.kvDelete('meetings', 'room-1', { fetchImpl })).resolves.toBe(true);
+  });
+});

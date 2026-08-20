@@ -225,15 +225,22 @@ export class FlowHttpKVClient {
   async delete(collection: string, key: string): Promise<void> {
     return this.runRequest('delete', collection, key, async () => {
       const auth = this.requireAuthHeader();
-      const url =
-        `${this.kvUrl()}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
-      const resp = await this.fetchImpl(url, {
+      // keyvalue2 contract: DELETE reads {id, key} from the JSON BODY. The
+      // query-param shape returns 200 with an error string and deletes
+      // NOTHING (live-probed 2026-08-20), so a status check alone is a
+      // false positive — inspect the body for the flow's soft error.
+      const resp = await this.fetchImpl(this.kvUrl(), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: auth },
+        body: JSON.stringify({ id: collection, key }),
       });
       // 404 on delete: idempotent success (the row was already gone).
       if (resp.status === 404) return;
       await this.assertOk(resp, 'delete', collection, key);
+      const text = await resp.text().catch(() => '');
+      if (/invalid|error|cannot/i.test(text)) {
+        throw new Error(`kv delete rejected for ${collection}/${key}: ${text.slice(0, 120)}`);
+      }
     });
   }
 
