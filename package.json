@@ -1,7 +1,7 @@
 {
   "name": "gsx-power-user",
   "productName": "Onereach.ai",
-  "version": "5.0.37",
+  "version": "5.0.38",
   "description": "GSX Power User Desktop Application",
   "main": "main.js",
   "icon": "assets/icon.icns",
