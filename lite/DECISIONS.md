@@ -1622,3 +1622,50 @@ The chunk-failure-recovery release valve (Phase 2 entry) logs structured inciden
 - **Why after the `isUpdatingApp` guard**: Squirrel's install handoff has a 10s budget (`lite/updater/install.ts`); the drain must never spend it. During an update install the old process is Squirrel's to kill, and a teardown abort there is cosmetically absorbed by the relaunch.
 - **The inventory IS the enforcement** (ADR-074 pattern): `keychain-quiesce.test.ts` scans every non-test `require('keytar')` in `lite/` and fails on any line not wrapped in `trackKeychainBackend(` — a fourth keytar consumer cannot silently reopen the crash window. The same file source-pins the quit wiring: drain before teardowns, updating-guard before drain, capped rounds.
 - **Out of scope**: mid-run keytar aborts (wedged securityd during normal operation) — that is a keytar-replacement conversation (the package is archived upstream), not a quit-path one.
+
+## ADR-077: KV rides the login token — the refresh_token flow is retired
+
+**Date:** 2026-08-20  ·  **Status:** shipped
+
+**Context.** Lite's KV transport minted a per-account FLOW token from a
+public `/http/{accountId}/refresh_token` flow, then talked to
+`/http/{signed-in-account}/keyvalue2`. Both are per-account Edison flow
+deployments — so onboarding silently required two server-side deploys
+per GSX account. First contact with reality: rich@onereach.com's first
+sign-in — his default account (dd96413e…) had neither flow, so the
+post-sign-in KV persist died with "Sign-in succeeded but the session
+could not be saved: KV refresh_token failed: HTTP 404" (the session HAD
+been saved — the keychain vault write precedes the KV write — which is
+why a relaunch "fixed" it; the banner was wrong twice over).
+
+**Decision (platform owner, 2026-08-20).** The platform accepts the
+login token directly; the flow dance is obsolete. The client now sends
+`Authorization: Bearer <mult>` — the token captured at sign-in
+(`KVAuthBindings.getToken` → `getAuthApi().getToken(env)`, "login
+settings") — and every request goes to ONE fixed endpoint: the shared
+org KV (`SHARED_KV_ACCOUNT_ID`). Per-user scoping is by token and by
+key, never by URL. No token cache, no inflight coalescing, no TTL: the
+resolver reads the CURRENT token on every call, so sign-in rotation
+needs no cache bust (the old client had to drop its FLOW token on 401).
+
+**Kept:** the signed-out gate (empty token throws the same "KV requires
+a signed-in OneReach account" before any network), the wire format
+(PUT `itemValue` JSON-string + `n`, POST list, sentinel parsing,
+double-encoding unwrap), the circuit breaker, and onAuthRejected.
+
+**Verified:** live against production — refresh_token 404s on
+non-org accounts while org keyvalue2 answers PUT/GET/DELETE with Bearer
+(200 + correct `{"value":…}` round-trip; probe key deleted); isolated
+worktree gate 0 tsc errors, 103 unit + 16 integration green; three
+mutation checks discriminate (FLOW prefix, per-user URL, gate removal);
+fresh signed-out boot: 43 events, 0 warn, 0 error, event-bus hydrate
+skips cleanly.
+
+**Consequences.** Teammate onboarding no longer depends on per-account
+flow deployments (the Rich class of failure is structurally gone). The
+in-memory contract server now 404s `/refresh_token` so any regression
+reintroducing the mint fails in CI. The full app (`lib/tickets-client.js`,
+`lib/signaling-client.js`, `lib/edison-sdk-manager.js`) still does the
+FLOW dance against the org account — works, but should follow suit
+eventually. `SHARED_KV_ACCOUNT_ID` is the same org plumbing as
+`BAKED_IN_DEFAULT_GRAPH` and carries the same pre-public blocker.

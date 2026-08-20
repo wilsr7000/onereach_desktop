@@ -21,7 +21,7 @@ import { KVCredentialsProvider } from '../../neon/credentials.js';
 function makeKvClient(fetchImpl: typeof fetch): FlowHttpKVClient {
   return new FlowHttpKVClient({
     refreshUrl: 'https://example.test/refresh_token',
-    accountId: () => 'acct-1',
+    token: () => 'mult-token-1',
     fetchImpl,
     log: () => undefined,
   } as never);

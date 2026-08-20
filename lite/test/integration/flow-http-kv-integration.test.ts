@@ -11,8 +11,11 @@
  *
  * These tests drive the real client against the in-memory contract
  * server (which speaks the actual PUT `itemValue` / GET `{ value }`
- * protocol + the `/refresh_token` mint), so a field-name regression
- * fails here instead of in production.
+ * protocol; its `/refresh_token` route answers 404 like production
+ * does for undeployed accounts, since the 2026-08-20 login-token
+ * migration retired the mint), so a field-name regression — or a
+ * reintroduced refresh_token call — fails here instead of in
+ * production.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -25,7 +28,7 @@ import { FlowHttpKVClient } from '../../kv/flow-http-client.js';
 let server: InMemoryKVServer;
 
 function makeClient(): FlowHttpKVClient {
-  return new FlowHttpKVClient({ accountId: () => 'acct-1', baseUrl: server.url });
+  return new FlowHttpKVClient({ token: () => 'mult-token-1', baseUrl: server.url });
 }
 
 beforeEach(async () => {

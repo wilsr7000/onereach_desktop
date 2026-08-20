@@ -127,13 +127,14 @@ export async function startInMemoryKVServer(port = 0): Promise<InMemoryKVServer>
       return;
     }
 
-    // refresh_token flow: the FLOW-token transport (FlowHttpKVClient)
-    // mints a per-account token here before any keyvalue call. Return a
-    // canned token so the client can proceed to the real PUT/GET.
+    // refresh_token flow: RETIRED (2026-08-20 login-token migration).
+    // The client must never call it — answer 404 exactly like
+    // production does for accounts without the flow deployed, so any
+    // regression that re-introduces the mint fails loudly here.
     if (url.includes('/refresh_token')) {
-      res.statusCode = 200;
+      res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ token: 'test-flow-token' }));
+      res.end(JSON.stringify({ error: 'refresh_token flow retired' }));
       return;
     }
 

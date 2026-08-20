@@ -219,7 +219,7 @@ let _instance: KVApi | null = null;
  * Get the singleton KV API. Lazily instantiates on first call.
  *
  * Default backing implementation is `FlowHttpKVClient` -- direct
- * HTTP to `https://em.edison.api.onereach.ai/http/{accountId}/keyvalue2`,
+ * HTTP to the shared org `keyvalue2` flow endpoint,
  * authenticated with a FLOW token cached from the per-account
  * `/refresh_token` flow. (The previous `@or-sdk/key-value-storage`
  * transport rejected the OAuth `mult` cookie with `wrong keyId`; the
@@ -279,16 +279,17 @@ export function _setKVApiForTesting(api: KVApi): void {
  * Edison only in v1; multi-env support lands when the `auth-multi-env`
  * chunk in `lite/PORTING.md` does.
  *
- * Why this transport (not the SDK): the OneReach KV behind
- * `@or-sdk/key-value-storage` requires a "user-level platform token"
- * that the lite OAuth flow does not produce -- it rejects the
- * captured `mult` cookie with `Token was not accepted: wrong keyId`.
- * The `/http/{accountId}/keyvalue2` flow accepts a per-account FLOW
- * token from a public `/refresh_token` flow and is the same transport
- * the full app's tickets / signaling clients use successfully.
+ * Auth (2026-08-20, per platform owner): the login token captured at
+ * sign-in (`KVAuthBindings.getToken` -> `getAuthApi().getToken(env)`)
+ * is sent as `Authorization: Bearer <token>`. The per-account
+ * `refresh_token` FLOW-token dance is retired -- the platform accepts
+ * the login token directly, and the endpoint is the shared org KV
+ * (`SHARED_KV_ACCOUNT_ID`), not the signed-in user's account, so
+ * onboarding no longer requires per-account flow deployments (the
+ * rich@onereach.com first-sign-in 404).
  */
 function defaultFlowHttpConfig(): {
-  accountId: () => string | null;
+  token: () => string;
   logger: NonNullable<KVConfig['logger']>;
   spanEmitter: NonNullable<KVConfig['spanEmitter']>;
   onAuthRejected: (reason: string) => void;
@@ -303,7 +304,7 @@ function defaultFlowHttpConfig(): {
     throw new Error('lite/kv: no EnvironmentConfig found for edison');
   }
   return {
-    accountId: () => _authBindings?.getAccountId() ?? null,
+    token: () => _authBindings?.getToken() ?? '',
     logger: (level, message, data) => {
       const log = getLoggingApi();
       log[level]('kv', message, data);

@@ -1,11 +1,16 @@
 /**
  * FlowHttpKVClient unit tests.
  *
- * Verifies the per-account flow KV transport:
- *   - Fetches a FLOW token from /refresh_token before each call (cached).
- *   - Prefixes "FLOW " on the Authorization header.
- *   - Hits the right URL shape (`/http/{accountId}/keyvalue2`).
- *   - Maps server responses to the same KVApi semantics as the SDK client.
+ * Verifies the login-token KV transport (2026-08-20 auth migration):
+ *   - Every request carries `Authorization: Bearer <login token>` from
+ *     the injected token resolver ("login settings") — there is NO
+ *     refresh_token flow call, ever.
+ *   - Every request hits the SHARED org KV URL
+ *     (`/http/{SHARED_KV_ACCOUNT_ID}/keyvalue2`) — the URL never
+ *     varies by who signed in (the rich@onereach.com first-sign-in
+ *     404 class: per-account flow deployments are retired).
+ *   - Signed-out (empty token) throws without touching the network.
+ *   - Maps server responses to the same KVApi semantics as before.
  *   - Reclassifies stale-token errors and fires onAuthRejected.
  *
  * Network is stubbed via a fetch impl that records requests + returns
@@ -13,7 +18,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { FlowHttpKVClient, FLOW_TOKEN_TTL_MS } from '../../kv/flow-http-client.js';
+import { FlowHttpKVClient, SHARED_KV_ACCOUNT_ID } from '../../kv/flow-http-client.js';
 import { KVError, KV_ERROR_CODES } from '../../kv/client.js';
 
 // ─── fetch stub ────────────────────────────────────────────────────────────
@@ -76,167 +81,93 @@ function makeResponse(status: number, text: string): Response {
   });
 }
 
-const ACCOUNT_ID = '35254342-4a2e-475b-aec1-18547e517e29';
+const KV_URL = `https://em.edison.api.onereach.ai/http/${SHARED_KV_ACCOUNT_ID}/keyvalue2`;
 
 function makeClient(opts: {
-  accountId?: string | null;
+  token?: string;
   baseUrl?: string;
   onAuthRejected?: (reason: string) => void;
-  now?: () => number;
 } = {}): { client: FlowHttpKVClient; stub: FetchStub } {
   const stub = new FetchStub();
   const config: ConstructorParameters<typeof FlowHttpKVClient>[0] = {
-    accountId: () => (opts.accountId === undefined ? ACCOUNT_ID : opts.accountId),
+    token: () => opts.token ?? 'mult-token-abc',
     fetchImpl: stub.fetch,
     baseUrl: opts.baseUrl ?? 'https://em.edison.api.onereach.ai',
   };
   if (opts.onAuthRejected !== undefined) config.onAuthRejected = opts.onAuthRejected;
-  if (opts.now !== undefined) config.now = opts.now;
   const client = new FlowHttpKVClient(config);
   return { client, stub };
 }
 
-// ─── Token acquisition + caching ───────────────────────────────────────────
+// ─── Login-token auth (the 2026-08-20 migration contract) ──────────────────
 
-describe('FlowHttpKVClient token acquisition', () => {
-  it('fetches a FLOW token from /refresh_token before the first KV call', async () => {
-    const { client, stub } = makeClient();
+describe('FlowHttpKVClient login-token auth', () => {
+  it('sends Authorization: Bearer <login token> on every op', async () => {
+    const { client, stub } = makeClient({ token: 'mult-xyz' });
     stub.responses = [
-      { body: { token: 'abc123' } }, // refresh_token
-      { status: 404 }, // get -> 404 -> null
+      { status: 404 }, // get
+      { status: 200, body: { ok: true } }, // set
+      { status: 200, body: { records: [] } }, // listKeys
+      { status: 200, body: { ok: true } }, // delete
     ];
-    await client.get('lite-tool-entries', 'default');
-    expect(stub.requests).toHaveLength(2);
-    expect(stub.requests[0]?.url).toBe(
-      `https://em.edison.api.onereach.ai/http/${ACCOUNT_ID}/refresh_token`
-    );
-    expect(stub.requests[0]?.method).toBe('GET');
+    await client.get('c', 'k');
+    await client.set('c', 'k', { a: 1 });
+    await client.listKeys('c');
+    await client.delete('c', 'k');
+    expect(stub.requests).toHaveLength(4);
+    for (const req of stub.requests) {
+      expect(req.headers['Authorization']).toBe('Bearer mult-xyz');
+    }
   });
 
-  it('prefixes "FLOW " on the Authorization header', async () => {
+  it('NEVER calls the refresh_token flow', async () => {
+    // The per-account /refresh_token dance is retired (it 404'd for any
+    // teammate whose default GSX account lacked the flow — the
+    // rich@onereach.com sign-in incident). The login token is used
+    // directly; one network call per KV op.
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc123' } },
-      { status: 404 },
-    ];
-    await client.get('coll', 'k');
-    expect(stub.requests[1]?.headers['Authorization']).toBe('FLOW abc123');
-  });
-
-  it('honors a token that already starts with "FLOW "', async () => {
-    const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'FLOW abc123' } },
-      { status: 404 },
-    ];
-    await client.get('coll', 'k');
-    expect(stub.requests[1]?.headers['Authorization']).toBe('FLOW abc123');
-  });
-
-  it('falls back to access_token when token field is absent', async () => {
-    const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { access_token: 'xyz789' } },
-      { status: 404 },
-    ];
-    await client.get('coll', 'k');
-    expect(stub.requests[1]?.headers['Authorization']).toBe('FLOW xyz789');
-  });
-
-  it('caches the token across calls (one /refresh_token for many KV ops)', async () => {
-    const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } }, // refresh_token (fired once)
-      { status: 404 },             // get 1
-      { status: 404 },             // get 2
-      { status: 404 },             // get 3
-    ];
+    stub.responses = [{ status: 404 }, { status: 404 }, { status: 404 }];
     await client.get('c', 'k1');
     await client.get('c', 'k2');
     await client.get('c', 'k3');
-    const refreshTokenCalls = stub.requests.filter((r) =>
-      r.url.endsWith('/refresh_token')
-    );
-    expect(refreshTokenCalls).toHaveLength(1);
+    const refreshCalls = stub.requests.filter((r) => r.url.includes('refresh_token'));
+    expect(refreshCalls).toHaveLength(0);
+    expect(stub.requests).toHaveLength(3);
   });
 
-  it('refreshes the token after TTL expires', async () => {
-    let now = 1_000_000;
-    const { client, stub } = makeClient({ now: () => now });
-    stub.responses = [
-      { body: { token: 'first' } },
-      { status: 404 },
-      { body: { token: 'second' } },
-      { status: 404 },
-    ];
-    await client.get('c', 'k1');
-    now += FLOW_TOKEN_TTL_MS + 1;
-    await client.get('c', 'k2');
-    const refreshes = stub.requests.filter((r) => r.url.endsWith('/refresh_token'));
-    expect(refreshes).toHaveLength(2);
-    // Second KV call should use the new token.
-    const kvCalls = stub.requests.filter((r) => r.url.includes('/keyvalue2'));
-    expect(kvCalls[1]?.headers['Authorization']).toBe('FLOW second');
+  it('always hits the SHARED org KV URL — never a per-user account URL', async () => {
+    const { client, stub } = makeClient({ token: 'someone-elses-mult' });
+    stub.responses = [{ status: 404 }];
+    await client.get('lite-tool-entries', 'default');
+    expect(stub.requests[0]?.url).toBe(`${KV_URL}?id=lite-tool-entries&key=default`);
+    expect(stub.requests[0]?.url).toContain(SHARED_KV_ACCOUNT_ID);
   });
 
-  it('refreshes the token when the active accountId changes', async () => {
-    let accountId: string | null = ACCOUNT_ID;
+  it('reads the token fresh on every call — auth rotation needs no cache bust', async () => {
+    let token = 'first';
     const stub = new FetchStub();
     const client = new FlowHttpKVClient({
-      accountId: () => accountId,
+      token: () => token,
       fetchImpl: stub.fetch,
       baseUrl: 'https://em.edison.api.onereach.ai',
     });
-    stub.responses = [
-      { body: { token: 'first' } },
-      { status: 404 },
-      { body: { token: 'second' } },
-      { status: 404 },
-    ];
+    stub.responses = [{ status: 404 }, { status: 404 }];
     await client.get('c', 'k1');
-    accountId = '11111111-2222-3333-4444-555555555555';
+    token = 'second';
     await client.get('c', 'k2');
-    const refreshes = stub.requests.filter((r) => r.url.endsWith('/refresh_token'));
-    expect(refreshes).toHaveLength(2);
-    expect(refreshes[1]?.url).toContain('/11111111-2222-');
+    expect(stub.requests[0]?.headers['Authorization']).toBe('Bearer first');
+    expect(stub.requests[1]?.headers['Authorization']).toBe('Bearer second');
   });
 
-  it('coalesces concurrent first-time refreshes into a single network call', async () => {
-    const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } }, // single refresh_token even with 5 parallel get()s
-      { status: 404 },
-      { status: 404 },
-      { status: 404 },
-      { status: 404 },
-      { status: 404 },
-    ];
-    await Promise.all([
-      client.get('c', 'k1'),
-      client.get('c', 'k2'),
-      client.get('c', 'k3'),
-      client.get('c', 'k4'),
-      client.get('c', 'k5'),
-    ]);
-    const refreshes = stub.requests.filter((r) => r.url.endsWith('/refresh_token'));
-    expect(refreshes).toHaveLength(1);
-  });
-
-  it('throws KVError 401 when refresh_token returns non-200', async () => {
-    const { client, stub } = makeClient();
-    stub.responses = [{ status: 500, body: { error: 'flow not deployed' } }];
-    await expect(client.get('c', 'k')).rejects.toMatchObject({
-      code: KV_ERROR_CODES.HTTP,
-      status: 500,
-    });
-  });
-
-  it('throws KVError 401 when accountId is null (signed-out)', async () => {
-    const { client } = makeClient({ accountId: null });
+  it('throws KVError 401 without touching the network when signed out', async () => {
+    const rejected: string[] = [];
+    const { client, stub } = makeClient({ token: '', onAuthRejected: (r) => rejected.push(r) });
     await expect(client.get('c', 'k')).rejects.toMatchObject({
       code: KV_ERROR_CODES.HTTP,
       status: 401,
     });
+    expect(stub.requests).toHaveLength(0);
+    expect(rejected).toHaveLength(1);
   });
 });
 
@@ -245,16 +176,11 @@ describe('FlowHttpKVClient token acquisition', () => {
 describe('FlowHttpKVClient.set', () => {
   it('PUTs to /keyvalue2?id=...&key=... with the value JSON-encoded as a string', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { ok: true } },
-    ];
+    stub.responses = [{ status: 200, body: { ok: true } }];
     await client.set('lite-tool-entries', 'default', { foo: 'bar' });
-    const req = stub.requests[1];
+    const req = stub.requests[0];
     expect(req?.method).toBe('PUT');
-    expect(req?.url).toBe(
-      `https://em.edison.api.onereach.ai/http/${ACCOUNT_ID}/keyvalue2?id=lite-tool-entries&key=default`
-    );
+    expect(req?.url).toBe(`${KV_URL}?id=lite-tool-entries&key=default`);
     // The value is sent under `itemValue` (the field the flow actually
     // stores) as a JSON STRING, plus `n` for older flow versions. Sending
     // it under `value` was ignored by the flow -> round-tripped to the
@@ -273,7 +199,6 @@ describe('FlowHttpKVClient.set', () => {
     // Simulate the flow echoing back the stringified value under { value }.
     const stored = JSON.stringify({ schemaVersion: 1, entries: [{ id: 'a' }] });
     stub.responses = [
-      { body: { token: 'abc' } }, // refresh_token (minted once, then cached)
       { status: 200, body: { ok: true } }, // PUT
       { status: 200, body: { value: stored } }, // GET returns the string
     ];
@@ -284,60 +209,40 @@ describe('FlowHttpKVClient.set', () => {
 
   it('URL-encodes collection + key', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { ok: true } },
-    ];
+    stub.responses = [{ status: 200, body: { ok: true } }];
     await client.set('weird/coll', 'edison:abc-123', {});
-    expect(stub.requests[1]?.url).toContain(
-      'id=weird%2Fcoll&key=edison%3Aabc-123'
-    );
+    expect(stub.requests[0]?.url).toContain('id=weird%2Fcoll&key=edison%3Aabc-123');
   });
 });
 
 describe('FlowHttpKVClient.get', () => {
   it('returns null on HTTP 404', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 404 },
-    ];
+    stub.responses = [{ status: 404 }];
     expect(await client.get('c', 'k')).toBeNull();
   });
 
   it('returns null on the "No data found." sentinel', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { Status: 'No data found.' } },
-    ];
+    stub.responses = [{ status: 200, body: { Status: 'No data found.' } }];
     expect(await client.get('c', 'k')).toBeNull();
   });
 
   it('parses { value: ... } shape', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { value: { foo: 'bar' } } },
-    ];
+    stub.responses = [{ status: 200, body: { value: { foo: 'bar' } } }];
     expect(await client.get('c', 'k')).toEqual({ foo: 'bar' });
   });
 
   it('parses { get: { value } } shape', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { get: { value: 'hello' } } },
-    ];
+    stub.responses = [{ status: 200, body: { get: { value: 'hello' } } }];
     expect(await client.get('c', 'k')).toBe('hello');
   });
 
   it('parses double-encoded inner JSON strings', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { value: '{"nested":true}' } },
-    ];
+    stub.responses = [{ status: 200, body: { value: '{"nested":true}' } }];
     expect(await client.get('c', 'k')).toEqual({ nested: true });
   });
 
@@ -352,7 +257,6 @@ describe('FlowHttpKVClient.get', () => {
     // JSON.stringify produces a double-encoded response body.
     const { client, stub } = makeClient();
     stub.responses = [
-      { body: { token: 'abc' } },
       { status: 200, body: '{"schemaVersion":1,"tabs":[{"id":"t1"}],"activeId":"t1"}' },
     ];
     expect(await client.get('lite-main-window-tabs', 'default')).toEqual({
@@ -366,10 +270,7 @@ describe('FlowHttpKVClient.get', () => {
     // A stored value that is genuinely a string like "hello" must NOT
     // be coerced — only object/array re-parses are unwrapped.
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: 'hello' },
-    ];
+    stub.responses = [{ status: 200, body: 'hello' }];
     expect(await client.get('c', 'k')).toBe('hello');
   });
 });
@@ -378,15 +279,15 @@ describe('FlowHttpKVClient.listKeys', () => {
   it('POSTs to /keyvalue2 with body { id: collection } and parses records[]', async () => {
     const { client, stub } = makeClient();
     stub.responses = [
-      { body: { token: 'abc' } },
       {
         status: 200,
         body: { records: [{ key: 'a' }, { key: 'b' }, 'c'] },
       },
     ];
     expect(await client.listKeys('c')).toEqual(['a', 'b', 'c']);
-    const req = stub.requests[1];
+    const req = stub.requests[0];
     expect(req?.method).toBe('POST');
+    expect(req?.url).toBe(KV_URL);
     expect(JSON.parse(req?.body ?? '{}')).toEqual({ id: 'c' });
   });
 });
@@ -394,20 +295,14 @@ describe('FlowHttpKVClient.listKeys', () => {
 describe('FlowHttpKVClient.delete', () => {
   it('DELETEs /keyvalue2?id=...&key=...', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 200, body: { ok: true } },
-    ];
+    stub.responses = [{ status: 200, body: { ok: true } }];
     await client.delete('c', 'k');
-    expect(stub.requests[1]?.method).toBe('DELETE');
+    expect(stub.requests[0]?.method).toBe('DELETE');
   });
 
   it('treats 404 on delete as idempotent success', async () => {
     const { client, stub } = makeClient();
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 404 },
-    ];
+    stub.responses = [{ status: 404 }];
     await expect(client.delete('c', 'k')).resolves.toBeUndefined();
   });
 });
@@ -418,10 +313,7 @@ describe('FlowHttpKVClient onAuthRejected', () => {
   it('fires when KV returns HTTP 401', async () => {
     const rejected: string[] = [];
     const { client, stub } = makeClient({ onAuthRejected: (r) => rejected.push(r) });
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 401, bodyText: 'Token was not accepted: wrong keyId' },
-    ];
+    stub.responses = [{ status: 401, bodyText: 'Token was not accepted: wrong keyId' }];
     await expect(client.set('c', 'k', {})).rejects.toMatchObject({
       code: KV_ERROR_CODES.HTTP,
       status: 401,
@@ -433,11 +325,8 @@ describe('FlowHttpKVClient onAuthRejected', () => {
   it('fires when KV returns 200 but body contains "Token was not accepted" (legacy flow shape)', async () => {
     const rejected: string[] = [];
     const { client, stub } = makeClient({ onAuthRejected: (r) => rejected.push(r) });
-    stub.responses = [
-      { body: { token: 'abc' } },
-      // The flow KV occasionally returns 4xx as 200+body. Detect by body content.
-      { status: 400, bodyText: 'wrong keyId' },
-    ];
+    // The flow KV occasionally returns 4xx as 200+body. Detect by body content.
+    stub.responses = [{ status: 400, bodyText: 'wrong keyId' }];
     await expect(client.set('c', 'k', {})).rejects.toBeInstanceOf(KVError);
     expect(rejected).toHaveLength(1);
   });
@@ -445,10 +334,7 @@ describe('FlowHttpKVClient onAuthRejected', () => {
   it('does not fire on 5xx server errors', async () => {
     const rejected: string[] = [];
     const { client, stub } = makeClient({ onAuthRejected: (r) => rejected.push(r) });
-    stub.responses = [
-      { body: { token: 'abc' } },
-      { status: 503, bodyText: 'service unavailable' },
-    ];
+    stub.responses = [{ status: 503, bodyText: 'service unavailable' }];
     await expect(client.set('c', 'k', {})).rejects.toMatchObject({
       code: KV_ERROR_CODES.HTTP,
       status: 503,
@@ -456,19 +342,25 @@ describe('FlowHttpKVClient onAuthRejected', () => {
     expect(rejected).toEqual([]);
   });
 
-  it('drops the cached token on 401 so the next call refreshes', async () => {
-    const { client, stub } = makeClient();
+  it('a 401 does not poison later calls — the next op retries with the current token', async () => {
+    // With no client-side token cache there is nothing to drop: after a
+    // rejection (e.g. the server rotated its keyset mid-session and the
+    // kernel re-signed-in), the very next call reads the CURRENT login
+    // token and proceeds.
+    let token = 'stale';
+    const stub = new FetchStub();
+    const client = new FlowHttpKVClient({
+      token: () => token,
+      fetchImpl: stub.fetch,
+      baseUrl: 'https://em.edison.api.onereach.ai',
+    });
     stub.responses = [
-      { body: { token: 'first' } },
       { status: 401, bodyText: 'Token was not accepted' },
-      { body: { token: 'second' } },
       { status: 200, body: { ok: true } },
     ];
     await expect(client.set('c', 'k', {})).rejects.toBeInstanceOf(KVError);
+    token = 'fresh-after-resignin';
     await client.set('c', 'k', {});
-    const refreshes = stub.requests.filter((r) => r.url.endsWith('/refresh_token'));
-    expect(refreshes).toHaveLength(2);
-    const kvCalls = stub.requests.filter((r) => r.url.includes('/keyvalue2'));
-    expect(kvCalls[1]?.headers['Authorization']).toBe('FLOW second');
+    expect(stub.requests[1]?.headers['Authorization']).toBe('Bearer fresh-after-resignin');
   });
 });
