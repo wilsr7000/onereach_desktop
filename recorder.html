@@ -9408,10 +9408,7 @@
             const pauseWindows = (this._aiPauseWindows || [])
               .map((w) => ({
                 startSec: w.startSec,
-                endSec:
-                  w.endSec !== null
-                    ? w.endSec
-                    : (Date.now() - (this.recordingStartTime || Date.now())) / 1000,
+                endSec: w.endSec !== null ? w.endSec : this._mediaElapsedSec(),
               }))
               .filter((w) => w.endSec > w.startSec);
             const result = await window.recorder.transcribeItem(itemId, {
@@ -10432,7 +10429,16 @@
         _hostDisplayName: '', // Host's display name
         _currentSpeakerName: null, // Name of current speaker (for transcription)
         _utteranceSpeakerName: null, // Speaker snapshotted at speech_started (per utterance)
-        _aiPauseWindows: [], // [{startSec, endSec}] AI-paused spans, redacted from the diarized pass
+        _aiPauseWindows: [], // [{startSec, endSec}] AI-paused spans in MEDIA time, redacted from the diarized pass
+
+        // Seconds of RECORDED MEDIA elapsed — wall clock minus every span
+        // the MediaRecorder was paused (matches diarizer word timestamps).
+        _mediaElapsedSec() {
+          if (!this.recordingStartTime) return 0;
+          let pausedMs = this.totalPausedMs || 0;
+          if (this.isPaused && this.pauseStartTime) pausedMs += Date.now() - this.pauseStartTime;
+          return Math.max(0, (Date.now() - this.recordingStartTime - pausedMs) / 1000);
+        },
 
         // Multi-participant layout state
         _participants: new Map(), // sid -> { container, identity, isSpeaking }
@@ -12524,11 +12530,14 @@
           this._agentPaused = !this._agentPaused;
           const paused = this._agentPaused;
 
-          // Record the pause window (seconds relative to recording start) so
-          // the post-save diarized pass can REDACT it — it runs on the full
-          // recording audio and would otherwise transcribe the paused span.
+          // Record the pause window in MEDIA time (recording-pause spans
+          // subtracted) so the post-save diarized pass can REDACT it — the
+          // diarizer's word timestamps are media time, and wall-clock spans
+          // would drift late by every recording pause, redacting the wrong
+          // speech while leaking the span the user asked to keep off the
+          // record.
           if (this.recordingStartTime) {
-            const relSec = (Date.now() - this.recordingStartTime) / 1000;
+            const relSec = this._mediaElapsedSec();
             if (paused) {
               this._aiPauseWindows.push({ startSec: relSec, endSec: null });
             } else {
