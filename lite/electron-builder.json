@@ -110,7 +110,7 @@
   "npmRebuild": false,
   "mac": {
     "category": "public.app-category.productivity",
-    "icon": "lite/assets/icon-lite.icns",
+    "icon": "assets/icon.icns",
     "target": [
       "dmg",
       "zip"
@@ -149,7 +149,7 @@
     "category": "Office"
   },
   "dmg": {
-    "icon": "lite/assets/icon-lite.icns",
+    "icon": "assets/icon.icns",
     "iconSize": 128,
     "title": "Onereach.ai Lite ${version}",
     "contents": [
