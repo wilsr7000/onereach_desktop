@@ -320,7 +320,11 @@ else
     # the USER'S INSTALLED APP and any concurrent cut's smoke child).
     run_boot_smoke() {
         BOOT_LOG=$(mktemp)
-        "$APP_BIN" > "$BOOT_LOG" 2>&1 &
+        # LITE_NO_KEYCHAIN (2026-08-20): the smoke child is an AD-HOC copy,
+        # so its signature matches no Keychain ACL — touching the real
+        # Keychain risks keytar's native abort (the 4x-in-one-day SIGABRT
+        # class). Module integrity is the smoke's job; sign-in is not.
+        LITE_NO_KEYCHAIN=1 "$APP_BIN" > "$BOOT_LOG" 2>&1 &
         BOOT_PID=$!
         BOOTED=0
         SMOKE_KILLED=0
