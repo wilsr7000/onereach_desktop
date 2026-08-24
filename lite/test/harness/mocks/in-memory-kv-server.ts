@@ -99,8 +99,20 @@ export async function startInMemoryKVServer(port = 0): Promise<InMemoryKVServer>
     const body = await readBody(req);
     const url = req.url ?? '/';
     const params = new URL(url, 'http://localhost').searchParams;
-    const collection = params.get('id');
-    const key = params.get('key');
+    let collection = params.get('id');
+    let key = params.get('key');
+    // b663132 — DELETE carries {id, key} in the JSON body, not query
+    // params. Record whichever shape arrived so assertions on the
+    // recorded traffic keep working across the contract change.
+    if (collection === null || key === null) {
+      try {
+        const parsed = JSON.parse(body) as { id?: unknown; key?: unknown };
+        if (collection === null && typeof parsed.id === 'string') collection = parsed.id;
+        if (key === null && typeof parsed.key === 'string') key = parsed.key;
+      } catch {
+        /* no JSON body */
+      }
+    }
 
     requests.push({
       method: req.method ?? 'GET',
@@ -127,13 +139,14 @@ export async function startInMemoryKVServer(port = 0): Promise<InMemoryKVServer>
       return;
     }
 
-    // refresh_token flow: the FLOW-token transport (FlowHttpKVClient)
-    // mints a per-account token here before any keyvalue call. Return a
-    // canned token so the client can proceed to the real PUT/GET.
+    // refresh_token flow: RETIRED (2026-08-20 login-token migration).
+    // The client must never call it — answer 404 exactly like
+    // production does for accounts without the flow deployed, so any
+    // regression that re-introduces the mint fails loudly here.
     if (url.includes('/refresh_token')) {
-      res.statusCode = 200;
+      res.statusCode = 404;
       res.setHeader('Content-Type', 'application/json');
-      res.end(JSON.stringify({ token: 'test-flow-token' }));
+      res.end(JSON.stringify({ error: 'refresh_token flow retired' }));
       return;
     }
 
@@ -149,7 +162,7 @@ export async function startInMemoryKVServer(port = 0): Promise<InMemoryKVServer>
           handlePost(res, body, store);
           return;
         case 'DELETE':
-          handleDelete(res, collection, key, store);
+          handleDelete(res, body, collection, key, store);
           return;
         default:
           res.statusCode = 405;
@@ -309,17 +322,34 @@ function handlePost(
 
 function handleDelete(
   res: ServerResponse,
+  body: string,
   collection: string | null,
   key: string | null,
   store: Map<string, unknown>
 ): void {
-  if (collection === null || key === null) {
-    res.statusCode = 400;
-    res.end('DELETE requires id and key query params');
-    return;
+  // keyvalue2 contract (live-probed 2026-08-20, b663132): DELETE takes
+  // {id, key} in the JSON BODY. The real service 200s the query-param
+  // shape with an error STRING and deletes nothing — the mock now
+  // mirrors that exactly, so a client regressing to query params fails
+  // the integration suite the same way it fails production.
+  let bodyId: string | null = null;
+  let bodyKey: string | null = null;
+  try {
+    const parsed = JSON.parse(body) as { id?: unknown; key?: unknown };
+    if (typeof parsed.id === 'string') bodyId = parsed.id;
+    if (typeof parsed.key === 'string') bodyKey = parsed.key;
+  } catch {
+    /* no body — the legacy query-param shape */
   }
-  store.delete(`${collection}::${key}`);
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
+  if (bodyId === null || bodyKey === null) {
+    // Faithful to the live service: 200 + error string, nothing deleted.
+    res.end(JSON.stringify('Invalid collection name: must be a non-empty string'));
+    return;
+  }
+  store.delete(`${bodyId}::${bodyKey}`);
   res.end(JSON.stringify({ Status: 'OK' }));
+  void collection;
+  void key;
 }

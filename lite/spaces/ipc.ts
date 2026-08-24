@@ -13,6 +13,8 @@
 
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { getSpacesApi } from './api.js';
+import { runAgenticSearch, type AgenticSearchResult } from './agentic-search.js';
+import { getAiApi } from '../ai/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import type { SpacesError } from './errors.js';
 import { resolveSpaceScope } from './scope.js';
@@ -153,12 +155,17 @@ export const SPACES_IPC = {
   ITEMS_ADD_TO_SPACE: 'lite:spaces:items:addToSpace',
   ITEMS_REMOVE_FROM_SPACE: 'lite:spaces:items:removeFromSpace',
   ITEMS_SEARCH: 'lite:spaces:items:search',
+  ITEMS_SEARCH_AGENTIC: 'lite:spaces:items:search-agentic',
+  /** main → renderer push: agentic walk progress beats. */
+  ITEMS_SEARCH_AGENTIC_PROGRESS: 'lite:spaces:items:search-agentic-progress',
   /** Asset versioning (ADR-057). */
   ITEMS_VERSIONS: 'lite:spaces:items:versions',
   ITEMS_VERSION_GET: 'lite:spaces:items:versionGet',
   ITEMS_VERSION_RESTORE: 'lite:spaces:items:versionRestore',
   /** Learning Center (replaces Home, 2026-08-07). */
   LEARN_SIGNALS: 'lite:spaces:learn:signals',
+  PRESENCE_IN_SPACE: 'lite:spaces:presence:inSpace',
+  PRESENCE_SCOPE: 'lite:spaces:presence:scope',
   LEARN_PROGRESS_GET: 'lite:spaces:learn:progressGet',
   LEARN_PROGRESS_SAVE: 'lite:spaces:learn:progressSave',
   /** Metadata sprint. */
@@ -321,6 +328,46 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         }
         const value = await getSpacesApi().identity.attributionEmailSet(raw);
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.PRESENCE_IN_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown }
+    ): Promise<SpacesIpcResult<unknown>> => {
+      try {
+        const spaceId =
+          payload !== undefined && typeof payload.spaceId === 'string' ? payload.spaceId : '';
+        const value = await getSpacesApi().presenceInSpace(spaceId);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.PRESENCE_SCOPE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { spaceId?: unknown; spaceName?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const spaceId =
+          payload !== undefined && typeof payload.spaceId === 'string' && payload.spaceId.length > 0
+            ? payload.spaceId
+            : null;
+        const spaceName =
+          payload !== undefined && typeof payload.spaceName === 'string' && payload.spaceName.length > 0
+            ? payload.spaceName.slice(0, 80)
+            : null;
+        getSpacesApi().presenceScope(spaceId, spaceName);
+        return { ok: true, value: { ok: true } };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }
@@ -1525,6 +1572,39 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
             ? (payload?.opts as SearchItemsOpts)
             : ({ query: '' } as SearchItemsOpts);
         const value = await getSpacesApi().items.search(opts);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_SEARCH_AGENTIC,
+    async (
+      event: IpcMainInvokeEvent,
+      payload?: { query?: unknown; spaceId?: unknown }
+    ): Promise<SpacesIpcResult<AgenticSearchResult>> => {
+      try {
+        const query = typeof payload?.query === 'string' ? payload.query : '';
+        const spaceId =
+          typeof payload?.spaceId === 'string' && payload.spaceId.length > 0
+            ? payload.spaceId
+            : undefined;
+        // Progress beats push straight to the ASKING renderer only —
+        // another window's search must not animate this one.
+        const value = await runAgenticSearch(
+          query,
+          {
+            ...(spaceId !== undefined ? { spaceId } : {}),
+            onProgress: (p) => {
+              if (!event.sender.isDestroyed()) {
+                event.sender.send(SPACES_IPC.ITEMS_SEARCH_AGENTIC_PROGRESS, p);
+              }
+            },
+          },
+          { spacesApi: getSpacesApi(), ai: getAiApi() }
+        );
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

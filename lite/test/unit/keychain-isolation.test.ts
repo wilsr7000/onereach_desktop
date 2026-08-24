@@ -54,3 +54,51 @@ describe('LITE_NO_KEYCHAIN=1 gives every store an inert backend', () => {
     expect(await store.hasSecret()).toBe(false);
   });
 });
+
+describe('agent-shell default-off (fifth SIGABRT, 2026-08-20)', () => {
+  const K = 'LITE_KEYCHAIN';
+  let savedNo: string | undefined;
+  let savedYes: string | undefined;
+
+  beforeEach(() => {
+    savedNo = process.env[FLAG];
+    savedYes = process.env[K];
+    delete process.env[FLAG];
+    delete process.env[K];
+  });
+  afterEach(() => {
+    if (savedNo === undefined) delete process.env[FLAG];
+    else process.env[FLAG] = savedNo;
+    if (savedYes === undefined) delete process.env[K];
+    else process.env[K] = savedYes;
+  });
+
+  it('with NO flags at all, an agent shell still gets the inert backend', async () => {
+    // This very test process runs in a Claude shell — the discriminator
+    // the rule rides on. If it is ever absent here, the premise changed;
+    // fail loudly rather than skip.
+    expect(process.env['CLAUDECODE'], 'agent shells set CLAUDECODE').toBeDefined();
+    const keyMod = await import('../../ai/key-store.js');
+    keyMod._resetKeychainBackendForTesting();
+    const keyStore = new keyMod.AnthropicKeyStore();
+    expect(await keyStore.getKey()).toBeNull();
+  });
+
+  it('precedence is pinned in source: opt-in > opt-out > agent-shell', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    for (const rel of ['auth/session-vault.ts', 'ai/key-store.ts', 'totp/store.ts']) {
+      const candidates = [path.resolve(rel), path.resolve('lite', rel)];
+      const found = candidates.find((f) => fs.existsSync(f));
+      const src = fs.readFileSync(found as string, 'utf8');
+      const optIn = src.indexOf("LITE_KEYCHAIN'] === '1') return false");
+      const optOut = src.indexOf("LITE_NO_KEYCHAIN'] === '1') return true");
+      const agent = src.indexOf("CLAUDECODE'] !== undefined");
+      expect(optIn, rel).toBeGreaterThan(-1);
+      expect(optOut, rel).toBeGreaterThan(optIn);
+      expect(agent, rel).toBeGreaterThan(optOut);
+    }
+  });
+});

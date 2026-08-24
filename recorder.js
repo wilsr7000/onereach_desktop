@@ -1811,21 +1811,15 @@ Respond with JSON:
         const kvUrl = kvClient.kvUrlFromRefreshUrl(reconcile.refreshUrl);
         const key = `wiser-room:${roomName}`;
 
-        const resp = await fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
-          method: 'DELETE',
-        });
+        // Through the chokepoint: keyvalue2 DELETE takes {id, key} in the
+        // body — the old query-param shape 200s without deleting, leaving
+        // ended meetings joinable as zombies.
+        await kvClient.kvDelete(KV_COLLECTION, key, { url: kvUrl });
         this._activeKvRooms.delete(roomName);
         this._stopRosterRepublish(roomName);
-        const respStatus = resp.status;
-        let _respBody = '';
-        try {
-          _respBody = await resp.text();
-        } catch {
-          /* no-op */
-        }
 
-        log.info('recorder', 'Meeting tokens cleared from KV', { roomName, status: respStatus });
-        return { success: resp.ok };
+        log.info('recorder', 'Meeting tokens cleared from KV', { roomName });
+        return { success: true };
       } catch (error) {
         log.error('recorder', 'Failed to clear meeting tokens', { error: error.message });
         return { success: false, error: error.message };
@@ -1842,9 +1836,7 @@ Respond with JSON:
       const kvUrl = kvClient.kvUrlFromRefreshUrl(refreshUrl);
       for (const roomName of this._activeKvRooms) {
         const key = `wiser-room:${roomName}`;
-        fetch(`${kvUrl}?id=${encodeURIComponent(KV_COLLECTION)}&key=${encodeURIComponent(key)}`, {
-          method: 'DELETE',
-        }).catch(() => {});
+        kvClient.kvDelete(KV_COLLECTION, key, { url: kvUrl, retries: 0 }).catch(() => {});
       }
       this._activeKvRooms.clear();
     });

@@ -9408,10 +9408,7 @@
             const pauseWindows = (this._aiPauseWindows || [])
               .map((w) => ({
                 startSec: w.startSec,
-                endSec:
-                  w.endSec !== null
-                    ? w.endSec
-                    : (Date.now() - (this.recordingStartTime || Date.now())) / 1000,
+                endSec: w.endSec !== null ? w.endSec : this._mediaElapsedSec(),
               }))
               .filter((w) => w.endSec > w.startSec);
             const result = await window.recorder.transcribeItem(itemId, {
@@ -9572,6 +9569,25 @@
 
         // Instructions
         setInstructions(data) {
+          // A live meeting owns this window. "Start a meeting in space X"
+          // while one is running just refocuses this singleton — silently
+          // re-pointing the save target (and popping settings) mid-meeting
+          // would misfile artifacts and read as a ghost second meeting.
+          // End Session is the gate for starting the next one.
+          if (this.sessionConnected && data && data.spaceId) {
+            const currentSpace =
+              (this._activeMeeting && this._activeMeeting.spaceId) ||
+              this.elements.targetSpace?.value ||
+              null;
+            if (currentSpace && data.spaceId !== currentSpace) {
+              this.showStatus(
+                'Already in a meeting — End Session before starting one in another space',
+                'warning',
+                7000
+              );
+              return;
+            }
+          }
           this.instructions = data;
 
           if (data.instructions) {
@@ -9595,8 +9611,9 @@
             }
           }
 
-          // Auto-open settings if instructions present
-          if (data.instructions && !this.settingsOpen) {
+          // Auto-open settings if instructions present (not over a live
+          // meeting — the panel would cover the session UI)
+          if (data.instructions && !this.settingsOpen && !this.sessionConnected) {
             this.toggleSettings();
           }
         },
@@ -10432,7 +10449,16 @@
         _hostDisplayName: '', // Host's display name
         _currentSpeakerName: null, // Name of current speaker (for transcription)
         _utteranceSpeakerName: null, // Speaker snapshotted at speech_started (per utterance)
-        _aiPauseWindows: [], // [{startSec, endSec}] AI-paused spans, redacted from the diarized pass
+        _aiPauseWindows: [], // [{startSec, endSec}] AI-paused spans in MEDIA time, redacted from the diarized pass
+
+        // Seconds of RECORDED MEDIA elapsed — wall clock minus every span
+        // the MediaRecorder was paused (matches diarizer word timestamps).
+        _mediaElapsedSec() {
+          if (!this.recordingStartTime) return 0;
+          let pausedMs = this.totalPausedMs || 0;
+          if (this.isPaused && this.pauseStartTime) pausedMs += Date.now() - this.pauseStartTime;
+          return Math.max(0, (Date.now() - this.recordingStartTime - pausedMs) / 1000);
+        },
 
         // Multi-participant layout state
         _participants: new Map(), // sid -> { container, identity, isSpeaking }
@@ -12524,11 +12550,14 @@
           this._agentPaused = !this._agentPaused;
           const paused = this._agentPaused;
 
-          // Record the pause window (seconds relative to recording start) so
-          // the post-save diarized pass can REDACT it — it runs on the full
-          // recording audio and would otherwise transcribe the paused span.
+          // Record the pause window in MEDIA time (recording-pause spans
+          // subtracted) so the post-save diarized pass can REDACT it — the
+          // diarizer's word timestamps are media time, and wall-clock spans
+          // would drift late by every recording pause, redacting the wrong
+          // speech while leaking the span the user asked to keep off the
+          // record.
           if (this.recordingStartTime) {
-            const relSec = (Date.now() - this.recordingStartTime) / 1000;
+            const relSec = this._mediaElapsedSec();
             if (paused) {
               this._aiPauseWindows.push({ startSec: relSec, endSec: null });
             } else {
@@ -13858,10 +13887,14 @@
             this._offerSaveAsTemplate(this._lastCompletedMeeting);
           }
 
-          // Switch back to camera mode
+          // Land on the meeting setup, not camera mode: ending a meeting is
+          // the natural moment to start the next one — the space picker is
+          // right there. (Camera tab is one click away for solo recording.)
           document.querySelector('.main-layout')?.classList.remove('session-on');
-          this.switchMode('camera');
-          this.showStatus('Session ended', 'info');
+          this.elements.previewPlaceholder.style.display = 'none';
+          this.elements.audioMixControls.classList.remove('visible');
+          this.sessionShowSetup();
+          this.showStatus('Session ended — pick a space to start another meeting', 'info');
           this._sessionEnding = false;
         },
 

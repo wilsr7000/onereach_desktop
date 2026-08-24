@@ -1,28 +1,28 @@
 /**
- * Flow-token KV transport.
+ * Login-token KV transport.
  *
- * The OneReach KV service that the user's account actually has access
- * to is the per-account flow KV at
+ * Lite's KV rides the shared org KV flow endpoint
  *
- *   https://em.edison.api.onereach.ai/http/{accountId}/keyvalue2
+ *   https://em.edison.api.onereach.ai/http/{SHARED_KV_ACCOUNT_ID}/keyvalue2
  *
- * It accepts the token returned from the public per-account
- * `refresh_token` flow:
+ * authenticated with the signed-in user's login token
+ * (`Authorization: Bearer <mult>` -- the same token
+ * `getAuthApi().getToken(env)` serves everywhere else).
  *
- *   GET https://em.edison.api.onereach.ai/http/{accountId}/refresh_token
+ * HISTORY (2026-08-20, per platform owner): this client previously
+ * minted a per-account FLOW token from a public per-account
+ * `/refresh_token` flow and talked to `/http/{signed-in-account}/keyvalue2`.
+ * That made TWO per-account flow deployments an onboarding requirement,
+ * and any teammate whose default GSX account lacked them hit
+ * "Sign-in succeeded but the session could not be saved: KV
+ * refresh_token failed: HTTP 404" at first sign-in (live incident:
+ * rich@onereach.com, account dd96413e). The platform now accepts the
+ * login token directly, so the refresh_token flow is retired and the
+ * KV URL no longer varies by who signed in. Verified live 2026-08-20:
+ * refresh_token 404s on non-org accounts while the org keyvalue2
+ * answers -- exactly the old failure and the new path.
  *
- * The returned token must be sent literally as `Authorization: FLOW <token>`.
- *
- * Why this transport (not the SDK):
- *   - `@or-sdk/key-value-storage` (the path lite previously used) goes
- *     through Edison discovery and expects a "user-level platform token".
- *     Lite's auth captures the user's OAuth `mult` cookie -- the SDK KV
- *     server rejects that with `Token was not accepted: wrong keyId`.
- *   - The full app's KV consumers (tickets-client.js, signaling-client.js,
- *     capture-signaling.js) all use this direct-HTTP / FLOW-token path.
- *     It works for normal user accounts; the SDK path doesn't.
- *
- * Wire format:
+ * Wire format (unchanged across the auth migration):
  *   - GET    `?id={collection}&key={key}`             - read one
  *   - PUT    `?id={collection}&key={key}` body={...}  - write one
  *   - DELETE `?id={collection}&key={key}`             - remove one
@@ -41,16 +41,25 @@ import { KVError, KV_ERROR_CODES, type KVRecord } from './client.js';
 import { isAuthRejectedMessage } from './sdk-client.js';
 import { isKvEvent, type KvEvent } from './events.js';
 
-/** 50 minutes -- conservative cache lifetime; matches lib/tickets-client.js. */
-export const FLOW_TOKEN_TTL_MS = 50 * 60 * 1000;
+/**
+ * The org account whose `keyvalue2` flow serves ALL of Lite's KV. One
+ * fixed endpoint for every user -- per-user scoping is by login token
+ * and per-user keys, never by URL. Same org plumbing as
+ * `BAKED_IN_DEFAULT_GRAPH` in lite/neon/credentials.ts (kv must not
+ * import neon -- dep direction), and covered by the same pre-public
+ * blocker: multi-tenant builds must not bake this in.
+ */
+export const SHARED_KV_ACCOUNT_ID = '35254342-4a2e-475b-aec1-18547e517e29';
 
 /**
- * Configuration for {@link FlowHttpKVClient}. Strict superset of
- * `KVConfig` -- adds the per-account URL builder + token cache.
+ * Configuration for {@link FlowHttpKVClient}.
  */
 export interface FlowHttpKVClientConfig {
-  /** OneReach accountId resolver. Returns null when signed-out. */
-  accountId: () => string | null;
+  /**
+   * Login-token resolver (`KVAuthBindings.getToken`): the raw `mult`
+   * value, or '' when signed out. Sent as `Authorization: Bearer <v>`.
+   */
+  token: () => string;
   /**
    * Optional fetch impl override (for tests). Defaults to global
    * `fetch`. Tests pass a stub that records calls + returns canned
@@ -73,19 +82,6 @@ export interface FlowHttpKVClientConfig {
    * `em.edison.api.onereach.ai`. Tests pass a localhost / nock URL.
    */
   baseUrl?: string;
-  /** Token cache TTL override (ms). Defaults to {@link FLOW_TOKEN_TTL_MS}. */
-  tokenTtlMs?: number;
-  /** Clock override for tests. Defaults to `Date.now`. */
-  now?: () => number;
-}
-
-interface CachedToken {
-  /** The full Authorization header value (already prefixed with `FLOW `). */
-  authHeader: string;
-  /** Epoch ms when this token expires from the cache. */
-  expiresAt: number;
-  /** AccountId this token was minted for. Cache invalidates when account changes. */
-  accountId: string;
 }
 
 const DEFAULT_BASE_URL = 'https://em.edison.api.onereach.ai';
@@ -98,19 +94,15 @@ const DEFAULT_BASE_URL = 'https://em.edison.api.onereach.ai';
  * @internal
  */
 export class FlowHttpKVClient {
-  private readonly getAccountId: FlowHttpKVClientConfig['accountId'];
+  private readonly getToken: FlowHttpKVClientConfig['token'];
   private readonly fetchImpl: typeof fetch;
   private readonly log: NonNullable<FlowHttpKVClientConfig['logger']>;
   private readonly spanEmitter: NonNullable<FlowHttpKVClientConfig['spanEmitter']> | null;
   private readonly onAuthRejected: NonNullable<FlowHttpKVClientConfig['onAuthRejected']> | null;
   private readonly baseUrl: string;
-  private readonly tokenTtlMs: number;
-  private readonly nowFn: () => number;
-  private cachedToken: CachedToken | null = null;
-  private inflightRefresh: Promise<CachedToken> | null = null;
 
   constructor(config: FlowHttpKVClientConfig) {
-    this.getAccountId = config.accountId;
+    this.getToken = config.token;
     this.fetchImpl = config.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.log =
       config.logger ??
@@ -120,18 +112,15 @@ export class FlowHttpKVClient {
     this.spanEmitter = config.spanEmitter ?? null;
     this.onAuthRejected = config.onAuthRejected ?? null;
     this.baseUrl = config.baseUrl ?? DEFAULT_BASE_URL;
-    this.tokenTtlMs = config.tokenTtlMs ?? FLOW_TOKEN_TTL_MS;
-    this.nowFn = config.now ?? ((): number => Date.now());
   }
 
   // ─── public surface (KVApi) ───────────────────────────────────────────
 
   async set(collection: string, key: string, value: unknown): Promise<void> {
     return this.runRequest('set', collection, key, async () => {
-      const accountId = this.requireAccountId();
-      const auth = await this.getAuthHeader(accountId);
+      const auth = this.requireAuthHeader();
       const url =
-        `${this.kvUrl(accountId)}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
+        `${this.kvUrl()}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
       // The Edison flow KV stores the value under `itemValue`, as a JSON
       // STRING -- confirmed by the live PUT response (which echoes
       // `itemValue`) AND the in-memory contract server the integration
@@ -156,10 +145,9 @@ export class FlowHttpKVClient {
 
   async get(collection: string, key: string): Promise<unknown | null> {
     return this.runRequest('get', collection, key, async () => {
-      const accountId = this.requireAccountId();
-      const auth = await this.getAuthHeader(accountId);
+      const auth = this.requireAuthHeader();
       const url =
-        `${this.kvUrl(accountId)}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
+        `${this.kvUrl()}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
       const resp = await this.fetchImpl(url, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json', Authorization: auth },
@@ -175,9 +163,8 @@ export class FlowHttpKVClient {
 
   async listKeys(collection: string): Promise<string[]> {
     return this.runRequest('listKeys', collection, undefined, async () => {
-      const accountId = this.requireAccountId();
-      const auth = await this.getAuthHeader(accountId);
-      const resp = await this.fetchImpl(this.kvUrl(accountId), {
+      const auth = this.requireAuthHeader();
+      const resp = await this.fetchImpl(this.kvUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: auth },
         body: JSON.stringify({ id: collection }),
@@ -237,17 +224,23 @@ export class FlowHttpKVClient {
 
   async delete(collection: string, key: string): Promise<void> {
     return this.runRequest('delete', collection, key, async () => {
-      const accountId = this.requireAccountId();
-      const auth = await this.getAuthHeader(accountId);
-      const url =
-        `${this.kvUrl(accountId)}?id=${encodeURIComponent(collection)}&key=${encodeURIComponent(key)}`;
-      const resp = await this.fetchImpl(url, {
+      const auth = this.requireAuthHeader();
+      // keyvalue2 contract: DELETE reads {id, key} from the JSON BODY. The
+      // query-param shape returns 200 with an error string and deletes
+      // NOTHING (live-probed 2026-08-20), so a status check alone is a
+      // false positive — inspect the body for the flow's soft error.
+      const resp = await this.fetchImpl(this.kvUrl(), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json', Authorization: auth },
+        body: JSON.stringify({ id: collection, key }),
       });
       // 404 on delete: idempotent success (the row was already gone).
       if (resp.status === 404) return;
       await this.assertOk(resp, 'delete', collection, key);
+      const text = await resp.text().catch(() => '');
+      if (/invalid|error|cannot/i.test(text)) {
+        throw new Error(`kv delete rejected for ${collection}/${key}: ${text.slice(0, 120)}`);
+      }
     });
   }
 
@@ -264,121 +257,34 @@ export class FlowHttpKVClient {
     });
   }
 
-  /** @internal -- exposed for tests to verify cache invalidation. */
-  _resetTokenCacheForTesting(): void {
-    this.cachedToken = null;
-    this.inflightRefresh = null;
-  }
-
   // ─── internals ────────────────────────────────────────────────────────
 
-  /** Per-account KV endpoint URL. */
-  private kvUrl(accountId: string): string {
-    return `${this.baseUrl}/http/${accountId}/keyvalue2`;
+  /** The shared org KV endpoint. One URL for every signed-in user. */
+  private kvUrl(): string {
+    return `${this.baseUrl}/http/${SHARED_KV_ACCOUNT_ID}/keyvalue2`;
   }
 
-  /** Per-account `refresh_token` flow URL. Public; no auth needed. */
-  private refreshTokenUrl(accountId: string): string {
-    return `${this.baseUrl}/http/${accountId}/refresh_token`;
-  }
-
-  private requireAccountId(): string {
-    const accountId = this.getAccountId();
-    if (typeof accountId !== 'string' || accountId.length === 0) {
+  /**
+   * `Authorization: Bearer <login token>` from the auth bindings, or a
+   * thrown signed-out error. The token is captured at sign-in and
+   * lives in the auth store ("login settings") -- no refresh_token
+   * flow, no cache, no per-account minting. When auth rotates the
+   * token, the next call simply reads the new value.
+   */
+  private requireAuthHeader(): string {
+    const token = this.getToken();
+    if (typeof token !== 'string' || token.length === 0) {
       const err = new KVError({
         code: KV_ERROR_CODES.HTTP,
         message: 'KV requires a signed-in OneReach account.',
         status: 401,
-        context: { reason: 'no-account' },
+        context: { reason: 'signed-out' },
         remediation: 'Sign in to OneReach (Settings -> Account) and try again.',
       });
       this.notifyAuthRejected(err.message);
       throw err;
     }
-    return accountId;
-  }
-
-  /**
-   * Return a valid `Authorization: FLOW <token>` header value, fetching
-   * a fresh one if the cache is empty / stale / for a different account.
-   *
-   * Concurrent callers all await the same in-flight refresh promise so
-   * we make one network call per cache miss, not N.
-   */
-  private async getAuthHeader(accountId: string): Promise<string> {
-    const now = this.nowFn();
-    const cached = this.cachedToken;
-    if (cached !== null && cached.accountId === accountId && cached.expiresAt > now) {
-      return cached.authHeader;
-    }
-    if (this.inflightRefresh !== null) {
-      const t = await this.inflightRefresh;
-      return t.authHeader;
-    }
-    this.inflightRefresh = this.refreshToken(accountId).finally(() => {
-      this.inflightRefresh = null;
-    });
-    const t = await this.inflightRefresh;
-    return t.authHeader;
-  }
-
-  private async refreshToken(accountId: string): Promise<CachedToken> {
-    const url = this.refreshTokenUrl(accountId);
-    let resp: Response;
-    try {
-      resp = await this.fetchImpl(url, { method: 'GET' });
-    } catch (err) {
-      throw new KVError({
-        code: KV_ERROR_CODES.NETWORK,
-        message: `KV refresh_token network error: ${(err as Error).message}`,
-        context: { op: 'refresh_token', accountId },
-        remediation: 'Check your network connection (DNS, VPN, captive portal).',
-        cause: err as Error,
-      });
-    }
-    if (!resp.ok) {
-      const body = await safeReadBody(resp);
-      throw new KVError({
-        code: KV_ERROR_CODES.HTTP,
-        message: `KV refresh_token failed: HTTP ${resp.status}`,
-        status: resp.status,
-        ...(body !== undefined ? { responseBody: body } : {}),
-        context: { op: 'refresh_token', accountId },
-        remediation: `The /http/${accountId}/refresh_token flow may not be deployed for this account.`,
-      });
-    }
-    let data: { token?: string; access_token?: string };
-    try {
-      data = (await resp.json()) as { token?: string; access_token?: string };
-    } catch (err) {
-      throw new KVError({
-        code: KV_ERROR_CODES.HTTP,
-        message: `KV refresh_token returned non-JSON body`,
-        status: resp.status,
-        context: { op: 'refresh_token', accountId },
-        remediation: 'The refresh_token flow returned an unexpected payload.',
-        cause: err as Error,
-      });
-    }
-    let raw = data.token ?? data.access_token ?? '';
-    if (raw === '') {
-      throw new KVError({
-        code: KV_ERROR_CODES.HTTP,
-        message: 'KV refresh_token returned an empty token',
-        status: resp.status,
-        context: { op: 'refresh_token', accountId },
-        remediation: 'The refresh_token flow must return `{ token: "..." }`.',
-      });
-    }
-    if (!raw.startsWith('FLOW ')) raw = `FLOW ${raw}`;
-    const cached: CachedToken = {
-      authHeader: raw,
-      expiresAt: this.nowFn() + this.tokenTtlMs,
-      accountId,
-    };
-    this.cachedToken = cached;
-    this.log('info', 'kv-flow: token acquired', { accountId, ttlMs: this.tokenTtlMs });
-    return cached;
+    return `Bearer ${token}`;
   }
 
   // ── Circuit breaker (2026-08-14) ──────────────────────────────────
@@ -481,14 +387,12 @@ export class FlowHttpKVClient {
     if (resp.ok) return;
     const body = await safeReadBody(resp);
     if (resp.status === 401 || resp.status === 403) {
-      // Token cache may be stale (server rotated keyset). Drop it so
-      // the next call refreshes. The auth-rejection hook still fires
-      // for the kernel's prompt path.
-      this.cachedToken = null;
+      // The login token was rejected. There is no client-side cache to
+      // drop anymore -- recovery is a fresh sign-in, and the
+      // auth-rejection hook routes the kernel to exactly that prompt.
       const reason = body !== undefined && body.length > 0 ? body : `HTTP ${resp.status}`;
       this.notifyAuthRejected(reason);
     } else if (isAuthRejectedMessage(body ?? '')) {
-      this.cachedToken = null;
       this.notifyAuthRejected(body ?? '');
     }
     const baseContext: Record<string, unknown> = {

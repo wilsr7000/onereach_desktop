@@ -29,6 +29,7 @@
  */
 
 import { UNCATEGORIZED_SPACE_ID } from './scope.js';
+import { riffStageLabel } from './riff-summary.js';
 import { bootRenderer } from '../renderer-boot.js';
 import type {
   DiscoveryQueryResult,
@@ -368,6 +369,7 @@ function init(): void {
   wireSidebarSections();
   wireSidebarToolbar();
   wireSidebarSearch();
+  wireAgenticProgress();
   wireSidebarSort();
   wireMutationsUI();
   wireCacheUpdates();
@@ -415,6 +417,8 @@ function wireCacheUpdates(): void {
   cacheUpdateUnsubscribe = sub((update) => {
     // Every event is a health heartbeat for the staleness watchdog…
     markCacheBroadcast();
+    // …and the presence strip's refresh tick (throttled internally).
+    void refreshSpacePresence();
     // …but repaints happen only when the data actually differs —
     // the periodic graph poll must never flicker an unchanged page
     // (2026-08-18). Missing flag (older main) = assume changed.
@@ -832,19 +836,54 @@ async function loadUncategorizedCount(): Promise<void> {
 
 // ─── Sidebar search + sort (Phase 1f) ──────────────────────────────────
 
+/** One subscription: agentic-walk beats update the progress line in place. */
+function wireAgenticProgress(): void {
+  const items = window.lite?.spaces?.items;
+  if (items?.onSearchAgenticProgress === undefined) return;
+  items.onSearchAgenticProgress((p) => {
+    const el = document.getElementById('spaces-agentic-progress');
+    if (el === null) return;
+    el.textContent =
+      p.phase === 'match'
+        ? `✓ ${p.title} — ${p.matchesSoFar} so far`
+        : `Reading “${p.title}” · ${p.index + 1}/${p.total}`;
+  });
+}
+
 function wireSidebarSearch(): void {
   const input = document.getElementById('spaces-sidebar-search-input');
   if (!(input instanceof HTMLInputElement)) return;
   input.addEventListener('input', () => {
     state.searchQuery = input.value;
-    // A FILTER, not a search (2026-08-19). This box used to do both:
-    // narrow the nav by Space name AND run a debounced cross-space item
-    // search whose results landed in a cramped sidebar tree. Content
-    // search now lives in the main pane with a scope control, so this
-    // box does the one thing its position implies — narrow the list
-    // below it.
+    // Typing narrows the nav by Space name (instant, local). CONTENT
+    // search routes through the ONE engine on Enter / Ask AI below —
+    // global scope, results in the main pane where they have room.
+    // (2026-08-19 removed the old second implementation that rendered
+    // into a cramped sidebar tree; it stays dead.)
     applySidebarFilter();
   });
+  input.addEventListener('keydown', (event: KeyboardEvent): void => {
+    if (event.key !== 'Enter') return;
+    const q = input.value.trim();
+    if (q.length === 0) return;
+    // Route into the one engine: global scope, main-pane results.
+    state.itemsSearchScope = 'all';
+    state.itemsSearchQuery = q;
+    void runItemsSearch();
+  });
+  const askAi = document.getElementById('spaces-sidebar-search-ai');
+  if (askAi instanceof HTMLButtonElement) {
+    askAi.addEventListener('click', () => {
+      const q = input.value.trim();
+      if (q.length === 0) {
+        input.focus();
+        return;
+      }
+      state.itemsSearchScope = 'all';
+      state.itemsSearchQuery = q;
+      void runAgenticItemsSearch();
+    });
+  }
   input.addEventListener('keydown', (event: KeyboardEvent): void => {
     if (event.key !== 'Escape') return;
     if (input.value.length > 0) {
@@ -3590,8 +3629,23 @@ function setActiveScope(scopeId: string): void {
   state.items = [];
   renderedItemsSignature = null;
   renderedItemsScopeId = null;
+  // Presence (2026-08-20): stamp WHICH Space the viewer has open onto
+  // their beacon, so members see "X is here now". Home/Uncategorized
+  // clear the facet. Fire-and-forget garnish.
+  {
+    const sp = state.spaces.find((s) => s.id === scopeId);
+    void window.lite?.spaces?.presence
+      ?.scope(sp !== undefined ? sp.id : null, sp !== undefined ? sp.name : null)
+      .catch(() => undefined);
+  }
   pendingTileFocusId = null;
-  // Sprint 3: clear any active items search on scope switch.
+  // Sprint 3: clear any active items search on scope switch — and
+  // SUPERSEDE anything in flight (2026-08-20, "search shows up when you
+  // select a space"): without the bump, a response racing the switch
+  // painted space A's results over space B's contents. Same class the
+  // 2026-08-08 "honest search clears" fix closed for the old sidebar
+  // search; the port carried the guard but not this call site.
+  itemsSearchSeq++;
   state.itemsSearchQuery = '';
   state.itemsSearchResults = null;
   if (state.itemsSearchTimer !== null) {
@@ -4062,7 +4116,147 @@ function renderItemList(opts: RenderItemListOpts): void {
  * both kinds get the SAME tiles, filters, and affordances rather than a
  * lookalike second implementation that drifts.
  */
+/** Reasons from the last agentic walk, keyed by item id. */
+const agenticReasonById = new Map<string, string>();
+let agenticRunning = false;
+
+/**
+ * THE search, placed directly above the assets it searches (2026-08-20:
+ * "It should be placed above the assets and agentic search should be
+ * part of it"). One box, three controls: query, scope (This space /
+ * All spaces), and Ask AI — the agentic tier that judges intent where
+ * the instant tier matches substrings.
+ */
+function buildContentSearchControls(): HTMLElement {
+  const wrap = document.createElement('div');
+  wrap.className = 'spaces-items-search-wrap spaces-items-search-above-assets';
+
+  const scopedToSpace = state.itemsSearchScope === 'space';
+  const search = document.createElement('input');
+  search.type = 'search';
+  search.className = 'spaces-items-search';
+  search.id = 'spaces-items-search-input';
+  search.placeholder = scopedToSpace ? 'Search this space…' : 'Search all spaces…';
+  search.setAttribute(
+    'aria-label',
+    scopedToSpace ? 'Search assets in this space' : 'Search assets in all spaces'
+  );
+  search.value = state.itemsSearchQuery;
+  search.addEventListener('input', () => {
+    onItemsSearchChange(search.value);
+  });
+  wrap.appendChild(search);
+
+  const scope = document.createElement('div');
+  scope.className = 'spaces-items-search-scope';
+  scope.setAttribute('role', 'group');
+  scope.setAttribute('aria-label', 'Search scope');
+  const options: ReadonlyArray<{ key: 'space' | 'all'; label: string }> = [
+    { key: 'space', label: 'This space' },
+    { key: 'all', label: 'All spaces' },
+  ];
+  for (const opt of options) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'spaces-items-search-scope-btn';
+    btn.textContent = opt.label;
+    const on = state.itemsSearchScope === opt.key;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (on) btn.classList.add('is-on');
+    btn.addEventListener('click', () => {
+      if (state.itemsSearchScope === opt.key) return;
+      state.itemsSearchScope = opt.key;
+      if (state.itemsSearchQuery.trim().length > 0) void runItemsSearch();
+      else renderItemList({});
+    });
+    scope.appendChild(btn);
+  }
+  wrap.appendChild(scope);
+
+  const askAi = document.createElement('button');
+  askAi.type = 'button';
+  askAi.className = 'spaces-items-search-ask-ai';
+  askAi.textContent = agenticRunning ? 'Asking…' : 'Ask AI';
+  askAi.disabled = agenticRunning;
+  askAi.title =
+    'Have AI judge each asset against what you MEAN — finds what substring search misses';
+  askAi.addEventListener('click', () => {
+    void runAgenticItemsSearch();
+  });
+  wrap.appendChild(askAi);
+
+  const progress = document.createElement('span');
+  progress.className = 'spaces-items-search-progress';
+  progress.id = 'spaces-agentic-progress';
+  wrap.appendChild(progress);
+  return wrap;
+}
+
+/**
+ * The agentic tier. Results land in the SAME results state as the
+ * instant tier (one rendering path), each carrying the model reason.
+ * The seq guard covers every race: newer keystrokes, scope switches,
+ * and a second Ask AI all supersede an older walk.
+ */
+async function runAgenticItemsSearch(): Promise<void> {
+  const query = state.itemsSearchQuery.trim();
+  if (query.length === 0 || agenticRunning) return;
+  const bridge = window.lite?.spaces;
+  if (bridge?.items?.searchAgentic === undefined) {
+    showToast('Agentic search needs a newer build of Lite');
+    return;
+  }
+  const seq = ++itemsSearchSeq;
+  agenticRunning = true;
+  renderItemList({});
+  try {
+    const scopedToSpace =
+      state.itemsSearchScope === 'space' &&
+      state.activeScopeId !== HOME_SCOPE_ID &&
+      state.activeScopeId !== UNCATEGORIZED_SPACE_ID;
+    const envelope = await bridge.items.searchAgentic({
+      query,
+      ...(scopedToSpace ? { spaceId: state.activeScopeId } : {}),
+    });
+    if (seq !== itemsSearchSeq) return; // superseded — never paint stale
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    const result = envelope.value;
+    agenticReasonById.clear();
+    const nowIso = new Date().toISOString();
+    state.itemsSearchResults = result.matches.map((m) => {
+      agenticReasonById.set(m.id, m.reason);
+      return {
+        id: m.id,
+        title: m.title,
+        kind: m.kind,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+        otherSpaces: [],
+        producedBy: null,
+      } as unknown as RendererItemSummary;
+    });
+    showToast(
+      result.matches.length === 0
+        ? `AI examined ${result.evaluated} asset${result.evaluated === 1 ? '' : 's'} — none matched`
+        : `AI found ${result.matches.length} match${result.matches.length === 1 ? '' : 'es'}`
+    );
+  } catch (err) {
+    if (seq === itemsSearchSeq) showToast(messageFrom(err));
+  } finally {
+    agenticRunning = false;
+    const progress = document.getElementById('spaces-agentic-progress');
+    if (progress !== null) progress.textContent = '';
+    if (seq === itemsSearchSeq) renderItemList({});
+  }
+}
+
 function appendSpaceContents(wrap: HTMLElement, opts: RenderItemListOpts): void {
+  // THE search sits directly above the assets it searches.
+  wrap.appendChild(buildContentSearchControls());
+
   // Sprint 3: when a search is active, replace the timeline with a
   // search-result list. The search bypasses the timeline merge entirely
   // — it's a direct asset hit-list, not a chronological feed.
@@ -4082,7 +4276,17 @@ function appendSpaceContents(wrap: HTMLElement, opts: RenderItemListOpts): void 
     grid.className = 'spaces-card-grid';
     grid.id = 'spaces-card-grid';
     for (const item of state.itemsSearchResults) {
-      grid.appendChild(buildItemCard(item, item.id === state.activeItemId));
+      const card = buildItemCard(item, item.id === state.activeItemId);
+      // The agentic tier's value is WHY it matched — surface the
+      // model's one-line reason under the tile it judged.
+      const reason = agenticReasonById.get(item.id);
+      if (reason !== undefined && reason.length > 0) {
+        const why = document.createElement('p');
+        why.className = 'spaces-agentic-reason';
+        why.textContent = reason;
+        card.appendChild(why);
+      }
+      grid.appendChild(card);
     }
     wrap.appendChild(grid);
     return;
@@ -5901,6 +6105,8 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
       titleWrap.appendChild(buildSpaceMembersStrip(space));
       // What's happened in it, always visible (2026-08-19).
       titleWrap.appendChild(buildSpaceActivityStrip());
+      // Who's HERE right now (2026-08-20) — live beacons, self excluded.
+      mountPresenceStrip(titleWrap);
     }
   }
 
@@ -5920,8 +6126,12 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   // collapsed section) while this wide pane hosted the narrowest one —
   // the scopes were inverted and neither box was "the" search. Home gets
   // it too now: Home is not a Space, so it simply searches everything.
-  {
-    const onHome = state.activeScopeId === HOME_SCOPE_ID;
+  // The content search lives ABOVE THE ASSETS for space views
+  // (2026-08-20: "It should be placed above the assets") — see
+  // buildContentSearchControls, called from appendSpaceContents. Home
+  // has no contents region, so its box stays here in the header.
+  if (state.activeScopeId === HOME_SCOPE_ID) {
+    const onHome = true;
     const searchWrap = document.createElement('div');
     searchWrap.className = 'spaces-items-search-wrap';
 
@@ -6855,6 +7065,88 @@ export function buildServicePulseBanner(
   });
   bar.appendChild(report);
   return bar;
+}
+
+// ─── Live presence in the open Space (2026-08-20) ───────────────────────
+// "Can you show in a space when looking at a space if anyone is active
+// in the space." Presence beacons carry activeSpaceId; the strip reads
+// fresh ones (≤150s) for the active scope. Refresh rides the cache
+// heartbeat (zero new timers, same pattern as the meeting ring) and
+// repaints ONLY on change, honoring the no-flicker contract.
+
+let spacePresence: { forSpaceId: string; entries: LiteSpacePresenceEntryView[] } | null = null;
+let presenceFetchAt = 0;
+const PRESENCE_REFRESH_MIN_MS = 45_000;
+
+function renderPresenceStrip(): void {
+  const host = document.getElementById('spaces-presence-strip');
+  if (host === null) return;
+  const entries =
+    spacePresence !== null && spacePresence.forSpaceId === state.activeScopeId
+      ? spacePresence.entries
+      : [];
+  host.replaceChildren();
+  host.hidden = entries.length === 0;
+  if (entries.length === 0) return;
+  const dot = document.createElement('span');
+  dot.className = 'spaces-presence-dot';
+  dot.setAttribute('aria-hidden', 'true');
+  host.appendChild(dot);
+  const label = document.createElement('span');
+  label.className = 'spaces-presence-label';
+  const names = entries.map((e) => displayPersonName(e.name)).filter((n) => n.length > 0);
+  label.textContent =
+    names.length === 1
+      ? `${names[0]} is here now`
+      : names.length === 2
+        ? `${names[0]} and ${names[1]} are here now`
+        : `${names.length} people here now`;
+  label.title = names.join(', ');
+  host.appendChild(label);
+}
+
+/** Mount the live-presence host into a Space header (no-op on Home/Uncat). */
+function mountPresenceStrip(titleWrap: HTMLElement): void {
+  if (
+    state.activeScopeId === HOME_SCOPE_ID ||
+    state.activeScopeId === UNCATEGORIZED_SPACE_ID
+  ) {
+    return;
+  }
+  const presenceHost = document.createElement('div');
+  presenceHost.id = 'spaces-presence-strip';
+  presenceHost.className = 'spaces-presence-strip';
+  presenceHost.hidden = true;
+  titleWrap.appendChild(presenceHost);
+  renderPresenceStrip();
+  void refreshSpacePresence(true);
+}
+
+async function refreshSpacePresence(force = false): Promise<void> {
+  const scopeId = state.activeScopeId;
+  if (scopeId === HOME_SCOPE_ID || scopeId === UNCATEGORIZED_SPACE_ID) {
+    if (spacePresence !== null) {
+      spacePresence = null;
+      renderPresenceStrip();
+    }
+    return;
+  }
+  const now = Date.now();
+  if (!force && now - presenceFetchAt < PRESENCE_REFRESH_MIN_MS) return;
+  presenceFetchAt = now;
+  const bridge = window.lite?.spaces?.presence;
+  if (bridge === undefined) return;
+  try {
+    const envelope = await bridge.inSpace(scopeId);
+    if (envelope.ok !== true || state.activeScopeId !== scopeId) return;
+    const next = { forSpaceId: scopeId, entries: envelope.value };
+    // No-flicker: repaint only when the data differs.
+    if (JSON.stringify(next) === JSON.stringify(spacePresence)) return;
+    spacePresence = next;
+    renderPresenceStrip();
+  } catch {
+    /* presence is garnish */
+  }
 }
 
 /** Start of the current/most-recent degraded episode (for toast gating). */
@@ -7943,7 +8235,10 @@ function buildPlaybookTilePreview(
   head.appendChild(label);
   // Right-aligned pill: live progress when the steps carry checkboxes,
   // plain step count otherwise. The playbook is the plan that RUNS —
-  // its tile should say how far it has run.
+  // its tile should say how far it has run. A WISER riff plan carries
+  // no steps in the graph — for those, its LIFECYCLE is the progress
+  // ("Draft", "Not submitted"), so the pill shows that instead of
+  // showing nothing (2026-08-20 "tiles are not very descriptive").
   if (detailed.length > 0) {
     const pill = document.createElement('span');
     pill.className = 'spaces-card-playbook-pill';
@@ -7955,6 +8250,15 @@ function buildPlaybookTilePreview(
       pill.classList.add('is-complete');
     }
     head.appendChild(pill);
+  } else {
+    const stageLabel = riffStageLabel(item.riffStage, item.riffStatus);
+    if (stageLabel !== null) {
+      const pill = document.createElement('span');
+      pill.className = 'spaces-card-playbook-pill is-stage';
+      pill.textContent = stageLabel;
+      pill.title = 'WISER playbook lifecycle';
+      head.appendChild(pill);
+    }
   }
   preview.appendChild(head);
 
@@ -12952,7 +13256,7 @@ function buildDetailTypeBlock(item: RendererItem): HTMLElement | null {
  *
  * Code spans are extracted into placeholders BEFORE bold / italic /
  * link replacements so we never interpret formatting inside `` `…` ``.
- * Placeholders are unique sentinel strings (` CS<n> `) that
+ * Placeholders are unique sentinel strings (`\u0000CS<n>\u0000`) that
  * can't collide with user content (NUL is forbidden in source) — they
  * survive the other passes intact and we restore them at the end.
  */
@@ -13856,6 +14160,54 @@ export function bucketTimelineByDate(
   return out;
 }
 
+/** One space's cluster inside a time bucket. */
+export interface TimelineSpaceGroup {
+  /** null = rows with no Space (uncategorized adds etc.). */
+  spaceId: string | null;
+  space?: RendererSpaceChipRef;
+  rows: TimelineRow[];
+}
+
+/**
+ * Group a time-bucket's rows by Space, preserving recency: groups are
+ * ordered by their NEWEST row (so the bucket still reads
+ * newest-activity-first), rows keep their order within each group, and
+ * spaceless rows cluster under a trailing null group. Pure; exported
+ * for tests. (2026-08-20: "events in home should be grouped by time
+ * first and space second.")
+ */
+export function groupBucketBySpace(
+  rows: ReadonlyArray<TimelineRow>
+): TimelineSpaceGroup[] {
+  const byKey = new Map<string, TimelineSpaceGroup>();
+  for (const row of rows) {
+    const key = row.spaceId ?? '\u0000none';
+    let group = byKey.get(key);
+    if (group === undefined) {
+      group = { spaceId: row.spaceId ?? null, rows: [] };
+      if (row.space !== undefined) group.space = row.space;
+      byKey.set(key, group);
+    }
+    if (group.space === undefined && row.space !== undefined) group.space = row.space;
+    group.rows.push(row);
+  }
+  const groups = [...byKey.values()];
+  const newest = (g: TimelineSpaceGroup): number => {
+    let max = Number.NEGATIVE_INFINITY;
+    for (const r of g.rows) {
+      const t = Date.parse(r.timestamp);
+      if (Number.isFinite(t) && t > max) max = t;
+    }
+    return max;
+  };
+  groups.sort((a, b) => {
+    // Spaceless rows trail — they lack a header identity.
+    if ((a.spaceId === null) !== (b.spaceId === null)) return a.spaceId === null ? 1 : -1;
+    return newest(b) - newest(a);
+  });
+  return groups;
+}
+
 /**
  * Apply the active filter to a merged timeline. Pure; exported for
  * tests.
@@ -13927,8 +14279,42 @@ export function buildHomeTimeline(): HTMLElement {
   list.className = 'home-timeline-list';
   for (const bucket of buckets) {
     list.appendChild(buildTimelineBucketHeader(bucket.label));
-    for (const row of bucket.rows) {
-      list.appendChild(buildTimelineRow(row));
+    // Time first, Space second (2026-08-20): within the band, rows
+    // cluster under their Space so one initiative's activity reads as
+    // one block instead of interleaving with every other Space.
+    for (const group of groupBucketBySpace(bucket.rows)) {
+      const section = document.createElement('div');
+      section.className = 'home-space-group';
+      const head = document.createElement('div');
+      head.className = 'home-space-group-head';
+      const dot = document.createElement('span');
+      dot.className = 'home-space-group-dot';
+      if (group.space?.color !== undefined && group.space.color !== null) {
+        dot.style.background = group.space.color;
+      }
+      head.appendChild(dot);
+      const name = document.createElement('span');
+      name.className = 'home-space-group-name';
+      name.textContent =
+        group.spaceId === null
+          ? 'Uncategorized'
+          : friendlySpaceName(group.space?.name ?? '');
+      head.appendChild(name);
+      const count = document.createElement('span');
+      count.className = 'home-space-group-count';
+      count.textContent = String(group.rows.length);
+      head.appendChild(count);
+      if (group.spaceId !== null) {
+        head.setAttribute('role', 'button');
+        head.setAttribute('tabindex', '0');
+        const target = group.spaceId;
+        head.addEventListener('click', () => setActiveScope(target));
+      }
+      section.appendChild(head);
+      for (const row of group.rows) {
+        section.appendChild(buildTimelineRow(row));
+      }
+      list.appendChild(section);
     }
   }
   region.appendChild(list);
@@ -14643,6 +15029,7 @@ function messageFrom(err: unknown): string {
 (window as unknown as {
   __spacesRendererForTesting?: unknown;
 }).__spacesRendererForTesting = {
+  groupBucketBySpace,
   focusItemTile,
   safeCssColor,
   stripMarkdownForExcerpt,

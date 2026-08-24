@@ -657,6 +657,12 @@ export interface SpacesApi {
    */
   getUncategorizedCount(): Promise<number>;
 
+  /** Live presence: who has this Space open right now (fresh beacons). */
+  presenceInSpace(spaceId: string): Promise<import('./types.js').SpacePresenceEntry[]>;
+
+  /** Report the viewer's active Space onto their presence beacon. */
+  presenceScope(spaceId: string | null, spaceName: string | null): void;
+
   /** Learning Center: workspace signals for mission auto-detection. */
   learnSignals(): Promise<import('./learn-content.js').LearnSignals>;
 
@@ -1072,6 +1078,14 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async learnSignals(): Promise<import('./learn-content.js').LearnSignals> {
     throw notInitialized('learnSignals');
+  }
+
+  async presenceInSpace(): Promise<import('./types.js').SpacePresenceEntry[]> {
+    throw notInitialized('presenceInSpace');
+  }
+
+  presenceScope(): void {
+    /* uninitialized: presence is garnish — silently inert */
   }
 
   async learnProgressGet(): Promise<import('./learn-content.js').LearnProgress> {

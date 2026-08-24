@@ -47,6 +47,8 @@ import {
 import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
 import { registerJourneyMapTargetChannel } from '../journey-map-window.js';
+import { riffSheetDescription } from './riff-summary.js';
+import { SPACES_EVENTS } from './events.js';
 import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
@@ -169,6 +171,78 @@ async function annotateVersionDiff(
 let activeCache: SpacesCache | null = null;
 /** Live SDK client for background jobs (GSX migration sweep). */
 let activeClient: SdkSpacesClient | null = null;
+
+/**
+ * Riff playbook ids this boot has already tried to enrich. Sheets are
+ * multi-MB KV values, so even a FAILED attempt is not retried until
+ * the next launch — a sheet with no usable summary would otherwise be
+ * refetched on every Space open.
+ */
+const riffEnrichAttempted = new Set<string>();
+/** Serializes sweeps so two Space opens don't double-fetch. */
+let riffEnrichInFlight: Promise<void> | null = null;
+
+/**
+ * Background pass: riff `:Playbook` members of this Space that have no
+ * description get their KV `summary.text` written onto the graph node
+ * (SET_PLAYBOOK_DESCRIPTION — guarded to only-while-empty, so it can
+ * never clobber a real description later). One write per playbook
+ * EVER: after it lands, the node stops matching the candidate query.
+ *
+ * Fire-and-forget by design — the Space list must paint at its normal
+ * speed; the enriched descriptions arrive via cache invalidation +
+ * the standard repaint broadcast a moment later.
+ */
+function enrichRiffPlaybooks(spaceId: string): void {
+  if (typeof spaceId !== 'string' || spaceId.length === 0) return;
+  if (riffEnrichInFlight !== null) return; // one sweep at a time
+  const client = activeClient;
+  const cache = activeCache;
+  if (client === null) return;
+  const log = getLoggingApi();
+  riffEnrichInFlight = (async (): Promise<void> => {
+    try {
+      const ids = (await client.listPlaybooksNeedingDescription(spaceId, 8)).filter(
+        (id) => !riffEnrichAttempted.has(id)
+      );
+      if (ids.length === 0) return;
+      let wrote = 0;
+      for (const id of ids) {
+        riffEnrichAttempted.add(id);
+        try {
+          const sheet = await getKVApi().get('riff:sheets', id);
+          const description = riffSheetDescription(sheet);
+          if (description === null) {
+            log.info('spaces', 'riff sheet had no usable summary', { id });
+            continue;
+          }
+          if (await client.setPlaybookDescription(id, description)) wrote += 1;
+        } catch (err) {
+          // Missing sheet, KV hiccup, graph refusal — all per-item and
+          // non-fatal; the tile just stays plain for this playbook.
+          log.warn('spaces', 'riff enrichment skipped', {
+            id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      if (wrote > 0) {
+        log.event(SPACES_EVENTS.RIFF_ENRICH_FINISH, { spaceId, wrote, considered: ids.length });
+        // Drop the stale list so the next paint carries the new
+        // descriptions; the cache's update broadcast repaints open
+        // windows without a manual refresh.
+        if (cache !== null) cache.invalidate((key) => key === itemsListKey(spaceId));
+      }
+    } catch (err) {
+      log.warn('spaces', 'riff enrichment sweep failed', {
+        spaceId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      riffEnrichInFlight = null;
+    }
+  })();
+}
 /** Delayed-start handle for the boot-time GSX migration sweep. */
 let gsxMigrationTimer: ReturnType<typeof setTimeout> | null = null;
 let cacheUnsubscribe: (() => void) | null = null;
@@ -922,6 +996,11 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       // key for now -- v1 uses default pagination only; revisit if
       // we wire infinite scroll.
       const scopeId = scope.kind === 'uncategorized' ? '__uncategorized__' : scope.spaceId;
+      // Riff playbooks in this Space with a blank tile line get their
+      // KV summary written back in the background — fire-and-forget,
+      // capped, once per id per boot (2026-08-20 "tiles are not very
+      // descriptive" report).
+      if (scope.kind === 'space') enrichRiffPlaybooks(scope.spaceId);
       return cache.getOrFetch(itemsListKey(scopeId), () => client.listItems(scope, opts));
     },
     get(id: string): Promise<Item | null> {
@@ -1494,6 +1573,28 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     },
     learnSignals() {
       return client.learnSignals();
+    },
+
+    presenceInSpace(spaceId: string) {
+      return client.presenceInSpace(spaceId);
+    },
+
+    // 2026-08-20 — "show in a space if anyone is active in the space."
+    // The renderer reports scope changes; the beacon carries the Space
+    // as facets (null clears when leaving to Home/Uncategorized).
+    presenceScope(spaceId: string | null, _spaceName: string | null): void {
+      // Release-review finding (2026-08-20, HIGH): the name facet leaked
+      // restricted-Space NAMES into the shared presence KV log, which
+      // the main app's Live Activity trail renders to any user with no
+      // visibility check — and nothing ever READS the name facet
+      // (PRESENCE_IN_SPACE matches on activeSpaceId; display names come
+      // from the viewer's own gated state). Ship the opaque id only;
+      // explicitly null the name so beacons written by the leaky build
+      // are scrubbed on the next beat.
+      presenceBeat({
+        activeSpaceId: spaceId,
+        activeSpaceName: null,
+      });
     },
 
     learnProgressGet() {

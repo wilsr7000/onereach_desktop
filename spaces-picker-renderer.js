@@ -55,6 +55,16 @@ const SVG_ICONS = {
     <circle cx="18" cy="16" r="3"/>
   </svg>`,
 
+  // Journey map (ADR-072) — stages on a path, which is what the asset
+  // is. Without an entry here a journey falls through to `default` and
+  // sits in the list as an anonymous square, indistinguishable from
+  // anything else this app doesn't recognise.
+  journey: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+    <path d="M4 17h4a3 3 0 0 0 3-3V10a3 3 0 0 1 3-3h4"/>
+    <circle cx="4" cy="17" r="2"/>
+    <circle cx="20" cy="7" r="2"/>
+  </svg>`,
+
   // Default fallback
   default: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
     <rect x="5" y="5" width="14" height="14" rx="2"/>

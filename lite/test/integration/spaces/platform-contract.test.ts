@@ -132,6 +132,8 @@ function buildStubConsumer(): {
       /* stub: the contract only needs the method to exist */
     },
     learnSignals: async () => ({ spaces: 0, otherMembers: 0, kinds: {} }),
+    presenceInSpace: async () => [],
+    presenceScope: () => undefined,
     learnProgressGet: async () => ({
       version: 1 as const,
       role: null,

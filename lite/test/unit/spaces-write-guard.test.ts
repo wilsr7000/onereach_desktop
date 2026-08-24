@@ -39,6 +39,11 @@ const EXEMPT: Record<string, string> = {
   ENSURE_CHECKLIST_SCHEMA: 'registry documentation, not user data',
   ENSURE_ACCESS_ROLE_SCHEMA: 'registry documentation, not user data',
   ENSURE_JOURNEY_SCHEMA: 'registry documentation, not user data',
+  SET_PLAYBOOK_DESCRIPTION:
+    'derived-metadata backfill, not user content: copies the riff sheet\'s own ' +
+    'KV summary onto its graph node, and ONLY while description is empty (the ' +
+    'WHERE guard) — it can never overwrite anything a person wrote. The ' +
+    'candidate query that feeds it is SPACE_VISIBLE-gated',
   UPSERT_PERSON: 'identity plumbing — a Person node is not Space content',
   ENSURE_MEETINGS_SPACE: 'bootstrap of the shared meetings Space',
   PIN_SPACE:

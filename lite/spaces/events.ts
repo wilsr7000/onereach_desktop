@@ -79,6 +79,9 @@ export const SPACES_EVENTS = {
   UNCATEGORIZED_COUNT_FINISH: 'spaces.uncategorizedCount.finish',
   UNCATEGORIZED_COUNT_FAIL: 'spaces.uncategorizedCount.fail',
   // ─── learn signals (Learning Center, 2026-08-07) ─────────────────────
+  PRESENCE_IN_SPACE_START: 'spaces.presence.inSpace.start',
+  PRESENCE_IN_SPACE_FINISH: 'spaces.presence.inSpace.finish',
+  PRESENCE_IN_SPACE_FAIL: 'spaces.presence.inSpace.fail',
   LEARN_SIGNALS_START: 'spaces.learn.signals.start',
   LEARN_SIGNALS_FINISH: 'spaces.learn.signals.finish',
   LEARN_SIGNALS_FAIL: 'spaces.learn.signals.fail',
@@ -167,6 +170,8 @@ export const SPACES_EVENTS = {
   // conforms to the platform contract's span taxonomy — every spaces
   // event ends .start | .finish | .fail (platform-contract.test.ts).
   GSX_MIGRATE_ITEM: 'spaces.gsxMigrate.item.finish',
+  /** One riff-playbook description backfill batch landed (2026-08-20). */
+  RIFF_ENRICH_FINISH: 'spaces.riffEnrich.finish',
   // NOTE: IPC entry events are emitted dynamically as
   // `spaces.ipc.<verb>` by the wrapper in `ipc.ts` (the verb derived
   // from each `lite:spaces:*` channel). They are intentionally NOT

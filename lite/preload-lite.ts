@@ -78,6 +78,8 @@ const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_LEARN_SIGNALS = 'lite:spaces:learn:signals';
+const SPACES_PRESENCE_IN_SPACE = 'lite:spaces:presence:inSpace';
+const SPACES_PRESENCE_SCOPE = 'lite:spaces:presence:scope';
 const SPACES_LEARN_PROGRESS_GET = 'lite:spaces:learn:progressGet';
 const SPACES_LEARN_PROGRESS_SAVE = 'lite:spaces:learn:progressSave';
 const SPACES_ITEMS_LIST = 'lite:spaces:items:list';
@@ -128,6 +130,8 @@ const SPACES_ITEMS_MOVE_TO_SPACE = 'lite:spaces:items:moveToSpace';
 const SPACES_ITEMS_ADD_TO_SPACE = 'lite:spaces:items:addToSpace';
 const SPACES_ITEMS_REMOVE_FROM_SPACE = 'lite:spaces:items:removeFromSpace';
 const SPACES_ITEMS_SEARCH = 'lite:spaces:items:search';
+const SPACES_ITEMS_SEARCH_AGENTIC = 'lite:spaces:items:search-agentic';
+const SPACES_ITEMS_SEARCH_AGENTIC_PROGRESS = 'lite:spaces:items:search-agentic-progress';
 const SPACES_ITEMS_VERSIONS = 'lite:spaces:items:versions';
 const SPACES_ITEMS_VERSION_GET = 'lite:spaces:items:versionGet';
 const SPACES_ITEMS_VERSION_RESTORE = 'lite:spaces:items:versionRestore';
@@ -683,6 +687,11 @@ interface SpacesItemsBridge {
     id: string,
     spaceId: string
   ): Promise<SpacesIpcResultView<unknown>>;
+  searchAgentic(payload: {
+    query: string;
+    spaceId?: string;
+  }): Promise<SpacesIpcResultView<unknown>>;
+  onSearchAgenticProgress(listener: (p: unknown) => void): () => void;
   search(opts: {
     query: string;
     spaceId?: string;
@@ -964,6 +973,10 @@ interface SpacesBridge {
    */
   refresh(): Promise<SpacesIpcResultView<{ ok: true }>>;
   getUncategorizedCount(): Promise<SpacesIpcResultView<number>>;
+  presence: {
+    inSpace(spaceId: string): Promise<SpacesIpcResultView<LiteSpacePresenceEntryView[]>>;
+    scope(spaceId: string | null, spaceName: string | null): Promise<SpacesIpcResultView<{ ok: true }>>;
+  };
   learn: {
     signals(): Promise<SpacesIpcResultView<LiteLearnSignalsView>>;
     progressGet(): Promise<SpacesIpcResultView<LiteLearnProgressView>>;
@@ -1656,6 +1669,16 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_REFRESH) as Promise<SpacesIpcResultView<{ ok: true }>>,
   getUncategorizedCount: () =>
     ipcRenderer.invoke(SPACES_UNCATEGORIZED_COUNT) as Promise<SpacesIpcResultView<number>>,
+  presence: {
+    inSpace: (spaceId: string) =>
+      ipcRenderer.invoke(SPACES_PRESENCE_IN_SPACE, { spaceId }) as Promise<
+        SpacesIpcResultView<LiteSpacePresenceEntryView[]>
+      >,
+    scope: (spaceId: string | null, spaceName: string | null) =>
+      ipcRenderer.invoke(SPACES_PRESENCE_SCOPE, { spaceId, spaceName }) as Promise<
+        SpacesIpcResultView<{ ok: true }>
+      >,
+  },
   learn: {
     signals: () =>
       ipcRenderer.invoke(SPACES_LEARN_SIGNALS) as Promise<
@@ -1770,6 +1793,17 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_ITEMS_SEARCH, { opts }) as Promise<
         SpacesIpcResultView<unknown[]>
       >,
+    searchAgentic: (payload: { query: string; spaceId?: string }) =>
+      ipcRenderer.invoke(SPACES_ITEMS_SEARCH_AGENTIC, payload) as Promise<
+        SpacesIpcResultView<unknown>
+      >,
+    onSearchAgenticProgress: (listener: (p: unknown) => void) => {
+      const handler = (_e: Electron.IpcRendererEvent, p: unknown): void => listener(p);
+      ipcRenderer.on(SPACES_ITEMS_SEARCH_AGENTIC_PROGRESS, handler);
+      return (): void => {
+        ipcRenderer.removeListener(SPACES_ITEMS_SEARCH_AGENTIC_PROGRESS, handler);
+      };
+    },
     versions: (id: string, limit?: number) =>
       ipcRenderer.invoke(SPACES_ITEMS_VERSIONS, { id, limit }) as Promise<
         SpacesIpcResultView<unknown[]>

@@ -349,7 +349,7 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src.slice(explorerClick, explorerClick + 500)).toContain('focusItemTile(item.id)');
     expect(src.slice(explorerClick, explorerClick + 500)).toContain('pendingTileFocusId = item.id');
     // renderItemList honors the pending focus after painting.
-    const render = bodyOf('function renderItemList', 9000);
+    const render = bodyOf('function appendSpaceContents', 9000);
     expect(render).toContain('pendingTileFocusId !== null && focusItemTile(pendingTileFocusId)');
   });
 
@@ -564,6 +564,40 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(aiStart).toBeGreaterThan(-1);
     expect(aiEnd).toBeGreaterThan(aiStart);
     expect(body.slice(aiStart, aiEnd)).not.toMatch(/updateSpace|\.update\(/);
+  });
+
+  it('presence: scope beats on navigation; strip refresh rides the heartbeat, change-gated', () => {
+    // 2026-08-20: "show in a space if anyone is active in the space."
+    const src = source();
+    const scope = bodyOf('function setActiveScope', 2600);
+    expect(scope).toMatch(/presence\s*\n?\s*\?\.scope\(/);
+    const refresh = bodyOf('async function refreshSpacePresence', 2200);
+    // Zero new timers: the refresh is throttled and driven by the
+    // cache heartbeat; repaints only when the data changed.
+    expect(refresh).toContain('PRESENCE_REFRESH_MIN_MS');
+    expect(refresh).toMatch(/JSON\.stringify\(next\) === JSON\.stringify\(spacePresence\)/);
+    expect(src).toMatch(/markCacheBroadcast\(\);[\s\S]{0,200}refreshSpacePresence\(\)/);
+  });
+
+  it('presence beacons never carry the Space NAME — ids only', () => {
+    // Release-review finding (2026-08-20, HIGH): activeSpaceName flowed
+    // into the shared presence KV log, rendered ungated by the main
+    // app's Live Activity trail — restricted Space names are exactly
+    // the sensitive part. The id is opaque; the name must never leave.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    const found = ['spaces/main.ts', 'lite/spaces/main.ts']
+      .map((r) => path.resolve(r))
+      .find((f) => fs.existsSync(f));
+    expect(found).toBeDefined();
+    const src = fs.readFileSync(found as string, 'utf8');
+    const start = src.indexOf('presenceScope(');
+    expect(start).toBeGreaterThan(-1);
+    const body = src.slice(start, start + 900);
+    expect(body).toContain('activeSpaceName: null');
+    expect(body).not.toMatch(/activeSpaceName: spaceName|activeSpaceName: _spaceName/);
   });
 
   it('the existing-asset search has a supersession guard too', () => {

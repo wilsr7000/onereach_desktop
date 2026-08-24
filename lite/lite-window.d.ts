@@ -688,6 +688,37 @@ interface LiteAssetVersionView {
   mimeType?: string;
 }
 
+
+/** Agentic search — one judged match. */
+interface LiteAgenticSearchMatch {
+  id: string;
+  title: string;
+  spaceId: string | null;
+  kind: string;
+  confidence: number;
+  reason: string;
+}
+
+/** Agentic search — the walk's outcome. */
+interface LiteAgenticSearchResult {
+  query: string;
+  matches: LiteAgenticSearchMatch[];
+  evaluated: number;
+  totalCandidates: number;
+  stoppedEarly: boolean;
+}
+
+/** Agentic search — one progress beat. */
+interface LiteAgenticSearchProgress {
+  phase: 'evaluating' | 'match';
+  index: number;
+  total: number;
+  id: string;
+  title: string;
+  confidence?: number;
+  matchesSoFar: number;
+}
+
 interface LiteSpaceItemSummary {
   id: string;
   title: string;
@@ -699,6 +730,11 @@ interface LiteSpaceItemSummary {
   /** ms epoch of MY last read (VIEWED audit edge); absent = never opened. */
   viewedAtMs?: number;
   excerpt?: string;
+  /** WISER riff lifecycle (only on `:Playbook`-labeled members):
+   *  submission stage (`not_submitted`/…) + edit status (`draft`/…).
+   *  The playbook tile shows these when it has no checkbox progress. */
+  riffStage?: string;
+  riffStatus?: string;
   /** User-authored description when non-blank. Distinct from `excerpt`
    *  (which may itself be derived from description OR content) — tiles
    *  that need both, like the playbook tile, read this directly. */
@@ -910,6 +946,16 @@ interface LiteSpacesItemsBridge {
     spaceId?: string;
     limit?: number;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItemSummary[]>>;
+  /**
+   * The agentic tier of the one search: an LLM walks candidates and
+   * judges intent, not substrings. Progress via onSearchAgenticProgress.
+   */
+  searchAgentic(payload: {
+    query: string;
+    spaceId?: string;
+  }): Promise<LiteSpacesIpcResult<LiteAgenticSearchResult>>;
+  /** Subscribe to agentic-walk progress. Returns unsubscribe. */
+  onSearchAgenticProgress(listener: (p: LiteAgenticSearchProgress) => void): () => void;
   /** Asset versioning (ADR-057) — history list, newest first. */
   versions(id: string, limit?: number): Promise<LiteSpacesIpcResult<LiteAssetVersionView[]>>;
   /** One full snapshot for the version viewer. */
@@ -966,6 +1012,13 @@ interface LiteHomeUrlState {
   url: string;
   isDefault: boolean;
   defaultUrl: string;
+}
+
+interface LiteSpacePresenceEntryView {
+  personId: string;
+  name: string;
+  lastSeenMs: number;
+  app: string;
 }
 
 interface LiteLearnSignalsView {
@@ -1064,6 +1117,11 @@ interface LiteSpacesBridge {
    */
   refresh(): Promise<LiteSpacesIpcResult<{ ok: true }>>;
   getUncategorizedCount(): Promise<LiteSpacesIpcResult<number>>;
+  /** Live presence (2026-08-20): who's in a Space + scope reporting. */
+  presence?: {
+    inSpace(spaceId: string): Promise<LiteSpacesIpcResult<LiteSpacePresenceEntryView[]>>;
+    scope(spaceId: string | null, spaceName: string | null): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  };
   /** Learning Center bridge (replaces Home, 2026-08-07). */
   learn: {
     signals(): Promise<LiteSpacesIpcResult<LiteLearnSignalsView>>;

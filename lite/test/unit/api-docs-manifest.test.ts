@@ -29,6 +29,7 @@ describe('API docs manifest', () => {
       'gsx',
         'health',
         'idw',
+        'keychain',
         'kv',
         'logging',
         'main-window',

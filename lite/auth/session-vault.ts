@@ -31,6 +31,7 @@
  */
 
 import type { Cookie } from 'electron';
+import { trackKeychainBackend } from '../keychain/api.js';
 
 /**
  * Minimal keytar surface (same shape as ai/totp). Production wires the
@@ -71,14 +72,41 @@ const SCHEMA = 1;
 
 let _defaultBackend: KeychainBackend | null = null;
 
+/**
+ * Should this process get an inert keychain backend?
+ *
+ * Precedence: LITE_KEYCHAIN=1 (explicit opt-in, wins so a sign-in test
+ * can beat the harness default) > LITE_NO_KEYCHAIN=1 (explicit opt-out;
+ * e2e harness + release smoke) > agent-shell default-off.
+ *
+ * Agent-shell default-off (2026-08-20, FIFTH keytar SIGABRT of the day):
+ * every crashed launch came from a Claude-session shell (CLAUDECODE=1)
+ * running an unpackaged or ad-hoc binary whose signature matches no
+ * Keychain ACL — keytar then throws a C++ exception past the NAPI
+ * boundary and abort()s. A rule in project memory cannot reach sessions
+ * that never read memory; an env discriminator reaches every one. The
+ * user's own terminal launches carry no CLAUDECODE and keep the vault;
+ * packaged builds are untouched (stable ACL).
+ */
+function keychainInert(): boolean {
+  if (process.env['LITE_KEYCHAIN'] === '1') return false;
+  if (process.env['LITE_NO_KEYCHAIN'] === '1') return true;
+  if (process.env['CLAUDECODE'] !== undefined) {
+    let packaged = false;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      packaged = (require('electron') as { app?: { isPackaged?: boolean } }).app?.isPackaged === true;
+    } catch {
+      // Plain node (unit tests) — unpackaged by definition.
+    }
+    if (!packaged) return true;
+  }
+  return false;
+}
+
 function defaultKeychainBackend(): KeychainBackend {
-  if (process.env['LITE_NO_KEYCHAIN'] === '1') {
-    // Keychain disabled (e2e isolation, 2026-08-20): a test-launched
-    // binary at a fresh path triggers a Keychain auth prompt nobody can
-    // answer, and keytar's native completion then throws a C++ exception
-    // that escapes the NAPI boundary — abort(), the 2026-08-12
-    // "app-killer" crash class, reproduced twice today. A test instance
-    // also has no business reading the user's REAL session tokens.
+  if (keychainInert()) {
+    // Inert backend — see keychainInert() above for the why.
     if (_defaultBackend === null) {
       _defaultBackend = {
         setPassword: async () => undefined,
@@ -90,7 +118,9 @@ function defaultKeychainBackend(): KeychainBackend {
   }
   if (_defaultBackend === null) {
     // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
-    _defaultBackend = require('keytar') as KeychainBackend;
+    // ADR-075: every keytar call is tracked so quit can drain
+    // in-flight keychain work before Node teardown (see lite/keychain/).
+    _defaultBackend = trackKeychainBackend(require('keytar') as KeychainBackend);
   }
   return _defaultBackend;
 }

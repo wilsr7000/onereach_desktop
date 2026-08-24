@@ -42,6 +42,7 @@ import {
 } from './note-standard';
 import { SpacesError } from './errors.js';
 import type { LearnSignals } from './learn-content.js';
+import type { SpacePresenceEntry } from './types.js';
 import type { Span } from '../logging/events.js';
 import type {
   Space,
@@ -276,7 +277,7 @@ const SPACE_WRITABLE = `(
           coalesce(s.createdBy, '') = $viewerId
           OR EXISTS {
             MATCH (:Person {id: $viewerId})-[w:HAS_ACCESS]->(s)
-            WHERE ${GRANT_LIVE.replace(/r\./g, 'w.')}
+            WHERE ${GRANT_LIVE.replace(/\br\./g, 'w.')}
               AND coalesce(w.role, 'writer') <> 'reader'
           }
         )
@@ -408,6 +409,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     WITH s, count(a) AS itemCount,
          max(${MEMBER_ACTIVITY_MS}) AS memberActivityMs
     WITH s, itemCount,
@@ -454,6 +456,7 @@ export const CYPHER = {
     MATCH (a)
     WHERE ${SPACE_MEMBER}
       AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
@@ -468,6 +471,7 @@ export const CYPHER = {
     MATCH (a)
     WHERE ${SPACE_MEMBER}
       AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
       AND NOT EXISTS {
         MATCH (a)-[:BELONGS_TO]->(live:Space)
         WHERE live.deletedAt IS NULL
@@ -504,6 +508,8 @@ export const CYPHER = {
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            a.metadata AS tileMetadata,
+           CASE WHEN a:Playbook THEN a.stage ELSE NULL END AS riffStage,
+           CASE WHEN a:Playbook THEN a.status ELSE NULL END AS riffStatus,
            [] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -520,6 +526,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
         AND s.deletedAt IS NULL
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${SPACE_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(other:Space)
       WHERE other.id <> s.id
@@ -560,6 +567,8 @@ export const CYPHER = {
            CASE WHEN coalesce(a.type, a.assetType) = 'agent'
                 THEN a.agentEndpoints ELSE NULL END AS tileAgentEndpoints,
            a.metadata AS tileMetadata,
+           CASE WHEN a:Playbook THEN a.stage ELSE NULL END AS riffStage,
+           CASE WHEN a:Playbook THEN a.status ELSE NULL END AS riffStatus,
            [x IN otherSpacesRaw WHERE x.id IS NOT NULL] AS otherSpaces,
            CASE WHEN producer IS NULL
                 THEN null
@@ -841,6 +850,64 @@ export const CYPHER = {
     RETURN a.id AS id
   `,
 
+  /**
+   * Why did a guarded write return nothing? (2026-08-20, the "add
+   * assets broke" report.) A SPACE_WRITABLE mutation that matches no
+   * rows used to throw "Space not found" no matter WHY — for a
+   * read-only member or a lapsed grant, that is a lie that costs a
+   * debugging session. This probe answers, within what the viewer is
+   * allowed to know (SPACE_VISIBLE-gated, so an invisible Space stays
+   * a genuine "not found"): can they write, and what role do they hold?
+   */
+  EXPLAIN_WRITE_REFUSAL: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    OPTIONAL MATCH (:Person {id: $viewerId})-[g:HAS_ACCESS]->(s)
+    RETURN ${SPACE_WRITABLE} AS canWrite,
+           coalesce(g.role, 'writer') AS role,
+           (g IS NOT NULL AND g.expiresUnixMs IS NOT NULL AND g.expiresUnixMs <= $nowMs)
+             AS grantExpired,
+           coalesce(s.name, s.id) AS name
+  `,
+
+  /**
+   * WISER riff playbooks whose tile has nothing to say (2026-08-20
+   * user report: "playbook tiles are not very descriptive"). Riff
+   * `:Playbook` nodes carry no content and no description in the graph
+   * — the body lives in KV (`riff:sheets`), including a real
+   * `summary.text`. This lists the candidates one Space's background
+   * enrichment pass should hydrate. Capped: enrichment fetches a
+   * multi-MB sheet per id, so the sweep works a few at a time.
+   */
+  LIST_PLAYBOOKS_NEEDING_DESCRIPTION: `
+    MATCH (p:Playbook)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND p.deletedAt IS NULL
+        AND coalesce(p.isTrashed, false) = false
+        AND trim(coalesce(p.description, '')) = ''
+        AND ${SPACE_VISIBLE}
+    RETURN p.id AS id
+    ORDER BY coalesce(p.updatedAt, p.updated_at, 0) DESC
+    LIMIT toInteger($limit)
+  `,
+
+  /**
+   * Write the KV-derived summary onto the riff node — ONLY while the
+   * description is still empty. The guard makes the write idempotent
+   * and non-clobbering: the day the riff app (or a human) writes a
+   * real description, this becomes a no-op forever. Source-stamped so
+   * the provenance is auditable in the graph.
+   */
+  SET_PLAYBOOK_DESCRIPTION: `
+    MATCH (p:Playbook {id: $id})
+      WHERE trim(coalesce(p.description, '')) = ''
+    SET p.description = $description,
+        p.descriptionSource = 'lite:riff-kv-summary',
+        p.descriptionEnrichedAtMs = $nowMs
+    RETURN p.id AS id
+  `,
+
   /** The asset's viewers, most-recent first. Visibility-gated. */
   GET_ASSET_VIEWERS: `
     MATCH (a:Asset {id: $id})
@@ -861,6 +928,7 @@ export const CYPHER = {
     MATCH (a {id: $id})
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${ASSET_VISIBLE}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s:Space)
       WHERE s.deletedAt IS NULL
@@ -1202,6 +1270,7 @@ export const CYPHER = {
     MATCH (a:Asset)
       WHERE coalesce(a.url, a.fileUrl) = $fileKey
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     RETURN a.id AS id
     LIMIT 1
   `,
@@ -1428,6 +1497,30 @@ export const CYPHER = {
    * hands-on missions. Same visibility rules as every other read —
    * detection must never reveal more than the viewer can see.
    */
+  /**
+   * Live presence in a Space (2026-08-20): Presence beacons carry an
+   * activeSpaceId facet while someone has that Space open. Fresh =
+   * beaten within $freshMs (2.5× the 60s heartbeat). Self is excluded
+   * query-side — "you are here" is noise to the person standing there.
+   */
+  PRESENCE_IN_SPACE: `
+    MATCH (s:Space {id: $spaceId})
+    WHERE s.deletedAt IS NULL
+      AND ${SPACE_VISIBLE}
+    WITH s
+    MATCH (pr:Presence)
+    WHERE pr.activeSpaceId = s.id
+      AND coalesce(pr.lastSeenAt, 0) >= $nowMs - $freshMs
+      AND pr.personId <> $viewerId
+    OPTIONAL MATCH (pr)-[:PRESENCE_OF]->(p:Person)
+    RETURN pr.personId AS presencePersonId,
+           coalesce(p.name, pr.personId) AS presenceName,
+           pr.lastSeenAt AS presenceLastSeenMs,
+           coalesce(pr.appName, '') AS presenceApp
+    ORDER BY pr.lastSeenAt DESC
+    LIMIT 12
+  `,
+
   LEARN_KIND_COUNTS: `
     MATCH (a:Asset)
     WHERE a.deletedAt IS NULL
@@ -1455,6 +1548,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     RETURN count(a) AS count
   `,
 
@@ -1503,6 +1597,7 @@ export const CYPHER = {
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     WITH s, count(a) AS itemCount
     SET s.deletedAt = null,
         s.updatedAt = $now
@@ -1598,6 +1693,7 @@ export const CYPHER = {
     MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND coalesce(a.type, a.assetType) = 'ticket'
         AND ($status IS NULL OR coalesce(a.status, 'open') = $status)
         AND ${SPACE_VISIBLE}
@@ -2085,6 +2181,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
           AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     SET a.deletedAt = $now,
         a.updatedAt = $now
     RETURN a.id AS id
@@ -2130,6 +2227,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
           AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
     OPTIONAL MATCH (a)-[old:BELONGS_TO]->(source:Space {id: $fromSpaceId})
@@ -2154,6 +2252,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
           AND ${ASSET_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
     MERGE (a)-[:BELONGS_TO]->(target)
@@ -2174,6 +2273,7 @@ export const CYPHER = {
       WHERE ${SPACE_MEMBER}
         AND ${SPACE_WRITABLE}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
     OPTIONAL MATCH (s)-[c:CONTAINS]->(a)
     DELETE r, c
     SET a.updatedAt = $now
@@ -2206,6 +2306,7 @@ export const CYPHER = {
     MATCH (a)
       WHERE ${SPACE_MEMBER}
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND (
           toLower(coalesce(a.name, a.title, '')) CONTAINS toLower($query)
           OR toLower(coalesce(a.description, '')) CONTAINS toLower($query)
@@ -2369,6 +2470,7 @@ export const CYPHER = {
     MATCH (a:Asset {id: $ticketId})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${ASSET_WRITABLE}
     MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
       WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
@@ -2388,6 +2490,7 @@ export const CYPHER = {
     MATCH (a:Asset {id: $ticketId})
       WHERE coalesce(a.type, a.assetType) = 'ticket'
         AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
         AND ${ASSET_WRITABLE}
     MATCH (c:Checklist {id: $checklistId})-[:BELONGS_TO]->(cs:Space)
       WHERE (coalesce(cs.visibility, 'open') <> 'restricted'
@@ -2674,6 +2777,33 @@ export class SdkSpacesClient {
       now: new Date().toISOString(),
     });
     return rows.length > 0;
+  }
+
+  async presenceInSpace(spaceId: string): Promise<SpacePresenceEntry[]> {
+    return this.withSpan('spaces.presence.inSpace', async () => {
+      const id = typeof spaceId === 'string' ? spaceId.trim() : '';
+      if (id.length === 0) return [];
+      const rows = await this.run(CYPHER.PRESENCE_IN_SPACE, {
+        spaceId: id,
+        viewerId: this.viewerParam(),
+        freshMs: 150_000,
+      });
+      const out: SpacePresenceEntry[] = [];
+      for (const r of rows) {
+        const personId = typeof r.presencePersonId === 'string' ? r.presencePersonId : '';
+        if (personId.length === 0) continue;
+        const lastSeen = Number(r.presenceLastSeenMs);
+        out.push({
+          personId,
+          name: typeof r.presenceName === 'string' && r.presenceName.length > 0
+            ? r.presenceName
+            : personId,
+          lastSeenMs: Number.isFinite(lastSeen) ? lastSeen : 0,
+          app: typeof r.presenceApp === 'string' ? r.presenceApp : '',
+        });
+      }
+      return out;
+    });
   }
 
   async learnSignals(): Promise<LearnSignals> {
@@ -3082,6 +3212,38 @@ export class SdkSpacesClient {
   async recordAssetView(id: string): Promise<void> {
     if (typeof id !== 'string' || id.length === 0) return;
     await this.run(CYPHER.RECORD_ASSET_VIEW, { id });
+  }
+
+  /**
+   * Riff playbooks in a Space still missing a description — the
+   * candidates for the KV-summary enrichment pass. See
+   * LIST_PLAYBOOKS_NEEDING_DESCRIPTION for why they are empty.
+   */
+  async listPlaybooksNeedingDescription(spaceId: string, limit = 8): Promise<string[]> {
+    if (typeof spaceId !== 'string' || spaceId.length === 0) return [];
+    const capped = clampSmallLimit(limit, 8, 25);
+    const rows = await this.run(CYPHER.LIST_PLAYBOOKS_NEEDING_DESCRIPTION, {
+      spaceId,
+      limit: capped,
+    });
+    return rows
+      .map((r) => r['id'])
+      .filter((v): v is string => typeof v === 'string' && v.length > 0);
+  }
+
+  /**
+   * Stamp a KV-derived summary onto a riff playbook node. Returns true
+   * when the write landed; false when the node already had a
+   * description (the Cypher guard) or vanished.
+   */
+  async setPlaybookDescription(id: string, description: string): Promise<boolean> {
+    const trimmed = typeof description === 'string' ? description.trim() : '';
+    if (typeof id !== 'string' || id.length === 0 || trimmed.length === 0) return false;
+    const rows = await this.run(CYPHER.SET_PLAYBOOK_DESCRIPTION, {
+      id,
+      description: trimmed.slice(0, 500),
+    });
+    return rows.length > 0;
   }
 
   /** Read an asset's viewers (who looked, when, how many times). */
@@ -3809,12 +3971,7 @@ export class SdkSpacesClient {
           spaceId: targetSpaceId,
         });
         if (rows.length === 0) {
-          throw new SpacesError({
-            code: 'SPACES_NOT_FOUND',
-            message: `Space ${targetSpaceId} not found`,
-            remediation: 'Refresh the list and try again.',
-            context: { spaceId: targetSpaceId },
-          });
+          await this.throwWriteRefusal(targetSpaceId, 'items.create');
         }
       }
       const created = await this.getItemAfterCreate(id);
@@ -3878,12 +4035,7 @@ export class SdkSpacesClient {
       commitTimestampMs: nowMs,
     });
     if (rows.length === 0) {
-      throw new SpacesError({
-        code: 'SPACES_NOT_FOUND',
-        message: `Space ${input.spaceId} not found`,
-        remediation: 'Refresh the list and try again.',
-        context: { spaceId: input.spaceId },
-      });
+      await this.throwWriteRefusal(input.spaceId, 'items.create');
     }
     if (kvCollection !== null && kvRef !== null && this.noteKv !== null) {
       const spaceNameRaw = rows[0]?.['spaceName'];
@@ -4408,11 +4560,7 @@ export class SdkSpacesClient {
       };
       const rows = await this.run(CYPHER.MOVE_ASSET_TO_SPACE, params);
       if (rows.length === 0) {
-        throw new SpacesError({
-          code: 'SPACES_NOT_FOUND',
-          message: 'Asset or target space not found',
-          context: { id, toSpaceId },
-        });
+        await this.throwWriteRefusal(toSpaceId, 'items.moveToSpace');
       }
       const moved = await this.getItem(id);
       if (moved === null) {
@@ -4454,11 +4602,7 @@ export class SdkSpacesClient {
         now,
       });
       if (rows.length === 0) {
-        throw new SpacesError({
-          code: 'SPACES_NOT_FOUND',
-          message: 'Asset or target space not found',
-          context: { id, toSpaceId },
-        });
+        await this.throwWriteRefusal(toSpaceId, 'items.addToSpace');
       }
       const updated = await this.getItem(id);
       if (updated === null) {
@@ -4764,6 +4908,73 @@ export class SdkSpacesClient {
   private viewerParam(): string {
     const raw = this.getViewerId !== null ? this.getViewerId() : null;
     return typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  }
+
+  /**
+   * A guarded mutation matched no rows — say WHY, honestly (2026-08-20:
+   * "add assets broke"; before the write-guard era the same symptom was
+   * always "not found", which sends people hunting for a missing Space
+   * when the real answer is a role or a lapsed grant).
+   *
+   * Always throws. Ordered by what the viewer is allowed to learn:
+   * signed out → NOT_AUTHENTICATED; Space invisible/absent → NOT_FOUND
+   * (unchanged for them); visible but not writable → FORBIDDEN naming
+   * the actual reason (read-only role / expired or missing grant).
+   */
+  private async throwWriteRefusal(spaceId: string, op: string): Promise<never> {
+    if (this.viewerParam() === '') {
+      throw new SpacesError({
+        code: 'SPACES_NOT_AUTHENTICATED',
+        message: 'Sign in to make changes in Spaces.',
+        remediation: 'Sign in (Settings → Account), then try again.',
+        context: { op, spaceId },
+      });
+    }
+    let rows: Array<Record<string, unknown>> = [];
+    try {
+      rows = await this.run(CYPHER.EXPLAIN_WRITE_REFUSAL, { spaceId });
+    } catch {
+      // The probe is best-effort — classification must never mask the
+      // original failure shape.
+    }
+    const row = rows[0];
+    if (row === undefined) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_FOUND',
+        message: `Space ${spaceId} not found`,
+        remediation: 'Refresh the list and try again.',
+        context: { op, spaceId },
+      });
+    }
+    const name = typeof row['name'] === 'string' && row['name'].length > 0 ? row['name'] : spaceId;
+    if (row['canWrite'] === true) {
+      // The guard passed on the re-probe but the write matched nothing —
+      // a race or transient. Say that, not "no access".
+      throw new SpacesError({
+        code: 'SPACES_CYPHER',
+        message: `The change to "${name}" didn't land — likely a transient conflict.`,
+        remediation: 'Try again; if it repeats, refresh the Space first.',
+        context: { op, spaceId },
+      });
+    }
+    if (row['role'] === 'reader') {
+      throw new SpacesError({
+        code: 'SPACES_FORBIDDEN',
+        message: `You're a read-only member of "${name}".`,
+        remediation:
+          'Ask a writer in this Space to change your role (space header → People → role).',
+        context: { op, spaceId, role: 'reader' },
+      });
+    }
+    throw new SpacesError({
+      code: 'SPACES_FORBIDDEN',
+      message:
+        row['grantExpired'] === true
+          ? `Your access to "${name}" has expired.`
+          : `You're not a writer in "${name}".`,
+      remediation: 'Ask a member to add you: right-click the Space → Add people…',
+      context: { op, spaceId },
+    });
   }
 
 
@@ -5728,6 +5939,10 @@ function toItemSummary(row: Record<string, unknown>, opts: SummaryOpts): ItemSum
   if (description !== undefined) summary.description = description;
   const contentHead = optString(row, 'contentHead');
   if (contentHead !== undefined) summary.contentHead = contentHead;
+  const riffStage = optString(row, 'riffStage');
+  if (riffStage !== undefined) summary.riffStage = riffStage;
+  const riffStatus = optString(row, 'riffStatus');
+  if (riffStatus !== undefined) summary.riffStatus = riffStatus;
   const tileAgentType = optString(row, 'tileAgentType');
   if (tileAgentType !== undefined) summary.agentType = tileAgentType;
   const tileEndpoints = parseAgentEndpointsJson(row['tileAgentEndpoints']);
