@@ -54,16 +54,22 @@ interface BugReportUpdateResult {
   payload: BugReportPayload;
   kvUpdated: boolean;
   kvError: string | null;
+  /** ADR-078: mutation landed on a spooled (not-yet-synced) report. */
+  spooled: boolean;
 }
 
 interface BugReportDeleteResult {
   kvDeleted: boolean;
   kvError: string | null;
+  /** ADR-078: deletion removed a spooled (not-yet-synced) report. */
+  spooled: boolean;
 }
 
 interface BugReportSaveResult {
   kvWritten: boolean;
   kvError: string | null;
+  /** ADR-078: report saved to the local spool, awaiting sync to KV. */
+  spooled: boolean;
 }
 
 interface BugReportBridge {
@@ -407,9 +413,18 @@ sendBtn.addEventListener('click', async () => {
   sendBtn.disabled = true;
   cancelBtn.disabled = true;
   try {
-    await window.bugReport.save(descriptionInput.value, validAttachments, feedbackType);
-    resultDiv.textContent =
-      feedbackType === 'feature' ? 'Suggestion sent. Thanks.' : 'Bug report sent. Thanks.';
+    const saveResult = await window.bugReport.save(
+      descriptionInput.value,
+      validAttachments,
+      feedbackType
+    );
+    // ADR-078: a spooled save DID succeed -- the report is on this
+    // machine and syncs when a session exists. Say that, not "sent".
+    resultDiv.textContent = saveResult.spooled
+      ? 'Saved on this Mac — it will sync to OneReach when you sign in.'
+      : feedbackType === 'feature'
+        ? 'Suggestion sent. Thanks.'
+        : 'Bug report sent. Thanks.';
     resultDiv.classList.remove('hidden', 'error');
     // Clear staged attachments -- they live in the saved report now.
     stagedAttachments.length = 0;

@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { promises as fsp } from 'node:fs';
+import * as path from 'node:path';
+import { tmpdir } from 'node:os';
 import { BugReportStore } from '../../bug-report/store.js';
 import { FakeKV, makeBugReportPayload } from '../harness/index.js';
 
@@ -247,5 +250,170 @@ describe('BugReportStore.delete', () => {
     const result = await store.delete('2099-01-01T00:00:00.000Z');
     expect(result.kvDeleted).toBe(false);
     expect(result.kvError).toMatch(/mock delete failure/);
+  });
+});
+
+// ─── ADR-078: local spool ───────────────────────────────────────────────────
+
+describe('BugReportStore spool (ADR-078)', () => {
+  let kv: FakeKV;
+  let store: BugReportStore;
+  let spoolDir: string;
+  /** Flip to simulate sign-in/out. */
+  let account: string | null;
+  let mirrored: string[];
+
+  beforeEach(async () => {
+    kv = new FakeKV();
+    spoolDir = await fsp.mkdtemp(path.join(tmpdir(), 'lite-bugs-spool-test-'));
+    account = null;
+    mirrored = [];
+    store = new BugReportStore({
+      kvApi: kv,
+      spoolDir,
+      getActiveAccountId: () => account,
+      mirrorToGraph: async (payload) => {
+        mirrored.push(payload.timestamp);
+        return { filed: true };
+      },
+    });
+  });
+
+  afterEach(async () => {
+    await fsp.rm(spoolDir, { recursive: true, force: true });
+  });
+
+  async function spoolFiles(): Promise<string[]> {
+    try {
+      return (await fsp.readdir(spoolDir)).filter((f) => f.endsWith('.json'));
+    } catch {
+      return [];
+    }
+  }
+
+  it('signed-out save succeeds into the spool, touching neither KV nor graph', async () => {
+    const payload = makePayload({ description: 'filed while signed out' });
+    const result = await store.save(payload);
+
+    expect(result).toEqual({ kvWritten: false, kvError: null, spooled: true });
+    expect(kv.sets).toHaveLength(0);
+    expect(mirrored).toEqual([]);
+    const files = await spoolFiles();
+    expect(files).toHaveLength(1);
+    const onDisk = JSON.parse(
+      await fsp.readFile(path.join(spoolDir, files[0] as string), 'utf-8')
+    ) as { description: string; timestamp: string };
+    expect(onDisk.description).toBe('filed while signed out');
+    expect(onDisk.timestamp).toBe(payload.timestamp);
+  });
+
+  it('signed-in save writes KV and leaves no spool residue', async () => {
+    account = 'acct-1';
+    const result = await store.save(makePayload());
+
+    expect(result.kvWritten).toBe(true);
+    expect(result.spooled).toBe(false);
+    expect(kv.sets).toHaveLength(1);
+    expect(await spoolFiles()).toHaveLength(0);
+    expect(mirrored).toHaveLength(1);
+  });
+
+  it('signed-in save with KV down keeps the report in the spool (soft result, no throw)', async () => {
+    account = 'acct-1';
+    kv.failSet = true;
+    const result = await store.save(makePayload());
+
+    expect(result.kvWritten).toBe(false);
+    expect(result.spooled).toBe(true);
+    expect(result.kvError).toMatch(/mock set failure/);
+    expect(await spoolFiles()).toHaveLength(1);
+    expect(mirrored).toEqual([]);
+  });
+
+  it('drainSpool is a counted no-op while signed out', async () => {
+    await store.save(makePayload());
+    const result = await store.drainSpool();
+    expect(result).toEqual({ drained: 0, remaining: 1 });
+    expect(kv.sets).toHaveLength(0);
+  });
+
+  it('drainSpool pushes every spooled report to KV, mirrors, and clears the spool', async () => {
+    const a = makePayload({ timestamp: '2026-08-24T01:00:00.000Z' });
+    const b = makePayload({ timestamp: '2026-08-24T02:00:00.000Z' });
+    await store.save(a);
+    await store.save(b);
+    account = 'acct-1';
+
+    const result = await store.drainSpool();
+    expect(result).toEqual({ drained: 2, remaining: 0 });
+    expect(kv.sets.map((s) => s.key).sort()).toEqual([a.timestamp, b.timestamp]);
+    expect(mirrored.sort()).toEqual([a.timestamp, b.timestamp]);
+    expect(await spoolFiles()).toHaveLength(0);
+  });
+
+  it('drainSpool stops on KV failure and reports the remainder', async () => {
+    await store.save(makePayload({ timestamp: '2026-08-24T03:00:00.000Z' }));
+    await store.save(makePayload({ timestamp: '2026-08-24T04:00:00.000Z' }));
+    account = 'acct-1';
+    kv.failSet = true;
+
+    const result = await store.drainSpool();
+    expect(result).toEqual({ drained: 0, remaining: 2 });
+    expect(await spoolFiles()).toHaveLength(2);
+  });
+
+  it('list surfaces spooled reports signed out, with spool:<ts> ids', async () => {
+    const payload = makePayload({ description: 'visible offline' });
+    await store.save(payload);
+
+    const summaries = await store.list();
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]?.filePath).toBe(`spool:${payload.timestamp}`);
+    expect(summaries[0]?.descriptionPreview).toBe('visible offline');
+  });
+
+  it('read resolves spooled reports by spool: id and by bare timestamp while signed out', async () => {
+    const payload = makePayload({ description: 'readable offline' });
+    await store.save(payload);
+
+    expect((await store.read(`spool:${payload.timestamp}`)).description).toBe('readable offline');
+    expect((await store.read(payload.timestamp)).description).toBe('readable offline');
+  });
+
+  it('update mutates a spooled report in place, with notes redaction', async () => {
+    const payload = makePayload();
+    await store.save(payload);
+
+    const result = await store.update(payload.timestamp, {
+      status: 'resolved',
+      notes: 'key sk-abcdefghijklmnopqrstuvwx seen here',
+    });
+    expect(result.spooled).toBe(true);
+    expect(result.kvUpdated).toBe(false);
+    expect(result.payload.status).toBe('resolved');
+    expect(result.payload.notes).toContain('[REDACTED:OPENAI_KEY]');
+    expect(kv.sets).toHaveLength(0);
+    // The mutation persisted to the file, not just the returned object.
+    const reread = await store.read(payload.timestamp);
+    expect(reread.status).toBe('resolved');
+  });
+
+  it('delete removes a spooled report so a later drain cannot resurrect it', async () => {
+    const payload = makePayload();
+    await store.save(payload);
+
+    const result = await store.delete(payload.timestamp);
+    expect(result.spooled).toBe(true);
+    expect(result.kvError).toBeNull();
+    expect(await spoolFiles()).toHaveLength(0);
+
+    account = 'acct-1';
+    expect(await store.drainSpool()).toEqual({ drained: 0, remaining: 0 });
+    expect(kv.sets).toHaveLength(0);
+  });
+
+  it('without a spoolDir, signed-out save still hard-fails (legacy contract)', async () => {
+    const legacy = new BugReportStore({ kvApi: kv, getActiveAccountId: () => null });
+    await expect(legacy.save(makePayload())).rejects.toThrow(/signed out/);
   });
 });

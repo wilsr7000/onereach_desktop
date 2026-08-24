@@ -324,16 +324,22 @@ interface BugReportUpdateResult {
   payload: unknown;
   kvUpdated: boolean;
   kvError: string | null;
+  /** ADR-078: mutation landed on a spooled (not-yet-synced) report. */
+  spooled: boolean;
 }
 
 interface BugReportDeleteResult {
   kvDeleted: boolean;
   kvError: string | null;
+  /** ADR-078: deletion removed a spooled (not-yet-synced) report. */
+  spooled: boolean;
 }
 
 interface BugReportSaveResult {
   kvWritten: boolean;
   kvError: string | null;
+  /** ADR-078: report saved to the local spool, awaiting sync to KV. */
+  spooled: boolean;
 }
 
 interface UpdaterState {

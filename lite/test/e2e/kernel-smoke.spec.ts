@@ -17,15 +17,14 @@
  * top-levels (IDW/Tools/Spaces/University/Planning/Help ≈ 8 today) —
  * asserting a count repeats that mistake on every module launch.
  *   6. Bug-report flow: the seeded sk-... key is REDACTED in the live
- *      payload preview; save() hard-fails signed out (KV-only store,
- *      test instances have no session) and writes NOTHING locally
+ *      payload preview; a signed-out save lands the redacted JSON in
+ *      the local spool (userData/lite-bugs/) and the modal says so
  *   7. macOS: codesign --verify --deep --strict passes on the .app
  *
- * 2026-08-20: item 6 re-pointed from the OLD local-file store
- * (userData/lite-bugs/) to the KV-only store's signed-out contract.
- * PRODUCT NOTE: signed-out/offline users currently cannot file bug
- * reports at all -- if a local spool lands (pending decision), point
- * this spec at the spool instead.
+ * 2026-08-20: item 6 was re-pointed at the KV-only store's signed-out
+ * hard fail. 2026-08-24 (ADR-078): the spool landed -- a signed-out
+ * save SUCCEEDS locally, so the original redacted-JSON-on-disk
+ * assertions are back, pointed at the spool.
  *
  * Refactored onto the lite test harness (lite/test/harness/) per ADR-023.
  *
@@ -127,13 +126,12 @@ test('kernel: launches with single window and exact menu structure', async ({}, 
   }
 });
 
-test('kernel: bug-report redacts the live preview; save hard-fails signed out with no local spool', async ({}, testInfo) => {
-  // 2026-08-20: the store is KV-only (lite/bug-report/store.ts) and
-  // test instances run signed out (fresh userData, LITE_NO_KEYCHAIN=1),
-  // so save() MUST reject with the signed-out error and nothing may be
-  // written locally. Redaction is still asserted end-to-end via the
-  // modal's live payload preview (capture runs before save).
-  // If a signed-out local spool ships, re-point this spec at the spool.
+test('kernel: bug-report flow writes redacted JSON to the spool (userData/lite-bugs/)', async ({}, testInfo) => {
+  // ADR-078: test instances run signed out (fresh userData,
+  // LITE_NO_KEYCHAIN=1), and a signed-out save SUCCEEDS into the local
+  // spool. This restores the original kernel contract -- redacted JSON
+  // on disk -- with the honest "saved on this Mac" modal message on
+  // top.
   try {
     await fs.access(defaultExecutablePath());
   } catch {
@@ -143,6 +141,8 @@ test('kernel: bug-report redacts the live preview; save hard-fails signed out wi
 
   handle = await launchLite();
   const client = new LiteLogServerClient(handle.logServerUrl);
+
+  const before = (await readBugReports(handle.userDataPath)).map((r) => r.filePath);
 
   // Trigger via menu click. Report a Bug lives in the Help menu (ADR-016);
   // no accelerator is bound (ADR-015) so menu click is the only path.
@@ -156,32 +156,51 @@ test('kernel: bug-report redacts the live preview; save hard-fails signed out wi
   const seededDescription = 'Test bug -- my OPENAI key sk-ABCDEFGHIJKLMNOPQRSTUVWX leaked here';
   await modalWindow.fill('#description', seededDescription);
 
-  // Redaction contract, previously asserted on the saved file: the
-  // preview payload masks the key and never shows the raw secret.
+  // Redaction is visible BEFORE saving: the live preview masks the key
+  // and never shows the raw secret.
   const preview = modalWindow.locator('#payload-preview');
   await expect(preview).toContainText('[REDACTED:OPENAI_KEY]', { timeout: 5_000 });
   await expect(preview).not.toContainText('sk-ABCDEFGHIJKLMNOPQRSTUVWX');
 
-  // Submit. Signed out, the KV-only store rejects; the modal surfaces
-  // the failure inline instead of pretending the report was filed.
+  // Submit. Signed out, the save lands in the spool and the modal says
+  // so -- success, not an error.
   const beforeSubmit = new Date().toISOString();
   await modalWindow.click('#send');
 
   const result = modalWindow.locator('#result');
-  await expect(result).toContainText(/signed out/i, { timeout: 5_000 });
-  await expect(result).toHaveClass(/error/);
+  await expect(result).toContainText(/saved on this mac/i, { timeout: 5_000 });
+  await expect(result).not.toHaveClass(/error/);
 
-  // The rejection is observable on the central queue (ADR-025/-026):
-  // the save span fails rather than silently vanishing.
-  const failEvent = await client.waitForEvent('bug-report.save.fail', {
+  // The spooled save is observable on the central queue (ADR-025/-026)
+  // as a FINISH -- a filed report must never count as an error.
+  const finishEvent = await client.waitForEvent('bug-report.save.finish', {
     timeoutMs: 5_000,
     since: beforeSubmit,
   });
-  expect(failEvent.data.eventName).toBe('bug-report.save.fail');
+  expect(finishEvent.data.eventName).toBe('bug-report.save.finish');
+  expect(finishEvent.data.data).toMatchObject({ kvWritten: false, spooled: true });
 
-  // KV-only store: NOTHING may land in the old local-file location.
-  const localFiles = await readBugReports(handle.userDataPath);
-  expect(localFiles).toEqual([]);
+  // The original kernel contract: redacted JSON on disk.
+  const after = await readBugReports(handle.userDataPath);
+  const newReports = after.filter((r) => !before.includes(r.filePath));
+  expect(newReports.length).toBe(1);
+
+  const payload = newReports[0]!.payload as {
+    appTag: string;
+    source: string;
+    version: string;
+    description: string;
+    os: { platform: string };
+    redactionTelemetry: { bucket: string; countsByKind: Record<string, number> };
+  };
+  expect(payload.appTag).toBe('lite');
+  expect(payload.source).toBe('user-bug-report');
+  expect(payload.version).toBeTruthy();
+  expect(payload.os.platform).toBe(process.platform);
+  expect(payload.description).not.toContain('sk-ABCDEFGHIJKLMNOPQRSTUVWX');
+  expect(payload.description).toContain('[REDACTED:OPENAI_KEY]');
+  expect(payload.redactionTelemetry.countsByKind.OPENAI_KEY).toBeGreaterThanOrEqual(1);
+  expect(payload.redactionTelemetry.bucket).not.toBe('none');
 });
 
 test('kernel: events flow through the central queue end-to-end (ADR-025)', async ({}, testInfo) => {
@@ -189,11 +208,12 @@ test('kernel: events flow through the central queue end-to-end (ADR-025)', async
   //   (a) the harness can ADD events to the live event log via pushEvent()
   //   (b) the harness can READ events back via waitForEvent() / getEvents()
   //   (c) the bug-report module migration routes its logs through the
-  //       central queue (visible at /logs?category=bug-report), including
-  //       the signed-out save FAILURE span -- test instances have no
-  //       session, so the KV write never happens and category=kv stays
-  //       silent (those assertions left with the file store, 2026-08-20)
-  //   (d) signed out, nothing is persisted to the old local file store.
+  //       central queue (visible at /logs?category=bug-report) -- test
+  //       instances run signed out, so the save FINISHES into the spool
+  //       (ADR-078) and category=kv stays silent until a drain
+  //   (d) the spooled report's `recentLogs` field captures the queue
+  //       mirror -- the "streams payoff" of ADR-025, restored now that
+  //       a signed-out save persists again.
   try {
     await fs.access(defaultExecutablePath());
   } catch {
@@ -228,11 +248,9 @@ test('kernel: events flow through the central queue end-to-end (ADR-025)', async
 
   // File a bug -- this triggers the bug-report module code paths that,
   // post ADR-025 migration, log through getLoggingApi() and end up
-  // visible at /logs. Test instances run SIGNED OUT (KV-only store), so
-  // the save rejects -- what this section proves is that the attempt
-  // and its failure flow through the central queue, not that a report
-  // lands. (KV set/`recentLogs` assertions from the file-store era are
-  // unreachable signed out; if a local spool ships, restore them.)
+  // visible at /logs. Test instances run SIGNED OUT, so the save lands
+  // in the spool (ADR-078) and its span FINISHES with spooled=true.
+  const before = (await readBugReports(handle.userDataPath)).map((r) => r.filePath);
   const beforeSubmit = new Date().toISOString();
   await clickMenuItem(handle.app, 'Report a Bug...');
   const modalWindow = await waitForBugReportModal(handle.app, { timeoutMs: 5_000 });
@@ -243,13 +261,13 @@ test('kernel: events flow through the central queue end-to-end (ADR-025)', async
   );
   await modalWindow.click('#send');
 
-  // (c): the save attempt's failure span reaches the queue -- the
-  // signed-out rejection is observable, not swallowed.
-  const saveFail = await client.waitForEvent('bug-report.save.fail', {
+  // (c): the spooled save's finish span reaches the queue.
+  const saveFinish = await client.waitForEvent('bug-report.save.finish', {
     timeoutMs: 5_000,
     since: beforeSubmit,
   });
-  expect(saveFail.data.eventName).toBe('bug-report.save.fail');
+  expect(saveFinish.data.eventName).toBe('bug-report.save.finish');
+  expect(saveFinish.data.data).toMatchObject({ kvWritten: false, spooled: true });
 
   // (c) continued: bug-report log lines appear under category=bug-report.
   // Pre-ADR-025 these went to console.log and were invisible at the log
@@ -265,8 +283,17 @@ test('kernel: events flow through the central queue end-to-end (ADR-025)', async
       bugReportLogs.map((e) => e.message).join(', ')
   ).toBe(true);
 
-  // (d): KV-only store + signed out means NO report may be persisted
-  // locally -- the old file store must stay gone.
-  const localFiles = await readBugReports(handle.userDataPath);
-  expect(localFiles).toEqual([]);
+  // (d): the spooled report's `recentLogs` captures the queue mirror.
+  // The harness-pushed event from (a) arrived on the queue BEFORE the
+  // save, so it must appear in the report's recentLogs window -- the
+  // queue mirror works for harness-injected events too.
+  const after = await readBugReports(handle.userDataPath);
+  const newReports = after.filter((r) => !before.includes(r.filePath));
+  expect(newReports.length).toBe(1);
+  const recentLogs = (newReports[0]!.payload as { recentLogs?: string }).recentLogs ?? '';
+  expect(recentLogs.length).toBeGreaterThan(0);
+  expect(
+    /test\.kernel\.smoke/.test(recentLogs),
+    'expected the harness-pushed event to appear in recentLogs'
+  ).toBe(true);
 });

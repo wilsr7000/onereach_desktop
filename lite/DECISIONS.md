@@ -1669,3 +1669,48 @@ reintroducing the mint fails in CI. The full app (`lib/tickets-client.js`,
 FLOW dance against the org account — works, but should follow suit
 eventually. `SHARED_KV_ACCOUNT_ID` is the same org plumbing as
 `BAKED_IN_DEFAULT_GRAPH` and carries the same pre-public blocker.
+
+## ADR-078: Bug reports spool locally first — a report is never refusable
+
+**Date:** 2026-08-24  ·  **Status:** shipped
+
+**Context.** The KV-only store (the 2026-08 kernel simplification)
+hard-failed `save()` when signed out: "Cannot save a bug report while
+signed out." That kills the support channel exactly when it matters
+most — auth broken, network down, first-run before sign-in. Surfaced
+by the e2e tier repair (2026-08-20): test instances run signed out, and
+the old spec's "writes redacted JSON to userData/lite-bugs/" contract
+had silently become unsatisfiable.
+
+**Decision.** KV stays the system of record; a local SPOOL (not the old
+dual-store mirror) guarantees capture. `save()` writes the redacted
+payload to `userData/lite-bugs/` FIRST, then pushes to KV when a
+session exists — on success the spool file is removed and the graph
+mirror fires. Signed out or KV-down, the save SUCCEEDS with
+`{ spooled: true }` and the modal says so honestly ("Saved on this Mac
+— it will sync to OneReach when you sign in"). `drainSpool()` pushes
+stranded reports on sign-in, session hydrate, module init, and after
+any successful save; it stops on the first KV failure and coalesces
+concurrent runs (overlap would double-file graph tickets).
+`list`/`read`/`update`/`delete` see spooled reports (`spool:<ts>` ids),
+so a signed-out filer can still find, annotate, and withdraw their
+report. A save can now only throw when BOTH the spool write and KV are
+unavailable. Without a configured `spoolDir` (legacy tests, standalone
+usage) the store behaves exactly as the KV-only era did.
+
+**Invariant.** A report lives in the spool XOR in KV (a brief overlap
+exists only mid-drain; `list()` dedupes with KV winning). The drain is
+idempotent — `kv.set` re-upload is safe — so a failed spool-file
+removal costs a retry, never a loss. Deleting a spooled report removes
+the file, so a later drain cannot resurrect it.
+
+**Verified.** 12 new store unit tests (spool save/drain/list/read/
+update/delete, KV-down soft result, legacy no-spool hard fail); e2e
+kernel-smoke re-pointed at the spool — the original redacted-JSON-on-
+disk assertions are BACK, now valid signed out.
+
+**Consequences.** The e2e specs' signed-out carve-outs (2026-08-20) are
+gone. Known accepted edge: a save racing a sign-in-triggered drain can
+double-fire the graph mirror for one report (KV write itself is
+idempotent); the drain guard covers drain-vs-drain but not
+save-vs-drain.

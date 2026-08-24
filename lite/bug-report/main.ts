@@ -15,6 +15,7 @@ import * as os from 'node:os';
 import * as http from 'node:http';
 import { capture, isFeedbackType, type BugReportAttachment, type BugReportPayload, type FeedbackType } from './capture.js';
 import { getBugReportApi, _resetBugReportApiForTesting } from './api.js';
+import { getAuthApi } from '../auth/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getHealthApi, type AppHealthSnapshot } from '../health/api.js';
 import { getFilesApi, FilesError } from '../files/api.js';
@@ -40,6 +41,8 @@ const MAX_ATTACHMENTS_PER_REPORT = 10;
 
 let modalWindow: BrowserWindow | null = null;
 let handlersRegistered = false;
+/** ADR-078: unsubscribe for the sign-in/hydrate spool-drain trigger. */
+let authUnsubscribe: (() => void) | null = null;
 
 interface InitOptions {
   /** Port lite's log server is listening on (default 47392) */
@@ -256,6 +259,32 @@ export function initBugReport(opts: InitOptions): void {
     }
     return getBugReportApi().delete(timestamp);
   });
+
+  // ADR-078: drain the signed-out spool once a session exists. Fires
+  // on explicit sign-in AND on boot-time session hydrate, plus one
+  // opportunistic attempt now (covers already-signed-in boots where
+  // hydrate finished before this module initialized). The drain is an
+  // enhancement -- it must never make boot fatal.
+  try {
+    authUnsubscribe = getAuthApi().onEvent((ev) => {
+      if (ev.name === 'auth.signIn.finish' || ev.name === 'auth.hydrate.finish') {
+        void getBugReportApi()
+          .drainSpool()
+          .catch(() => {
+            /* drainSpool logs its own failures */
+          });
+      }
+    });
+  } catch (err) {
+    getLoggingApi().warn('bug-report', 'spool drain subscription failed', {
+      error: (err as Error).message,
+    });
+  }
+  void getBugReportApi()
+    .drainSpool()
+    .catch(() => {
+      /* drainSpool logs its own failures */
+    });
 
   handlersRegistered = true;
 }
@@ -489,6 +518,14 @@ export function _teardownForTesting(): void {
   ipcMain.removeHandler(IPC_ATTACH);
   ipcMain.removeHandler(IPC_DOWNLOAD_ATTACHMENT);
   ipcMain.removeAllListeners(IPC_CLOSE);
+  if (authUnsubscribe !== null) {
+    try {
+      authUnsubscribe();
+    } catch {
+      /* best-effort */
+    }
+    authUnsubscribe = null;
+  }
   handlersRegistered = false;
   options = null;
   // Reset the API singleton so a subsequent init() picks up a fresh

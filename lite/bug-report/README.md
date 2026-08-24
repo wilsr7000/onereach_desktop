@@ -19,13 +19,15 @@ Bug reports are user-filed records of "this app misbehaved". Each report carries
 
 ### Where reports go
 
-KV is the **system of record** — it carries the redaction guarantee, the triage status, and the CRUD surface the modal drives. What KV does not give anyone is a place to *look*, so each saved report is also mirrored into the graph as a text item in a well-known Space (see [`space.ts`](space.ts)):
+KV is the **system of record**, but a report is **never refusable** (ADR-078): `save()` writes the redacted payload to a local spool (`userData/lite-bugs/`) *first*, then pushes to KV when a session exists. Signed out or KV-down, the save succeeds with `{ spooled: true }` and the modal says "Saved on this Mac — it will sync to OneReach when you sign in." `drainSpool()` pushes stranded reports on sign-in, session hydrate, module init, and after any successful save. A spooled report is visible in the modal (`spool:<timestamp>` ids) and can be read, annotated, and deleted before it ever reaches KV.
 
-| | KV (`lite-bugs`) | Graph (`Onereach.ai Lite Bugs` Space) |
-|---|---|---|
-| Role | System of record | Visibility + triage surface |
-| Written by | `store.save()` | `mirrorToGraph` hook, after the KV write |
-| On failure | `save()` **throws** | **Soft-fails** — user still sees "report sent" |
+What KV does not give anyone is a place to *look*, so each report that reaches KV is also mirrored into the graph as a text item in a well-known Space (see [`space.ts`](space.ts)):
+
+| | Spool (`userData/lite-bugs/`) | KV (`lite-bugs`) | Graph (`Onereach.ai Lite Bugs` Space) |
+|---|---|---|---|
+| Role | Capture guarantee (ADR-078) | System of record | Visibility + triage surface |
+| Written by | `store.save()`, first, always | drain / signed-in save | `mirrorToGraph` hook, after the KV write |
+| On failure | `save()` **throws** only if KV is also unavailable | Soft result `{ spooled: true }` — report stays local | **Soft-fails** — user still sees "report sent" |
 
 The Space is created on first use (`ensureLiteBugsSpace`), idempotently and race-safely: a create that loses to another client comes back as a duplicate-name error, which is treated as success — we re-list and adopt the winner. Items carry `metadata.bugReportTimestamp`, which is the join back to the KV record.
 
@@ -136,7 +138,7 @@ it('does the thing', async () => {
 
 | Code | Method | When it fires | `.context` fields | Remediation surfaced to user |
 |---|---|---|---|---|
-| `BR_SAVE_FAILED` | `save()` | KV write rejected. `.cause` is the underlying `KVError`. | `op`, `timestamp`, `collection`, `kvCode?`, `kvStatus?` | Inherits the KV error's remediation if available; otherwise "Check your network connection and try again. The report was not stored." |
+| `BR_SAVE_FAILED` | `save()` | Nothing could be persisted: the spool write failed AND KV was unavailable (or the legacy no-spool config is in play and the user is signed out / KV rejected). A KV-only failure with a healthy spool is NOT an error — it returns `{ spooled: true }` (ADR-078). | `op`, `timestamp`, `reason?`, `collection?`, `kvCode?`, `kvStatus?` | Spool failure: "The local spool could not be written — check disk space and permissions." KV failure: inherits the KV error's remediation. |
 | `BR_NOT_FOUND` | `read()` | The id resolves to no record (deleted or wrong key). | `op`, `idOrPath`, `key`, `collection` | "The report may have been deleted, or the identifier is wrong. Refresh the list and try again." |
 | `BR_BAD_PAYLOAD` | `read()` | KV returned a non-object value (corrupt or written by an incompatible client). | `op`, `key`, `collection`, `actualType` | "The stored value is corrupt or written by an incompatible client. Delete the record and re-file the report." |
 

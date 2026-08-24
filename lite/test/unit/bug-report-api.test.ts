@@ -47,7 +47,7 @@ function makeStubApi(): BugReportApi & {
     save: async (payload) => {
       calls.push({ method: 'save', args: [payload] });
       reports.set(payload.timestamp, payload);
-      return { kvWritten: true, kvError: null };
+      return { kvWritten: true, kvError: null, spooled: false };
     },
     list: async () => {
       calls.push({ method: 'list', args: [] });
@@ -83,12 +83,16 @@ function makeStubApi(): BugReportApi & {
         lastModified: new Date().toISOString(),
       };
       reports.set(timestamp, next);
-      return { payload: next, kvUpdated: true, kvError: null };
+      return { payload: next, kvUpdated: true, kvError: null, spooled: false };
     },
     delete: async (timestamp) => {
       calls.push({ method: 'delete', args: [timestamp] });
       reports.delete(timestamp);
-      return { kvDeleted: true, kvError: null };
+      return { kvDeleted: true, kvError: null, spooled: false };
+    },
+    drainSpool: async () => {
+      calls.push({ method: 'drainSpool', args: [] });
+      return { drained: 0, remaining: 0 };
     },
     onEvent: () => {
       calls.push({ method: 'onEvent', args: [] });

@@ -38,6 +38,7 @@ export type {
   SaveResult,
   UpdateResult,
   DeleteResult,
+  DrainResult,
   BugReportErrorCode,
   BugReportErrorOptions,
 } from './store.js';
@@ -57,6 +58,9 @@ export {
   type BugReportSaveStartEvent,
   type BugReportSaveFinishEvent,
   type BugReportSaveFailEvent,
+  type BugReportDrainStartEvent,
+  type BugReportDrainFinishEvent,
+  type BugReportDrainFailEvent,
   type BugReportListStartEvent,
   type BugReportListFinishEvent,
   type BugReportListFailEvent,
@@ -84,7 +88,13 @@ export {
 export { LiteError, isLiteError } from '../errors.js';
 
 import type { BugReportPayload, BugReportStatus } from './capture.js';
-import type { BugReportSummary, SaveResult, UpdateResult, DeleteResult } from './store.js';
+import type {
+  BugReportSummary,
+  SaveResult,
+  UpdateResult,
+  DeleteResult,
+  DrainResult,
+} from './store.js';
 
 /**
  * The public surface of the bug-report module. All cross-module callers
@@ -110,14 +120,20 @@ import type { BugReportSummary, SaveResult, UpdateResult, DeleteResult } from '.
  */
 export interface BugReportApi {
   /**
-   * Persist a new bug report.
+   * Persist a new bug report. Spool-first (ADR-078): the payload lands
+   * in the local spool before KV is attempted, so a signed-out or
+   * offline save SUCCEEDS with `{ spooled: true }` and syncs on the
+   * next drain.
    *
    * @param payload Already-redacted, schema-validated payload from
    *   `capture()`. The `timestamp` field is the KV key.
-   * @returns `{ kvWritten: true, kvError: null }` on success.
-   * @throws {BugReportError} `BR_SAVE_FAILED` if the KV write rejected.
-   *   Inspect `.cause` for the underlying `KVError` (`.code`,
-   *   `.context`, `.remediation`).
+   * @returns `{ kvWritten: true, spooled: false }` when the KV write
+   *   landed; `{ kvWritten: false, spooled: true }` when the report is
+   *   waiting in the local spool (signed out, or KV failed).
+   * @throws {BugReportError} `BR_SAVE_FAILED` only when NOTHING could
+   *   be persisted (spool write failed AND KV was unavailable, or the
+   *   legacy no-spool configuration is in play). Inspect `.cause` for
+   *   the underlying `KVError` (`.code`, `.context`, `.remediation`).
    *
    * @example
    * ```typescript
@@ -214,6 +230,22 @@ export interface BugReportApi {
   delete(timestamp: string): Promise<DeleteResult>;
 
   /**
+   * Push spooled reports to KV (ADR-078). No-op when the spool is
+   * empty, unconfigured, or the user is signed out. Wired to fire on
+   * sign-in / session hydrate (bug-report/main.ts) and after any
+   * successful save; callable directly for tests and manual retry.
+   *
+   * @returns How many reports were pushed and how many remain.
+   *
+   * @example
+   * ```typescript
+   * const { drained, remaining } = await getBugReportApi().drainSpool();
+   * if (remaining > 0) log.warn(`bug spool still holds ${remaining}`);
+   * ```
+   */
+  drainSpool(): Promise<DrainResult>;
+
+  /**
    * Subscribe to typed bug-report events (ADR-032). Branch on
    * `ev.name` for type-narrowed access to span data, IPC payloads,
    * and serialized errors.
@@ -273,8 +305,30 @@ export function _setBugReportApiForTesting(api: BugReportApi): void {
  * WebSocket, recent() buffer). Tests can override by passing their own
  * `logger` to `BugReportStore` directly.
  */
+/**
+ * Local spool location (ADR-078): `userData/lite-bugs`. Resolved
+ * lazily because unit tests import this module outside Electron, where
+ * `require('electron')` yields the binary-path string (no `app`).
+ * Returning undefined there disables the spool -- the legacy KV-only
+ * behavior the store tests exercise.
+ */
+function resolveSpoolDir(): string | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+    const electron = require('electron') as typeof import('electron');
+    if (typeof electron?.app?.getPath !== 'function') return undefined;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+    const path = require('node:path') as typeof import('node:path');
+    return path.join(electron.app.getPath('userData'), 'lite-bugs');
+  } catch {
+    return undefined;
+  }
+}
+
 function defaultConfig(): StoreConfig {
+  const spoolDir = resolveSpoolDir();
   return {
+    ...(spoolDir !== undefined ? { spoolDir } : {}),
     logger: (level, message, data) => {
       const log = getLoggingApi();
       log[level]('bug-report', message, data);

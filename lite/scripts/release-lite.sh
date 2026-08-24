@@ -390,6 +390,29 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# E2E gate on the FRESH artifact (2026-08-24): the pre-build gate runs
+# typecheck + unit + integration, but the e2e tier exercises the
+# PACKAGED app — dist-lite/, which this script just rebuilt. Running it
+# here means the exact binary being shipped drove a real window, the
+# menu invariants, the bug-report modal, and the updater flows. The
+# tier is hermetic and ~15s since the isolation pass (per-run log
+# ports, LITE_NO_KEYCHAIN, local update feed, dialogs suppressed under
+# LITE_TEST_MODE). The "About WISER" assertion sat broken for five days
+# because no gate ran this tier — this is that gate.
+# SKIP_E2E=1 bypasses in emergencies — loudly.
+# ---------------------------------------------------------------------------
+if [ "${SKIP_E2E:-0}" = "1" ]; then
+    echo -e "${YELLOW}⚠ SKIP_E2E=1 — shipping WITHOUT the packaged-app e2e tier.${NC}"
+else
+    echo -e "${BLUE}E2E gate: driving the freshly packaged app under Playwright…${NC}"
+    if ! npm run lite:test:e2e; then
+        echo -e "${RED}✗ E2E tier failed against the packaged artifact — fix before releasing (or SKIP_E2E=1).${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ E2E green against the shipping artifact.${NC}"
+fi
+
+# ---------------------------------------------------------------------------
 # Manifest sanity (2026-08-07): the yml is uploaded as-is, so a stale
 # dist artifact ships a manifest whose version disagrees with the tag —
 # which BRICKS auto-update for every install (observed live: v0.0.38's

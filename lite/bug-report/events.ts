@@ -7,10 +7,14 @@ import type { EventRecord, SerializedEventError } from '../logging/events.js';
 
 /** Stable event name catalog. */
 export const BUG_REPORT_EVENTS = {
-  // Spans -- 5 ops × 3 outcomes = 15 names
+  // Spans -- 6 ops × 3 outcomes = 18 names
   SAVE_START: 'bug-report.save.start',
   SAVE_FINISH: 'bug-report.save.finish',
   SAVE_FAIL: 'bug-report.save.fail',
+  // Spool drain (ADR-078): stranded signed-out reports pushed to KV.
+  DRAIN_START: 'bug-report.drain.start',
+  DRAIN_FINISH: 'bug-report.drain.finish',
+  DRAIN_FAIL: 'bug-report.drain.fail',
   LIST_START: 'bug-report.list.start',
   LIST_FINISH: 'bug-report.list.finish',
   LIST_FAIL: 'bug-report.list.fail',
@@ -60,12 +64,36 @@ export interface BugReportSaveFinishEvent extends BugReportSpanBase {
   name: typeof BUG_REPORT_EVENTS.SAVE_FINISH;
   level: 'info';
   durationMs: number;
-  data: { kvWritten: true };
+  // spooled=true means the report rests in the local spool awaiting
+  // sync (ADR-078); kvError carries the deferred-sync reason if the KV
+  // write was attempted and failed.
+  data: { kvWritten: boolean; spooled: boolean; kvError?: string };
 }
 export interface BugReportSaveFailEvent extends BugReportSpanBase {
   name: typeof BUG_REPORT_EVENTS.SAVE_FAIL;
   level: 'error';
   durationMs: number;
+  error: SerializedEventError;
+}
+
+// ─── drain (ADR-078) ─────────────────────────────────────────────────────
+
+export interface BugReportDrainStartEvent extends BugReportSpanBase {
+  name: typeof BUG_REPORT_EVENTS.DRAIN_START;
+  level: 'info';
+  data: { pending: number };
+}
+export interface BugReportDrainFinishEvent extends BugReportSpanBase {
+  name: typeof BUG_REPORT_EVENTS.DRAIN_FINISH;
+  level: 'info';
+  durationMs: number;
+  data: { drained: number; remaining: number };
+}
+export interface BugReportDrainFailEvent extends BugReportSpanBase {
+  name: typeof BUG_REPORT_EVENTS.DRAIN_FAIL;
+  level: 'error';
+  durationMs: number;
+  data?: { drained: number; remaining: number };
   error: SerializedEventError;
 }
 
@@ -122,7 +150,7 @@ export interface BugReportUpdateFinishEvent extends BugReportSpanBase {
   name: typeof BUG_REPORT_EVENTS.UPDATE_FINISH;
   level: 'info';
   durationMs: number;
-  data: { kvUpdated: true };
+  data: { kvUpdated?: boolean; spooled?: boolean };
 }
 export interface BugReportUpdateFailEvent extends BugReportSpanBase {
   name: typeof BUG_REPORT_EVENTS.UPDATE_FAIL;
@@ -142,7 +170,7 @@ export interface BugReportDeleteFinishEvent extends BugReportSpanBase {
   name: typeof BUG_REPORT_EVENTS.DELETE_FINISH;
   level: 'info';
   durationMs: number;
-  data: { kvDeleted: true };
+  data: { kvDeleted: boolean; spooled?: boolean; signedOut?: boolean };
 }
 export interface BugReportDeleteFailEvent extends BugReportSpanBase {
   name: typeof BUG_REPORT_EVENTS.DELETE_FAIL;
@@ -200,6 +228,9 @@ export type BugReportEvent =
   | BugReportSaveStartEvent
   | BugReportSaveFinishEvent
   | BugReportSaveFailEvent
+  | BugReportDrainStartEvent
+  | BugReportDrainFinishEvent
+  | BugReportDrainFailEvent
   | BugReportListStartEvent
   | BugReportListFinishEvent
   | BugReportListFailEvent
