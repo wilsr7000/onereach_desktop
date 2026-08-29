@@ -327,3 +327,28 @@ describe('PlaybookExecutor', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// isPlaybook tag-shape tolerance (2026-08-29). Tags reach the heuristic in
+// two shapes: arrays (graph-native) and comma-joined strings (the
+// spaces-sync serialization). A string used to throw `tags.some is not a
+// function`, which 500'd the whole /playbook-qa gateway route.
+// ---------------------------------------------------------------------------
+describe('isPlaybook tag normalization', () => {
+  it('accepts array tags', () => {
+    expect(executor.isPlaybook({ tags: ['Playbook', 'ops'] })).toBe(true);
+    expect(executor.isPlaybook({ tags: ['notes'] })).toBe(false);
+  });
+
+  it('accepts comma-joined string tags (spaces-sync shape) without throwing', () => {
+    expect(executor.isPlaybook({ tags: 'ops, playbook' })).toBe(true);
+    expect(executor.isPlaybook({ tags: 'ops,notes' })).toBe(false);
+    expect(executor.isPlaybook({ metadata: { tags: 'q3 Playbook' } })).toBe(true);
+  });
+
+  it('tolerates junk tag shapes (number, object, null)', () => {
+    expect(executor.isPlaybook({ tags: 42 })).toBe(false);
+    expect(executor.isPlaybook({ tags: { a: 1 } })).toBe(false);
+    expect(executor.isPlaybook({ tags: null, metadata: {} })).toBe(false);
+  });
+});
