@@ -8114,6 +8114,93 @@ body {
 
 /* WISER riff lifecycle ("Draft", "Not submitted") — quieter than the
    progress pill: a state, not a score. */
+
+/* ── Spreadsheet preview (2026-08-20) ──────────────────────────── */
+.spaces-detail-sheet-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+.spaces-detail-sheet-tabs {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.spaces-detail-sheet-tab {
+  background: none;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 6px 6px 0 0;
+  color: #a8b3c7;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.spaces-detail-sheet-tab.is-active {
+  color: #e8ecf4;
+  background: rgba(148, 163, 184, 0.12);
+  border-bottom-color: transparent;
+}
+.spaces-detail-sheet-tabs-more {
+  font-size: 11px;
+  opacity: 0.55;
+  padding-left: 6px;
+}
+.spaces-detail-sheet-scroll {
+  overflow: auto;
+  max-height: 420px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 8px;
+  /* Dark scrollbars — never the default white slab on a dark pane. */
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+.spaces-detail-sheet-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.spaces-detail-sheet-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.spaces-detail-sheet-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.22);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.spaces-detail-sheet-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 100%;
+}
+.spaces-detail-sheet-table th,
+.spaces-detail-sheet-table td {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  padding: 4px 10px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.spaces-detail-sheet-table th {
+  position: sticky;
+  top: 0;
+  background: #171a22;
+  color: #cdd6e4;
+  font-weight: 600;
+  z-index: 1;
+}
+.spaces-detail-sheet-table tr:nth-child(even) td {
+  background: rgba(148, 163, 184, 0.045);
+}
+.spaces-detail-sheet-truncation {
+  margin: 8px 10px;
+  font-size: 11px;
+  opacity: 0.6;
+}
+
 .spaces-card-playbook-pill.is-stage {
   font-variant-numeric: normal;
   letter-spacing: 0.06em;

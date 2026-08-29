@@ -248,6 +248,15 @@ export interface SpacesItemsApi {
    * an explicit message rather than a dead viewer.
    */
   readFileData(key: string): Promise<{ dataUrl: string } | null>;
+  /**
+   * Parse an uploaded .xlsx into a capped preview table (2026-08-20).
+   * Soft: null on missing/oversized/unparseable — the pane falls back
+   * to the generic document card. Parsing runs in main; the renderer
+   * receives plain strings only.
+   */
+  readSpreadsheet(
+    key: string
+  ): Promise<import('./spreadsheet-preview.js').SpreadsheetPreviewModel | null>;
 
   /**
    * Read the file's AUTHORITATIVE scheduled deletion from the bucket.
@@ -867,6 +876,11 @@ class UninitializedSpacesApi implements SpacesApi {
     ): Promise<{ expiresAt: string | null; source: 'bucket' } | null> {
       // Soft API — null, not a throw, matching the initialized impl.
       return null;
+    },
+    async readSpreadsheet(
+      _key: string
+    ): Promise<import('./spreadsheet-preview.js').SpreadsheetPreviewModel | null> {
+      throw notInitialized('items.readSpreadsheet');
     },
     async readFileData(_key: string): Promise<{ dataUrl: string } | null> {
       // Same soft contract as resolveFileUrl.

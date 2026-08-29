@@ -76,6 +76,7 @@ const SPACES_OPEN_JOURNEY_MAP = 'lite:spaces:openJourneyMap';
 const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
 const SPACES_REFRESH = 'lite:spaces:refresh';
 const SPACES_ITEMS_READ_FILE_DATA = 'lite:spaces:items:readFileData';
+const SPACES_ITEMS_READ_SPREADSHEET = 'lite:spaces:items:readSpreadsheet';
 const SPACES_UNCATEGORIZED_COUNT = 'lite:spaces:uncategorizedCount';
 const SPACES_LEARN_SIGNALS = 'lite:spaces:learn:signals';
 const SPACES_PRESENCE_IN_SPACE = 'lite:spaces:presence:inSpace';
@@ -604,6 +605,8 @@ interface SpacesItemsBridge {
   ): Promise<SpacesIpcResultView<{ expiresAt: string | null; source: 'bucket' } | null>>;
   /** Read stored bytes as a data: URL for inline preview (null on failure). */
   readFileData(key: string): Promise<SpacesIpcResultView<{ dataUrl: string } | null>>;
+  /** .xlsx → capped preview table parsed in main; null = no preview (2026-08-20). */
+  readSpreadsheet(key: string): Promise<SpacesIpcResultView<unknown>>;
   createBinary(input: {
     spaceId: string;
     title: string;
@@ -1720,6 +1723,10 @@ const spaces: SpacesBridge = {
     readFileData: (key) =>
       ipcRenderer.invoke(SPACES_ITEMS_READ_FILE_DATA, { key }) as Promise<
         SpacesIpcResultView<{ dataUrl: string } | null>
+      >,
+    readSpreadsheet: (key) =>
+      ipcRenderer.invoke(SPACES_ITEMS_READ_SPREADSHEET, { key }) as Promise<
+        SpacesIpcResultView<unknown>
       >,
     update: (id, patch) =>
       ipcRenderer.invoke(SPACES_ITEMS_UPDATE, { id, patch }) as Promise<

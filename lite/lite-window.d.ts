@@ -719,6 +719,21 @@ interface LiteAgenticSearchProgress {
   matchesSoFar: number;
 }
 
+/** Capped .xlsx preview table, parsed in main (2026-08-20). */
+interface LiteSpreadsheetSheet {
+  name: string;
+  rows: string[][];
+  totalRows: number;
+  totalCols: number;
+  truncatedRows: boolean;
+  truncatedCols: boolean;
+}
+interface LiteSpreadsheetPreview {
+  sheets: LiteSpreadsheetSheet[];
+  totalSheets: number;
+  truncatedSheets: boolean;
+}
+
 interface LiteSpaceItemSummary {
   id: string;
   title: string;
@@ -808,6 +823,7 @@ interface LiteSpacesItemsBridge {
   ): Promise<LiteSpacesIpcResult<{ expiresAt: string | null; source: 'bucket' } | null>>;
   /** Read stored bytes as a data: URL for inline preview (null on failure). */
   readFileData(key: string): Promise<LiteSpacesIpcResult<{ dataUrl: string } | null>>;
+  readSpreadsheet(key: string): Promise<LiteSpacesIpcResult<LiteSpreadsheetPreview | null>>;
   /**
    * Phase 3b item mutations. Each returns the updated server state
    * (the full Item for `update`, the post-mutation tag list for

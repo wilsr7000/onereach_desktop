@@ -48,6 +48,7 @@ import { createSpacesWindow, closeSpacesWindow } from './window.js';
 import { registerSpacesIpc, unregisterSpacesIpc } from './ipc.js';
 import { registerJourneyMapTargetChannel } from '../journey-map-window.js';
 import { riffSheetDescription } from './riff-summary.js';
+import { parseSpreadsheetBuffer, type SpreadsheetPreviewModel } from './spreadsheet-preview.js';
 import { SPACES_EVENTS } from './events.js';
 import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
@@ -101,6 +102,9 @@ function guessMimeFromKey(key: string): string {
   if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';
   if (lower.endsWith('.csv')) return 'text/csv';
   if (lower.endsWith('.json')) return 'application/json';
+  if (lower.endsWith('.xlsx'))
+    return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
   return 'application/octet-stream';
 }
 
@@ -1071,6 +1075,31 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
         // The common real-world case: the object is gone from storage
         // (NoSuchKey) while the graph node still points at it.
         getLoggingApi().warn('spaces', 'readFileData failed', {
+          error: (err as Error).message,
+        });
+        return null;
+      }
+    },
+    async readSpreadsheet(key: string): Promise<SpreadsheetPreviewModel | null> {
+      // Soft API, same contract as readFileData: any failure (missing
+      // object, over-cap, unparseable workbook) returns null and the
+      // pane falls back to the generic document card. Parsing happens
+      // HERE — exceljs stays out of the sandboxed renderer, which
+      // receives only plain strings.
+      if (typeof key !== 'string' || key.length === 0) return null;
+      try {
+        const bytes = await getFilesApi().download(key);
+        const buf = Buffer.from(bytes);
+        if (buf.byteLength > MAX_INLINE_PREVIEW_BYTES) {
+          getLoggingApi().info('spaces', 'readSpreadsheet: over inline cap', {
+            bytes: buf.byteLength,
+            cap: MAX_INLINE_PREVIEW_BYTES,
+          });
+          return null;
+        }
+        return await parseSpreadsheetBuffer(buf);
+      } catch (err) {
+        getLoggingApi().warn('spaces', 'readSpreadsheet failed', {
           error: (err as Error).message,
         });
         return null;

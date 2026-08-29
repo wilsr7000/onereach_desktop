@@ -2927,6 +2927,38 @@ async function resolveAndInjectFileUrl(
     return;
   }
 
+  // Spreadsheets (2026-08-20): parse in main via exceljs, render a
+  // capped table with sheet tabs. Old .xls isn't parseable by exceljs
+  // and falls through to the generic card like before.
+  const looksLikeXlsx =
+    (item.mimeType ?? '').toLowerCase() ===
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    /\.xlsx$/i.test(item.title ?? '') ||
+    /\.xlsx$/i.test(item.fileKey ?? '');
+  if (looksLikeXlsx) {
+    try {
+      const [sheetEnv, urlEnv] = await Promise.all([
+        bridge.items.readSpreadsheet(item.fileKey),
+        bridge.items.resolveFileUrl(item.fileKey),
+      ]);
+      if (state.activeItemId !== itemId) return;
+      const model =
+        sheetEnv.ok === true ? (sheetEnv.value as LiteSpreadsheetPreview | null) : null;
+      const remoteUrl = urlEnv.ok === true && typeof urlEnv.value === 'string' ? urlEnv.value : null;
+      if (model !== null && model.sheets.length > 0) {
+        injectSpreadsheetViewer(item, model, remoteUrl);
+        return;
+      }
+      // Unparseable / empty workbook: fall through to the generic card.
+    } catch (err) {
+      window.logging?.warn?.('spaces', 'detail spreadsheet preview failed', {
+        itemId: item.id,
+        error: messageFrom(err),
+      });
+      // fall through to the generic preview
+    }
+  }
+
   // Text-like GSX files (markdown / code / CSV / plain text) with no
   // inline content: read the bytes through the authenticated bridge,
   // decode, and feed the SAME renderer the inline path uses — so an
@@ -2999,6 +3031,133 @@ function injectPdfViewer(
   next.className = 'spaces-detail-preview';
   next.setAttribute('data-kind', item.kind);
   next.appendChild(buildPdfViewer(item, dataUrl, remoteUrl));
+  const existing = pane.querySelector('.spaces-detail-preview');
+  if (existing !== null) existing.replaceWith(next);
+  else pane.appendChild(next);
+}
+
+/**
+ * Spreadsheet viewer (2026-08-20, "we need a preview on .xlsx").
+ *
+ * A capped table with sheet tabs — the model arrives fully parsed from
+ * main (plain strings only; exceljs never enters the renderer).
+ * Truncation is stated, never silent: a preview is for recognizing a
+ * file, and "showing 200 of 12,041 rows" keeps it honest. The full
+ * file stays one click away.
+ *
+ * Pure DOM; exported for the asset-matrix tests.
+ */
+export function buildSpreadsheetViewer(
+  item: RendererItem,
+  model: LiteSpreadsheetPreview,
+  remoteUrl: string | null
+): HTMLElement {
+  const box = document.createElement('div');
+  box.className = 'spaces-detail-sheet-viewer';
+
+  const table = document.createElement('div');
+  table.className = 'spaces-detail-sheet-scroll';
+
+  const renderSheet = (index: number): void => {
+    const sheet = model.sheets[index];
+    table.replaceChildren();
+    if (sheet === undefined) return;
+    const t = document.createElement('table');
+    t.className = 'spaces-detail-sheet-table';
+    const width = sheet.rows.reduce((w, r) => Math.max(w, r.length), 0);
+    const body = document.createElement('tbody');
+    sheet.rows.forEach((row, rowIndex) => {
+      const tr = document.createElement('tr');
+      for (let c = 0; c < width; c++) {
+        // First row renders as the header — spreadsheets usually lead
+        // with one, and when they don't it is still the right visual
+        // anchor for scanning columns.
+        const cell = document.createElement(rowIndex === 0 ? 'th' : 'td');
+        cell.textContent = row[c] ?? '';
+        tr.appendChild(cell);
+      }
+      body.appendChild(tr);
+    });
+    t.appendChild(body);
+    table.appendChild(t);
+
+    const notes: string[] = [];
+    if (sheet.truncatedRows) notes.push(`showing ${sheet.rows.length} of ${sheet.totalRows} rows`);
+    if (sheet.truncatedCols) notes.push(`first ${Math.min(sheet.totalCols, 40)} of ${sheet.totalCols} columns`);
+    if (notes.length > 0) {
+      const note = document.createElement('p');
+      note.className = 'spaces-detail-sheet-truncation';
+      note.textContent = `Preview — ${notes.join(' · ')}. Open or download for the full file.`;
+      table.appendChild(note);
+    }
+  };
+
+  // Sheet tabs — only when there is a choice to make.
+  if (model.sheets.length > 1 || model.truncatedSheets) {
+    const tabs = document.createElement('div');
+    tabs.className = 'spaces-detail-sheet-tabs';
+    tabs.setAttribute('role', 'tablist');
+    model.sheets.forEach((sheet, i) => {
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'spaces-detail-sheet-tab';
+      tab.setAttribute('role', 'tab');
+      tab.textContent = sheet.name;
+      if (i === 0) tab.classList.add('is-active');
+      tab.addEventListener('click', () => {
+        tabs.querySelectorAll('.spaces-detail-sheet-tab').forEach((el) => el.classList.remove('is-active'));
+        tab.classList.add('is-active');
+        renderSheet(i);
+      });
+      tabs.appendChild(tab);
+    });
+    if (model.truncatedSheets) {
+      const more = document.createElement('span');
+      more.className = 'spaces-detail-sheet-tabs-more';
+      more.textContent = `+${model.totalSheets - model.sheets.length} more`;
+      tabs.appendChild(more);
+    }
+    box.appendChild(tabs);
+  }
+
+  box.appendChild(table);
+  renderSheet(0);
+
+  // Actions — same affordances the PDF pane owes the user.
+  const actions = document.createElement('div');
+  actions.className = 'spaces-detail-pdf-actions';
+  if (remoteUrl !== null) {
+    const open = document.createElement('a');
+    open.className = 'spaces-detail-pdf-action';
+    open.href = remoteUrl;
+    open.target = '_blank';
+    open.rel = 'noopener noreferrer';
+    open.textContent = 'Open in browser';
+    actions.appendChild(open);
+    const dl = document.createElement('a');
+    dl.className = 'spaces-detail-pdf-action';
+    dl.href = remoteUrl;
+    dl.download = item.title.length > 0 ? item.title : 'spreadsheet.xlsx';
+    dl.textContent = 'Download';
+    actions.appendChild(dl);
+  }
+  if (actions.childElementCount > 0) box.appendChild(actions);
+  return box;
+}
+
+function injectSpreadsheetViewer(
+  item: RendererItem,
+  model: LiteSpreadsheetPreview,
+  remoteUrl: string | null
+): void {
+  const pane = document.querySelector<HTMLElement>(
+    '#spaces-detail .spaces-detail-pane'
+  );
+  if (pane === null) return;
+  const next = document.createElement('div');
+  next.className = 'spaces-detail-preview';
+  next.setAttribute('data-kind', item.kind);
+  next.appendChild(buildSpreadsheetViewer(item, model, remoteUrl));
   const existing = pane.querySelector('.spaces-detail-preview');
   if (existing !== null) existing.replaceWith(next);
   else pane.appendChild(next);
@@ -15065,6 +15224,10 @@ function messageFrom(err: unknown): string {
   shortStageLabel,
   buildAgentLibraryRow,
   buildTileHoverText,
+  openBatchIntakeWizard,
+  routeDroppedFiles,
+  createAssetFromUploadFile,
+  knownSpaceHashes,
   buildMemberPickerRow,
   buildExistingAssetRow,
   // Shared-dashboard sections (2026-08-08 review: error-state honesty).
@@ -17520,7 +17683,10 @@ interface UploadCreateFail {
 
 /** SHA-256 of a file's bytes, hex. The identity of "the same file". */
 async function fileSha256(file: File): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  // .slice() copies into THIS realm — a cross-realm buffer (jsdom's
+  // FileReader in tests) is rejected by webcrypto's brand checks.
+  const bytes = new Uint8Array(await file.arrayBuffer()).slice();
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
   return Array.from(new Uint8Array(digest))
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
@@ -18098,10 +18264,17 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
     addBtn.addEventListener('click', () => {
       lock(true);
       status.textContent = 'Adding…';
-      void addOne(item, titleInput.value, desc.value).then(() => {
-        index += 1;
-        render();
-      });
+      // A throw is a FAILURE TO RECORD, never a frozen panel — the
+      // behavioral test caught the original unguarded version locking
+      // every button on the first unexpected rejection.
+      void addOne(item, titleInput.value, desc.value)
+        .catch((err) => {
+          summary.failed.push(`${item.relativePath}: ${messageFrom(err)}`);
+        })
+        .then(() => {
+          index += 1;
+          render();
+        });
     });
     skipBtn.addEventListener('click', () => {
       summary.skipped += 1;
@@ -18111,11 +18284,18 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
     allBtn.addEventListener('click', () => {
       lock(true);
       void (async () => {
-        await addOne(item, titleInput.value, desc.value);
+        const safeAdd = async (it: IntakeItem, title: string, description: string): Promise<void> => {
+          try {
+            await addOne(it, title, description);
+          } catch (err) {
+            summary.failed.push(`${it.relativePath}: ${messageFrom(err)}`);
+          }
+        };
+        await safeAdd(item, titleInput.value, desc.value);
         for (let i = index + 1; i < queue.length; i++) {
           const next = queue[i]!;
           status.textContent = `Adding ${i - index + 1} of ${queue.length - index}… (${next.suggestedTitle})`;
-          await addOne(next, next.suggestedTitle, '');
+          await safeAdd(next, next.suggestedTitle, '');
         }
         index = queue.length;
         render();

@@ -171,6 +171,7 @@ function buildStubConsumer(): {
       },
       getFileExpiry: async (): Promise<null> => null,
       readFileData: async () => null,
+      readSpreadsheet: async () => null,
       // Phase 3b — item mutations. Default stubs return the
       // canonical empty shapes; specific Phase 3b unit tests
       // exercise the real behavior. The platform contract just
