@@ -42,6 +42,7 @@ import { openBugReportModal, initBugReport } from './bug-report/main.js';
 import { initAuth, type AuthHandle } from './auth/main.js';
 import { initTotp, type TotpHandle } from './totp/main.js';
 import { initSettings, type SettingsHandle } from './settings/main.js';
+import { registerMemoryIngestIpc } from './memory-ingest/ipc.js';
 import { initHelp, type HelpHandle } from './help/main.js';
 import { initTray, type TrayHandle } from './tray/main.js';
 import { initSpaces, type SpacesHandle } from './spaces/main.js';
@@ -807,6 +808,17 @@ app
       });
     } catch (err) {
       getLoggingApi().error('settings', 'initSettings threw', {
+        error: (err as Error).message,
+      });
+    }
+
+    // Memory-ingest IPC (ADR-079): server CRUD for the Settings
+    // "Agentic memory" section + the per-space ingestion runner the
+    // Spaces window invokes. Pure handler registration -- no window.
+    try {
+      registerMemoryIngestIpc();
+    } catch (err) {
+      getLoggingApi().error('memory', 'registerMemoryIngestIpc threw', {
         error: (err as Error).message,
       });
     }

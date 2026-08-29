@@ -1645,6 +1645,74 @@ interface LiteAiBridge {
   deleteKey(): Promise<LiteAiIpcResult<{ ok: true }>>;
 }
 
+// ---------------------------------------------------------------------------
+// Memory bridge (ADR-079) -- agentic-memory MCP servers + space ingestion.
+// Mirrors lite/memory-ingest/ipc.ts. The API key is write-only across
+// the boundary: `hasApiKey` is all a renderer ever reads back.
+// ---------------------------------------------------------------------------
+
+type LiteMemoryIpcResult<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { message: string } };
+
+interface LiteMemoryServerView {
+  id: string;
+  name: string;
+  url: string;
+  hasApiKey: boolean;
+  toolName?: string;
+  createdAt: string;
+}
+
+interface LiteMemoryIngestProgress {
+  itemId: string;
+  itemTitle: string;
+  serverId: string;
+  serverName: string;
+  outcome: 'sent' | 'skipped' | 'failed';
+  message?: string;
+  index: number;
+  total: number;
+}
+
+interface LiteMemoryIngestSummary {
+  spaceId: string;
+  items: number;
+  sent: number;
+  skipped: number;
+  failed: Array<{
+    itemId: string;
+    itemTitle: string;
+    serverId: string;
+    serverName: string;
+    message: string;
+  }>;
+  perServer: Record<
+    string,
+    { name: string; sent: number; skipped: number; failed: number }
+  >;
+}
+
+interface LiteMemoryBridge {
+  listServers(): Promise<LiteMemoryIpcResult<LiteMemoryServerView[]>>;
+  addServer(input: {
+    name: string;
+    url: string;
+    apiKey?: string;
+    toolName?: string;
+  }): Promise<LiteMemoryIpcResult<LiteMemoryServerView>>;
+  removeServer(id: string): Promise<LiteMemoryIpcResult<null>>;
+  testServer(
+    id: string
+  ): Promise<LiteMemoryIpcResult<{ toolCount: number; ingestTool: string | null }>>;
+  ingestSpace(
+    spaceId: string
+  ): Promise<LiteMemoryIpcResult<LiteMemoryIngestSummary>>;
+  onIngestProgress(
+    handler: (beat: LiteMemoryIngestProgress) => void
+  ): () => void;
+}
+
 interface LiteWindowBridge {
   /** Feedback modal opener (outage banner's Report action). */
   bugReport?: { open(prefill?: string): Promise<{ ok: true }> };
@@ -1664,6 +1732,7 @@ interface LiteWindowBridge {
   health?: LiteHealthBridge;
   telemetry?: LiteTelemetryBridge;
   neon?: LiteNeonBridge;
+  memory?: LiteMemoryBridge;
   idw?: LiteIdwBridge;
   tools?: LiteToolsBridge;
   mainWindow?: LiteMainWindowBridge;

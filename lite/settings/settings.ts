@@ -28,6 +28,7 @@ import { mountIdws } from './sections/idws.js';
 import { mountDeveloper } from './sections/developer.js';
 import { mountDiagnostics } from './sections/diagnostics.js';
 import { mountAi } from './sections/ai.js';
+import { mountAgenticMemory } from './sections/agentic-memory.js';
 import type { SectionDescriptor } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ const ICON_IDWS = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 // Sparkle icon for the AI section (auto-metadata).
 const ICON_AI = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.8 4.6L18 9.4l-4.2 1.8L12 16l-1.8-4.8L6 9.4l4.2-1.8z" /><path d="M19 14l.7 1.8L21.5 16.5l-1.8.7L19 19l-.7-1.8L16.5 16.5l1.8-.7z" /></svg>`;
 
+const ICON_MEMORY = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4" /><path d="M12 12v3" /><circle cx="6" cy="19" r="1.6" /><circle cx="12" cy="19" r="1.6" /><circle cx="18" cy="19" r="1.6" /><path d="M12 15c0 1.5-2.5 1.5-4.7 2.6M12 15v2.4M12 15c0 1.5 2.5 1.5 4.7 2.6" /></svg>`;
 
 // ---------------------------------------------------------------------------
 // Placeholder mount -- used by sections that ship empty in v1
@@ -101,6 +103,12 @@ const SECTIONS: SectionDescriptor[] = [
     title: 'AI',
     icon: ICON_AI,
     mount: mountAi,
+  },
+  {
+    id: 'agentic-memory',
+    title: 'Agentic memory',
+    icon: ICON_MEMORY,
+    mount: mountAgenticMemory,
   },
   {
     id: 'updates',

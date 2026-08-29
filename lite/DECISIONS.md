@@ -1714,3 +1714,48 @@ gone. Known accepted edge: a save racing a sign-in-triggered drain can
 double-fire the graph mirror for one report (KV write itself is
 idempotent); the drain guard covers drain-vs-drain but not
 save-vs-drain.
+
+## ADR-079: Agentic memory — Lite as MCP client, hash-keyed ingested flags
+
+**Date:** 2026-08-28  ·  **Status:** shipped
+
+**Context.** User request: "connect an mcp server for ingesting items
+in the space... flagged as ingested or not... add mcp server creds...
+Should be able to add multiple. All items should be sent to MCP server
+for ingestion unless it already is flagged." Lite already speaks MCP as
+a SERVER (spaces-mcp, for Claude reading Spaces); this is the inverse
+direction — pushing Space content OUT to external memory systems.
+
+**Decision.** New `lite/memory-ingest/` module: Lite acts as an MCP
+CLIENT over streamable HTTP (@modelcontextprotocol/sdk), one connection
+per configured server per run. Server configs (name, URL, optional
+bearer API key, optional tool-name override) live in the user's OAGI KV
+(`lite-memory-config`) — account-synced like the Neon settings, and the
+key is WRITE-ONLY across IPC (`hasApiKey` is all renderers read back).
+The ingestion tool is resolved from the remote `tools/list` by
+heuristics that hard-veto destructive/read names (delete, forget,
+search…) — an explicit override always wins; arguments are mapped onto
+that tool's own inputSchema (body property by well-known name, extras
+only when declared). The per-item flag is `metadata.agenticMemory`, a
+JSON doc `{serverId: {sha, at, name}}` written via `patchMetadata`
+(per-key merge, never clobbers user metadata). The skip test is HASH
+equality against the item's content identity (intake-stamped
+`contentSha256` for files, sha256 of title/description/content/source
+otherwise) — so "already ingested" is content-true and edits re-arm the
+pair automatically; with multiple servers the flag is per (item,
+server). Entry points: Settings → "Agentic memory" (add/test/remove,
+multiple) and the space context menu "Send to agentic memory" (no-server
+case routes to Settings via the toast action; progress beats retitle
+the toast; final rollup sent/up-to-date/failed). The metadata table
+renders the flag as friendly per-server status, never raw JSON.
+
+**Invariant.** A flag is written ONLY after the remote tool call
+succeeds; a failed call records a failure row and leaves the pair
+armed. One server's outage never blocks another (per-server fatal
+poisoning, per-item isolation). A fully up-to-date run opens zero
+connections.
+
+**Verified.** 19 unit tests on store/resolution/mapping/engine (skip on
+same hash, re-send on changed hash, per-server independence, no flag on
+failure, lazy connect) + 5 renderer tests (menu entry wired, friendly
+flag rendering incl. stale verdict).

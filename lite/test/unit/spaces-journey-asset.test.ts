@@ -43,6 +43,7 @@ describe('creating a journey from the Space that will hold it', () => {
         share: noop, unshare: noop, addPeople: noop, upload: noop, rename: noop,
         editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop,
         newJourney: () => { fired += 1; },
+        sendToMemory: noop,
         deleteSpace: noop, togglePin: noop,
       }
     );

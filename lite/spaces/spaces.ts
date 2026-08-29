@@ -1650,6 +1650,7 @@ export function buildSpaceContextEntries(
     convertUser: () => void;
     setPlaybook: () => void;
     newJourney: () => void;
+    sendToMemory: () => void;
     deleteSpace: () => void;
     togglePin: () => void;
   }
@@ -1698,6 +1699,11 @@ export function buildSpaceContextEntries(
     // from the Space that will hold it, not only from the Planning
     // menu. Same right-click reachability the playbook got.
     { type: 'action', label: 'New journey map…', run: handlers.newJourney },
+    // ADR-079 — push every item to the user's connected agentic-memory
+    // MCP servers. Skips (item, server) pairs whose ingested flag
+    // matches the current content hash, so re-runs are cheap and
+    // edits re-send themselves.
+    { type: 'action', label: 'Send to agentic memory', run: handlers.sendToMemory },
     { type: 'separator' },
     {
       type: 'submenu',
@@ -1973,6 +1979,9 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     },
     newJourney: () => {
       void openJourneyComposer(space.id);
+    },
+    sendToMemory: () => {
+      void runMemoryIngest(space.id, space.name);
     },
     deleteSpace: () => {
       void performSoftDelete(space.id);
@@ -10805,6 +10814,52 @@ export interface DetailMetadataCallbacks {
   onMetadataAutoFill?: () => Promise<void>;
 }
 
+/**
+ * Render the ADR-079 ingest flag as human-readable per-server status.
+ * `{"srv":{"sha":"...","at":"...","name":"Team memory"}}` becomes
+ * "Team memory — ingested 2h ago (up-to-date)". Staleness is only
+ * judged when the item carries an intake-stamped `contentSha256` to
+ * compare against; text items just report the ingestion time.
+ * Returns null for anything unparseable so the caller falls back to
+ * the raw value.
+ */
+export function formatIngestStatus(
+  value: unknown,
+  meta: Record<string, unknown>
+): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const currentSha =
+    typeof meta.contentSha256 === 'string' ? meta.contentSha256 : undefined;
+  const lines: string[] = [];
+  for (const rec of Object.values(parsed as Record<string, unknown>)) {
+    if (typeof rec !== 'object' || rec === null) continue;
+    const r = rec as { sha?: unknown; at?: unknown; name?: unknown };
+    if (typeof r.sha !== 'string') continue;
+    const name = typeof r.name === 'string' && r.name.length > 0 ? r.name : 'memory';
+    const when =
+      typeof r.at === 'string' && r.at.length > 0
+        ? ` ${formatRelativeTime(r.at)}`
+        : '';
+    const fresh =
+      currentSha === undefined
+        ? ''
+        : r.sha === currentSha
+          ? ' (up-to-date)'
+          : ' (stale — will re-send)';
+    lines.push(`${name} — ingested${when}${fresh}`);
+  }
+  return lines.length > 0 ? lines.join('\n') : null;
+}
+
 export function buildDetailMetadata(
   item: RendererItem,
   edit?: DetailMetadataCallbacks
@@ -10852,13 +10907,20 @@ export function buildDetailMetadata(
 
       const dd = document.createElement('dd');
       dd.className = 'spaces-detail-metadata-value';
-      dd.textContent = formatMetadataValue(value);
+      // ADR-079 -- the agentic-memory flag is machine-written JSON;
+      // render it as per-server "ingested" status instead of the raw
+      // document. Falls through to raw when the value doesn't parse.
+      const ingestStatus =
+        key === 'agenticMemory' ? formatIngestStatus(value, meta) : null;
+      dd.textContent = ingestStatus ?? formatMetadataValue(value);
       row.appendChild(dd);
 
       // Click-to-edit on the value cell. Calls `onMetadataValueEdit`
       // which goes through the same coercion path as `onMetadataAdd`
       // (numeric strings → numbers, "true"/"false" → booleans, etc).
-      if (edit?.onMetadataValueEdit !== undefined) {
+      // The ingest flag is not hand-editable (remove is the only
+      // sensible mutation -- it means "forget ingestion state").
+      if (edit?.onMetadataValueEdit !== undefined && ingestStatus === null) {
         const onEdit = edit.onMetadataValueEdit;
         dd.classList.add('is-editable');
         dd.title = 'Click to edit';
@@ -16661,6 +16723,89 @@ async function performUndoDelete(spaceId: string, displayName: string): Promise<
   } catch (err) {
     window.logging?.error?.('spaces', 'space undelete failed', { spaceId, error: messageFrom(err) });
     showToast(messageFrom(err));
+  }
+}
+
+// ─── Agentic memory ingestion (ADR-079) ─────────────────────────────────
+
+/** One run at a time; the menu action becomes a no-op while active. */
+let memoryIngestBusy = false;
+
+/**
+ * Push a space's items to every connected agentic-memory server.
+ * The no-server case routes to Settings instead of failing -- the
+ * toast's action button IS the setup path. Progress beats retitle the
+ * toast so a long run narrates itself; the final toast carries the
+ * sent / up-to-date / failed rollup.
+ */
+async function runMemoryIngest(spaceId: string, spaceName: string): Promise<void> {
+  const memory = window.lite?.memory;
+  if (memory === undefined) {
+    showToast('Memory bridge unavailable — reload the app');
+    return;
+  }
+  if (memoryIngestBusy) {
+    showToast('An ingestion run is already in progress');
+    return;
+  }
+  let servers: LiteMemoryServerView[];
+  try {
+    const listRes = await memory.listServers();
+    if (!listRes.ok) {
+      showToast(listRes.error.message);
+      return;
+    }
+    servers = listRes.value;
+  } catch (err) {
+    showToast(messageFrom(err));
+    return;
+  }
+  if (servers.length === 0) {
+    showToast('No agentic memory connected yet', {
+      undoLabel: 'Open Settings',
+      onUndo: () => {
+        void window.lite?.settings?.open('agentic-memory');
+      },
+      durationMs: 12000,
+    });
+    return;
+  }
+  memoryIngestBusy = true;
+  showToast(`Sending "${spaceName}" to agentic memory…`, { durationMs: 120000 });
+  const unsubscribe = memory.onIngestProgress((beat) => {
+    if (beat.outcome === 'sent') {
+      showToast(
+        `Ingesting ${beat.itemTitle} → ${beat.serverName} (${beat.index}/${beat.total})`,
+        { durationMs: 120000 }
+      );
+    }
+  });
+  try {
+    const res = await memory.ingestSpace(spaceId);
+    if (!res.ok) {
+      showToast(res.error.message);
+      return;
+    }
+    const s = res.value;
+    const parts = [`sent ${s.sent}`, `up-to-date ${s.skipped}`];
+    if (s.failed.length > 0) parts.push(`failed ${s.failed.length}`);
+    const target =
+      servers.length === 1 ? (servers[0]?.name ?? 'memory') : `${servers.length} servers`;
+    showToast(`Memory (${target}): ${parts.join(', ')}`, { durationMs: 10000 });
+    if (s.failed.length > 0) {
+      window.logging?.warn?.('spaces', 'memory ingest failures', {
+        spaceId,
+        failed: s.failed,
+      });
+    }
+    // Flags landed in item metadata; refresh so open detail rails and
+    // metadata tables show the new ingested state without a reopen.
+    if (s.sent > 0) await loadItems();
+  } catch (err) {
+    showToast(messageFrom(err));
+  } finally {
+    unsubscribe();
+    memoryIngestBusy = false;
   }
 }
 

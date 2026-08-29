@@ -58,6 +58,13 @@ const TOTP_GET_CURRENT_CODE = 'lite:totp:get-current-code';
 const TOTP_DELETE_SECRET = 'lite:totp:delete-secret';
 
 const SETTINGS_OPEN = 'lite:settings:open';
+// Memory-ingest channels (ADR-079) -- mirror lite/memory-ingest/ipc.ts.
+const MEMORY_LIST_SERVERS = 'lite:memory:listServers';
+const MEMORY_ADD_SERVER = 'lite:memory:addServer';
+const MEMORY_REMOVE_SERVER = 'lite:memory:removeServer';
+const MEMORY_TEST_SERVER = 'lite:memory:testServer';
+const MEMORY_INGEST_SPACE = 'lite:memory:ingestSpace';
+const MEMORY_INGEST_PROGRESS = 'lite:memory:ingestProgress';
 const HOME_URL_GET = 'lite:main-window:homeUrl:get';
 const HOME_URL_SET = 'lite:main-window:homeUrl:set';
 const API_DOCS_OPEN = 'lite:api-docs:open';
@@ -2076,6 +2083,71 @@ const telemetry: TelemetryBridge = {
     ipcRenderer.invoke(TELEMETRY_SET_CONSENT, { state }) as Promise<LiteTelemetryStatusView>,
 };
 
+// ---------------------------------------------------------------------------
+// Memory bridge (ADR-079) -- agentic-memory server CRUD + space
+// ingestion. Payload shapes are opaque `unknown` here (the preload
+// stays type-light, matching the spaces bridge); the renderer-facing
+// types live in lite-window.d.ts. The API key flows one way: it rides
+// `addServer` inward and never comes back out of `listServers`.
+// ---------------------------------------------------------------------------
+
+type MemoryIpcResultView<T> =
+  | { ok: true; value: T }
+  | { ok: false; error: { message: string } };
+
+interface MemoryBridge {
+  listServers(): Promise<MemoryIpcResultView<unknown[]>>;
+  addServer(input: {
+    name: string;
+    url: string;
+    apiKey?: string;
+    toolName?: string;
+  }): Promise<MemoryIpcResultView<unknown>>;
+  removeServer(id: string): Promise<MemoryIpcResultView<null>>;
+  testServer(id: string): Promise<MemoryIpcResultView<unknown>>;
+  ingestSpace(spaceId: string): Promise<MemoryIpcResultView<unknown>>;
+  onIngestProgress(handler: (beat: unknown) => void): () => void;
+}
+
+const memory: MemoryBridge = {
+  listServers: () =>
+    ipcRenderer.invoke(MEMORY_LIST_SERVERS) as Promise<
+      MemoryIpcResultView<unknown[]>
+    >,
+  addServer: (input) =>
+    ipcRenderer.invoke(MEMORY_ADD_SERVER, input) as Promise<
+      MemoryIpcResultView<unknown>
+    >,
+  removeServer: (id) =>
+    ipcRenderer.invoke(MEMORY_REMOVE_SERVER, { id }) as Promise<
+      MemoryIpcResultView<null>
+    >,
+  testServer: (id) =>
+    ipcRenderer.invoke(MEMORY_TEST_SERVER, { id }) as Promise<
+      MemoryIpcResultView<unknown>
+    >,
+  ingestSpace: (spaceId) =>
+    ipcRenderer.invoke(MEMORY_INGEST_SPACE, { spaceId }) as Promise<
+      MemoryIpcResultView<unknown>
+    >,
+  onIngestProgress: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      beat: unknown
+    ): void => {
+      try {
+        handler(beat);
+      } catch {
+        // best-effort: never let a buggy handler crash IPC
+      }
+    };
+    ipcRenderer.on(MEMORY_INGEST_PROGRESS, listener);
+    return (): void => {
+      ipcRenderer.removeListener(MEMORY_INGEST_PROGRESS, listener);
+    };
+  },
+};
+
 const neon: NeonBridge = {
   queryNamed: (name, parameters) =>
     ipcRenderer.invoke(NEON_QUERY_NAMED, { name, parameters }) as Promise<{ records: NeonRecord[] }>,
@@ -2923,6 +2995,7 @@ contextBridge.exposeInMainWorld('lite', {
   health,
   telemetry,
   neon,
+  memory,
   idw,
   tools,
   ai,

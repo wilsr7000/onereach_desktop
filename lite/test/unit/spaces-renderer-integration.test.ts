@@ -386,6 +386,7 @@ describe('sidebar context menus', () => {
       share: noop, unshare: noop, addPeople: noop, upload: noop, rename: noop,
       editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop,
       newJourney: noop, deleteSpace: noop, togglePin: noop,
+      sendToMemory: noop,
     };
     const entries = mod.buildSpaceContextEntries(
       { id: 's1', name: 'Open user space', visibility: 'open', kind: 'user',
@@ -551,6 +552,7 @@ describe('space context menu — Add people', () => {
         convertUser: noop,
         setPlaybook: noop,
         newJourney: noop, deleteSpace: noop, togglePin: noop,
+        sendToMemory: noop,
       }
     );
     const labels = entries

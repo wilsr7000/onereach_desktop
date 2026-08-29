@@ -1624,6 +1624,7 @@ describe('space description editability (2026-08-13 report)', () => {
       {
         share: noop, unshare: noop, addPeople: noop, upload: noop,
         rename: noop, editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop, newJourney: noop, deleteSpace: noop, togglePin: noop,
+        sendToMemory: noop,
       }
     );
     const labels = entries
@@ -1687,6 +1688,7 @@ describe('space context menu — Delete space (2026-08-16)', () => {
         upload: () => undefined, rename: () => undefined, editObjective: () => undefined,
         convertShared: () => undefined, convertUser: () => undefined,
         setPlaybook: () => undefined, newJourney: () => undefined,
+        sendToMemory: () => undefined,
         deleteSpace: () => { fired += 1; }, togglePin: () => undefined,
       }
     );
@@ -1717,6 +1719,7 @@ describe('space context menu — every action is wired (coverage contract)', () 
       convertUser: h('convertUser'),
       setPlaybook: h('setPlaybook'),
       newJourney: h('setPlaybook'),
+      sendToMemory: h('sendToMemory'),
       deleteSpace: h('deleteSpace'),
       togglePin: h('togglePin'),
     };
@@ -1747,7 +1750,7 @@ describe('space context menu — every action is wired (coverage contract)', () 
     const labels = entries
       .filter((e) => (e as { type: string }).type === 'action')
       .map((e) => (e as { label: string }).label);
-    for (const needed of ['Add people…', 'Rename', 'Set current playbook…', 'Delete space…']) {
+    for (const needed of ['Add people…', 'Rename', 'Set current playbook…', 'Send to agentic memory', 'Delete space…']) {
       expect(labels, `missing menu action: ${needed}`).toContain(needed);
     }
   });

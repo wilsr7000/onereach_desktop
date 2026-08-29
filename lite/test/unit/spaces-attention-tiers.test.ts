@@ -128,6 +128,7 @@ describe('context menu — pin entry (ADR-069)', () => {
   const handlers = {
     share: noop, unshare: noop, addPeople: noop, upload: noop, rename: noop,
     editObjective: noop, convertShared: noop, convertUser: noop, setPlaybook: noop, newJourney: noop, deleteSpace: noop,
+    sendToMemory: noop,
     togglePin: noop,
   };
 

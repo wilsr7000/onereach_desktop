@@ -1987,3 +1987,102 @@ body {
 .neon-source-value.ok { color: #6ee7b7; }
 .neon-source-value.warn { color: #f0b357; }
 .neon-source-value.muted { color: var(--or-text-muted, rgba(255,255,255,0.45)); }
+
+/* ── Agentic memory (ADR-079) ─────────────────────────────────────────── */
+
+.memory-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.memory-server-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memory-server-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  background: #1a1a1d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.memory-server-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.memory-server-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8ea;
+}
+
+.memory-server-detail {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.memory-server-status {
+  margin: 0;
+}
+
+.memory-server-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.memory-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 14px;
+}
+
+.memory-add-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.75);
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.memory-add-form label {
+  font-size: 11px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 6px;
+}
+
+.memory-add-form input {
+  background: #1a1a1d;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e8e8ea;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  outline: none;
+  width: 100%;
+}
+
+.memory-add-form input:focus {
+  border-color: #4f8cff;
+}
+
+.memory-add-form input::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
