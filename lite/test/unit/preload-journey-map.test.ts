@@ -60,6 +60,9 @@ const ALLOWED_CHANNELS = [
 interface JourneyBridge {
   available: boolean;
   listSpaces(): Promise<Array<{ id: string; name: string }>>;
+  listAssets(
+    spaceId?: string
+  ): Promise<Array<{ id: string; title: string; kind: string; spaceId: string; updatedAt?: string }>>;
   listJourneys(
     spaceId?: string
   ): Promise<Array<{ id: string; title: string; spaceId?: string; updatedAt?: string }>>;
@@ -98,9 +101,15 @@ describe('the surface the Builder sees', () => {
     expect(bridge.available).toBe(true);
   });
 
-  it('is exactly the seven journey calls — no general graph access', () => {
+  it('is exactly the journey calls plus read-only asset access', () => {
+    // `listAssets` was added deliberately (2026-08): a journey is built
+    // FROM something — a research doc, a transcript — and while this
+    // bridge returned journeys only, "Import from Spaces" showed an
+    // empty list in any Space that held research. The widening is READ
+    // side only; the write surface below is unchanged.
     expect(Object.keys(h.state.exposed ?? {}).sort()).toEqual([
       'available',
+      'listAssets',
       'listJourneys',
       'listSpaces',
       'load',
@@ -109,6 +118,16 @@ describe('the surface the Builder sees', () => {
       'save',
       'update',
     ]);
+  });
+
+  it('can still only WRITE journeys — reading more did not widen writing', () => {
+    // The property that made the wider read acceptable. If a general
+    // create/update/delete ever appears here, a page we do not build can
+    // rewrite the graph.
+    const writers = Object.keys(h.state.exposed ?? {}).filter((k) =>
+      /^(save|update|create|delete|remove|write|put|post)/i.test(k)
+    );
+    expect(writers.sort()).toEqual(['save', 'update']);
   });
 });
 
@@ -186,6 +205,58 @@ describe('listJourneys', () => {
   it('is empty, not broken, when the Space cannot be read', async () => {
     reply('lite:spaces:items:list', { ok: false, error: { message: 'forbidden' } });
     await expect(bridge.listJourneys('s1')).resolves.toEqual([]);
+  });
+});
+
+describe('listAssets', () => {
+  // The bug this exists for: a Space full of research documents showed
+  // NOTHING in the Builder's import picker, because the only listing
+  // call filtered everything that was not a journey — on this side of
+  // the bridge, after the items had already arrived.
+  const mixed = {
+    ok: true,
+    value: [
+      { id: 'a', title: 'Onboarding', kind: 'journey', updatedAt: '2026-08-18T00:00:00Z' },
+      { id: 'b', title: 'Gartner MQ 2026', kind: 'document' },
+      { id: 'c', title: 'Interview notes', kind: 'text' },
+      { id: 'd', title: 'Deck', kind: 'file' },
+    ],
+  };
+
+  it('returns every asset, not just journeys', async () => {
+    reply('lite:spaces:items:list', mixed);
+    const out = await bridge.listAssets('s1');
+    expect(out.map((i) => i.id)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('reports each asset kind, so a document is not mistaken for a journey', async () => {
+    reply('lite:spaces:items:list', mixed);
+    const out = await bridge.listAssets('s1');
+    expect(out.map((i) => i.kind)).toEqual(['journey', 'document', 'text', 'file']);
+  });
+
+  it('stamps the Space each asset came from', async () => {
+    reply('lite:spaces:items:list', mixed);
+    const out = await bridge.listAssets('s1');
+    expect(out.every((i) => i.spaceId === 's1')).toBe(true);
+  });
+
+  it('fans out across every Space when asked for all of them', async () => {
+    reply('lite:spaces:listSpaces', { ok: true, value: [{ id: 's1' }, { id: 's2' }] });
+    reply('lite:spaces:items:list', mixed);
+    const out = await bridge.listAssets();
+    expect(new Set(out.map((i) => i.spaceId))).toEqual(new Set(['s1', 's2']));
+  });
+
+  it('is empty, not broken, when the Space cannot be read', async () => {
+    reply('lite:spaces:items:list', { ok: false, error: { message: 'forbidden' } });
+    await expect(bridge.listAssets('s1')).resolves.toEqual([]);
+  });
+
+  it('leaves listJourneys narrow — it still returns journeys only', async () => {
+    reply('lite:spaces:items:list', mixed);
+    const out = await bridge.listJourneys('s1');
+    expect(out.map((j) => j.id)).toEqual(['a']);
   });
 });
 

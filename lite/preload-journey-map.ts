@@ -35,6 +35,47 @@ const ITEMS_GET = 'lite:spaces:items:get';
 const JOURNEYS_CREATE = 'lite:spaces:journeys:create';
 const ITEMS_UPDATE = 'lite:spaces:items:update';
 
+/** A listed item, with the Space it came from — the Builder needs it to save back. */
+interface ListedItem {
+  id: string;
+  title: string;
+  kind: string;
+  spaceId: string;
+  updatedAt?: string;
+}
+
+/**
+ * Items in one Space, or across every Space when spaceId is omitted.
+ *
+ * Lite's list channel is per-scope with no "everything" mode, so the
+ * all-Spaces case walks the Space list. `kind` narrows the result when
+ * given; without it every asset comes back.
+ */
+async function listItemsIn(spaceId?: string, kind?: string): Promise<ListedItem[]> {
+  const inSpace = async (id: string): Promise<ListedItem[]> => {
+    const env = (await ipcRenderer.invoke(ITEMS_LIST, { scopeId: id })) as Envelope<
+      Array<{ id: string; title: string; kind: string; updatedAt?: string }>
+    >;
+    if (env.ok !== true || env.value === undefined) return [];
+    return env.value
+      .filter((i) => kind === undefined || i.kind === kind)
+      .map((i) => ({
+        id: i.id,
+        title: i.title,
+        kind: i.kind,
+        spaceId: id,
+        ...(i.updatedAt !== undefined ? { updatedAt: i.updatedAt } : {}),
+      }));
+  };
+
+  if (typeof spaceId === 'string' && spaceId.length > 0) return inSpace(spaceId);
+
+  const env = (await ipcRenderer.invoke(SPACES_LIST)) as Envelope<Array<{ id: string }>>;
+  if (env.ok !== true || env.value === undefined) return [];
+  const perSpace = await Promise.all(env.value.map((s) => inSpace(s.id)));
+  return perSpace.flat();
+}
+
 contextBridge.exposeInMainWorld('journeySpaces', {
   /** Marks the bridge present so the app can feature-detect. */
   available: true,
@@ -61,39 +102,45 @@ contextBridge.exposeInMainWorld('journeySpaces', {
   listJourneys: async (
     spaceId?: string
   ): Promise<Array<{ id: string; title: string; spaceId: string; updatedAt?: string }>> => {
-    const inSpace = async (id: string): Promise<
-      Array<{ id: string; title: string; spaceId: string; updatedAt?: string }>
-    > => {
-      const env = (await ipcRenderer.invoke(ITEMS_LIST, { scopeId: id })) as Envelope<
-        Array<{ id: string; title: string; kind: string; updatedAt?: string }>
-      >;
-      if (env.ok !== true || env.value === undefined) return [];
-      return env.value
-        .filter((i) => i.kind === 'journey')
-        .map((i) => ({
-          id: i.id,
-          title: i.title,
-          spaceId: id,
-          ...(i.updatedAt !== undefined ? { updatedAt: i.updatedAt } : {}),
-        }));
-    };
-
-    if (typeof spaceId === 'string' && spaceId.length > 0) return inSpace(spaceId);
-
-    const env = (await ipcRenderer.invoke(SPACES_LIST)) as Envelope<Array<{ id: string }>>;
-    if (env.ok !== true || env.value === undefined) return [];
-    const perSpace = await Promise.all(env.value.map((s) => inSpace(s.id)));
-    return perSpace.flat();
+    const rows = await listItemsIn(spaceId, 'journey');
+    return rows.map(({ kind: _kind, ...rest }) => rest);
   },
+
+  /**
+   * Every asset in a Space, not just the journeys.
+   *
+   * A journey is usually built FROM something — a research doc, an
+   * interview transcript, a strategy note already filed in the Space.
+   * While this bridge returned journeys only, the Builder's "Import from
+   * Spaces" picker looked broken: a Space full of documents showed
+   * nothing, because nothing had been asked for. The items were already
+   * crossing the bridge and being discarded here.
+   *
+   * READ ONLY, and deliberately so. Writing is still journeys and
+   * journeys alone (`save` / `update`): a hosted page can now read what
+   * is in your Spaces, but it cannot create or alter anything that
+   * isn't a journey map.
+   */
+  listAssets: async (
+    spaceId?: string
+  ): Promise<Array<{ id: string; title: string; kind: string; spaceId: string; updatedAt?: string }>> =>
+    listItemsIn(spaceId),
 
   /** One journey's full record, including its markdown `content`. */
   load: async (
     itemId: string
-  ): Promise<{ id: string; title: string; content: string; description?: string } | null> => {
+  ): Promise<{
+    id: string;
+    title: string;
+    content: string;
+    kind?: string;
+    description?: string;
+  } | null> => {
     const env = (await ipcRenderer.invoke(ITEMS_GET, { id: itemId })) as Envelope<{
       id: string;
       title: string;
       content?: string;
+      kind?: string;
       description?: string;
     } | null>;
     if (env.ok !== true || env.value === null || env.value === undefined) return null;
@@ -101,6 +148,11 @@ contextBridge.exposeInMainWorld('journeySpaces', {
       id: env.value.id,
       title: env.value.title,
       content: env.value.content ?? '',
+      // Carried through so a caller knows what it actually opened. The
+      // Builder used to stamp everything it loaded as a journey, which
+      // was harmless while only journeys were listable and wrong the
+      // moment documents became readable.
+      ...(env.value.kind !== undefined ? { kind: env.value.kind } : {}),
       ...(env.value.description !== undefined ? { description: env.value.description } : {}),
     };
   },
