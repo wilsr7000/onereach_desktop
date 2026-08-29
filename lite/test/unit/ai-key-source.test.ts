@@ -25,6 +25,7 @@ import {
   liteUserDataDir,
   fingerprintSecret,
   buildAppAiCredentials,
+  keychainSuppressedHere,
   describeAiCredentials,
 } from '../harness/ai-key.js';
 
@@ -124,8 +125,65 @@ describe('a key never reaches a log line', () => {
   });
 
   it('says how to configure one when there is none', () => {
-    const line = describeAiCredentials(null);
-    expect(line).toContain('Settings → AI');
-    expect(line).toContain('ANTHROPIC_API_KEY');
+    const prior = process.env['CLAUDECODE'];
+    delete process.env['CLAUDECODE'];
+    try {
+      const line = describeAiCredentials(null);
+      expect(line).toContain('Settings → AI');
+      expect(line).toContain('ANTHROPIC_API_KEY');
+    } finally {
+      if (prior !== undefined) process.env['CLAUDECODE'] = prior;
+    }
+  });
+});
+
+describe('a skip that names the real reason', () => {
+  // The live AI tier silently skipped in every agent shell and reported
+  // "no AI credentials configured" — while a perfectly good key sat in
+  // the keychain. `key-store.ts` swaps in an inert backend when
+  // CLAUDECODE is set, because agent shells were SIGABRTing on keytar.
+  // A skip that misreports its cause is worse than a failure: it sends
+  // someone to re-paste a key that was never the problem.
+  const withEnv = (vars: Record<string, string | undefined>, fn: () => void): void => {
+    const prior: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(vars)) {
+      prior[k] = process.env[k];
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    try {
+      fn();
+    } finally {
+      for (const [k, v] of Object.entries(prior)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+
+  it('detects the shell where the keychain is deliberately inert', () => {
+    expect(keychainSuppressedHere({ CLAUDECODE: '1' })).toBe(true);
+    // The documented opt-out of the opt-out.
+    expect(keychainSuppressedHere({ CLAUDECODE: '1', LITE_KEYCHAIN: '1' })).toBe(false);
+    // A user's own terminal carries no CLAUDECODE.
+    expect(keychainSuppressedHere({})).toBe(false);
+  });
+
+  it('explains the inert keychain instead of blaming a missing key', () => {
+    withEnv({ CLAUDECODE: '1', LITE_KEYCHAIN: undefined }, () => {
+      const line = describeAiCredentials(null);
+      expect(line).toContain('LITE_KEYCHAIN=1');
+      expect(line).toContain('inert');
+      // The misleading advice must NOT appear here.
+      expect(line).not.toContain('paste a Claude key');
+    });
+  });
+
+  it('uses the same two env vars the app guard does', () => {
+    // The harness reports env facts rather than copying the rule, but
+    // the VARIABLE NAMES still have to match or the message is fiction.
+    const src = readFileSync(resolve(__dirname, '..', '..', 'ai', 'key-store.ts'), 'utf8');
+    expect(src).toContain("process.env['LITE_KEYCHAIN'] === '1'");
+    expect(src).toContain("process.env['CLAUDECODE'] !== undefined");
   });
 });

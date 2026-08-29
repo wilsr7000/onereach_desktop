@@ -169,6 +169,20 @@ export async function resolveAppClaudeConfig(
  */
 export function describeAiCredentials(found: AppAiCredentials | null): string {
   if (found === null) {
+    // The likeliest reason inside a Claude/CI shell is NOT a missing
+    // key. `lite/ai/key-store.ts` swaps in an inert keychain backend
+    // when CLAUDECODE is set (agent shells were SIGABRTing on keytar),
+    // so a perfectly good key in Settings → AI reads back as null and
+    // this whole tier skips itself. Saying "no credentials configured"
+    // there sends someone to re-paste a key that was already fine.
+    if (keychainSuppressedHere()) {
+      return (
+        'the keychain is inert in this shell — CLAUDECODE is set and ' +
+        'LITE_KEYCHAIN is not, so lite/ai/key-store.ts substitutes an ' +
+        'inert backend and Settings → AI reads back empty. Re-run with ' +
+        'LITE_KEYCHAIN=1 to use the real key.'
+      );
+    }
     return (
       'no AI credentials configured — paste a Claude key into Settings → AI ' +
       `(keychain), export ANTHROPIC_API_KEY, or write ${AI_CONFIG_FILENAME} ` +
@@ -182,6 +196,22 @@ export function describeAiCredentials(found: AppAiCredentials | null): string {
     `provider=claude source=${found.source} model=${found.config.model} ` +
     `(${found.fingerprint})`
   );
+}
+
+/**
+ * Whether this shell is one where Lite deliberately refuses to touch the
+ * keychain, so a null key means "not reachable" rather than "not set".
+ *
+ * Reports the ENV FACTS rather than re-implementing the rule in
+ * `key-store.ts` — that rule is load-bearing safety code that changed
+ * after five keytar SIGABRTs in a day, and a copy of it here would be
+ * one more thing to keep in step. `ai-key-source.test.ts` pins the two
+ * variable names against that file.
+ */
+export function keychainSuppressedHere(
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  return env['LITE_KEYCHAIN'] !== '1' && env['CLAUDECODE'] !== undefined;
 }
 
 /** Which input produced the winning key. */

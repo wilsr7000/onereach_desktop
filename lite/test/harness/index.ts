@@ -67,6 +67,7 @@ export {
   readAiConfigFileJson,
   fingerprintSecret,
   buildAppAiCredentials,
+  keychainSuppressedHere,
   resolveAppAiConfig,
   resolveAppClaudeConfig,
   describeAiCredentials,

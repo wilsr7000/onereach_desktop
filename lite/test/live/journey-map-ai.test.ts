@@ -20,6 +20,8 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { AiService } from '../../ai/service.js';
 import {
@@ -27,6 +29,7 @@ import {
   sanitizeJourneyDraft,
   journeyToMarkdown,
   journeyDescription,
+  extractJsonObject,
 } from '../../spaces/journey.js';
 import type { JourneyDraft } from '../../spaces/types.js';
 import {
@@ -36,6 +39,25 @@ import {
 } from '../harness/ai-key.js';
 
 const credentials = await resolveAppClaudeConfig();
+
+/**
+ * The output cap `journeys.draft` really sends, READ FROM THE APP rather
+ * than copied. This mattered twice: at 2000 the model's answer is cut
+ * off mid-JSON (the bug this file first caught), and a copied constant
+ * silently drifts back to the wrong value the moment someone edits one
+ * side — which is exactly what happened to an earlier version of this
+ * test.
+ */
+const APP_MAX_TOKENS = ((): number => {
+  const src = readFileSync(resolve(__dirname, '..', '..', 'spaces', 'main.ts'), 'utf8');
+  const m = /maxTokens:\s*(\d+),\s*\n\s*feature: 'spaces-journey-draft'/.exec(src);
+  if (m?.[1] === undefined) throw new Error('could not read the journey draft maxTokens');
+  return Number(m[1]);
+})();
+
+/** The corrective nudge `journeys.draft` sends on a second attempt. */
+const CORRECTIVE =
+  'Your previous reply was not parseable JSON. Return ONLY the JSON object — no prose, no code fences.';
 
 /** The subject under test — concrete, so "be specific" is checkable. */
 const SUBJECT =
@@ -48,6 +70,8 @@ interface LiveRun {
   draft: JourneyDraft;
   markdown: string;
   model: string;
+  /** How many model calls the app would have spent to get a usable draft. */
+  attempts: number;
 }
 
 let run: LiveRun;
@@ -63,28 +87,44 @@ describe.skipIf(credentials === null)('the journey prompt against the live model
       accountId: () => null,
     });
 
-    const result = await service.chat({
-      system: JOURNEY_SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: SUBJECT }],
-      jsonMode: true,
-      maxTokens: 2000,
-      feature: 'spaces-journey-draft',
-    });
-
-    let parsed: unknown = null;
-    try {
-      parsed = JSON.parse(result.content);
-    } catch {
-      parsed = null;
-    }
-    run = {
-      raw: result.content,
-      parsed,
-      draft: sanitizeJourneyDraft(parsed),
-      markdown: journeyToMarkdown(sanitizeJourneyDraft(parsed)),
-      model: result.model,
+    // Mirror `journeys.draft` exactly: ask, SALVAGE the reply with the
+    // app's own `extractJsonObject` (which pulls JSON out of fences and
+    // prose), and on failure retry ONCE with the corrective nudge. A
+    // bare JSON.parse here would fail the build on replies the app
+    // recovers from perfectly — testing a stricter contract than ships.
+    const ask = async (corrective: boolean): Promise<{ raw: string; model: string }> => {
+      const result = await service.chat({
+        system: JOURNEY_SYSTEM_PROMPT,
+        messages: [
+          { role: 'user', content: SUBJECT },
+          ...(corrective ? [{ role: 'user' as const, content: CORRECTIVE }] : []),
+        ],
+        jsonMode: true,
+        maxTokens: APP_MAX_TOKENS,
+        feature: 'spaces-journey-draft',
+      });
+      return { raw: result.content, model: result.model };
     };
-  }, 120_000);
+
+    let attempts = 1;
+    let reply = await ask(false);
+    let parsed = extractJsonObject(reply.raw);
+    if (parsed === null) {
+      attempts = 2;
+      reply = await ask(true);
+      parsed = extractJsonObject(reply.raw);
+    }
+
+    const draft = sanitizeJourneyDraft(parsed);
+    run = {
+      raw: reply.raw,
+      parsed,
+      draft,
+      markdown: journeyToMarkdown(draft),
+      model: reply.model,
+      attempts,
+    };
+  }, 240_000);
 
   it('runs on the key the app is configured with, not one invented by the suite', async () => {
     // The assertion that gives this whole file its meaning. Written so
@@ -100,12 +140,34 @@ describe.skipIf(credentials === null)('the journey prompt against the live model
     console.log(`  ↳ ${describeAiCredentials(credentials)} · replied as ${run.model}`);
   });
 
-  it('replies with JSON, which is the entire contract with the composer', () => {
-    // `journeys.draft` does a bare JSON.parse and turns a failure into
-    // "The AI reply was not valid JSON". If the model starts wrapping
-    // its answer in prose or a fence, every journey draft breaks.
-    expect(run.parsed, `model reply was not JSON:\n${run.raw.slice(0, 400)}`).not.toBeNull();
+  it('is given room to finish — the answer is not cut off mid-JSON', () => {
+    // The failure this file first caught, and then lost: at maxTokens
+    // 2000 a realistic subject came back truncated mid-string, salvage
+    // found nothing, the retry truncated identically, and the user was
+    // told to rephrase a subject that was never the problem. The cap is
+    // read from the app so the two cannot drift apart again.
+    expect(
+      APP_MAX_TOKENS,
+      'journeys.draft cannot fit the journey its own prompt asks for'
+    ).toBeGreaterThanOrEqual(4000);
+    expect(
+      run.raw.trimEnd().endsWith('}'),
+      `reply ends: ${JSON.stringify(run.raw.slice(-80))}`
+    ).toBe(true);
+  });
+
+  it('yields JSON the composer can use — the entire contract', () => {
+    // Asserted through the app's own salvage, because that is what the
+    // user's draft actually depends on.
+    expect(run.parsed, `nothing salvageable from:\n${run.raw.slice(0, 400)}`).not.toBeNull();
     expect(typeof run.parsed).toBe('object');
+  });
+
+  it('gets there first time, without needing the corrective retry', () => {
+    // Not fatal — the app recovers — but a retry means a doubled wait
+    // and doubled spend on every draft. If this starts failing, the
+    // prompt has drifted even though the feature still "works".
+    expect(run.attempts, 'the model needed a corrective nudge to return JSON').toBe(1);
   });
 
   it('produces a journey the composer would accept', () => {
