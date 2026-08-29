@@ -30,6 +30,7 @@
 
 import { UNCATEGORIZED_SPACE_ID } from './scope.js';
 import { riffStageLabel } from './riff-summary.js';
+import { collectDroppedFiles, expandZips, planIntake, type IntakeItem } from './intake.js';
 import { bootRenderer } from '../renderer-boot.js';
 import type {
   DiscoveryQueryResult,
@@ -15196,6 +15197,7 @@ function wireMutationsUI(): void {
   wireToast();
   wireNewAssetDialog();
   wireDragDropAssetUpload();
+  wireGlobalDropGuard();
 }
 
 // ─── "+ New Space" guided wizard ────────────────────────────────────────
@@ -16786,19 +16788,43 @@ function wireNewAssetDialog(): void {
   }
   // Dropzone drag-drop (modal-scoped — separate from the items-region
   // dropzone which opens the modal in the first place).
-  if (dropzone !== null) {
-    dropzone.addEventListener('dragover', (ev) => {
+  // The WHOLE dialog accepts the drop (2026-08-20) — the little
+  // dropzone was a fiddly target and a near-miss used to navigate the
+  // window (see wireGlobalDropGuard). The zone stays as the visual cue.
+  const dialogRoot = document.getElementById('spaces-new-asset-backdrop');
+  if (dropzone !== null && dialogRoot !== null) {
+    dialogRoot.addEventListener('dragover', (ev) => {
       ev.preventDefault();
       dropzone.classList.add('is-drag-target');
     });
-    dropzone.addEventListener('dragleave', () => {
-      dropzone.classList.remove('is-drag-target');
+    dialogRoot.addEventListener('dragleave', (ev) => {
+      if (ev.target === dialogRoot) dropzone.classList.remove('is-drag-target');
     });
-    dropzone.addEventListener('drop', (ev) => {
+    dialogRoot.addEventListener('drop', (ev) => {
       ev.preventDefault();
       dropzone.classList.remove('is-drag-target');
-      const file = ev.dataTransfer?.files?.[0] ?? null;
-      handleNewAssetFileSelection(file);
+      const dt = ev.dataTransfer;
+      if (dt === null) return;
+      void (async () => {
+        const collected = await collectDroppedFiles(dt);
+        if (collected.length === 0) return;
+        const expanded = await expandZips(collected);
+        const plan = planIntake(expanded);
+        const single =
+          collected.length === 1 && plan.length === 1 && plan[0]!.file === collected[0]!.file;
+        if (single) {
+          handleNewAssetFileSelection(plan[0]!.file);
+          return;
+        }
+        // A folder / zip / multi-file drop outgrows this dialog — hand
+        // it to the one-by-one intake wizard.
+        closeNewAssetDialog();
+        const spaceId =
+          state.activeScopeId === HOME_SCOPE_ID || state.activeScopeId === UNCATEGORIZED_SPACE_ID
+            ? ''
+            : state.activeScopeId;
+        openBatchIntakeWizard(plan, spaceId);
+      })();
     });
   }
   // Esc closes when open.
@@ -17472,6 +17498,188 @@ function closeNewAssetDialog(): void {
   newAssetFile = null;
 }
 
+/**
+ * Create one asset from an uploaded file — the ONE upload pipeline
+ * (2026-08-20). Extracted from the new-asset dialog so the batch
+ * intake wizard (folder/zip drops) drives the identical path: inline
+ * text vs GSX binary decision, transcript conversion, metadata
+ * extraction — and now the per-space duplicate gate. Returns results
+ * instead of touching dialog DOM; callers own their own chrome.
+ */
+interface UploadCreateOk {
+  ok: true;
+  enrich: { id: string; kind: string; mimeType?: string; hasContent: boolean };
+  note: string | null;
+  contentSha256: string;
+}
+interface UploadCreateFail {
+  ok: false;
+  message: string;
+  duplicate?: { existingTitle: string };
+}
+
+/** SHA-256 of a file's bytes, hex. The identity of "the same file". */
+async function fileSha256(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Hashes already present in the OPEN space (new-era uploads stamp
+ * metadata.contentSha256; older files predate the stamp and cannot be
+ * byte-checked without downloading them — documented limitation).
+ */
+function knownSpaceHashes(): Map<string, string> {
+  const known = new Map<string, string>();
+  for (const item of state.items) {
+    const sha = (item.metadata as Record<string, unknown> | undefined)?.['contentSha256'];
+    if (typeof sha === 'string' && sha.length > 0) known.set(sha, item.title || item.id);
+  }
+  return known;
+}
+
+async function createAssetFromUploadFile(
+  file: File,
+  opts: {
+    spaceId: string;
+    title: string;
+    creatorId: string | null;
+    creatorName: string | null;
+    /** Per-space dedupe: hash → existing title. Duplicates are refused. */
+    knownHashes?: ReadonlyMap<string, string>;
+  }
+): Promise<UploadCreateOk | UploadCreateFail> {
+  const { spaceId, title, creatorId, creatorName } = opts;
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return { ok: false, message: 'Bridge unavailable.' };
+
+  // "Spaces should not allow exact duplicate files in the same space"
+  // (2026-08-20). Identity is the BYTES, not the name: a renamed copy
+  // is still the same file; two different files sharing a name are not.
+  const contentSha256 = await fileSha256(file);
+  const existingTitle = opts.knownHashes?.get(contentSha256);
+  if (existingTitle !== undefined) {
+    return {
+      ok: false,
+      message: `Already in this space as “${existingTitle}” — exact duplicate files are not allowed.`,
+      duplicate: { existingTitle },
+    };
+  }
+
+  let enrich: UploadCreateOk['enrich'] | null = null;
+  let note: string | null = null;
+
+      
+      // Auto-extract metadata before upload — image dimensions, audio/
+      // video duration, PDF page count, CSV row/col, etc. Best-effort
+      // (returns {} on failure). See lite/spaces/metadata-extractor.ts.
+      const metadata = await extractMetadataFromFile(file);
+
+      // Text-like files (markdown, code, CSV, plain text) up to 512 KB
+      // become inline graph `content` instead of GSX binaries: the
+      // platform stores text in the graph, and the detail pane's
+      // Markdown/code renderer + "✎ Edit" affordance work immediately.
+      // Larger or non-text files take the GSX path below (ADR-050).
+      if (shouldInlineTextFile(file.name, file.type, file.size)) {
+        const text = await file.text();
+        // Transcript intake: .vtt/.srt exports and speaker-labeled
+        // text convert to consistent Markdown and land as kind
+        // 'transcript'. Gated to dialogue-plausible EXTENSIONS —
+        // YAML/JSON/code files with repeated `key: value` lines can
+        // false-positive the speaker-line detector, and conversion
+        // rewrites content irreversibly (the paste path keeps its
+        // live hint as the consent surface).
+        const transcriptEligible = /\.(vtt|srt|txt|text|md|markdown)$/i.test(file.name);
+        const transcript = transcriptEligible ? convertTranscript(text) : null;
+        const content = transcript !== null ? transcript.markdown : text;
+        const kind = transcript !== null ? 'transcript' : 'document';
+        const mimeType =
+          transcript !== null ? 'text/markdown' : file.type !== '' ? file.type : '';
+        const meta: Record<string, unknown> = {
+          // The dedupe identity — future uploads compare against this.
+          contentSha256,
+          ...(metadata as Record<string, unknown>),
+          ...(transcript !== null
+            ? {
+                transcript_format: transcript.format,
+                transcript_turns: transcript.turnCount,
+                ...(transcript.speakers.length > 0
+                  ? { transcript_speakers: transcript.speakers }
+                  : {}),
+              }
+            : {}),
+        };
+        const envelope = await bridge.items.create({
+          spaceId,
+          title,
+          kind,
+          content,
+          ...(mimeType !== '' ? { mimeType } : {}),
+          metadata: meta,
+          ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
+        });
+        if (envelope.ok === false) {
+          return { ok: false, message: envelope.error.message };
+        }
+        if (transcript !== null) {
+          note =
+          `Transcript formatted — ${transcript.turnCount} turns${
+            transcript.speakers.length > 0
+              ? `, ${transcript.speakers.length} speakers`
+              : ''
+          }`;
+        }
+        enrich = {
+          id: envelope.value.id,
+          kind,
+          ...(mimeType !== '' ? { mimeType } : {}),
+          hasContent: content.trim().length > 0,
+        };
+      } else {
+      // GSX-first (ADR-050): raw bytes cross the bridge; the main
+      // process uploads them to the account's GSX bucket and stores
+      // only the fileKey on the graph node. This is what makes the
+      // asset readable from every app on the account.
+      const bytes = await file.arrayBuffer();
+      const kind = inferKindFromMime(file.type) as
+        | 'image'
+        | 'video'
+        | 'audio'
+        | 'document'
+        | 'other';
+      // Sharing choices. Both are opt-in; omitted entirely when the
+      // user left the defaults alone, so a private upload sends no
+      // visibility flag at all and cannot be misread downstream.
+      const isPublic = isNewAssetPublic();
+      const expiresAt = newAssetExpiryIso();
+      const envelope = await bridge.items.createBinary({
+        spaceId,
+        title,
+        kind,
+        fileName: file.name,
+        mimeType: file.type,
+        bytes,
+        metadata: { contentSha256, ...(metadata as Record<string, unknown>) },
+        ...(creatorId !== null ? { creatorId } : {}),
+          ...(creatorName !== null ? { creatorName } : {}),
+        ...(isPublic ? { isPublic: true } : {}),
+        ...(expiresAt !== undefined ? { expiresAt } : {}),
+      });
+      if (envelope.ok === false) {
+        return { ok: false, message: envelope.error.message };
+      }
+      // hasContent: false — binary payload lives in GSX, not inline;
+      // image/PDF enrich eligibility is driven by kind + mimeType and
+      // the enricher downloads via the fileKey.
+      enrich = { id: envelope.value.id, kind, mimeType: file.type, hasContent: false };
+      }
+  if (enrich === null) return { ok: false, message: 'Upload produced no asset.' };
+  return { ok: true, enrich, note, contentSha256 };
+}
+
 async function submitNewAsset(): Promise<void> {
   // The Existing tab adds assets per-row; there is nothing to submit.
   if (newAssetMode === 'existing') return;
@@ -17645,114 +17853,20 @@ async function submitNewAsset(): Promise<void> {
         hasContent: true,
       };
     } else if (newAssetMode === 'upload' && newAssetFile !== null) {
-      const file = newAssetFile;
-      // Auto-extract metadata before upload — image dimensions, audio/
-      // video duration, PDF page count, CSV row/col, etc. Best-effort
-      // (returns {} on failure). See lite/spaces/metadata-extractor.ts.
-      const metadata = await extractMetadataFromFile(file);
-
-      // Text-like files (markdown, code, CSV, plain text) up to 512 KB
-      // become inline graph `content` instead of GSX binaries: the
-      // platform stores text in the graph, and the detail pane's
-      // Markdown/code renderer + "✎ Edit" affordance work immediately.
-      // Larger or non-text files take the GSX path below (ADR-050).
-      if (shouldInlineTextFile(file.name, file.type, file.size)) {
-        const text = await file.text();
-        // Transcript intake: .vtt/.srt exports and speaker-labeled
-        // text convert to consistent Markdown and land as kind
-        // 'transcript'. Gated to dialogue-plausible EXTENSIONS —
-        // YAML/JSON/code files with repeated `key: value` lines can
-        // false-positive the speaker-line detector, and conversion
-        // rewrites content irreversibly (the paste path keeps its
-        // live hint as the consent surface).
-        const transcriptEligible = /\.(vtt|srt|txt|text|md|markdown)$/i.test(file.name);
-        const transcript = transcriptEligible ? convertTranscript(text) : null;
-        const content = transcript !== null ? transcript.markdown : text;
-        const kind = transcript !== null ? 'transcript' : 'document';
-        const mimeType =
-          transcript !== null ? 'text/markdown' : file.type !== '' ? file.type : '';
-        const meta: Record<string, unknown> = {
-          ...(metadata as Record<string, unknown>),
-          ...(transcript !== null
-            ? {
-                transcript_format: transcript.format,
-                transcript_turns: transcript.turnCount,
-                ...(transcript.speakers.length > 0
-                  ? { transcript_speakers: transcript.speakers }
-                  : {}),
-              }
-            : {}),
-        };
-        const envelope = await bridge.items.create({
-          spaceId,
-          title,
-          kind,
-          content,
-          ...(mimeType !== '' ? { mimeType } : {}),
-          metadata: meta,
-          ...(creatorId !== null ? { creatorId } : {}),
-          ...(creatorName !== null ? { creatorName } : {}),
-        });
-        if (envelope.ok === false) {
-          showDialogError(error, envelope.error.message);
-          if (submit instanceof HTMLButtonElement) submit.disabled = false;
-          return;
-        }
-        if (transcript !== null) {
-          showToast(
-            `Transcript formatted — ${transcript.turnCount} turns${
-              transcript.speakers.length > 0
-                ? `, ${transcript.speakers.length} speakers`
-                : ''
-            }`
-          );
-        }
-        createdEnrich = {
-          id: envelope.value.id,
-          kind,
-          ...(mimeType !== '' ? { mimeType } : {}),
-          hasContent: content.trim().length > 0,
-        };
-      } else {
-      // GSX-first (ADR-050): raw bytes cross the bridge; the main
-      // process uploads them to the account's GSX bucket and stores
-      // only the fileKey on the graph node. This is what makes the
-      // asset readable from every app on the account.
-      const bytes = await file.arrayBuffer();
-      const kind = inferKindFromMime(file.type) as
-        | 'image'
-        | 'video'
-        | 'audio'
-        | 'document'
-        | 'other';
-      // Sharing choices. Both are opt-in; omitted entirely when the
-      // user left the defaults alone, so a private upload sends no
-      // visibility flag at all and cannot be misread downstream.
-      const isPublic = isNewAssetPublic();
-      const expiresAt = newAssetExpiryIso();
-      const envelope = await bridge.items.createBinary({
+      const result = await createAssetFromUploadFile(newAssetFile, {
         spaceId,
         title,
-        kind,
-        fileName: file.name,
-        mimeType: file.type,
-        bytes,
-        metadata: metadata as Record<string, unknown>,
-        ...(creatorId !== null ? { creatorId } : {}),
-          ...(creatorName !== null ? { creatorName } : {}),
-        ...(isPublic ? { isPublic: true } : {}),
-        ...(expiresAt !== undefined ? { expiresAt } : {}),
+        creatorId,
+        creatorName,
+        knownHashes: knownSpaceHashes(),
       });
-      if (envelope.ok === false) {
-        showDialogError(error, envelope.error.message);
+      if (result.ok === false) {
+        showDialogError(error, result.message);
         if (submit instanceof HTMLButtonElement) submit.disabled = false;
         return;
       }
-      // hasContent: false — binary payload lives in GSX, not inline;
-      // image/PDF enrich eligibility is driven by kind + mimeType and
-      // the enricher downloads via the fileKey.
-      createdEnrich = { id: envelope.value.id, kind, mimeType: file.type, hasContent: false };
-      }
+      if (result.note !== null) showToast(result.note);
+      createdEnrich = result.enrich;
     } else {
       const raw =
         contentInput instanceof HTMLTextAreaElement ? contentInput.value : '';
@@ -17850,6 +17964,224 @@ function inferKindFromMime(mime: string): string {
  * Multi-file drop is supported but only the first file is loaded —
  * batch upload is a future enhancement.
  */
+
+/**
+ * Batch intake wizard (2026-08-20): a folder, multi-file, or zip drop
+ * becomes individual assets through a one-by-one review — title +
+ * description per file, with Skip and an "Add all remaining" accelerator.
+ * Every add drives the ONE upload pipeline, so the per-space duplicate
+ * gate, transcript conversion, and metadata extraction all hold; a
+ * duplicate is announced and auto-skipped, and one failure never sinks
+ * the queue.
+ */
+function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
+  if (queue.length === 0) return;
+  document.querySelector('.spaces-intake-backdrop')?.remove();
+
+  const creatorId = readCurrentEditorId();
+  const creatorName = readCurrentEditorName();
+  const known = knownSpaceHashes();
+  const summary = { added: 0, skipped: 0, duplicates: 0, failed: [] as string[] };
+  let index = 0;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-member-picker-backdrop spaces-intake-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-member-picker spaces-intake-panel';
+  backdrop.appendChild(panel);
+  document.body.appendChild(backdrop);
+
+  const finish = (): void => {
+    backdrop.remove();
+    const bits = [`${summary.added} added`];
+    if (summary.duplicates > 0) bits.push(`${summary.duplicates} duplicate${summary.duplicates === 1 ? '' : 's'} skipped`);
+    if (summary.skipped > 0) bits.push(`${summary.skipped} skipped`);
+    if (summary.failed.length > 0) bits.push(`${summary.failed.length} failed`);
+    showToast(bits.join(' · '));
+    if (summary.failed.length > 0) {
+      window.logging?.warn?.('spaces', 'batch intake failures', { failed: summary.failed });
+    }
+    if (summary.added > 0) void loadItems();
+  };
+
+  const addOne = async (item: IntakeItem, title: string, description: string): Promise<void> => {
+    const result = await createAssetFromUploadFile(item.file, {
+      spaceId,
+      title: title.trim().length > 0 ? title.trim() : item.suggestedTitle,
+      creatorId,
+      creatorName,
+      knownHashes: known,
+    });
+    if (result.ok === false) {
+      if (result.duplicate !== undefined) summary.duplicates += 1;
+      else summary.failed.push(`${item.relativePath}: ${result.message}`);
+      return;
+    }
+    known.set(result.contentSha256, title || item.suggestedTitle);
+    summary.added += 1;
+    if (description.trim().length > 0) {
+      const bridge = window.lite?.spaces;
+      try {
+        await bridge?.items?.update?.(result.enrich.id, { description: description.trim() });
+      } catch {
+        /* description is best-effort — the asset itself landed */
+      }
+    }
+  };
+
+  const render = (): void => {
+    panel.replaceChildren();
+    const item = queue[index];
+    if (item === undefined) {
+      finish();
+      return;
+    }
+
+    const head = document.createElement('div');
+    head.className = 'spaces-member-picker-head';
+    const heading = document.createElement('span');
+    heading.textContent = `Add to space · ${index + 1} of ${queue.length}`;
+    head.appendChild(heading);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'spaces-member-picker-close';
+    close.textContent = '×';
+    close.setAttribute('aria-label', 'Stop adding');
+    close.addEventListener('click', finish);
+    head.appendChild(close);
+    panel.appendChild(head);
+
+    const fileLine = document.createElement('div');
+    fileLine.className = 'spaces-intake-file';
+    fileLine.textContent = `${item.relativePath} · ${formatBytes(item.file.size)}`;
+    panel.appendChild(fileLine);
+
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.className = 'spaces-new-asset-input';
+    titleInput.value = item.suggestedTitle;
+    titleInput.setAttribute('aria-label', 'Asset title');
+    panel.appendChild(titleInput);
+
+    const desc = document.createElement('textarea');
+    desc.className = 'spaces-new-asset-input spaces-intake-desc';
+    desc.placeholder = 'Description (optional)';
+    desc.rows = 2;
+    panel.appendChild(desc);
+
+    const status = document.createElement('div');
+    status.className = 'spaces-intake-status';
+    panel.appendChild(status);
+
+    const row = document.createElement('div');
+    row.className = 'spaces-intake-actions';
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'spaces-items-new';
+    addBtn.textContent = 'Add';
+    const skipBtn = document.createElement('button');
+    skipBtn.type = 'button';
+    skipBtn.className = 'spaces-intake-skip';
+    skipBtn.textContent = 'Skip';
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'spaces-intake-all';
+    allBtn.textContent = `Add all remaining (${queue.length - index})`;
+
+    const lock = (locked: boolean): void => {
+      addBtn.disabled = locked;
+      skipBtn.disabled = locked;
+      allBtn.disabled = locked;
+    };
+
+    addBtn.addEventListener('click', () => {
+      lock(true);
+      status.textContent = 'Adding…';
+      void addOne(item, titleInput.value, desc.value).then(() => {
+        index += 1;
+        render();
+      });
+    });
+    skipBtn.addEventListener('click', () => {
+      summary.skipped += 1;
+      index += 1;
+      render();
+    });
+    allBtn.addEventListener('click', () => {
+      lock(true);
+      void (async () => {
+        await addOne(item, titleInput.value, desc.value);
+        for (let i = index + 1; i < queue.length; i++) {
+          const next = queue[i]!;
+          status.textContent = `Adding ${i - index + 1} of ${queue.length - index}… (${next.suggestedTitle})`;
+          await addOne(next, next.suggestedTitle, '');
+        }
+        index = queue.length;
+        render();
+      })();
+    });
+
+    row.appendChild(addBtn);
+    row.appendChild(skipBtn);
+    row.appendChild(allBtn);
+    panel.appendChild(row);
+
+    titleInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') addBtn.click();
+    });
+    titleInput.focus();
+    titleInput.select();
+  };
+
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) finish();
+  });
+  render();
+}
+
+/** Route a drop: one plain file keeps the classic dialog; anything more
+ *  (multi-file, folder, zip) opens the one-by-one intake wizard. */
+async function routeDroppedFiles(dt: DataTransfer): Promise<void> {
+  const collected = await collectDroppedFiles(dt);
+  if (collected.length === 0) return;
+  const expanded = await expandZips(collected);
+  const plan = planIntake(expanded);
+  if (plan.length === 0) {
+    showToast('Nothing usable in that drop (system files are skipped).');
+    return;
+  }
+  const spaceId =
+    state.activeScopeId === HOME_SCOPE_ID || state.activeScopeId === UNCATEGORIZED_SPACE_ID
+      ? ''
+      : state.activeScopeId;
+  const single =
+    collected.length === 1 && plan.length === 1 && plan[0]!.file === collected[0]!.file;
+  if (single) {
+    openNewAssetDialog(plan[0]!.file);
+    return;
+  }
+  openBatchIntakeWizard(plan, spaceId);
+}
+
+/**
+ * Window-level drop guard (2026-08-20: "something weird is happening
+ * when I drag into the create asset modal"). Electron's DEFAULT for an
+ * unhandled file drop is to NAVIGATE the window to the dropped file —
+ * so any drop that missed a wired dropzone (the modal backdrop, the
+ * header, the sidebar) replaced the Spaces window with a file:// view.
+ * preventDefault at the window level kills the navigation everywhere;
+ * wired dropzones still act because their handlers run first.
+ */
+function wireGlobalDropGuard(): void {
+  window.addEventListener('dragover', (ev) => {
+    ev.preventDefault();
+  });
+  window.addEventListener('drop', (ev) => {
+    ev.preventDefault();
+  });
+}
+
 function wireDragDropAssetUpload(): void {
   const region = document.getElementById('spaces-items-region');
   if (region === null) return;
@@ -17873,9 +18205,8 @@ function wireDragDropAssetUpload(): void {
     ev.preventDefault();
     dragDepth = 0;
     region.classList.remove('is-drag-target');
-    const file = ev.dataTransfer?.files?.[0] ?? null;
-    if (file === null) return;
-    openNewAssetDialog(file);
+    if (ev.dataTransfer === null) return;
+    void routeDroppedFiles(ev.dataTransfer);
   });
 }
 

@@ -193,7 +193,9 @@ describe('review-fix wiring invariants (source-level)', () => {
   it('the upload path only converts transcripts for dialogue-shaped extensions', () => {
     // The bug: a YAML/JSON file with repeated `key: value` lines could
     // detect as a transcript and be irreversibly rewritten on upload.
-    const body = bodyOf('async function submitNewAsset', 12_000);
+    // 2026-08-20: the upload logic moved to createAssetFromUploadFile —
+    // the ONE pipeline both the dialog and the batch intake drive.
+    const body = bodyOf('async function createAssetFromUploadFile', 12_000);
     expect(body).toMatch(/transcriptEligible/);
     expect(body).toMatch(/vtt\|srt\|txt\|text\|md\|markdown/);
   });
