@@ -124,3 +124,46 @@ describe('main-window remote-home wiring (source-level)', () => {
     expect(read('preload-lite.ts')).toContain('homeUrl: {');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fresh-install sign-in wall (2026-08-30 audit). A virgin profile's Home
+// view loads the gsx-expert IDW, which bounces to
+// idw.edison.onereach.ai/login — and that view sat VISIBLE over the
+// boot-chat welcome, so a new user's first screen was the IDW's own SSO
+// form (which signs into the web view's cookie jar, not the app). The
+// rule: a signed-out app hides a Home view parked on a OneReach login
+// page so the app's real sign-in wall shows through.
+// ---------------------------------------------------------------------------
+import {
+  looksLikeOneReachLoginUrl,
+  shouldShowRemoteHome,
+} from '../../main-window/home-url-store.js';
+
+describe('looksLikeOneReachLoginUrl', () => {
+  it('matches the auth host and /login paths on any env host — including the IDW runtime', () => {
+    expect(looksLikeOneReachLoginUrl('https://auth.edison.onereach.ai/login?x=1', 'edison')).toBe(true);
+    expect(looksLikeOneReachLoginUrl('https://studio.edison.onereach.ai/login', 'edison')).toBe(true);
+    // The fresh-install case that was missed: the IDW runtime's own interstitial.
+    expect(looksLikeOneReachLoginUrl('https://idw.edison.onereach.ai/login?idwId=gsx-expert', 'edison')).toBe(true);
+  });
+
+  it('does not match signed-in IDW pages, other envs, or junk', () => {
+    expect(looksLikeOneReachLoginUrl('https://idw.edison.onereach.ai/gsx-expert', 'edison')).toBe(false);
+    expect(looksLikeOneReachLoginUrl('https://idw.staging.onereach.ai/login', 'edison')).toBe(false);
+    expect(looksLikeOneReachLoginUrl('https://evil.example.com/login', 'edison')).toBe(false);
+    expect(looksLikeOneReachLoginUrl('', 'edison')).toBe(false);
+    expect(looksLikeOneReachLoginUrl('https://idw.edison.onereach.ai/login', null)).toBe(false);
+  });
+});
+
+describe('shouldShowRemoteHome', () => {
+  const login = 'https://idw.edison.onereach.ai/login?idwId=gsx-expert';
+  it('hides a signed-out login interstitial so the boot-chat wall shows', () => {
+    expect(shouldShowRemoteHome(login, 'edison', false)).toBe(false);
+  });
+  it('shows everything else: signed-in login bounce, real IDW pages, non-OneReach', () => {
+    expect(shouldShowRemoteHome(login, 'edison', true)).toBe(true);
+    expect(shouldShowRemoteHome('https://idw.edison.onereach.ai/gsx-expert', 'edison', false)).toBe(true);
+    expect(shouldShowRemoteHome('https://example.com', null, false)).toBe(true);
+  });
+});

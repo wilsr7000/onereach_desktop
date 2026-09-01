@@ -36,7 +36,7 @@ import {
 } from 'electron';
 import type { Rectangle } from 'electron';
 import { dirname, join } from 'node:path';
-import { readHomeUrl, resolveHomeUrl } from './home-url-store.js';
+import { readHomeUrl, resolveHomeUrl , looksLikeOneReachLoginUrl, shouldShowRemoteHome } from './home-url-store.js';
 import { attachChromeParity, chromeParityUserAgent } from './browser-parity.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
@@ -355,31 +355,6 @@ async function refreshAttachedTabsForEnv(env: ReturnType<typeof getEnvironmentFo
       });
     }
   }
-}
-
-/**
- * Best-effort detector for the "this tab is stuck on a OneReach login
- * page" condition. Looks for the SSO interstitial host (`auth.<env>.…`)
- * or paths that include `/login` on a OneReach host. False negatives
- * (we miss a stuck tab) are fine — the user can refresh manually. False
- * positives (we reload a tab that's actually fine) are also tolerable
- * given this only fires on a session change.
- */
-function looksLikeOneReachLoginUrl(url: string, env: ReturnType<typeof getEnvironmentForUrl>): boolean {
-  if (url.length === 0 || env === null) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return false;
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (host.startsWith(`auth.${env}.`)) return true;
-  // Some IDW flows land on `studio.<env>.onereach.ai/login`.
-  if (host === `studio.${env}.onereach.ai` && parsed.pathname.includes('/login')) {
-    return true;
-  }
-  return false;
 }
 
 /** Best-effort accessor for the tab's stored URL. */
@@ -1393,14 +1368,34 @@ function attachRemoteHome(win: BrowserWindow): void {
     }
   );
   // Symmetry: a later successful load (retry, navigation, network back)
-  // re-shows the view so a transient failure isn't sticky-blank.
-  view.webContents.on('did-finish-load', () => {
+  // re-shows the view so a transient failure isn't sticky-blank — but
+  // only when it is not a signed-out login interstitial (see
+  // shouldShowRemoteHome): those hide so the boot-chat sign-in wall
+  // stays in front. The IDW runtime is a SPA — its bounce to /login is
+  // a CLIENT-SIDE route change, so did-finish-load alone never sees the
+  // login URL (2026-08-30 audit); in-page and committed navigations must
+  // re-evaluate too.
+  const updateRemoteHomeVisibility = (): void => {
     try {
-      view.setVisible(true);
+      const liveUrl = view.webContents.getURL();
+      const env = getEnvironmentForUrl(liveUrl);
+      const hasSession = env !== null && getAuthApi().getSession(env) !== null;
+      const show = shouldShowRemoteHome(liveUrl, env, hasSession);
+      if (view.getVisible() !== show) {
+        view.setVisible(show);
+        getLoggingApi().info('main-window', show
+          ? 'remote home visible again (left the login interstitial)'
+          : 'remote home on signed-out login page; revealing boot-chat wall', {
+          liveUrl: liveUrl.slice(0, 90),
+        });
+      }
     } catch {
       /* best-effort */
     }
-  });
+  };
+  view.webContents.on('did-finish-load', updateRemoteHomeVisibility);
+  view.webContents.on('did-navigate', updateRemoteHomeVisibility);
+  view.webContents.on('did-navigate-in-page', updateRemoteHomeVisibility);
   homeFeedView = view;
   win.contentView.addChildView(view);
   view.setBounds(computeContentBounds(win));

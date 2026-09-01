@@ -104,3 +104,51 @@ export function resolveHomeUrl(configured: string, accountId: string | null): st
   // account id from restructuring the URL (2026-08-07 review).
   return configured.split('{accountId}').join(encodeURIComponent(accountId ?? ''));
 }
+
+/**
+ * Best-effort detector for the "this tab is stuck on a OneReach login
+ * page" condition. Looks for the SSO interstitial host (`auth.<env>.…`)
+ * or paths that include `/login` on a OneReach host. False negatives
+ * (we miss a stuck tab) are fine — the user can refresh manually. False
+ * positives (we reload a tab that's actually fine) are also tolerable
+ * given this only fires on a session change.
+ */
+export function looksLikeOneReachLoginUrl(url: string, env: string | null): boolean {
+  if (url.length === 0 || env === null) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (host.startsWith(`auth.${env}.`)) return true;
+  // Any OneReach host of this env sitting on a /login path counts:
+  // studio (`studio.<env>.onereach.ai/login`) and the IDW runtime's own
+  // interstitial (`idw.<env>.onereach.ai/login?idwId=...` — missed until
+  // the 2026-08-30 fresh-install audit, which left stuck tabs and the
+  // Home view unreloaded after sign-in). False positives stay tolerable
+  // per the contract above.
+  if (host.endsWith(`.${env}.onereach.ai`) && parsed.pathname.includes('/login')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Visibility rule for the remote Home view (pure; unit-pinned).
+ *
+ * A signed-out app must keep the boot-chat sign-in wall in front: the
+ * IDW's own SSO page would sign into the web view's cookie jar, not
+ * the app — no identity gate, no IDW list, no Spaces — so a fresh
+ * install would show a confusing second login and bury the app's real
+ * one (2026-08-30 fresh-install audit). Once the app session exists,
+ * the session-changed reload re-injects cookies and the IDW shows.
+ */
+export function shouldShowRemoteHome(
+  liveUrl: string,
+  env: string | null,
+  hasAppSession: boolean
+): boolean {
+  return !(looksLikeOneReachLoginUrl(liveUrl, env) && !hasAppSession);
+}
