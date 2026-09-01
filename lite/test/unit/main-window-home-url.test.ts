@@ -38,9 +38,9 @@ describe('home-url store', () => {
     const state = await readHomeUrl();
     expect(state.isDefault).toBe(true);
     expect(state.url).toBe(DEFAULT_HOME_URL);
-    expect(DEFAULT_HOME_URL).toBe('https://idw.edison.onereach.ai/gsx-expert');
-    // The original request for this URL asked for the GSX account id
-    // on the query string — the placeholder delivers it at load time.
+    expect(DEFAULT_HOME_URL).toBe(
+      'https://files.edison.api.onereach.ai/public/dd96413e-9de1-4920-b53d-00d3af691a0f/gsx-expert-ui/index.html'
+    );
     expect(validateHomeUrl(DEFAULT_HOME_URL)).toBe(DEFAULT_HOME_URL);
   });
 

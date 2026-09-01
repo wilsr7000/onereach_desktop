@@ -20,12 +20,14 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 /**
- * The default Home page (2026-08-14, fourth iteration by user request):
- * the GSX Expert IDW on Edison. No placeholder needed — the IDW reads
- * the signed-in session itself (the tab rides the auto-login
- * machinery like any IDW surface).
+ * The default Home page (2026-09-01, by user request): the hosted GSX
+ * Expert UI on Edison public files. A static hosted page (not an IDW
+ * login route), so it never bounces through the SSO interstitial; it
+ * reads the signed-in session itself. No `{accountId}` placeholder —
+ * the account is baked into the published path.
  */
-export const DEFAULT_HOME_URL = 'https://idw.edison.onereach.ai/gsx-expert';
+export const DEFAULT_HOME_URL =
+  'https://files.edison.api.onereach.ai/public/dd96413e-9de1-4920-b53d-00d3af691a0f/gsx-expert-ui/index.html';
 
 /** Overridable for tests. */
 let baseDirOverride: string | null = null;
