@@ -88,7 +88,7 @@ const SECTIONS: SectionDescriptor[] = [
   },
   {
     id: 'oagi',
-    title: 'OAGI',
+    title: 'NEON - OAGI',
     icon: ICON_NEON,
     mount: mountNeon,
   },
