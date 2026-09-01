@@ -31,6 +31,16 @@ export const JOURNEY_MAP_BUILDER_URL =
   'https://files.edison.api.onereach.ai/public/' +
   '35254342-4a2e-475b-aec1-18547e517e29/journey-map-builder/index.html';
 
+/**
+ * Prefix the will-navigate guard trusts: the Builder's own deployment
+ * directory. Anything outside it opens in the OS browser instead of
+ * navigating a window that carries the `journeySpaces` preload bridge.
+ */
+export const JOURNEY_MAP_BUILDER_ORIGIN = JOURNEY_MAP_BUILDER_URL.slice(
+  0,
+  JOURNEY_MAP_BUILDER_URL.lastIndexOf('/') + 1
+);
+
 /** Its own cookie jar — never the auth partition, never a tab's. */
 const PARTITION = 'persist:lite-journey-map';
 
@@ -114,6 +124,24 @@ export function openJourneyMapWindow(opts?: { itemId?: string }): void {
       /* malformed URL — drop */
     }
     return { action: 'deny' };
+  });
+
+  // The preload bridge (`window.journeySpaces`) rides EVERY page this
+  // window navigates to — so in-window navigation must stay on the
+  // Builder's own deployment. Without this guard a single in-window
+  // link would hand read/write on the signed-in user's Spaces to an
+  // arbitrary site (2026-08-31 visibility audit). Same policy as
+  // popups: foreign http(s) destinations open in the OS browser.
+  win.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(JOURNEY_MAP_BUILDER_ORIGIN)) return;
+    event.preventDefault();
+    try {
+      const scheme = new URL(url).protocol;
+      if (scheme === 'https:' || scheme === 'http:') void shell.openExternal(url);
+    } catch {
+      /* malformed URL — drop */
+    }
+    getLoggingApi().event('journey-map.navigation-blocked', { url: url.slice(0, 120) });
   });
 
   win.on('closed', () => {

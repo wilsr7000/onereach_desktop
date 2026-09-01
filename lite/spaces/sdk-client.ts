@@ -826,7 +826,15 @@ export const CYPHER = {
            c.message AS kind,
            toString(c.timestamp) AS timestamp,
            c.spaceId AS spaceId,
-           coalesce(s.name, c.spaceId) AS spaceName
+           // Name the commit's space only when the viewer can SEE it —
+           // an asset shared into an open space must not narrate the
+           // names of its hidden homes (2026-08-31 audit; same rule as
+           // OTHER_SPACE_VISIBLE on the Home feed).
+           coalesce(
+             CASE WHEN s IS NOT NULL AND s.deletedAt IS NULL AND ${SPACE_VISIBLE}
+                  THEN s.name END,
+             c.spaceId
+           ) AS spaceName
     ORDER BY c.timestamp DESC
     LIMIT toInteger($limit)
   `,
@@ -1128,7 +1136,24 @@ export const CYPHER = {
       AND ($spaceId IS NULL OR c.spaceId = $spaceId)
     OPTIONAL MATCH (c)-[:IN_SPACE]->(s:Space)
     WITH c, s
-    WHERE s IS NULL OR (s.deletedAt IS NULL AND ${SPACE_VISIBLE})
+    // Fail closed (2026-08-31 stranger audit): a commit with NO
+    // IN_SPACE edge used to pass this filter for EVERY viewer, leaking
+    // author emails + activity kinds account-wide. An edgeless commit
+    // is now visible only to its own author, or to a viewer who can
+    // see a space it belongs to (by spaceId or via TOUCHED contents).
+    WHERE (s IS NOT NULL AND s.deletedAt IS NULL AND ${SPACE_VISIBLE})
+       OR (s IS NULL AND (
+            ($viewerId <> '' AND toLower(coalesce(c.author, '')) = $viewerId)
+            OR EXISTS {
+              MATCH (other:Space)
+              WHERE other.deletedAt IS NULL
+                AND ${OTHER_SPACE_VISIBLE}
+                AND (
+                  other.id = c.spaceId
+                  OR EXISTS { MATCH (c)-[:TOUCHED]->()-[:BELONGS_TO]->(other) }
+                )
+            }
+          ))
     WITH c, s
     ORDER BY c.timestamp DESC
     LIMIT toInteger($limit)

@@ -25,11 +25,15 @@ const h = vi.hoisted(() => {
   class FakeWebContents {
     sent: Array<{ channel: string; payload: unknown }> = [];
     openHandler: OpenHandler | null = null;
+    listeners: Record<string, (...args: unknown[]) => void> = {};
     send(channel: string, payload: unknown): void {
       this.sent.push({ channel, payload });
     }
     setWindowOpenHandler(fn: OpenHandler): void {
       this.openHandler = fn;
+    }
+    on(event: string, fn: (...args: unknown[]) => void): void {
+      this.listeners[event] = fn;
     }
   }
 
@@ -329,5 +333,45 @@ describe('the hosted page cannot walk this window somewhere else', () => {
       mod.closeJourneyMapWindow();
     }
     expect(h.state.opened).toEqual([]);
+  });
+});
+
+// 2026-08-31 visibility audit: every page this window hosts carries the
+// `journeySpaces` preload bridge (read/write on the signed-in user's
+// Spaces), so IN-WINDOW navigation must stay on the Builder deployment.
+// One in-window link to a foreign site would otherwise hand the bridge
+// to that site's code.
+describe('will-navigate keeps the bridge on the Builder deployment', () => {
+  const navigate = (url: string): { prevented: boolean } => {
+    mod.openJourneyMapWindow();
+    const listener = only().webContents.listeners['will-navigate'];
+    if (listener === undefined) throw new Error('no will-navigate guard installed');
+    let prevented = false;
+    listener({ preventDefault: () => { prevented = true; } }, url);
+    return { prevented };
+  };
+
+  it('allows navigation within the Builder deployment directory', () => {
+    const { prevented } = navigate(
+      mod.JOURNEY_MAP_BUILDER_ORIGIN + 'index.html?scenario=x'
+    );
+    expect(prevented).toBe(false);
+    mod.closeJourneyMapWindow();
+  });
+
+  it('blocks foreign http(s) destinations and routes them to the OS browser', () => {
+    const before = h.state.opened.length;
+    const { prevented } = navigate('https://evil.example.com/steal-bridge');
+    expect(prevented).toBe(true);
+    expect(h.state.opened.slice(before)).toEqual(['https://evil.example.com/steal-bridge']);
+    mod.closeJourneyMapWindow();
+  });
+
+  it('blocks non-web schemes without opening anything', () => {
+    const before = h.state.opened.length;
+    const { prevented } = navigate('file:///etc/passwd');
+    expect(prevented).toBe(true);
+    expect(h.state.opened.slice(before)).toEqual([]);
+    mod.closeJourneyMapWindow();
   });
 });

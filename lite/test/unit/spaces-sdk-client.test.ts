@@ -2068,9 +2068,13 @@ describe('CYPHER source strings — Phase 3c (per-asset activity)', () => {
     expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.author AS author/);
     expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.message AS kind/);
     expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/toString\(c\.timestamp\) AS timestamp/);
+    // 2026-08-31 audit: the name projection is visibility-guarded —
+    // a commit only NAMES its space when the viewer can see it, else
+    // falls back to the opaque spaceId.
     expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(
-      /coalesce\(s\.name, c\.spaceId\) AS spaceName/
+      /CASE WHEN s IS NOT NULL AND s\.deletedAt IS NULL AND/
     );
+    expect(CYPHER.ITEM_RECENT_COMMITS).toMatch(/c\.spaceId\s*\)\s*AS spaceName/);
   });
 
   it('ITEM_RECENT_COMMITS resolves spaceName via OPTIONAL MATCH on :IN_SPACE', () => {
@@ -3939,10 +3943,16 @@ describe('ADR-060 addendum: HOME_RECENT_EVENTS space fallback', () => {
     // OTHER_SPACE_VISIBLE binds alias `other` — the resolved space
     // must pass the same gate as otherSpaces chips.
     const q = CYPHER.HOME_RECENT_EVENTS;
-    // ADR-065: belonging-only gate for the `other` alias.
-    const gate = q.indexOf("coalesce(other.createdBy, '') = $viewerId");
-    expect(gate).toBeGreaterThan(-1);
-    expect(gate).toBeGreaterThan(q.indexOf('OPTIONAL MATCH (other:Space)'));
+    // ADR-065: belonging-only gate for the `other` alias. Since the
+    // 2026-08-31 fail-closed filter, OTHER_SPACE_VISIBLE appears TWICE
+    // (edgeless-commit gate before LIMIT, chips fallback after) — anchor
+    // on the post-LIMIT occurrence.
+    const afterLimit = q.indexOf('LIMIT toInteger($limit)');
+    expect(afterLimit).toBeGreaterThan(-1);
+    const fallbackMatch = q.indexOf('OPTIONAL MATCH (other:Space)', afterLimit);
+    expect(fallbackMatch).toBeGreaterThan(-1);
+    const gate = q.indexOf("coalesce(other.createdBy, '') = $viewerId", fallbackMatch);
+    expect(gate).toBeGreaterThan(fallbackMatch);
   });
 });
 

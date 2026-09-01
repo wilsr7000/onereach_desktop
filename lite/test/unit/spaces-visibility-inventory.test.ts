@@ -147,3 +147,62 @@ describe('every Cypher read is visibility-gated or justified', () => {
     expect((li as Query).body.includes('OTHER_SPACE_VISIBLE')).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Composition pins (2026-08-31 stranger audit). The inventory above can
+// only prove a predicate is PRESENT — it cannot see a predicate composed
+// so it fails open. A live three-viewer probe (robb / stranger / anon)
+// found HOME_RECENT_EVENTS leaking edgeless commits (author emails,
+// activity kinds) to viewers with access to nothing: `s IS NULL OR
+// (...visible)` let every commit with no IN_SPACE edge through. These
+// pins hold the fail-closed shapes.
+// ---------------------------------------------------------------------------
+describe('event-feed visibility composition', () => {
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'spaces', 'sdk-client.ts'),
+    'utf8'
+  );
+
+  it('HOME_RECENT_EVENTS: an edgeless commit is author-only-or-provably-visible, never public', () => {
+    const q = src.slice(src.indexOf('HOME_RECENT_EVENTS: `'));
+    const body = q.slice(0, q.indexOf('`,'));
+    // The fail-open filter must never come back.
+    expect(body).not.toMatch(/WHERE s IS NULL OR/);
+    // The fail-closed branch: author match, gated on a non-empty viewer.
+    expect(body).toContain("($viewerId <> '' AND toLower(coalesce(c.author, '')) = $viewerId)");
+    // ...or membership in a visible space reached by id or TOUCHED contents.
+    expect(body).toContain('[:TOUCHED]->()-[:BELONGS_TO]->(other)');
+  });
+
+  it('ITEM_RECENT_COMMITS: a commit never NAMES a space the viewer cannot see', () => {
+    const q = src.slice(src.indexOf('ITEM_RECENT_COMMITS: `'));
+    const body = q.slice(0, q.indexOf('`,'));
+    expect(body).not.toContain('coalesce(s.name, c.spaceId) AS spaceName');
+    expect(body).toMatch(/CASE WHEN s IS NOT NULL AND s\.deletedAt IS NULL AND/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The journey-map window carries the `journeySpaces` preload bridge on
+// every page it hosts, so in-window navigation must never leave the
+// Builder's own deployment (2026-08-31 audit: without the guard, one
+// in-window link hands the signed-in user's Spaces read/write bridge to
+// an arbitrary site).
+// ---------------------------------------------------------------------------
+describe('journey-map window bridge containment', () => {
+  const winSrc = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'journey-map-window.ts'),
+    'utf8'
+  );
+
+  it('a will-navigate guard pins the window to the Builder deployment', () => {
+    expect(winSrc).toContain("webContents.on('will-navigate'");
+    expect(winSrc).toContain('JOURNEY_MAP_BUILDER_ORIGIN');
+    expect(winSrc).toContain('event.preventDefault()');
+  });
+
+  it('popups stay denied (OS browser only)', () => {
+    expect(winSrc).toContain('setWindowOpenHandler');
+    expect(winSrc).toContain("return { action: 'deny' }");
+  });
+});
