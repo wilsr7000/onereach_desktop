@@ -1801,3 +1801,46 @@ the built server, discovers the catalog, calls a forwarded tool, and
 confirms the mutation tools are absent). Live-probed against the running
 app: 26 tools discovered; app_health / spaces_status / gateway_health
 all answered through one MCP connection.
+
+## ADR-081: NEON bridge — web apps read the Digital Twin over allowlisted loopback
+
+**Date:** 2026-08-31  ·  **Status:** shipped
+
+**Context.** Request: "make sure any web app can access [the org Digital
+Twin] from the APIs or MCP." The MCP half already existed — `spaces-mcp`
+exposes the viewer-gated NEON reads to MCP clients. The gap was an HTTP
+surface for the app's own hosted web apps (journey-map builder, WISER
+riff, IDW pages), which otherwise embed the cloud neon2 URL directly.
+
+**Decision.** A small read-only HTTP bridge in Lite's main process
+(`lite/neon-bridge/`, port 47294, loopback-only) exposes the gated read
+OPERATIONS — list spaces, list items, get item, search — the same
+surface as spaces-mcp. Two chosen constraints (2026-08-31):
+
+- **Read-only, viewer-scoped.** Only GET routes exist (any other method
+  is 405); there is NO raw-Cypher route, because arbitrary Cypher can't
+  be viewer-scoped. Every read forwards to the same `getSpacesApi()` the
+  app uses, so ADR-051 visibility + ADR-065 belonging apply for free —
+  a web app sees exactly what the signed-in user sees.
+- **Origin allowlist, not `*`.** The other local servers send
+  `Access-Control-Allow-Origin: *`, which would let ANY website open in
+  the browser read the org graph via localhost. This bridge echoes CORS
+  ONLY for the app's own hosted origins (files.edison.api.onereach.ai,
+  idw.edison.onereach.ai) plus localhost dev; every other browser origin
+  gets 403 and no `Access-Control-Allow-Origin`. A non-browser caller
+  (no Origin) is allowed — the bind is loopback-only.
+
+The handler is separated from the listener for unit testing; the bind
+is fire-and-forget at boot (a busy port tries two fallbacks; failure
+logs and the app boots normally — the bridge is an accelerant, never a
+boot dependency).
+
+**Invariant.** No mutation is reachable (GET-only, 405 otherwise). No
+disallowed browser origin ever receives data OR a CORS header. Reads
+are always viewer-scoped (they ride the gated SpacesApi).
+
+**Verified.** 10 unit tests (origin fence, read-only 405s, route→reads
+forwarding, CORS echo/refusal) + 4 live loopback tests. Live-probed in
+the running app on 47294: allowed origin → 200 + echoed CORS,
+evil.example.com → 403 with no CORS header, POST → 405, and
+/neon/spaces → 0 on a signed-out profile (viewer scoping, fail-closed).

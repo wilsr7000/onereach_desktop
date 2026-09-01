@@ -46,6 +46,7 @@ import { registerMemoryIngestIpc } from './memory-ingest/ipc.js';
 import { initHelp, type HelpHandle } from './help/main.js';
 import { initTray, type TrayHandle } from './tray/main.js';
 import { initSpaces, type SpacesHandle } from './spaces/main.js';
+import { initNeonBridge } from './neon-bridge/main.js';
 import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
 import { initTelemetry, type TelemetryHandle } from './telemetry/main.js';
@@ -892,6 +893,16 @@ app
         error: (err as Error).message,
       });
     }
+
+    // NEON bridge (ADR-081): read-only, viewer-scoped, origin-allowlisted
+    // HTTP surface so the app's own web apps read the org Digital Twin
+    // over loopback instead of embedding the cloud endpoint. Fire-and-
+    // forget — a bind failure logs and the app boots normally.
+    void initNeonBridge().catch((err: unknown) => {
+      getLoggingApi().error('neon-bridge', 'initNeonBridge threw', {
+        error: (err as Error).message,
+      });
+    });
 
     // Initialize API Reference window (ADR-035). Renders bundled
     // module documentation harvested from lite/<module>/api.ts +
