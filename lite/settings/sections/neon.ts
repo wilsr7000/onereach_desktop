@@ -125,17 +125,18 @@ function renderForm(container: HTMLElement, status: LiteNeonStatus): void {
       </div>
 
       <div class="neon-explainer">
-        <div class="neon-explainer-title">What is OAGI?</div>
+        <div class="neon-explainer-title">What is NEON - OAGI?</div>
         <p class="neon-explainer-body">
-          OAGI is your <strong>Organization System Twin</strong> -- the data fabric
-          that holds your organization's shared knowledge, content, and
-          automation state. Once connected, OAGI is the source of truth for
+          This is the path to your organization's <strong>Digital Twin</strong> --
+          the living data fabric (NEON) that holds your organization's shared
+          knowledge, content, and automation state. Connecting here links this
+          app to that Digital Twin, so it becomes the source of truth for
           everything your team shares across devices and apps.
         </p>
         <p class="neon-explainer-body">
           Ask your administrator for the connection details below. They come
-          from your OAGI configuration profile and look the same across every
-          device that connects to the same organization.
+          from your organization's OAGI configuration profile and look the same
+          across every device that connects to the same Digital Twin.
         </p>
       </div>
 

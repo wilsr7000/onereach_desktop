@@ -298,6 +298,11 @@ export class KVCredentialsProvider implements CredentialsProvider {
           ? partial.database
           : current.database,
     };
+    // ADR-070: /omnidata/neon is dead — normalize on WRITE too, not just
+    // on read, so a `/neon` value is never PERSISTED. Any save (even of an
+    // unrelated field) heals a stored legacy endpoint to /neon2, and the
+    // default is /neon2 everywhere (2026-08-31 user report).
+    next.endpoint = normalizeNeonEndpoint(next.endpoint);
     await this.kvApi.set(this.collection, this.key, next);
     // Invalidate AGAIN post-write: the merge-read above legitimately
     // re-cached the PRE-write resolution; the next read must see KV.

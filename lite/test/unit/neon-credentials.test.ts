@@ -199,6 +199,40 @@ describe('KVCredentialsProvider', () => {
     });
   });
 
+  it('write() heals a legacy /omnidata/neon endpoint to /neon2 (ADR-070)', async () => {
+    const fake = new FakeKV();
+    _setKVApiForTesting(fake);
+    const p = new KVCredentialsProvider();
+    await p.write({
+      endpoint: 'https://em.edison.api.onereach.ai/http/acct/omnidata/neon',
+      uri: 'u',
+      password: 'p',
+    });
+    const stored = (await fake.get('lite-neon-config', 'default')) as { endpoint: string };
+    expect(stored.endpoint).toBe(
+      'https://em.edison.api.onereach.ai/http/acct/omnidata/neon2'
+    );
+  });
+
+  it('write() heals a stored /neon even when saving an unrelated field', async () => {
+    const fake = new FakeKV();
+    _setKVApiForTesting(fake);
+    // Simulate a pre-migration persisted record.
+    await fake.set('lite-neon-config', 'default', {
+      endpoint: 'https://em.edison.api.onereach.ai/http/acct/omnidata/neon',
+      uri: 'u',
+      user: 'neo4j',
+      password: 'p',
+      database: 'neo4j',
+    });
+    const p = new KVCredentialsProvider();
+    await p.write({ password: 'rotated' });
+    const stored = (await fake.get('lite-neon-config', 'default')) as { endpoint: string };
+    expect(stored.endpoint).toBe(
+      'https://em.edison.api.onereach.ai/http/acct/omnidata/neon2'
+    );
+  });
+
   it('readPublic() reports hasPassword without the value', async () => {
     const fake = new FakeKV();
     _setKVApiForTesting(fake);
