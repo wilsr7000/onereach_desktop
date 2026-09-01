@@ -45,14 +45,18 @@ describe('built local-api-mcp over stdio', () => {
     // Guard: the server bundle must be built (npm run lite:build).
     expect(existsSync(BUILT), `built server missing at ${BUILT} — run lite:build`).toBe(true);
 
+    // Strip undefined values: StdioClientTransport's env is
+    // Record<string, string>, but process.env is string | undefined.
+    const cleanEnv: Record<string, string> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined) cleanEnv[k] = v;
+    }
+    cleanEnv.LOCAL_API_SPACES_PORT = String(spacesPort);
+    cleanEnv.LOCAL_API_VIEWER_ID = 'robb@onereach.com';
     const transport = new StdioClientTransport({
       command: 'node',
       args: [BUILT],
-      env: {
-        ...process.env,
-        LOCAL_API_SPACES_PORT: String(spacesPort),
-        LOCAL_API_VIEWER_ID: 'robb@onereach.com',
-      },
+      env: cleanEnv,
     });
     const client = new Client({ name: 'test-client', version: '1.0.0' }, { capabilities: {} });
     await client.connect(transport);
