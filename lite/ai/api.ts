@@ -29,6 +29,12 @@ import type {
   OkfConversionResult,
 } from './types.js';
 import type { AiChatInput, AiChatResult } from './chat.js';
+// Type-only (erased at runtime): keeps client.js/config.js out of this
+// module's static import graph — the Node conformance test imports api.ts
+// without the heavy Anthropic SDK. The values are dynamically imported in
+// testAiKey.
+import type { ClaudeMessageCreator as ClaudeMessageCreatorType } from './client.js';
+import type { ClaudeConfig as ClaudeConfigType } from './config.js';
 
 // Re-export the public types + error surface consumers need.
 export type {
@@ -219,6 +225,59 @@ export async function hasAiKey(): Promise<boolean> {
 export async function deleteAiKey(): Promise<void> {
   await getKeyStore().deleteKey();
   _keychainKey = null;
+}
+
+/**
+ * Validate a CANDIDATE Anthropic key against the live API without
+ * persisting it — the Settings "Test" button (2026-08-31). Makes the
+ * smallest possible authenticated call (one-token ping) and maps any
+ * failure to the standard `AiError` surface (AUTH_REJECTED for a bad
+ * key, NETWORK when offline, RATE_LIMITED, PROVIDER_ERROR). Returns the
+ * model it validated against on success. The key never touches the
+ * keychain, a log, or the renderer.
+ */
+export async function testAiKey(
+  key: string,
+  deps?: {
+    /** Injectable message-creator factory (tests avoid a live SDK call). */
+    makeCreator?: (config: ClaudeConfigType) => ClaudeMessageCreatorType;
+    /** Injectable error mapper (defaults to the real client mapper). */
+    mapError?: (err: unknown) => AiError;
+  }
+): Promise<{ ok: true; model: string }> {
+  const trimmed = key.trim();
+  if (trimmed.length === 0) {
+    throw new AiError({
+      code: AI_ERROR_CODES.INVALID_INPUT,
+      message: 'Paste an Anthropic API key to test.',
+      context: { op: 'key-test' },
+      remediation: 'The key starts with `sk-ant-`.',
+    });
+  }
+  // Lazy imports: keep this file's import surface electron-free and the
+  // heavy SDK out of the Node conformance test's path.
+  const [clientMod, { DEFAULT_CLAUDE_MODEL, DEFAULT_ANTHROPIC_BASE_URL }] =
+    await Promise.all([import('./client.js'), import('./config.js')]);
+  const makeCreator = deps?.makeCreator ?? clientMod.makeClaudeMessageCreator;
+  const mapError = deps?.mapError ?? clientMod.mapClaudeError;
+  const model = DEFAULT_CLAUDE_MODEL;
+  const createMessage = makeCreator({
+    provider: 'claude',
+    apiKey: trimmed,
+    model,
+    baseUrl: DEFAULT_ANTHROPIC_BASE_URL,
+  });
+  try {
+    await createMessage({
+      model,
+      max_tokens: 1,
+      system: 'Reply with ok.',
+      messages: [{ role: 'user', content: 'ping' }],
+    });
+  } catch (err) {
+    throw mapError(err);
+  }
+  return { ok: true, model };
 }
 
 function buildDefaultApi(): AiApi {

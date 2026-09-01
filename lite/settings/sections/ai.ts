@@ -95,10 +95,10 @@ function renderForm(container: HTMLElement, configured: boolean): void {
       </div>
 
       <div class="neon-field">
-        <label for="ai-key">
-          API key
+        <div class="neon-field-label-row">
+          <label for="ai-key">API key</label>
           <button type="button" id="ai-key-toggle" class="neon-link-button">show</button>
-        </label>
+        </div>
         <input
           type="password"
           id="ai-key"
@@ -115,6 +115,7 @@ function renderForm(container: HTMLElement, configured: boolean): void {
 
       <div class="neon-actions">
         <button type="button" id="ai-save" class="btn-primary">Save key</button>
+        <button type="button" id="ai-test" class="btn-secondary">Test</button>
         <button type="button" id="ai-clear" class="btn-secondary"${
           configured ? '' : ' disabled'
         }>Clear key</button>
@@ -135,6 +136,7 @@ function wireForm(container: HTMLElement): void {
   const keyInput = el<HTMLInputElement>(container, 'ai-key');
   const toggle = el<HTMLButtonElement>(container, 'ai-key-toggle');
   const save = el<HTMLButtonElement>(container, 'ai-save');
+  const test = el<HTMLButtonElement>(container, 'ai-test');
   const clear = el<HTMLButtonElement>(container, 'ai-clear');
   const banner = el<HTMLElement>(container, 'ai-banner');
 
@@ -172,6 +174,37 @@ function wireForm(container: HTMLElement): void {
       } finally {
         save.disabled = false;
         save.textContent = 'Save key';
+      }
+    })();
+  });
+
+  test.addEventListener('click', () => {
+    void (async () => {
+      const key = keyInput.value.trim();
+      if (key.length === 0) {
+        showBanner(banner, 'Paste a key to test it.', 'warn');
+        return;
+      }
+      test.disabled = true;
+      const original = test.textContent;
+      test.textContent = 'Testing…';
+      try {
+        const res = await aiBridge().testKey(key);
+        if (res.ok) {
+          showBanner(
+            banner,
+            `Key works — authenticated with Claude (${res.value.model}).`,
+            'ok'
+          );
+        } else {
+          showBanner(banner, `Key test failed: ${res.error.message}`, 'warn');
+        }
+      } catch (err) {
+        window.logging?.error?.('settings', 'AI key test failed', { error: (err as Error).message });
+        showBanner(banner, (err as Error).message, 'warn');
+      } finally {
+        test.disabled = false;
+        test.textContent = original;
       }
     })();
   });

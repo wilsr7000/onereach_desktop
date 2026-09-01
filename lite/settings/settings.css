@@ -948,13 +948,28 @@ body {
   margin-top: 4px;
 }
 
+/* Row that pairs a field label with a right-aligned inline action
+   (e.g. the API-key "show" toggle). The button lives OUTSIDE the
+   <label> so a label click never competes with the button's own
+   handler (2026-08-31: a real trackpad click that landed a pixel off
+   the tiny link hit the label instead, and "show" appeared dead). */
+.neon-field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
 .neon-link-button {
   background: none;
   border: none;
   color: #9bb9ff;
-  font-size: 10.5px;
+  font-size: 11px;
   cursor: pointer;
-  padding: 0;
+  /* A real hit target — the zero-padding link was a 4-char sliver that
+     was easy to miss on a trackpad. */
+  padding: 4px 6px;
+  margin: -4px -6px;
   font-family: inherit;
   text-decoration: underline;
 }

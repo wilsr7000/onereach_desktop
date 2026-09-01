@@ -27,6 +27,7 @@ import {
   saveAiKey,
   hasAiKey,
   deleteAiKey,
+  testAiKey,
   _resetAiApiForTesting,
   type AiStatus,
   type SpaceAssistResult,
@@ -53,6 +54,7 @@ export const AI_IPC = {
   KEY_SAVE: 'lite:ai:key-save',
   KEY_HAS: 'lite:ai:key-has',
   KEY_DELETE: 'lite:ai:key-delete',
+  KEY_TEST: 'lite:ai:key-test',
   // Generic chat for the embedded WISER Playbooks `window.ai` bridge.
   CHAT: WISER_AI_CHANNELS.CHAT,
   CHAT_STREAM: WISER_AI_CHANNELS.CHAT_STREAM,
@@ -298,6 +300,24 @@ export function initAi(opts: InitAiOptions = {}): AiHandle {
         await saveAiKey(key);
         log.info('ai key saved', {});
         return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeAiError(err) };
+      }
+    }
+  );
+
+  ipcMain.handle(
+    AI_IPC.KEY_TEST,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { key?: unknown }
+    ): Promise<AiIpcResult<{ ok: true; model: string }>> => {
+      getLoggingApi().event(AI_EVENTS.IPC_KEY_TEST);
+      try {
+        const key = typeof payload?.key === 'string' ? payload.key : '';
+        const result = await testAiKey(key);
+        log.info('ai key tested', { ok: true });
+        return { ok: true, value: result };
       } catch (err) {
         return { ok: false, error: serializeAiError(err) };
       }

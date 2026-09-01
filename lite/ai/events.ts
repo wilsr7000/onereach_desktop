@@ -33,6 +33,7 @@ export const AI_EVENTS = {
   IPC_KEY_SAVE: 'ai.ipc.key-save',
   IPC_KEY_HAS: 'ai.ipc.key-has',
   IPC_KEY_DELETE: 'ai.ipc.key-delete',
+  IPC_KEY_TEST: 'ai.ipc.key-test',
   // Generic chat (embedded WISER Playbooks `window.ai` bridge).
   IPC_CHAT: 'ai.ipc.chat',
   IPC_CHAT_STREAM: 'ai.ipc.chat-stream',
@@ -93,6 +94,9 @@ export interface AiIpcKeyHasEvent extends AiIpcEventBase {
 export interface AiIpcKeyDeleteEvent extends AiIpcEventBase {
   name: typeof AI_EVENTS.IPC_KEY_DELETE;
 }
+export interface AiIpcKeyTestEvent extends AiIpcEventBase {
+  name: typeof AI_EVENTS.IPC_KEY_TEST;
+}
 export interface AiIpcChatEvent extends AiIpcEventBase {
   name: typeof AI_EVENTS.IPC_CHAT;
 }
@@ -111,6 +115,7 @@ export type AiEvent =
   | AiIpcKeySaveEvent
   | AiIpcKeyHasEvent
   | AiIpcKeyDeleteEvent
+  | AiIpcKeyTestEvent
   | AiIpcChatEvent
   | AiIpcChatStreamEvent;
 

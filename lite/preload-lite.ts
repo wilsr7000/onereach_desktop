@@ -236,6 +236,7 @@ const AI_SUGGEST_SPACES = 'lite:ai:suggest-spaces';
 const AI_KEY_SAVE = 'lite:ai:key-save';
 const AI_KEY_HAS = 'lite:ai:key-has';
 const AI_KEY_DELETE = 'lite:ai:key-delete';
+const AI_KEY_TEST = 'lite:ai:key-test';
 
 // Boot-chat → host IPC channel. Fired when the chat (now inline inside
 // chrome.html's home view) reaches its settled resting state — either
@@ -2645,6 +2646,8 @@ interface AiBridge {
   hasKey(): Promise<AiIpcResultView<{ hasKey: boolean }>>;
   /** Remove the stored key. */
   deleteKey(): Promise<AiIpcResultView<{ ok: true }>>;
+  /** Validate a candidate key against the live API without saving it. */
+  testKey(key: string): Promise<AiIpcResultView<{ ok: true; model: string }>>;
 }
 
 const ai: AiBridge = {
@@ -2670,6 +2673,8 @@ const ai: AiBridge = {
     ipcRenderer.invoke(AI_KEY_SAVE, { key }) as Promise<AiIpcResultView<{ ok: true }>>,
   hasKey: () => ipcRenderer.invoke(AI_KEY_HAS) as Promise<AiIpcResultView<{ hasKey: boolean }>>,
   deleteKey: () => ipcRenderer.invoke(AI_KEY_DELETE) as Promise<AiIpcResultView<{ ok: true }>>,
+  testKey: (key) =>
+    ipcRenderer.invoke(AI_KEY_TEST, { key }) as Promise<AiIpcResultView<{ ok: true; model: string }>>,
 };
 
 // ---------------------------------------------------------------------------

@@ -1643,6 +1643,7 @@ interface LiteAiBridge {
   hasKey(): Promise<LiteAiIpcResult<{ hasKey: boolean }>>;
   /** Remove the stored Anthropic key. */
   deleteKey(): Promise<LiteAiIpcResult<{ ok: true }>>;
+  testKey(key: string): Promise<LiteAiIpcResult<{ ok: true; model: string }>>;
 }
 
 // ---------------------------------------------------------------------------
