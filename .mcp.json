@@ -6,6 +6,13 @@
       "env": {
         "SPACES_VIEWER_ID": "robb@onereach.com"
       }
+    },
+    "onereach-local-apis": {
+      "command": "node",
+      "args": ["dist-lite/build/local-api-mcp.js"],
+      "env": {
+        "LOCAL_API_VIEWER_ID": "robb@onereach.com"
+      }
     }
   }
 }

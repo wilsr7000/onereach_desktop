@@ -338,9 +338,20 @@ const spacesMcpOptions = {
   external: [],
 };
 
+const localApiMcpOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'mcp/local-api-mcp.ts')],
+  outfile: resolve(outDir, 'local-api-mcp.js'),
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  external: [],
+};
+
 const allConfigs = [
   mainProcessOptions,
   spacesMcpOptions,
+  localApiMcpOptions,
   preloadOptions,
   wiserPreloadOptions, journeyMapPreloadOptions,
   bugReportModalOptions,

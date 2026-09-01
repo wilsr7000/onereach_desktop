@@ -1759,3 +1759,45 @@ connections.
 same hash, re-send on changed hash, per-server independence, no flag on
 failure, lazy connect) + 5 renderer tests (menu entry wired, friendly
 flag rendering incl. stale verdict).
+
+## ADR-080: One MCP aggregator fronts every local HTTP API (discovery)
+
+**Date:** 2026-08-31  ·  **Status:** shipped
+
+**Context.** The desktop app runs three local HTTP APIs on loopback —
+47291 (Spaces/Tool), 47292 (log & app-control), 47293 (Agent Gateway) —
+each discoverable only by reading source or a hand-kept guide. Request:
+"add MCP to all the local APIs … help with discovery." MCP's
+`tools/list` is exactly a discovery surface.
+
+**Decision.** One new stdio MCP server, `lite/mcp/local-api-mcp.ts`
+(built to `dist-lite/build/local-api-mcp.js`, registered in `.mcp.json`
+as `onereach-local-apis`), fronts all three. Chosen over a per-server
+HTTP `/mcp` route: one connect point, one `tools/list`, and it reuses
+the proven spaces-mcp pattern (McpServer + StdioServerTransport,
+esbuild entry, test harness). It is a CLIENT of the loopback ports —
+every tool forwards to 127.0.0.1 and returns the JSON verbatim, so it
+lives in Lite's build yet fronts the MAIN app's APIs and inherits each
+API's own behavior + permission posture (e.g. `/playbook-qa` stays
+viewer-scoped via a forwarded `viewerId`, fail-closed).
+
+A single `OPERATIONS` catalog is the source of truth: `describe_api` /
+`list_local_apis` narrate it and `registerTools` wires exactly its
+`callable` rows. **Scope = read + discovery + SAFE actions** (the
+chosen option): all GET reads, plus `submit-task`, `playbook-qa`, and
+the read-only deep-search POST. The mutating control endpoints —
+`/app/restart`, `/ai/pause`, `/ai/resume`, `/logging/level` — are
+absent from the catalog, so a connected client can neither restart the
+app nor halt its AI. The gateway SSE stream is listed for discovery but
+`callable:false` (a one-shot tool can't model a stream).
+
+**Invariant.** No mutating control endpoint is ever callable; the only
+callable POSTs are submit-task, playbook-qa, and deep-search. Pinned by
+`local-api-mcp.test.ts` (catalog integrity + the forbidden-path scan)
+and proven at the wire by the stdio integration test.
+
+**Verified.** 16 unit + 1 stdio integration test (real MCP client spawns
+the built server, discovers the catalog, calls a forwarded tool, and
+confirms the mutation tools are absent). Live-probed against the running
+app: 26 tools discovered; app_health / spaces_status / gateway_health
+all answered through one MCP connection.
