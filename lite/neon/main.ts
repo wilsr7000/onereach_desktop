@@ -23,6 +23,7 @@ import { NEON_EVENTS } from './events.js';
 import type { NeonConfig, NeonRecord, NeonStatus } from './types.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getNamedQuery } from './named-queries.js';
+import { getAuthApi } from '../auth/api.js';
 import { wrapIpcHandler } from '../errors.js';
 
 /**
@@ -95,6 +96,24 @@ export function initNeon(opts: InitNeonOptions = {}): NeonHandle {
     ): Promise<{ records: NeonRecord[] }> => {
       getLoggingApi().event(NEON_EVENTS.IPC_QUERY);
       const name = typeof payload?.name === 'string' ? payload.name : '';
+      // Tied to the signed-in user (2026-09-01 identity audit): the graph
+      // proxy has no per-user auth of its own, so a renderer must never
+      // run a named query without an authenticated app session. Before
+      // this, a signed-out renderer could read the org catalog.
+      if (getAuthApi().getSession('edison') === null) {
+        log.warn('named query rejected: signed out', { name: name.slice(0, 80) });
+        throw new Error(
+          JSON.stringify({
+            __neonError: {
+              name: 'NeonError',
+              code: 'NEON_UNAUTHENTICATED',
+              message: 'Sign in to query the organization graph.',
+              context: { name: name.slice(0, 80) },
+              remediation: 'Open Settings → Account and sign in to OneReach.',
+            },
+          })
+        );
+      }
       const cypher = getNamedQuery(name);
       if (cypher === null) {
         log.warn('named query rejected: unknown name', { name: name.slice(0, 80) });

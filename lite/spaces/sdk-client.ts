@@ -4111,7 +4111,7 @@ export class SdkSpacesClient {
     const account = this.getNoteAccount();
     const kvCollection = account !== null && account.length > 0 ? noteKvCollection(account) : null;
     const kvRef = kvCollection !== null ? noteKvRef(id) : null;
-    const rows = await this.run(createNoteCypher(subtypeLabel), {
+    const rows = await this.run(createNoteCypher(subtypeLabel, { spaceWritable: SPACE_WRITABLE }), {
       id,
       spaceId: input.spaceId,
       title: input.title,

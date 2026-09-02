@@ -153,7 +153,22 @@ describe('UPDATE_NOTE_GUARDED cypher', () => {
 });
 
 describe('createNoteCypher', () => {
-  const cypher = createNoteCypher('BasicNote');
+  const GUARD = "($viewerId <> '' AND coalesce(s.createdBy,'') = $viewerId)";
+  const cypher = createNoteCypher('BasicNote', { spaceWritable: GUARD });
+
+  it('gates the Space MATCH with the caller-supplied writable guard, BEFORE any MERGE (2026-09-01 audit)', () => {
+    const matchIdx = cypher.indexOf('MATCH (s:Space {id: $spaceId})');
+    const guardIdx = cypher.indexOf(GUARD);
+    const mergeIdx = cypher.indexOf('MERGE (n:Note {id: $id})');
+    expect(matchIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeGreaterThan(matchIdx);
+    expect(guardIdx).toBeLessThan(mergeIdx);
+  });
+
+  it('refuses to build an unguarded note Cypher', () => {
+    expect(() => createNoteCypher('BasicNote', { spaceWritable: '' })).toThrow(/spaceWritable/);
+    expect(() => (createNoteCypher as unknown as (l: string) => string)('BasicNote')).toThrow(/spaceWritable/);
+  });
 
   it('MERGEs on id and dual-labels :Asset + subtype', () => {
     expect(cypher).toContain('MERGE (n:Note {id: $id})');

@@ -173,6 +173,8 @@ async function annotateVersionDiff(
 }
 
 let activeCache: SpacesCache | null = null;
+/** The viewer the cache was last filled for; a change drops it (2026-09-01). */
+let lastCachedViewer: string | null = null;
 /** Live SDK client for background jobs (GSX migration sweep). */
 let activeClient: SdkSpacesClient | null = null;
 
@@ -493,11 +495,19 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
   // teardown removes it.
   try {
     authUnsubscribe = getAuthApi().onSessionChanged((env, session) => {
-      if (session !== null) return;
+      // Invalidate on ANY change of the effective viewer — not only on
+      // sign-out. Before 2026-09-01 this returned early whenever a
+      // session existed, so a switch straight to a DIFFERENT signed-in
+      // identity kept the previous user's cached spaces/home feed for
+      // up to one TTL (the sign-out-only case was covered; the
+      // switch-user case was not). Compare identities, not nullness.
+      const nextViewer = session === null ? null : resolveViewerId();
+      if (nextViewer === lastCachedViewer) return;
+      lastCachedViewer = nextViewer;
       if (activeCache === null) return;
       try {
         activeCache.invalidate(() => true);
-        log.info('spaces cache invalidated on session change', { env });
+        log.info('spaces cache invalidated on viewer change', { env, signedIn: nextViewer !== null });
       } catch (err) {
         log.warn('spaces cache invalidate threw', {
           env,
@@ -891,6 +901,17 @@ const QUIET_READ_SPANS = new Set<string>([
 // ADR-051 identity convention, shared by the SDK client's viewerId dep and
 // the meeting ring's self-ring check: lowercased session email → declared
 // attribution email → accountId; null when signed out.
+/**
+ * The authenticated viewer identity (null when signed out) — the ONE
+ * value every permission predicate is scoped by. Exported so in-process
+ * surfaces that must be "tied to the signed-in user" (the NEON bridge's
+ * /neon/whoami, which the out-of-process MCP servers consult) share the
+ * exact same resolution as the SDK client (2026-09-01 identity audit).
+ */
+export function getSignedInViewerId(): string | null {
+  return resolveViewerId();
+}
+
 function resolveViewerId(): string | null {
   const session = getAuthApi().getSession('edison');
   if (session === null) return null;

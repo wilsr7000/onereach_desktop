@@ -206,3 +206,24 @@ describe('journey-map window bridge containment', () => {
     expect(winSrc).toContain("return { action: 'deny' }");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sign-in identity hygiene (2026-09-01 identity audit): the spaces cache
+// must be dropped on ANY change of the effective viewer, not only on
+// sign-out. The old listener returned early whenever a session existed,
+// so a switch straight to a different signed-in identity kept the
+// previous user's cached spaces/home feed for up to one TTL.
+// ---------------------------------------------------------------------------
+describe('spaces cache follows the signed-in viewer', () => {
+  const mainSrc = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'spaces', 'main.ts'),
+    'utf8'
+  );
+  it('invalidates on viewer-identity change, not merely on sign-out', () => {
+    const listener = mainSrc.slice(mainSrc.indexOf('onSessionChanged((env, session)'));
+    const body = listener.slice(0, listener.indexOf('} catch (err) {'));
+    expect(body).not.toContain('if (session !== null) return;');
+    expect(body).toContain('resolveViewerId()');
+    expect(body).toContain('lastCachedViewer');
+  });
+});

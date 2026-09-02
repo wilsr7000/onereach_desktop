@@ -187,10 +187,28 @@ export const UPDATE_NOTE_GUARDED = `
  * NOTE_SUBTYPE_LABELS by the caller before interpolation (labels
  * cannot be parameterized in Cypher).
  */
-export function createNoteCypher(subtypeLabel: string): string {
+export function createNoteCypher(
+  subtypeLabel: string,
+  guards: {
+    /**
+     * The caller's SPACE_WRITABLE predicate (alias `s`). REQUIRED: before
+     * 2026-09-01 this MATCH checked only `deletedAt IS NULL`, so ANY
+     * viewer who knew a space id could plant a note into it — the node
+     * was created and attached, and only the visibility-gated read-back
+     * failed ("disappeared after creation"). Found by the live
+     * stranger-write audit; the write-guard meta-test never saw this
+     * builder because it enumerates the CYPHER map, not functions.
+     */
+    spaceWritable: string;
+  }
+): string {
+  if (typeof guards?.spaceWritable !== 'string' || guards.spaceWritable.trim().length === 0) {
+    throw new Error('createNoteCypher requires a non-empty spaceWritable guard');
+  }
   return `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
+        AND ${guards.spaceWritable}
     MERGE (n:Note {id: $id})
     ON CREATE SET n.created_at = $nowMs,
                   n.createdAt = $nowMs,

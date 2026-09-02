@@ -194,3 +194,28 @@ describe('ADR-074 — the role toggle', () => {
     expect(block).toContain('including things other people put here');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Function-built mutations (2026-09-01 stranger-write audit). The inventory
+// above enumerates the CYPHER map — so `createNoteCypher`, a builder in
+// note-standard.ts, shipped for weeks with an unguarded Space MATCH and any
+// viewer could plant a note into any space. This pins the builder's
+// output the same way the map is pinned.
+// ---------------------------------------------------------------------------
+import { createNoteCypher } from '../../spaces/note-standard.js';
+
+describe('function-built note creation is write-guarded', () => {
+  it('the built Cypher gates the Space MATCH before creating anything', () => {
+    const guard = "$viewerId <> '' AND EXISTS { MATCH (:Person {id: $viewerId})-[w:HAS_ACCESS]->(s) }";
+    const q = createNoteCypher('BasicNote', { spaceWritable: guard });
+    const whereIdx = q.indexOf('WHERE s.deletedAt IS NULL');
+    const guardIdx = q.indexOf(guard);
+    const firstWrite = Math.min(...['MERGE', 'CREATE', 'SET '].map((k) => {
+      const i = q.indexOf(k);
+      return i < 0 ? Number.MAX_SAFE_INTEGER : i;
+    }));
+    expect(whereIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeGreaterThan(whereIdx);
+    expect(guardIdx).toBeLessThan(firstWrite);
+  });
+});
