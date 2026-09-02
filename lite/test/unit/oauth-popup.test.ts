@@ -261,19 +261,27 @@ describe('buildPopupHandler', () => {
     expect(result.action).toBe('allow');
   });
 
-  it('routes javascript: URLs to shell.openExternal (deny)', () => {
-    // Defense in depth: javascript: schemes should never become
-    // child windows even though they're not on the allowlist.
+  it('denies non-web schemes WITHOUT handing them to the OS (javascript:, file:, x-apple.systempreferences:)', () => {
+    // Defense in depth, both ways (2026-09-02 review): a non-web scheme
+    // never becomes a child window — and never reaches `open` either,
+    // which is what the old "route to shell.openExternal" did with
+    // anything a remote page asked for.
     const shellOpenExternal = vi.fn();
     const handler = buildPopupHandler({
       partition: 'persist:test',
       shellOpenExternal,
     });
-    const result = handler({
-      url: 'javascript:alert(1)',
-    } as unknown as Electron.HandlerDetails);
-    expect(result.action).toBe('deny');
-    expect(shellOpenExternal).toHaveBeenCalled();
+    for (const url of [
+      'javascript:alert(1)',
+      'file:///Applications/Calculator.app',
+      'x-apple.systempreferences:com.apple.preference.security',
+      'shortcuts://run-shortcut?name=x',
+      'not a url',
+    ]) {
+      const result = handler({ url } as unknown as Electron.HandlerDetails);
+      expect(result.action, url).toBe('deny');
+    }
+    expect(shellOpenExternal).not.toHaveBeenCalled();
   });
 
   it('logger is optional', () => {

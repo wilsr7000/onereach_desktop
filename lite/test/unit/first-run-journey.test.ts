@@ -80,7 +80,8 @@ describe('the first-run beat says what you will need', () => {
     const s = read('boot-chat/boot-chat.ts', 'lite/boot-chat/boot-chat.ts');
     const fn = s.indexOf('async function noteFirstSignIn(');
     expect(fn).toBeGreaterThan(-1);
-    const block = s.slice(fn, fn + 900);
+    const end = s.indexOf('async function renderWelcomeAndDigest(', fn);
+    const block = s.slice(fn, end > fn ? end : fn + 900);
     expect(block).toContain("state.completedAt['signed-in'] !== undefined) return;"); // once, ever
     expect(block).toContain("onboarding.markComplete('signed-in')"); // the module gets a writer
     // 2026-09-02 review: a post-sign-in bubble is covered by the hosted

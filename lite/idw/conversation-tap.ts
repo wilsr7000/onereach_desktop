@@ -34,6 +34,7 @@
 
 import { BrowserWindow, WebContentsView, type WebContents } from 'electron';
 import { getLoggingApi } from '../logging/api.js';
+import { getAuthApi } from '../auth/api.js';
 import { getSpacesApi } from '../spaces/api.js';
 import { IDW_EVENTS } from './events.js';
 import type { Space } from '../spaces/types.js';
