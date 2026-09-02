@@ -2725,7 +2725,7 @@ export const CYPHER = {
     SET as.lite_properties =
           'type: ItemKind (document|image|url|text|audio|video|playbook|ticket|agent|transcript|knowledge|journey|other; ' +
           'legacy rows carry assetType) · name = title · content: inline body (markdown/text) · description · ' +
-          'mimeType (camelCase; the registry\'s mime_type was never written) · url: storage key · size · ' +
+          'mimeType (camelCase; the registry key mime_type was never written) · url: storage key · size · ' +
           'metadata: JSON string · sourceUrl · deletedAt: ISO tombstone · createdAt/updatedAt: ISO · ' +
           'membership is the [:BELONGS_TO]->(:Space) edge, not a spaceId property',
         as.lite_annotated_at = $nowMs
