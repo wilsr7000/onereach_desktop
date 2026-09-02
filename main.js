@@ -5770,7 +5770,7 @@ function setupAiderIPC() {
       if (!aiderBridge) {
         throw new Error('GSX Create engine not started');
       }
-      const result = await aiderBridge.initialize(repoPath, modelName || 'claude-opus-4-7');
+      const result = await aiderBridge.initialize(repoPath, modelName || 'claude-fable-5-1');
       console.log('[GSX Create] Initialized:', result);
       return result;
     } catch (error) {
@@ -6284,14 +6284,18 @@ function setupAiderIPC() {
         modelName && (modelName.startsWith('gpt-') || modelName.startsWith('o1') || modelName.startsWith('o3'));
       const isAnthropic = modelName && modelName.startsWith('claude');
 
-      // Use the passed model, or fall back to Claude 4.5 - GSX Create prefers Claude 4.5 models
-      let model = modelName || 'claude-opus-4-5-20251101';
+      // Use the passed model, or fall back to Fable 5.1 — GSX Create pins to
+      // the current Fable generation (2026-09-02 model upgrade; the engine
+      // drives the bundled Claude Code CLI, which accepts it).
+      let model = modelName || 'claude-fable-5-1';
 
-      // Validate Claude model is 4.5 (if Anthropic)
-      if (isAnthropic && !model.includes('4-5') && !model.includes('4.5')) {
-        console.warn('[GSX Create] WARNING: Non-4.5 model requested:', model);
-        console.warn('[GSX Create] Forcing to claude-opus-4-5-20251101');
-        model = 'claude-opus-4-5-20251101';
+      // Validate the Claude model is a current-generation one (if Anthropic):
+      // an older 4.x pin from a stale setting is forced forward, same guard
+      // shape as the previous 4.5 pin.
+      if (isAnthropic && !/fable|mythos|opus-5|sonnet-5/.test(model)) {
+        console.warn('[GSX Create] WARNING: pre-Fable model requested:', model);
+        console.warn('[GSX Create] Forcing to claude-fable-5-1');
+        model = 'claude-fable-5-1';
       }
 
       // Select profile based on provider and capabilities
@@ -6301,7 +6305,7 @@ function setupAiderIPC() {
       if (isOpenAI) {
         profile = model.includes('gpt-4o-mini') ? 'fast' : 'standard';
       } else if (isAnthropic) {
-        profile = model.includes('opus') ? 'powerful' : 'standard';
+        profile = /opus|fable|mythos/.test(model) ? 'powerful' : 'standard';
       }
 
       console.log('[GSX Create] Using profile:', profile, 'model:', model);

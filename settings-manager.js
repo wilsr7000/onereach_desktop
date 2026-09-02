@@ -30,6 +30,21 @@ function _isSecretKey(key) {
   );
 }
 
+/** The current default Claude model (kept in sync with the LLM_PROFILES 'powerful' tier). */
+const CURRENT_CLAUDE_MODEL = 'claude-fable-5-1';
+/** Claude ids superseded by the 2026-09-02 upgrade: any 4.x / 3.x pin, or Fable 5 (not 5.1). */
+const STALE_CLAUDE_MODEL = /^claude-(opus|sonnet|haiku)-4|^claude-3|^claude-fable-5$/;
+
+/**
+ * Pure decision: should this stored (provider, model) move forward?
+ * Returns the new model id, or null when nothing should change.
+ */
+function migrateClaudeModel(provider, model) {
+  if (provider !== 'anthropic') return null;
+  if (typeof model !== 'string' || !STALE_CLAUDE_MODEL.test(model)) return null;
+  return CURRENT_CLAUDE_MODEL;
+}
+
 class SettingsManager {
   constructor() {
     // Lazy initialize paths - will be set on first access
@@ -55,8 +70,28 @@ class SettingsManager {
   get settings() {
     if (!this._settings) {
       this._settings = this.loadSettings();
+      this._migrateStaleClaudeModel();
     }
     return this._settings;
+  }
+
+  /**
+   * One-time forward migration of a stale Claude model pin (2026-09-02
+   * Fable 5.1 upgrade). A user-level `llmModel` shadows every default, so
+   * an install that once picked opus-4-5 (or was seeded with it) would
+   * otherwise never move. Only ANTHROPIC pins are touched — a user's
+   * choice of another provider (e.g. OpenAI) is theirs and is left alone.
+   */
+  _migrateStaleClaudeModel() {
+    try {
+      const next = migrateClaudeModel(this._settings.llmProvider, this._settings.llmModel);
+      if (next === null) return;
+      log.info('settings', 'Migrating stale Claude model pin', { from: this._settings.llmModel, to: next });
+      this._settings.llmModel = next;
+      this.saveSettings();
+    } catch (err) {
+      log.warn('settings', 'Claude model migration skipped', { error: err && err.message });
+    }
   }
 
   set settings(value) {
@@ -696,3 +731,5 @@ module.exports = {
   getSettingsManager,
   SettingsManager,
 };
+module.exports.migrateClaudeModel = migrateClaudeModel;
+module.exports.CURRENT_CLAUDE_MODEL = CURRENT_CLAUDE_MODEL;

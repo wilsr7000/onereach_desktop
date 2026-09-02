@@ -116,6 +116,13 @@ describe('GSXCreateEngine', () => {
     await expect(engine.addFiles('not-an-array')).rejects.toThrow(/must be an array/);
   });
 
+  it('defaults to Fable 5.1 when initialize() passes no model (2026-09-02 upgrade)', async () => {
+    const fresh = new GSXCreateEngine({ sessionKey: 'test-default' });
+    await fresh.start();
+    await fresh.initialize('/tmp/repo');
+    expect(fresh.model).toBe('claude-fable-5-1');
+  });
+
   it('runPrompt forwards cwd, model, systemPrompt, and captures session', async () => {
     const result = await engine.runPrompt('do a thing');
 
@@ -123,7 +130,7 @@ describe('GSXCreateEngine', () => {
     const [prompt, opts] = runnerMock.runClaudeCode.mock.calls[0];
     expect(prompt).toBe('do a thing');
     expect(opts.cwd).toBe('/tmp/repo');
-    expect(opts.model).toBe('claude-opus-4-7');
+    expect(opts.model).toBe('claude-opus-4-7'); // explicit model from initialize() passes through
     expect(opts.feature).toBe('gsx-create');
     expect(opts.enableTools).toBe(true);
     expect(opts.allowedTools).toContain('Read');

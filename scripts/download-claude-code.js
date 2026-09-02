@@ -137,6 +137,25 @@ function setExecutable(filePath) {
  * Download or update Claude Code for a specific platform.
  * Checks the installed version vs latest on npm and only re-installs when needed.
  */
+/**
+ * The oldest Claude Code the app's default model works with. Fable 5.1
+ * (claude-fable-5-1, the default since 2026-09-02) is refused by older
+ * binaries with "version 2.1.251 or newer is required". A build must
+ * never bundle a CLI that cannot run the default model.
+ */
+const MIN_CLAUDE_CODE_VERSION = '2.1.251';
+
+/** Compare dotted numeric versions: negative if a < b, 0 if equal, positive if a > b. */
+function compareVersions(a, b) {
+  const pa = String(a || '').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
 async function downloadForPlatform(platformKey, { forceUpdate = false, latestVersion = null } = {}) {
   const platformInfo = PLATFORMS[platformKey];
   if (!platformInfo) {
@@ -151,6 +170,9 @@ async function downloadForPlatform(platformKey, { forceUpdate = false, latestVer
 
   if (installedVersion && !forceUpdate) {
     if (latestVersion && installedVersion === latestVersion) {
+      if (compareVersions(installedVersion, MIN_CLAUDE_CODE_VERSION) < 0) {
+        throw new Error(`[download-claude-code] ${platformKey}: latest published v${installedVersion} is older than the minimum v${MIN_CLAUDE_CODE_VERSION} the default model requires`);
+      }
       console.log(`[download-claude-code] ${platformKey}: already at latest v${installedVersion} -- skipping`);
       return true;
     }
@@ -194,7 +216,10 @@ async function downloadForPlatform(platformKey, { forceUpdate = false, latestVer
     fs.writeFileSync(wrapperPath, wrapperContent);
     setExecutable(wrapperPath);
     const newVersion = getInstalledVersion(destDir);
-    console.log(`[download-claude-code] Installed v${newVersion} -> ${wrapperPath}`);
+    if (compareVersions(newVersion, MIN_CLAUDE_CODE_VERSION) < 0) {
+      throw new Error(`[download-claude-code] ${platformKey}: installed v${newVersion} is older than the minimum v${MIN_CLAUDE_CODE_VERSION} the default model (claude-fable-5-1) requires -- refusing to bundle it`);
+    }
+    console.log(`[download-claude-code] Installed v${newVersion} (>= v${MIN_CLAUDE_CODE_VERSION}) -> ${wrapperPath}`);
     return true;
   }
 
@@ -253,8 +278,12 @@ async function main() {
   console.log('\n[download-claude-code] Done!');
 }
 
-// Run
-main().catch((error) => {
-  console.error('[download-claude-code] Fatal error:', error);
-  process.exit(1);
-});
+// Run only when invoked directly — importable (tests) without side effects.
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('[download-claude-code] Fatal error:', error);
+    process.exit(1);
+  });
+}
+
+module.exports = { compareVersions, MIN_CLAUDE_CODE_VERSION };
