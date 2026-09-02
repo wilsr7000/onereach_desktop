@@ -1080,6 +1080,35 @@ function wireSidebarToolbar(): void {
       }
     });
   }
+  // "New Space" is a split button (2026-09-01 organization pass): the
+  // caret opens the other kinds. Outside click and Escape close it; the
+  // items' own click handlers run first, then the menu folds.
+  const menuToggle = document.getElementById('spaces-new-menu-toggle');
+  const menu = document.getElementById('spaces-new-menu');
+  if (menuToggle !== null && menu !== null) {
+    const setOpen = (open: boolean): void => {
+      menu.hidden = !open;
+      menuToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+    menuToggle.addEventListener('click', (event: MouseEvent): void => {
+      event.stopPropagation();
+      const open = menu.hidden;
+      setOpen(open);
+      if (open) menu.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    });
+    menu.addEventListener('click', () => setOpen(false));
+    document.addEventListener('click', (event: MouseEvent): void => {
+      if (menu.hidden) return;
+      const target = event.target;
+      if (target instanceof Node && (menu.contains(target) || menuToggle.contains(target))) return;
+      setOpen(false);
+    });
+    document.addEventListener('keydown', (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape' || menu.hidden) return;
+      setOpen(false);
+      menuToggle.focus();
+    });
+  }
   // ⌘F / Ctrl+F — the VS Code reflex. Search here means the sidebar
   // search, not a find-in-page (the window has no such affordance).
   // ⌘K / Ctrl+K — ADR-069 jump palette: past a certain scale humans
@@ -1122,18 +1151,25 @@ export function safeCssColor(value: unknown): string | null {
  * tree lives solely in the Spaces section's ONE open space. Recent's
  * job is "get me back there", not a second explorer.
  */
+/**
+ * Below this many Spaces the full list is a glance away, so a Recent
+ * tier would only repeat it (2026-09-01: four Spaces were listed three
+ * times over in one rail). The tier appears once the list is long
+ * enough to need a shortcut — and never repeats a pinned Space, which
+ * already sits directly above it.
+ */
+const RECENT_MIN_SPACES = 8;
+
 function renderRecentSpaces(): void {
   const list = document.getElementById('spaces-list-recent');
   if (list === null) return;
+  const section = list.closest<HTMLElement>('[data-side-section="recent"]');
   list.replaceChildren();
-  const recent = sortSpaces(state.spaces, 'recent').slice(0, RECENT_SPACES_LIMIT);
-  if (recent.length === 0) {
-    const empty = document.createElement('li');
-    empty.className = 'spaces-side-tree-empty';
-    empty.textContent = 'Nothing yet';
-    list.appendChild(empty);
-    return;
-  }
+  const candidates = state.spaces.filter((s) => s.pinned !== true);
+  const recent = sortSpaces(candidates, 'recent').slice(0, RECENT_SPACES_LIMIT);
+  const useful = state.spaces.length >= RECENT_MIN_SPACES && recent.length > 0;
+  if (section !== null) section.hidden = !useful;
+  if (!useful) return;
   for (const space of recent) {
     const li = document.createElement('li');
     li.className = 'spaces-row spaces-row-recent';
@@ -4424,8 +4460,19 @@ async function runAgenticItemsSearch(): Promise<void> {
 }
 
 function appendSpaceContents(wrap: HTMLElement, opts: RenderItemListOpts): void {
-  // THE search sits directly above the assets it searches.
-  wrap.appendChild(buildContentSearchControls());
+  // ONE toolbar row above the assets (2026-09-01 organization pass):
+  // the search (with its scope + Ask AI) on the left, the filter chips
+  // on the right. They used to stack as three separate rows.
+  const toolbar = document.createElement('div');
+  toolbar.className = 'spaces-items-toolbar-row';
+  toolbar.appendChild(buildContentSearchControls());
+  // Filter chips: shared with Home so the user's "Agents-only" or
+  // "24h" preference survives a scope switch. Applies to assets in
+  // the grid below — events are NOT rendered in the per-Space view
+  // anymore (they're an activity feed, not an asset surface). Hidden
+  // while a search result list is showing (it is not filterable).
+  if (state.itemsSearchResults === null) toolbar.appendChild(buildFilterChips());
+  wrap.appendChild(toolbar);
 
   // Sprint 3: when a search is active, replace the timeline with a
   // search-result list. The search bypasses the timeline merge entirely
@@ -4461,12 +4508,6 @@ function appendSpaceContents(wrap: HTMLElement, opts: RenderItemListOpts): void 
     wrap.appendChild(grid);
     return;
   }
-
-  // Filter chips: shared with Home so the user's "Agents-only" or
-  // "24h" preference survives a scope switch. Applies to assets in
-  // the grid below — events are NOT rendered in the per-Space view
-  // anymore (they're an activity feed, not an asset surface).
-  wrap.appendChild(buildFilterChips());
 
   // Per-Space view used to merge events + items into a chat-style
   // timeline. The user pushed back: "they look like Slack messages
@@ -5804,6 +5845,7 @@ async function openSetPlaybookPicker(spaceId: string, spaceName: string): Promis
   close.textContent = '×';
   const dismiss = (): void => backdrop.remove();
   close.addEventListener('click', dismiss);
+  closeOnEscape(backdrop, dismiss);
   head.appendChild(close);
   panel.appendChild(head);
 
@@ -5845,7 +5887,6 @@ async function openSetPlaybookPicker(spaceId: string, spaceName: string): Promis
     empty.textContent = 'This Space has no assets yet — add one first.';
     list.appendChild(empty);
     return;
-  closeOnEscape(backdrop, dismiss);
   }
 
   // Playbook-shaped assets lead: they're what a user is looking for.
@@ -6415,55 +6456,63 @@ function buildSpaceActivityStrip(): HTMLElement {
   return wrap;
 }
 
+/**
+ * The Space page header — three rows, top to bottom (2026-09-01
+ * organization pass):
+ *   1. identity: title + objective on the left, the actions on the right
+ *      (a grid row, so a long objective keeps the full width under the
+ *      title instead of being squeezed beside the buttons);
+ *   2. orientation: visibility (ADR-051), who's in it (2026-08-12), and
+ *      who's here right now (2026-08-20) — on ONE line;
+ *   3. what's happened: the activity strip (2026-08-19).
+ * Uncategorized gets row 1 only; Home gets row 1 with the search box.
+ */
 function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   const header = document.createElement('header');
   header.className = 'spaces-view-header';
-
+  const top = document.createElement('div');
+  top.className = 'spaces-view-header-top';
   const titleWrap = document.createElement('div');
   titleWrap.className = 'spaces-view-header-title-wrap';
+
+  const space =
+    state.activeScopeId === UNCATEGORIZED_SPACE_ID || state.activeScopeId === HOME_SCOPE_ID
+      ? undefined
+      : state.spaces.find((s) => s.id === state.activeScopeId);
+
+  // Rows 2–3 (built first; appended last).
+  let meta: HTMLElement | null = null;
+  let activity: HTMLElement | null = null;
+  if (space !== undefined) {
+    meta = document.createElement('div');
+    meta.className = 'spaces-view-header-meta';
+    meta.appendChild(buildSpaceVisibilityRow(space));
+    meta.appendChild(buildSpaceMembersStrip(space));
+    mountPresenceStrip(meta);
+    activity = buildSpaceActivityStrip();
+  }
 
   const title = document.createElement('h2');
   title.className = 'spaces-view-header-title';
   if (state.activeScopeId === UNCATEGORIZED_SPACE_ID) {
     title.textContent = 'Uncategorized';
   } else {
-    const space = state.spaces.find((s) => s.id === state.activeScopeId);
     title.textContent =
       space !== undefined && space.name.length > 0 ? space.name : '(unnamed Space)';
   }
   titleWrap.appendChild(title);
-
-  // Description / "objective" row. Real Spaces get a click-to-edit
-  // affordance; Uncategorized + Home get a fixed one-liner.
+  // Objective row: click-to-edit on a real Space; fixed line on Intake.
   if (state.activeScopeId === UNCATEGORIZED_SPACE_ID) {
     const sub = document.createElement('p');
     sub.className = 'spaces-view-header-sub';
     sub.textContent = 'Items that arrive without a Space land here for triage.';
     titleWrap.appendChild(sub);
-  } else if (state.activeScopeId === HOME_SCOPE_ID) {
-    // Home doesn't get a description editor — it isn't a Space.
-  } else {
-    const space = state.spaces.find((s) => s.id === state.activeScopeId);
-    if (space !== undefined) {
-      titleWrap.appendChild(buildSpaceObjectiveRow(space));
-      // ADR-051: per-space visibility control + (when restricted) the
-      // member management strip, on every Space kind.
-      titleWrap.appendChild(buildSpaceVisibilityRow(space));
-      // Who's in it, always visible (2026-08-12 UX pass).
-      titleWrap.appendChild(buildSpaceMembersStrip(space));
-      // What's happened in it, always visible (2026-08-19).
-      titleWrap.appendChild(buildSpaceActivityStrip());
-      // Who's HERE right now (2026-08-20) — live beacons, self excluded.
-      mountPresenceStrip(titleWrap);
-    }
+  } else if (space !== undefined) {
+    titleWrap.appendChild(buildSpaceObjectiveRow(space));
   }
+  top.appendChild(titleWrap);
 
-  header.appendChild(titleWrap);
-
-  // Actions row -- holds search + New + Refresh. Stacked under the
-  // title/description (rather than sharing one flex row with them)
-  // so a long Space description never gets crushed into a single
-  // narrow column by the buttons' natural width.
+  // Actions — the search on Home; New + Refresh on a Space.
   const actions = document.createElement('div');
   actions.className = 'spaces-view-header-actions';
 
@@ -6555,16 +6604,38 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   refresh.title = 'Refresh items + activity';
   refresh.setAttribute('aria-label', 'Refresh');
   refresh.disabled = opts.busy;
-  refresh.textContent = opts.busy ? 'Refreshing…' : '↻ Refresh';
+  refresh.textContent = opts.busy ? 'Refreshing…' : 'Refresh';
+  refresh.prepend(buildRefreshIcon());
   refresh.addEventListener('click', () => {
     if (state.loadingItems) return;
     void loadItems();
   });
   actions.appendChild(refresh);
 
-  header.appendChild(actions);
+  top.appendChild(actions);
+  header.appendChild(top);
+  if (meta !== null) header.appendChild(meta);
+  if (activity !== null) header.appendChild(activity);
 
   return header;
+}
+
+/** A crisp clockwise-arrow glyph (the ↻ character rendered unevenly). */
+function buildRefreshIcon(): SVGSVGElement {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M21 12a9 9 0 1 1-3-6.7');
+  const tip = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+  tip.setAttribute('points', '21 3 21 9 15 9');
+  svg.append(path, tip);
+  return svg;
 }
 
 /**
@@ -12621,19 +12692,20 @@ const checklistLibraryInFlight = new Set<string>();
 
 /** The Space's checklist library: list, view items, new, edit, delete. */
 export function buildSharedDashboardChecklists(space: RendererSpace): HTMLElement {
+  // Same heading + add-button language as Members / Tickets / Contents.
   const section = document.createElement('section');
-  section.className = 'spaces-dashboard-section spaces-checklist-library';
+  section.className = 'spaces-shared-section spaces-shared-section-checklists spaces-checklist-library';
 
   const head = document.createElement('div');
-  head.className = 'spaces-dashboard-section-head';
+  head.className = 'spaces-shared-section-heading-row';
   const title = document.createElement('h3');
-  title.className = 'spaces-dashboard-section-title';
+  title.className = 'spaces-shared-section-heading';
   title.textContent = 'Checklists';
   head.appendChild(title);
   const newBtn = document.createElement('button');
   newBtn.type = 'button';
-  newBtn.className = 'spaces-items-new spaces-checklist-new';
-  newBtn.textContent = '+ New checklist';
+  newBtn.className = 'spaces-shared-add-ticket-button spaces-checklist-new';
+  newBtn.textContent = '+ Checklist';
   newBtn.addEventListener('click', () => {
     // A throw here used to mean "nothing happened" with no trace.
     try {
@@ -12881,6 +12953,7 @@ export function openChecklistEditorPanel(opts: {
   close.textContent = '×';
   close.setAttribute('aria-label', 'Cancel');
   close.addEventListener('click', () => backdrop.remove());
+  closeOnEscape(backdrop, () => backdrop.remove());
   head.appendChild(close);
   panel.appendChild(head);
 
@@ -12953,7 +13026,6 @@ export function openChecklistEditorPanel(opts: {
   pauseInput.value = existing?.pausePoint ?? '';
   panel.appendChild(pauseInput);
 
-  closeOnEscape(backdrop, () => backdrop.remove());
   // ── AI draft box: describe it, review the rows it fills in. ──
   const aiRow = document.createElement('div');
   aiRow.className = 'spaces-checklist-ai-row';
@@ -13300,6 +13372,7 @@ async function openAttachChecklistPanel(
   close.textContent = '×';
   close.setAttribute('aria-label', 'Cancel');
   close.addEventListener('click', () => backdrop.remove());
+  closeOnEscape(backdrop, () => backdrop.remove());
   head.appendChild(close);
   panel.appendChild(head);
 
@@ -13372,7 +13445,6 @@ async function openAttachChecklistPanel(
       row.type = 'button';
       row.className = 'spaces-member-picker-row spaces-checklist-pick-row';
       const nm = document.createElement('span');
-  closeOnEscape(backdrop, () => backdrop.remove());
       nm.className = 'spaces-member-picker-name';
       nm.textContent = `${c.name} · ${c.items.length} items`;
       row.appendChild(nm);
@@ -15147,6 +15219,7 @@ function mountModal(title: string): HTMLElement {
   close.setAttribute('aria-label', 'Close');
   close.textContent = '×';
   close.addEventListener('click', () => backdrop.remove());
+  closeOnEscape(backdrop, () => backdrop.remove());
   header.appendChild(close);
   modal.appendChild(header);
   const body = document.createElement('div');
@@ -15219,7 +15292,6 @@ export function formatRecency(value: string | number): string {
       if (Number.isFinite(numeric)) ms = numeric;
       else return '';
     }
-  closeOnEscape(backdrop, () => backdrop.remove());
   } else {
     return '';
   }
@@ -18470,6 +18542,30 @@ function inferKindFromMime(mime: string): string {
  * duplicate is announced and auto-skipped, and one failure never sinks
  * the queue.
  */
+/**
+ * Escape closes an in-page dialog exactly like its × (2026-09-02
+ * modal-closability pass — four dialogs had only a ×). Only the TOPMOST
+ * backdrop answers, so a confirm stacked on an editor closes alone; the
+ * listener unhooks itself once the backdrop leaves the DOM by any route
+ * (a reopen's replace-remove, the ×, a backdrop click), so a stale
+ * listener can never dismiss a later dialog.
+ */
+export function closeOnEscape(backdrop: HTMLElement, dismiss: () => void): void {
+  const onKey = (ev: KeyboardEvent): void => {
+    if (!backdrop.isConnected) {
+      document.removeEventListener('keydown', onKey);
+      return;
+    }
+    if (ev.key !== 'Escape' || ev.defaultPrevented) return;
+    const stacked = document.body.querySelectorAll(':scope > [class*="backdrop"]');
+    if (stacked.length > 0 && stacked[stacked.length - 1] !== backdrop) return;
+    ev.preventDefault();
+    document.removeEventListener('keydown', onKey);
+    dismiss();
+  };
+  document.addEventListener('keydown', onKey);
+}
+
 function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
   if (queue.length === 0) return;
   document.querySelector('.spaces-intake-backdrop')?.remove();
@@ -18583,11 +18679,8 @@ export function closeOnEscape(backdrop: HTMLElement, dismiss: () => void): void 
     titleInput.setAttribute('aria-label', 'Asset title');
     panel.appendChild(titleInput);
 
-  // Listeners the wizard installs outside its own panel; finish() runs them.
-  const teardown: Array<() => void> = [];
     const desc = document.createElement('textarea');
     desc.className = 'spaces-new-asset-input spaces-intake-desc';
-    for (const undo of teardown) undo();
     desc.placeholder = 'Description (optional)';
     desc.rows = 2;
     panel.appendChild(desc);
@@ -18598,16 +18691,6 @@ export function closeOnEscape(backdrop: HTMLElement, dismiss: () => void): void 
 
     const row = document.createElement('div');
     row.className = 'spaces-intake-actions';
-
-  // Escape stops adding, exactly like the × (2026-09-02 modal-closability
-  // pass — the wizard had no keyboard exit before).
-  const onEscape = (ev: KeyboardEvent): void => {
-    if (ev.key !== 'Escape' || ev.defaultPrevented) return;
-    ev.preventDefault();
-    finish();
-  };
-  document.addEventListener('keydown', onEscape);
-  teardown.push(() => document.removeEventListener('keydown', onEscape));
 
     const addBtn = document.createElement('button');
     addBtn.type = 'button';

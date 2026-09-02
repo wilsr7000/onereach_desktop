@@ -56,8 +56,13 @@ describe('there is exactly one content search', () => {
     // left panel." The input filters space names as you type; Enter and
     // Ask AI route content search through the shared engine, results in
     // the main pane. The retired sidebar results tree stays retired.
-    expect(markup).toContain('>Search</span>');
+    // 2026-09-01 organization pass: the box moved from a collapsed
+    // sidebar section to the command bar at the top of the window — one
+    // global search, always visible, same ids, same wiring.
+    expect(markup).toContain('class="spaces-header-search"');
+    expect(markup).toContain('id="spaces-sidebar-search-input"');
     expect(markup).toContain('spaces-sidebar-search-ai');
+    expect(markup).not.toContain('data-side-section="search"');
     expect(markup).not.toContain('spaces-search-results');
     const src = source();
     const wire = src.slice(

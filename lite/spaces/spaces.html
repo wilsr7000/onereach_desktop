@@ -11,19 +11,88 @@
     <link rel="stylesheet" href="./spaces.css" />
   </head>
   <body>
+    <!--
+      THE command bar (2026-09-01 organization pass). Everything that acts
+      on the whole window lives here, once: the search box, refresh, and
+      the one primary action. The sidebar below it is navigation only.
+
+      Search: typing filters the sidebar by Space name (instant, local);
+      Enter runs the content search across every Space, results in the
+      main pane; Ask AI runs the agentic tier. Ids are unchanged from the
+      sidebar-era box so wireSidebarSearch and the ⌘F fallback still bind.
+    -->
     <header class="spaces-header">
       <h1>Spaces</h1>
+      <div class="spaces-header-search" role="search">
+        <span class="spaces-header-search-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7" /><line x1="20" y1="20" x2="16.2" y2="16.2" /></svg>
+        </span>
+        <input
+          type="search"
+          id="spaces-sidebar-search-input"
+          class="spaces-sidebar-search-input"
+          placeholder="Search spaces and assets…"
+          autocomplete="off"
+          spellcheck="false"
+          aria-label="Filter spaces by name; press Enter to search all assets"
+        />
+        <button
+          type="button"
+          id="spaces-sidebar-search-ai"
+          class="spaces-sidebar-search-ai"
+          title="Have AI judge every asset against what you mean — results open in the main pane"
+        >Ask AI</button>
+      </div>
       <div class="spaces-header-spacer"></div>
       <button
         type="button"
-        id="spaces-new-button"
-        class="spaces-new-button"
-        title="Create a new Space"
+        id="spaces-refresh-button"
+        class="spaces-header-icon-button"
+        title="Refresh from the graph (picks up Spaces created in WISER Playbooks or by agents)"
+        aria-label="Refresh spaces"
       >
-        <span class="spaces-new-button-glyph" aria-hidden="true">+</span>
-        <span class="spaces-new-button-label">New Space</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7" /><polyline points="21 3 21 9 15 9" /></svg>
       </button>
-      <span class="spaces-phase-badge" title="Module phase indicator">v1 · Workspace Beta</span>
+      <!--
+        One primary action, as a split button: the wide half creates a
+        Space; the caret opens the other kinds (Shared Space, AI-managed).
+        Both buttons keep their historical ids — wireNewSpaceButton and
+        wireNewSharedSpaceButton bind by id.
+      -->
+      <div class="spaces-new-split">
+        <button
+          type="button"
+          id="spaces-new-button"
+          class="spaces-new-button"
+          title="Create a new Space"
+        >
+          <span class="spaces-new-button-glyph" aria-hidden="true">+</span>
+          <span class="spaces-new-button-label">New Space</span>
+        </button>
+        <button
+          type="button"
+          id="spaces-new-menu-toggle"
+          class="spaces-new-button spaces-new-button-caret"
+          title="More ways to create"
+          aria-label="More ways to create a Space"
+          aria-haspopup="menu"
+          aria-expanded="false"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+        <div id="spaces-new-menu" class="spaces-new-menu" role="menu" hidden>
+          <button
+            type="button"
+            id="spaces-new-shared-button"
+            class="spaces-new-menu-item"
+            role="menuitem"
+            title="Create a new shared space (AI-managed)"
+          >
+            <span class="spaces-new-menu-item-title">Shared Space <span class="spaces-new-menu-item-badge">AI</span></span>
+            <span class="spaces-new-menu-item-hint">Agents keep a playbook, tickets and checklists in step</span>
+          </button>
+        </div>
+      </div>
     </header>
 
     <!--
@@ -411,65 +480,15 @@
       -->
       <nav id="spaces-sidebar" class="spaces-sidebar" aria-label="Spaces">
         <!--
-          WISER Playbooks / VS Code-style explorer sidebar (2026-08-07).
-          Structure: toolbar (brand + icon actions) → accent action rows
-          → collapsible sections (Search / Recent / Intake / Spaces).
-          Section collapse state persists per install; the Spaces section
-          rows expand in place to reveal each Space's items as a tree.
-          Legacy ids (search input, sort select, list ULs, refresh +
-          shared buttons) are preserved — renderer wiring and jsdom
-          fixtures address those, not this file.
+          Navigation rail (2026-09-01 organization pass). Pure navigation:
+          Home, then the collapsible tiers — Pinned (the human's working
+          set), Recent (only when the list is long enough to need it, and
+          never repeating a pinned Space), Intake, and every Space with
+          its item tree. Search, refresh and creation live in the command
+          bar above, once. Section collapse state persists per install.
+          Legacy ids (sort select, list ULs, collapse-all) are preserved —
+          renderer wiring and jsdom fixtures address those, not this file.
         -->
-        <div class="spaces-sidebar-toolbar">
-          <span class="spaces-sidebar-brand">Spaces</span>
-          <span class="spaces-sidebar-toolbar-actions">
-            <button
-              type="button"
-              id="spaces-sidebar-search-toggle"
-              class="spaces-toolbar-icon-button"
-              title="Search spaces and assets (⌘F)"
-              aria-label="Search spaces and assets"
-            >⌕</button>
-            <button
-              type="button"
-              id="spaces-refresh-button"
-              class="spaces-toolbar-icon-button"
-              title="Refresh from the graph (picks up Spaces created in WISER Playbooks or by agents)"
-              aria-label="Refresh spaces"
-            >⟳</button>
-            <button
-              type="button"
-              id="spaces-sidebar-collapse-all"
-              class="spaces-toolbar-icon-button"
-              title="Collapse all sections"
-              aria-label="Collapse all sections"
-            >⊟</button>
-          </span>
-        </div>
-
-        <div class="spaces-sidebar-actions">
-          <button
-            type="button"
-            id="spaces-action-new-space"
-            class="spaces-action-row spaces-action-row-accent"
-            title="Create a new Space"
-          >
-            <span class="spaces-action-row-glyph" aria-hidden="true">＋</span>
-            <span>New Space</span>
-          </button>
-          <button
-            type="button"
-            id="spaces-new-shared-button"
-            class="spaces-action-row"
-            title="Create a new shared space (AI-managed)"
-            aria-label="Create a new shared space"
-          >
-            <span class="spaces-action-row-glyph" aria-hidden="true">＋</span>
-            <span>Shared Space</span>
-            <span class="spaces-action-row-badge">AI</span>
-          </button>
-        </div>
-
         <div class="spaces-sidebar-scroll">
           <div class="spaces-sidebar-section spaces-sidebar-section-home">
             <ul class="spaces-list" id="spaces-list-home">
@@ -500,46 +519,6 @@
             </button>
             <div class="spaces-side-body">
               <ul class="spaces-list spaces-side-tree" id="spaces-list-pinned"></ul>
-            </div>
-          </section>
-
-          <section class="spaces-side-section" data-side-section="search">
-            <button
-              type="button"
-              class="spaces-side-header"
-              data-side-toggle="search"
-              aria-expanded="false"
-            >
-              <span class="spaces-side-chevron" aria-hidden="true">▸</span>
-              <span class="spaces-side-header-label">Search</span>
-            </button>
-            <div class="spaces-side-body">
-              <!-- A FILTER, not a search (2026-08-19). It narrows the
-                   lists below by Space name. Content search lives in the
-                   main pane with a scope control; this box used to do
-                   both and rendered results into a cramped tree here. -->
-              <!-- Typing filters the space list below (instant); Enter or
-                   Ask AI runs the ONE content search across ALL spaces,
-                   whose results render in the main pane where they have
-                   room (2026-08-20: "Search all spaces with agentic
-                   should also be in the left panel"). -->
-              <div class="spaces-sidebar-search">
-                <input
-                  type="search"
-                  id="spaces-sidebar-search-input"
-                  class="spaces-sidebar-search-input"
-                  placeholder="Search spaces + all assets…"
-                  autocomplete="off"
-                  spellcheck="false"
-                  aria-label="Filter spaces by name; press Enter to search all assets"
-                />
-                <button
-                  type="button"
-                  id="spaces-sidebar-search-ai"
-                  class="spaces-sidebar-search-ai"
-                  title="Have AI judge every asset against what you mean — results open in the main pane"
-                >Ask AI</button>
-              </div>
             </div>
           </section>
 
@@ -605,6 +584,15 @@
                   <option value="name">A→Z</option>
                   <option value="recent">Recent</option>
                 </select>
+                <button
+                  type="button"
+                  id="spaces-sidebar-collapse-all"
+                  class="spaces-toolbar-icon-button"
+                  title="Collapse all sections"
+                  aria-label="Collapse all sections"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 8 17 13" /><polyline points="7 19 12 14 17 19" /></svg>
+                </button>
               </span>
             </div>
             <div class="spaces-side-body">
