@@ -481,7 +481,7 @@ describe('Home view — context column', () => {
     const sections = document.querySelectorAll<HTMLElement>('.home-context-section');
     const aboutSection = sections[1];
     expect(aboutSection?.querySelector('.home-context-text')?.textContent ?? '').toContain(
-      'You can see all 4 Spaces'
+      'You can see 4 Spaces — the ones you created or were given access to.'
     );
   });
 });

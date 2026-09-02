@@ -1,14 +1,20 @@
 /**
- * ADR-083 — the NEON schema audit's code-side decisions, pinned.
+ * ADR-083 / ADR-084 — the NEON schema audit's code-side decisions, pinned.
  *
- * The audit's headline: Lite's belonging predicate honored only Lite's
- * own vocabulary (createdBy / HAS_ACCESS) while the graph's other
- * writers record account membership as [:OWNS] — 313 edges — so 92 live
- * Spaces were visible to nobody in Lite (robb: 20 of 114). Sight now
- * follows OWNS; writes do not. Plus two smaller contracts: GSX-Desktop's
- * `private` visibility reads as restricted (it read as OPEN), and Lite
- * documents its slice of the model in the registry without touching
- * what other writers own.
+ * ADR-083 had made sight follow the other writers' [:OWNS] edge, read as
+ * per-Space membership. ADR-084 (2026-09-02) reverses that: the live
+ * graph stamps OWNS on EVERY Space for EVERY account member (robb 102 of
+ * 109, Rich 99 of 109, bulk-created the day each signed in), so honoring
+ * it meant everyone saw everything — and it shipped in 0.0.79. Sight is
+ * now EXPLICIT PERMISSION ONLY: the viewer created the Space (Lite's
+ * `createdBy` or the Playbooks writer's `created_by_user`) or holds a
+ * live [:HAS_ACCESS] grant. OWNS appears in no predicate, and the first
+ * block below fails the build if it ever comes back.
+ *
+ * Two smaller contracts stay from ADR-083: GSX-Desktop's `private`
+ * visibility reads as restricted (it read as OPEN), and Lite documents
+ * its slice of the model in the registry without touching what other
+ * writers own.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -24,46 +30,64 @@ const sdkSource = (): string => {
   return readFileSync(found, 'utf8');
 };
 
-const OWNS_S = "[:OWNS]->(s)";
-const OWNS_OTHER = "[:OWNS]->(other)";
-const OWNS_VS = "[:OWNS]->(vs)";
-
-describe('sight follows OWNS (ADR-083)', () => {
-  it('every Space-level read honors the OWNS membership signal', () => {
+describe('sight is explicit permission only (ADR-084)', () => {
+  it('[:OWNS] appears in NO runtime query — membership is not permission', () => {
     // Evaluated on the REAL exported strings — a source-only check would
     // have passed the 0.0.77 invisible-byte outage.
-    expect(CYPHER.LIST_SPACES).toContain(OWNS_S);
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain(OWNS_S);
-    expect(CYPHER.LIST_ITEMS_IN_SPACE).toContain(OWNS_OTHER); // the chips join
-    expect(CYPHER.GET_ITEM).toContain(OWNS_VS); // ASSET_VISIBLE's space branch
+    const offenders = Object.entries(CYPHER)
+      .filter(([, q]) => typeof q === 'string' && /\[:OWNS\]/.test(q))
+      .map(([name]) => name);
+    expect(offenders, 'a query still reads [:OWNS] as access').toEqual([]);
   });
 
-  it('the live-meetings audience widens the same way (mobile mirrors the WHERE)', () => {
-    expect(CYPHER.LIST_LIVE_MEETINGS).toContain('[:OWNS]->(ms)');
-  });
-
-  it('OWNS grants SIGHT only — never a write', () => {
+  it('every visibility predicate is exactly: creator (either writer stamp) OR a live HAS_ACCESS grant', () => {
     const s = sdkSource();
-    const i = s.indexOf('const SPACE_WRITABLE = `');
-    // The predicate BODY only — the doc comment above SPACE_VISIBLE
-    // legitimately mentions OWNS in prose.
-    const block = s.slice(i, s.indexOf('`;', i));
-    expect(block).not.toContain('OWNS');
-    const j = s.indexOf('const ASSET_WRITABLE');
-    expect(s.slice(j, j + 1200)).not.toContain('OWNS');
-  });
-
-  it('the three visibility predicates all carry the branch (no half-applied sight)', () => {
-    const s = sdkSource();
-    for (const [name, marker] of [
-      ['SPACE_VISIBLE', OWNS_S],
-      ['OTHER_SPACE_VISIBLE', OWNS_OTHER],
-      ['ASSET_VISIBLE', OWNS_VS],
+    for (const [name, alias] of [
+      ['SPACE_VISIBLE', 's'],
+      ['OTHER_SPACE_VISIBLE', 'other'],
+      ['ASSET_VISIBLE', 'vs'],
     ] as const) {
       const i = s.indexOf(`const ${name} = \``);
       expect(i, `${name} missing`).toBeGreaterThan(-1);
-      expect(s.slice(i, i + 900), `${name} lacks the OWNS branch`).toContain(marker);
+      const body = s.slice(i, s.indexOf('`;', i));
+      expect(body, `${name}: Lite creator stamp`).toContain(`coalesce(${alias}.createdBy, '') = $viewerId`);
+      expect(body, `${name}: Playbooks creator stamp`).toContain(`coalesce(${alias}.created_by_user, '') = $viewerId`);
+      expect(body, `${name}: explicit grant`).toContain(`HAS_ACCESS]->(${alias})`);
+      expect(body, `${name}: nothing inferred`).not.toMatch(/OWNS|visibility|open/);
     }
+  });
+
+  it('the creator by EITHER stamp may write; a grant writes unless it is a reader', () => {
+    const s = sdkSource();
+    for (const [name, alias] of [
+      ['SPACE_WRITABLE', 's'],
+      ['ASSET_WRITABLE', 'ws'],
+    ] as const) {
+      const i = s.indexOf(`const ${name} = \``);
+      const body = s.slice(i, s.indexOf('`;', i));
+      expect(body, `${name}: Lite creator`).toContain(`coalesce(${alias}.createdBy, '') = $viewerId`);
+      expect(body, `${name}: Playbooks creator`).toContain(`coalesce(${alias}.created_by_user, '') = $viewerId`);
+      expect(body, `${name}: reader cannot write`).toContain("<> 'reader'");
+      expect(body).not.toContain('OWNS');
+    }
+  });
+
+  it('ASSET_WRITABLE keeps the "own uncategorized note" branch (created it, in no Space)', () => {
+    const s = sdkSource();
+    const i = s.indexOf('const ASSET_WRITABLE = `');
+    expect(s.slice(i, s.indexOf('`;', i))).toContain('[:CREATED]->(a)');
+  });
+
+  it('the live-meetings audience uses the same two signals (OR Mobile mirrors this WHERE — keep them in step)', () => {
+    expect(CYPHER.LIST_LIVE_MEETINGS).toContain("coalesce(ms.created_by_user, '') = $viewerId");
+    expect(CYPHER.LIST_LIVE_MEETINGS).toContain('HAS_ACCESS]->(ms)');
+    expect(CYPHER.LIST_LIVE_MEETINGS).not.toContain('OWNS');
+  });
+
+  it('the registry tells other writers the rule, in the same words', () => {
+    const q = CYPHER.ENSURE_LITE_SCHEMA_ANNOTATIONS;
+    expect(q).toContain('NOT permission (ADR-084)');
+    expect(q).toContain('created_by_user');
   });
 });
 

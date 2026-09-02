@@ -15103,14 +15103,15 @@ function buildContextAboutThisView(): HTMLElement {
   const total = permEntry.value.totalSpaceCount;
   const acl = document.createElement('p');
   acl.className = 'home-context-text';
-  if (typeof total === 'number' && total > visible) {
-    acl.textContent = `You can see ${visible} of ${total} Spaces in this account.`;
-  } else {
-    acl.textContent =
-      visible === 1
-        ? 'You can see 1 Space in this account.'
-        : `You can see all ${visible} Spaces in this account.`;
-  }
+  // Never phrase the visible count as the account's total (2026-09-02:
+  // "You can see all 114 Spaces in this account" read as a count of
+  // EVERY Space, which is not a number a member should be shown) — and
+  // never print a total the viewer cannot see.
+  void total;
+  acl.textContent =
+    visible === 1
+      ? 'You can see 1 Space — the ones you created or were given access to.'
+      : `You can see ${visible} Spaces — the ones you created or were given access to.`;
   section.appendChild(acl);
 
   if (countsEntry.value !== null) {

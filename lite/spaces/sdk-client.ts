@@ -242,11 +242,11 @@ const GRANT_LIVE = `(r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs)`;
 const OTHER_SPACE_VISIBLE = `(
         $viewerId <> '' AND (
           coalesce(other.createdBy, '') = $viewerId
+          OR coalesce(other.created_by_user, '') = $viewerId
           OR EXISTS {
             MATCH (:Person {id: $viewerId})-[r2:HAS_ACCESS]->(other)
             WHERE (r2.expiresUnixMs IS NULL OR r2.expiresUnixMs > $nowMs)
           }
-          OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(other) }
         )
       )`;
 
@@ -276,6 +276,7 @@ const OTHER_SPACE_VISIBLE = `(
 const SPACE_WRITABLE = `(
         $viewerId <> '' AND (
           coalesce(s.createdBy, '') = $viewerId
+          OR coalesce(s.created_by_user, '') = $viewerId
           OR EXISTS {
             MATCH (:Person {id: $viewerId})-[w:HAS_ACCESS]->(s)
             WHERE ${GRANT_LIVE.replace(/\br\./g, 'w.')}
@@ -284,18 +285,27 @@ const SPACE_WRITABLE = `(
         )
       )`;
 
-// ADR-083 — the account-membership signal the other writers use
-// (WISER / GSX-Desktop stamp [:OWNS] per Space, 313 edges) grants
-// SIGHT. Before this, 89 of robb's Spaces were invisible to him
-// in Lite. Writes stay on createdBy / HAS_ACCESS (SPACE_WRITABLE).
+// ADR-084 (2026-09-02) — sight is EXPLICIT PERMISSION ONLY. Two signals
+// and nothing inferred:
+//   1. the viewer created the Space — Lite stamps `createdBy`, the
+//      Playbooks writer stamps `created_by_user`; both are the creator;
+//   2. a live [:HAS_ACCESS] grant (ADR-065/074).
+// ADR-083 had added `[:OWNS]` as a third signal, reading it as per-Space
+// membership. The live graph says otherwise: the other writer stamps
+// OWNS on EVERY Space for EVERY account member (robb 102 of 109, Rich
+// 99 of 109, edges bulk-created the day each signed in), so honoring it
+// made everyone see everything ("you can't give access to spaces to
+// people who don't have permission"). OWNS is account membership, not
+// permission, and it appears in no predicate. `spaces-schema-audit.test.ts`
+// pins the absence.
 const SPACE_VISIBLE = `(
         $viewerId <> '' AND (
           coalesce(s.createdBy, '') = $viewerId
+          OR coalesce(s.created_by_user, '') = $viewerId
           OR EXISTS {
             MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(s)
             WHERE ${GRANT_LIVE}
           }
-          OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(s) }
         )
       )`;
 
@@ -327,6 +337,7 @@ const ASSET_WRITABLE = `(
             AND $viewerId <> ''
             AND (
               coalesce(ws.createdBy, '') = $viewerId
+              OR coalesce(ws.created_by_user, '') = $viewerId
               OR EXISTS {
                 MATCH (:Person {id: $viewerId})-[wr:HAS_ACCESS]->(ws)
                 WHERE (wr.expiresUnixMs IS NULL OR wr.expiresUnixMs > $nowMs)
@@ -350,11 +361,11 @@ const ASSET_VISIBLE = `(
           WHERE vs.deletedAt IS NULL
             AND ($viewerId <> '' AND (
                   coalesce(vs.createdBy, '') = $viewerId
+                  OR coalesce(vs.created_by_user, '') = $viewerId
                   OR EXISTS {
                     MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(vs)
                     WHERE ${GRANT_LIVE}
-                  }
-                  OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(vs) }))
+                  }))
         }
       )`;
 
@@ -1246,11 +1257,11 @@ export const CYPHER = {
           WHERE ms.deletedAt IS NULL
             AND toLower(coalesce(ms.name, '')) = 'wiser meetings'
             AND (coalesce(ms.createdBy, '') = $viewerId
+                 OR coalesce(ms.created_by_user, '') = $viewerId
                  OR EXISTS {
                    MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(ms)
                    WHERE ${GRANT_LIVE}
-                 }
-                 OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(ms) })
+                 })
         }
         // Per-meeting audience (2026-08-14): membership only bounds who MAY
         // be rung at all; the doorbell rings ONLY the host and the people
@@ -2717,9 +2728,10 @@ export const CYPHER = {
           'team|org|public read as open) · color, iconKey, description · deletedAt: ISO soft-delete tombstone · ' +
           'createdAt/updatedAt: ISO strings (other writers: created_at/updated_at epoch ms — read with the tsMs rule)',
         sp.lite_sight_rule =
-          'A Space is visible to a viewer when createdBy = viewer, OR a live [:HAS_ACCESS] grant exists, ' +
-          'OR a [:OWNS] edge exists (the account-membership signal WISER / GSX-Desktop write). ' +
-          'Writes require createdBy or a non-reader [:HAS_ACCESS] — OWNS grants sight only.',
+          'A Space is visible to a viewer ONLY when the viewer created it (createdBy, or the Playbooks ' +
+          'writer stamp created_by_user) OR a live HAS_ACCESS grant exists. OWNS edges are account membership ' +
+          'stamped by other writers for every member on every Space and are NOT permission (ADR-084). ' +
+          'Writes require the creator or a non-reader HAS_ACCESS grant.',
         sp.lite_annotated_at = $nowMs
     MERGE (as:Schema {entity: 'Asset'})
     SET as.lite_properties =
