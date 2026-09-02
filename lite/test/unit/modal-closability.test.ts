@@ -96,3 +96,30 @@ describe('AI Run Times feed overlays', () => {
     expect(handler).toMatch(/prefs-panel[\s\S]*togglePrefsPanel\(false\)/);
   });
 });
+
+describe('Spaces in-page dialogs that had only a ×', () => {
+  const src = read('spaces/spaces.ts');
+  const bodyOf = (name: string): string => {
+    const at = src.search(new RegExp(`^(export )?(async )?function ${name}\\(`, 'm'));
+    expect(at, `${name} missing`).toBeGreaterThan(-1);
+    const next = src.slice(at + 1).search(/^(export )?(async )?function \w+\(/m);
+    return src.slice(at, next === -1 ? undefined : at + 1 + next);
+  };
+
+  for (const name of [
+    'openSetPlaybookPicker',
+    'openChecklistEditorPanel',
+    'openAttachChecklistPanel',
+    'mountModal',
+  ]) {
+    it(`${name}: Escape closes exactly like the ×`, () => {
+      expect(bodyOf(name)).toMatch(/closeOnEscape\(backdrop, /);
+    });
+  }
+
+  it('the shared helper only answers for the topmost backdrop and unhooks itself', () => {
+    const helper = bodyOf('closeOnEscape');
+    expect(helper).toMatch(/stacked\[stacked\.length - 1\] !== backdrop\) return/);
+    expect(helper).toMatch(/if \(!backdrop\.isConnected\)/);
+  });
+});

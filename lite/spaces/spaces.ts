@@ -5845,6 +5845,7 @@ async function openSetPlaybookPicker(spaceId: string, spaceName: string): Promis
     empty.textContent = 'This Space has no assets yet — add one first.';
     list.appendChild(empty);
     return;
+  closeOnEscape(backdrop, dismiss);
   }
 
   // Playbook-shaped assets lead: they're what a user is looking for.
@@ -12952,6 +12953,7 @@ export function openChecklistEditorPanel(opts: {
   pauseInput.value = existing?.pausePoint ?? '';
   panel.appendChild(pauseInput);
 
+  closeOnEscape(backdrop, () => backdrop.remove());
   // ── AI draft box: describe it, review the rows it fills in. ──
   const aiRow = document.createElement('div');
   aiRow.className = 'spaces-checklist-ai-row';
@@ -13370,6 +13372,7 @@ async function openAttachChecklistPanel(
       row.type = 'button';
       row.className = 'spaces-member-picker-row spaces-checklist-pick-row';
       const nm = document.createElement('span');
+  closeOnEscape(backdrop, () => backdrop.remove());
       nm.className = 'spaces-member-picker-name';
       nm.textContent = `${c.name} · ${c.items.length} items`;
       row.appendChild(nm);
@@ -15216,6 +15219,7 @@ export function formatRecency(value: string | number): string {
       if (Number.isFinite(numeric)) ms = numeric;
       else return '';
     }
+  closeOnEscape(backdrop, () => backdrop.remove());
   } else {
     return '';
   }
@@ -18538,6 +18542,30 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
     close.type = 'button';
     close.className = 'spaces-member-picker-close';
     close.textContent = '×';
+/**
+ * Escape closes an in-page dialog exactly like its × (2026-09-02
+ * modal-closability pass — four dialogs had only a ×). Only the TOPMOST
+ * backdrop answers, so a confirm stacked on an editor closes alone; the
+ * listener unhooks itself once the backdrop leaves the DOM by any route
+ * (a reopen's replace-remove, the ×, a backdrop click), so a stale
+ * listener can never dismiss a later dialog.
+ */
+export function closeOnEscape(backdrop: HTMLElement, dismiss: () => void): void {
+  const onKey = (ev: KeyboardEvent): void => {
+    if (!backdrop.isConnected) {
+      document.removeEventListener('keydown', onKey);
+      return;
+    }
+    if (ev.key !== 'Escape' || ev.defaultPrevented) return;
+    const stacked = document.body.querySelectorAll(':scope > [class*="backdrop"]');
+    if (stacked.length > 0 && stacked[stacked.length - 1] !== backdrop) return;
+    ev.preventDefault();
+    document.removeEventListener('keydown', onKey);
+    dismiss();
+  };
+  document.addEventListener('keydown', onKey);
+}
+
     close.setAttribute('aria-label', 'Stop adding');
     close.addEventListener('click', finish);
     head.appendChild(close);
