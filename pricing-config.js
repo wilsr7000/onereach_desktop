@@ -18,7 +18,9 @@ const PRICING = {
 
   // Claude Fable 5 (Latest - 2026, new tier above Opus)
   'claude-fable-5': { input: 10.0, output: 50.0, provider: 'anthropic' },
-  // Fable 5.1 (2026-09-02 model upgrade). Pricing copied from Fable 5 pending confirmation.
+  // Fable 5.1 (2026-09-02 model upgrade). $10/$50 confirmed against the
+  // platform pricing page; cache reads are 0.025x base ($0.25/MTok) vs
+  // 0.1x ($1/MTok) on Fable 5 -- only the base rates are modelled here.
   'claude-fable-5-1': { input: 10.0, output: 50.0, provider: 'anthropic' },
 
   // Claude 4.7 (2026) -- Opus dropped to $5/$25 from 4.5 onward
