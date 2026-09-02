@@ -84,6 +84,24 @@ describe('sight is explicit permission only (ADR-084)', () => {
     expect(CYPHER.LIST_LIVE_MEETINGS).not.toContain('OWNS');
   });
 
+  it('the agent catalog respects asset permissions: directory entries stay, represented agents follow their asset', () => {
+    // A Lite-built agent's name/description come from the asset that
+    // [:REPRESENTS] it; an agent built in a restricted Space must not
+    // describe itself to every member (2026-09-02, with onereach-app-d5).
+    for (const [name, alias] of [
+      ['HOME_AGENTS_SAMPLE', 'a'],
+      ['AGENT_LIBRARY_SEARCH', 'g'],
+    ] as const) {
+      const q = CYPHER[name];
+      expect(q, `${name}: directory entries (no representing asset) stay visible`).toContain(
+        `NOT EXISTS { MATCH (:Asset)-[:REPRESENTS]->(${alias}) }`
+      );
+      expect(q, `${name}: a represented agent follows its asset's Space`).toContain('MATCH (rep)-[:BELONGS_TO]->(s:Space)');
+      expect(q, `${name}: uses the explicit-only Space predicate`).toContain("coalesce(s.created_by_user, '') = $viewerId");
+      expect(q).not.toContain('OWNS');
+    }
+  });
+
   it('the registry tells other writers the rule, in the same words', () => {
     const q = CYPHER.ENSURE_LITE_SCHEMA_ANNOTATIONS;
     expect(q).toContain('NOT permission (ADR-084)');

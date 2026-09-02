@@ -310,6 +310,34 @@ const SPACE_VISIBLE = `(
       )`;
 
 /**
+ * ADR-084 — the agent catalog respects asset permissions. A `:Agent`
+ * node is visible when it is a pure directory entry (no asset
+ * `[:REPRESENTS]` it — the platform / tracker-synced catalog, 20k+
+ * entries) OR when a representing asset is itself visible to the
+ * viewer: the viewer's own uncategorized asset, or one in a Space the
+ * viewer can see. A Lite-built agent's name and description are
+ * derived from that asset, so an agent built inside a restricted Space
+ * no longer tells every member what it does. `agent` is the bound
+ * alias (`a` on the home card, `g` in the library search).
+ */
+const AGENT_VISIBLE = (agent: string): string => `(
+        NOT EXISTS { MATCH (:Asset)-[:REPRESENTS]->(${agent}) }
+        OR EXISTS {
+          MATCH (rep:Asset)-[:REPRESENTS]->(${agent})
+          WHERE rep.deletedAt IS NULL
+            AND $viewerId <> ''
+            AND (
+              (NOT EXISTS { MATCH (rep)-[:BELONGS_TO]->(:Space) }
+                AND EXISTS { MATCH (:Person {id: $viewerId})-[:CREATED]->(rep) })
+              OR EXISTS {
+                MATCH (rep)-[:BELONGS_TO]->(s:Space)
+                WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE}
+              }
+            )
+        }
+      )`;
+
+/**
  * ADR-051 — item-level visibility. An asset (bound as `a`) is visible
  * when it is uncategorized (no space at all) or belongs to at least one
  * space the viewer can see. An item in both a restricted space and an
@@ -1205,6 +1233,7 @@ export const CYPHER = {
    */
   HOME_AGENTS_SAMPLE: `
     MATCH (a:Agent)
+    WHERE ${AGENT_VISIBLE('a')}
     RETURN a.id AS id,
            coalesce(a.name, a.title, a.id) AS name,
            coalesce(a.description, a.summary, '') AS description
@@ -1297,9 +1326,10 @@ export const CYPHER = {
    */
   AGENT_LIBRARY_SEARCH: `
     MATCH (g:Agent)
-    WHERE $q = ''
+    WHERE ${AGENT_VISIBLE('g')}
+      AND ($q = ''
        OR toLower(coalesce(g.name, g.title, '')) CONTAINS toLower($q)
-       OR toLower(coalesce(g.description, g.summary, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.description, g.summary, '')) CONTAINS toLower($q))
     RETURN g.id AS id,
            coalesce(g.name, g.title, g.id) AS name,
            coalesce(g.description, g.summary, '') AS description,

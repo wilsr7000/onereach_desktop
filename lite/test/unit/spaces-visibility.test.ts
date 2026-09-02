@@ -81,8 +81,10 @@ describe('visibility predicates in the Cypher surface', () => {
    *    (orphan-cleanup ambiguity guard, create dedupe, GSX migration).
    *    Viewer-gating them would make cleanup DELETE files whose assets
    *    are merely invisible to the current viewer.
-   *  - AGENT_LIBRARY_SEARCH / MEMBER_LIBRARY_SEARCH /
-   *    HOME_AGENTS_SAMPLE: account-wide directories by design.
+   *  - MEMBER_LIBRARY_SEARCH: account-wide people directory by design
+   *    (names are not asset content). AGENT_LIBRARY_SEARCH and
+   *    HOME_AGENTS_SAMPLE LEFT this list on 2026-09-02 (ADR-084): the
+   *    agent catalog respects asset permissions via AGENT_VISIBLE.
    *  - SPACE_EXISTS_BY_ID / SPACE_ITEM_COUNT: internal pre-flights;
    *    the mutations they serve are themselves gated now.
    *  - UNCATEGORIZED_*: creator-gated inline per ADR-065 (viewer-created only).
@@ -91,7 +93,6 @@ describe('visibility predicates in the Cypher surface', () => {
     'FIND_ASSET_BY_FILE_KEY',
     'FIND_AGENT_ASSET_IN_SPACE',
     'LIST_INLINE_BINARY_ASSETS',
-    'AGENT_LIBRARY_SEARCH',
     // ADR-062 meeting ring (Decision 1): :MeetingLive is deliberately
     // un-spaced — "a doorbell, not an artifact". Transient account-wide
     // broadcast (title/joinUrl/host, TTL-bounded LIMIT 5); completed-
@@ -102,7 +103,6 @@ describe('visibility predicates in the Cypher surface', () => {
     // of one Space matched by exact name — no content, no enumeration.
     'FIND_SPACE_BY_NAME',
     'MEMBER_LIBRARY_SEARCH',
-    'HOME_AGENTS_SAMPLE',
     'SPACE_EXISTS_BY_ID',
     'SPACE_ITEM_COUNT',
     // Internal endpoint-diff helper on the agent WRITE path; the

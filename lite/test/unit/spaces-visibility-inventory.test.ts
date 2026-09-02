@@ -35,15 +35,13 @@ const EXEMPT: Record<string, string> = {
     'IPC): finds ONE Space by exact name returning id+name only, so a ' +
     'first-time reporter can be granted membership before the gated flows ' +
     'run. Gating it would orphan every non-member filing.',
-  AGENT_LIBRARY_SEARCH:
-    'account-wide agent directory by design — the add-from-library picker ' +
-    'must list every agent in the account',
+  // AGENT_LIBRARY_SEARCH / HOME_AGENTS_SAMPLE left this list on
+  // 2026-09-02 (ADR-084): the :Agent catalog now respects asset
+  // permissions — pure directory entries stay, a represented agent
+  // follows its asset's Space. See AGENT_VISIBLE in sdk-client.ts.
   MEMBER_LIBRARY_SEARCH:
     'account-wide people/agent directory by design — the add-member picker ' +
     'must list people you could grant access to',
-  HOME_AGENTS_SAMPLE:
-    'account-wide agent sample for the Home card — :Agent nodes are not ' +
-    'space-scoped; the agent directory is deliberately account-visible',
   GET_AGENT_ENDPOINTS:
     'feeds createAgentFromLibrary only (library semantics above); not ' +
     'exposed as a renderer read',
@@ -58,10 +56,12 @@ const EXEMPT: Record<string, string> = {
     'returns a single aggregate count of other members, no identities',
 };
 
-// The three ADR-051 macros, plus the ADR-065 inline fail-closed
-// signature — a query carrying the viewer-required clause is gated by
-// construction even when its alias forces the predicate inline.
-const GATE_MARKERS = ['SPACE_VISIBLE', 'ASSET_VISIBLE', 'OTHER_SPACE_VISIBLE', "$viewerId <> ''"];
+// The three ADR-051 macros, the ADR-084 agent-catalog macro (which
+// embeds SPACE_VISIBLE for a represented agent's Space), plus the
+// ADR-065 inline fail-closed signature — a query carrying the
+// viewer-required clause is gated by construction even when its alias
+// forces the predicate inline.
+const GATE_MARKERS = ['SPACE_VISIBLE', 'ASSET_VISIBLE', 'OTHER_SPACE_VISIBLE', 'AGENT_VISIBLE(', "$viewerId <> ''"];
 const WRITE_MARKERS = [/\bMERGE\b/, /\bCREATE\b/, /\bSET\b/, /\bDETACH\b/, /\bDELETE\b/];
 
 function loadSource(): string {
