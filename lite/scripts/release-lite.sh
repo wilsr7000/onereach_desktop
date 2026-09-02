@@ -265,9 +265,15 @@ ASAR_LIST=$(npx @electron/asar list "$ASAR_PATH")
 # transitives in 0.0.47). keytar is the only runtime external left
 # that must ship in node_modules. Keep this list in lockstep with the
 # BUILT bundle's require()s; the boot smoke below is the arbiter.
-for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/keytar/package.json"; do
+# event-logger.js (2026-09-01): the repo-root log-FILE writer that
+# lib/log-event-queue.js lazily requires as '../event-logger' inside a
+# try/catch that marks the writer failed forever on the first miss.
+# 0.0.64 → 0.0.78 never packaged it, so no installed Lite ever wrote a
+# log file — silently. It is a boot-critical module for observability,
+# not for booting: a build without it starts fine and logs nothing.
+for CRITICAL in "dist-lite/build/main-lite.js" "dist-lite/build/wiser-header.html" "dist-lite/build/preload-lite-wiser.js" "node_modules/keytar/package.json" "/event-logger.js"; do
     if ! echo "$ASAR_LIST" | grep -q "$CRITICAL"; then
-        echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot.${NC}"
+        echo -e "${RED}✗ Packaged asar is missing ${CRITICAL} — the installed app would crash at boot (or, for event-logger.js, run without log files).${NC}"
         echo -e "${RED}  Run npm install and rebuild before publishing. Aborting.${NC}"
         exit 1
     fi
