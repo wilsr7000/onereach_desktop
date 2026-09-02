@@ -1166,21 +1166,23 @@ describe('SpaceScope handling', () => {
 // methods that power the Home news-feed cards. See lite/spaces/HOME-V1.md.
 
 describe('CYPHER source strings — Home view', () => {
-  it('HOME_ENTITY_COUNTS uses APOC stats', () => {
-    expect(CYPHER.HOME_ENTITY_COUNTS).toMatch(/CALL apoc\.meta\.stats\(\) YIELD labels/);
-    expect(CYPHER.HOME_ENTITY_COUNTS).toMatch(/RETURN labels/);
-  });
-
-  it('HOME_ENTITY_COUNTS_FALLBACK uses explicit UNION ALL per label', () => {
-    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(s:Space\)/);
-    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(a:Asset\)/);
-    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(p:Person\)/);
-    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/MATCH \(g:Agent\)/);
-    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(/UNION ALL/);
-    // Soft-deleted Spaces don't count toward the data-room overview.
-    expect(CYPHER.HOME_ENTITY_COUNTS_FALLBACK).toMatch(
-      /MATCH \(s:Space\) WHERE s\.deletedAt IS NULL/
-    );
+  it('HOME_ENTITY_COUNTS is the VIEWER\'s figures — never whole-graph APOC stats (ADR-084)', () => {
+    const q = CYPHER.HOME_ENTITY_COUNTS;
+    // The old primary was `apoc.meta.stats()`: label counts for the whole
+    // graph, shown to every member as "126 items across 149 people and
+    // 20k agents". Nothing account-wide is shown to a member now.
+    expect(q).not.toMatch(/apoc/i);
+    expect((q.match(/UNION ALL/g) ?? []).length).toBe(3);
+    // Spaces + items: the visibility predicates (both carry $viewerId).
+    expect(q).toMatch(/MATCH \(s:Space\) WHERE s\.deletedAt IS NULL AND \(\s*\$viewerId <> ''/);
+    expect(q).toMatch(/MATCH \(a:Asset\) WHERE a\.deletedAt IS NULL AND \(/);
+    // People: creators + members of the Spaces the viewer can see.
+    expect(q).toMatch(/OPTIONAL MATCH \(m:Person\)-\[:HAS_ACCESS\]->\(s\)/);
+    expect(q).toMatch(/collect\(DISTINCT s\.createdBy\) \+ collect\(DISTINCT s\.created_by_user\)/);
+    // Agents: agent ASSETS the viewer can see, not the account's :Agent catalog.
+    expect(q).toMatch(/coalesce\(a\.type, a\.assetType, ''\) = 'agent'/);
+    expect(q).not.toMatch(/MATCH \(g:Agent\)/);
+    expect(q).not.toMatch(/MATCH \(p:Person\) RETURN/);
   });
 
   it('HOME_RECENT_ITEMS surfaces all member kinds (ADR-058) with ItemSummary projection', () => {
@@ -1241,46 +1243,27 @@ describe('CYPHER source strings — Home view', () => {
   });
 });
 
-describe('SdkSpacesClient.getEntityCounts', () => {
-  it('normalises APOC labels into a flat counts shape', async () => {
+describe('SdkSpacesClient.getEntityCounts (ADR-084: the viewer\'s figures)', () => {
+  it('maps the UNION ALL rows to the counts shape', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('apoc.meta.stats()', [
-      {
-        labels: { Space: 4, Asset: 9, Person: 3, Agent: 159, Heartbeat: 565 },
-      },
-    ]);
-    const client = makeClient(stub);
-    expect(await client.getEntityCounts()).toEqual({
-      spaces: 4,
-      assets: 9,
-      people: 3,
-      agents: 159,
-    });
-  });
-
-  it('falls back to UNION ALL when APOC returns "procedure not found"', async () => {
-    const stub = buildStubQuery();
-    const apocErr = new Error('There is no procedure with the name `apoc.meta.stats` registered');
-    (apocErr as Error & { code?: string }).code = 'NEON_QUERY';
-    stub.setError('apoc.meta.stats()', apocErr);
     stub.setResponse('UNION ALL', [
-      { kind: 'Space', n: 4 },
-      { kind: 'Asset', n: 9 },
-      { kind: 'Person', n: 3 },
-      { kind: 'Agent', n: 159 },
+      { kind: 'Space', n: 24 },
+      { kind: 'Asset', n: 92 },
+      { kind: 'Person', n: 5 },
+      { kind: 'Agent', n: 1 },
     ]);
     const client = makeClient(stub);
     expect(await client.getEntityCounts()).toEqual({
-      spaces: 4,
-      assets: 9,
-      people: 3,
-      agents: 159,
+      spaces: 24,
+      assets: 92,
+      people: 5,
+      agents: 1,
     });
   });
 
-  it('defaults missing labels to 0 instead of undefined', async () => {
+  it('a kind with no row (a viewer with no agent assets) is 0, never undefined', async () => {
     const stub = buildStubQuery();
-    stub.setResponse('apoc.meta.stats()', [{ labels: { Space: 2 } }]);
+    stub.setResponse('UNION ALL', [{ kind: 'Space', n: 2 }]);
     const client = makeClient(stub);
     expect(await client.getEntityCounts()).toEqual({
       spaces: 2,
@@ -1290,11 +1273,12 @@ describe('SdkSpacesClient.getEntityCounts', () => {
     });
   });
 
-  it('propagates non-APOC errors instead of falling back', async () => {
+  it('never consults whole-graph APOC stats, and errors propagate instead of a silent fallback', async () => {
     const stub = buildStubQuery();
+    stub.setResponse('apoc.meta.stats()', [{ labels: { Space: 122, Asset: 126, Person: 149, Agent: 20519 } }]);
     const authErr = new Error('not configured');
     (authErr as Error & { code?: string }).code = 'NEON_NOT_CONFIGURED';
-    stub.setError('apoc.meta.stats()', authErr);
+    stub.setError('UNION ALL', authErr);
     const client = makeClient(stub);
     await expect(client.getEntityCounts()).rejects.toMatchObject({
       code: 'SPACES_NOT_AUTHENTICATED',

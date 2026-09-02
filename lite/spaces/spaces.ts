@@ -15117,11 +15117,13 @@ function buildContextAboutThisView(): HTMLElement {
   if (countsEntry.value !== null) {
     const summary = document.createElement('p');
     summary.className = 'home-context-text home-context-text-dim';
-    summary.textContent = `${formatBigNumber(countsEntry.value.assets)} ${
+    // Viewer-scoped figures (ADR-084) — say so, so nobody reads them as
+    // the account's totals.
+    summary.textContent = `In your Spaces: ${formatBigNumber(countsEntry.value.assets)} ${
       countsEntry.value.assets === 1 ? 'item' : 'items'
-    } across ${formatBigNumber(countsEntry.value.people)} ${
+    }, ${formatBigNumber(countsEntry.value.people)} ${
       countsEntry.value.people === 1 ? 'person' : 'people'
-    } and ${formatBigNumber(countsEntry.value.agents)} ${
+    }, ${formatBigNumber(countsEntry.value.agents)} ${
       countsEntry.value.agents === 1 ? 'agent' : 'agents'
     }.`;
     section.appendChild(summary);

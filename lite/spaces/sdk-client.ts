@@ -1047,22 +1047,28 @@ export const CYPHER = {
   // so legacy producer-side data still renders.
 
   /**
-   * Entity counts via APOC. Falls back to `HOME_ENTITY_COUNTS_FALLBACK`
-   * in the SDK when APOC is unavailable. Same recovery pattern as
-   * `discovery.ts` Q1.
+   * ADR-084 (2026-09-02): every figure is the VIEWER'S. The previous
+   * primary query was `apoc.meta.stats()` — whole-graph label counts,
+   * so the Spaces home told every member "126 items across 149 people
+   * and 20k agents" for the entire account regardless of access. Now:
+   * items = assets the viewer can see; people = the creators and
+   * members of the Spaces the viewer can see; agents = agent assets the
+   * viewer can see. No account-wide number is shown to a member.
    */
   HOME_ENTITY_COUNTS: `
-    CALL apoc.meta.stats() YIELD labels
-    RETURN labels
-  `,
-  HOME_ENTITY_COUNTS_FALLBACK: `
     MATCH (s:Space) WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE} RETURN 'Space' AS kind, count(s) AS n
     UNION ALL
     MATCH (a:Asset) WHERE a.deletedAt IS NULL AND ${ASSET_VISIBLE} RETURN 'Asset' AS kind, count(a) AS n
     UNION ALL
-    MATCH (p:Person) RETURN 'Person' AS kind, count(p) AS n
+    MATCH (s:Space) WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE}
+    OPTIONAL MATCH (m:Person)-[:HAS_ACCESS]->(s)
+    WITH collect(DISTINCT m.id) + collect(DISTINCT s.createdBy) + collect(DISTINCT s.created_by_user) AS ids
+    UNWIND ids AS pid
+    WITH DISTINCT pid WHERE pid IS NOT NULL AND pid <> ''
+    RETURN 'Person' AS kind, count(pid) AS n
     UNION ALL
-    MATCH (g:Agent) RETURN 'Agent' AS kind, count(g) AS n
+    MATCH (a:Asset) WHERE a.deletedAt IS NULL AND coalesce(a.type, a.assetType, '') = 'agent' AND ${ASSET_VISIBLE}
+    RETURN 'Agent' AS kind, count(a) AS n
   `,
 
   /**
@@ -3378,16 +3384,10 @@ export class SdkSpacesClient {
    * "loaded with no data" apart from "still loading".
    */
   async getEntityCounts(): Promise<EntityCounts> {
-    try {
-      const rows = await this.run(CYPHER.HOME_ENTITY_COUNTS);
-      return toEntityCountsFromApoc(rows);
-    } catch (err) {
-      if (looksLikeMissingApoc(err)) {
-        const rows = await this.run(CYPHER.HOME_ENTITY_COUNTS_FALLBACK);
-        return toEntityCountsFromFallback(rows);
-      }
-      throw err;
-    }
+    // ADR-084: one viewer-scoped query; the APOC whole-graph path is
+    // gone because its numbers were the account's, not the viewer's.
+    const rows = await this.run(CYPHER.HOME_ENTITY_COUNTS, { viewerId: this.viewerParam() });
+    return toEntityCountsFromFallback(rows);
   }
 
   /**
@@ -6477,44 +6477,10 @@ function clampSmallLimit(
 }
 
 /**
- * Returns true when an error from the APOC `getEntityCounts` attempt
- * looks like APOC isn't installed. Mirrors the heuristic from
- * `discovery.ts runQ1`. Anything else (auth, network, permissions)
- * propagates so callers see a real failure instead of a silent
- * fallback that hides the underlying cause.
- */
-function looksLikeMissingApoc(err: unknown): boolean {
-  if (err === null || typeof err !== 'object') return false;
-  const e = err as { code?: unknown; message?: unknown };
-  const code = typeof e.code === 'string' ? e.code : null;
-  const message = typeof e.message === 'string' ? e.message : '';
-  return (
-    code === 'SPACES_CYPHER' &&
-    /procedure|apoc\.meta\.stats|not.?found/i.test(message)
-  );
-}
-
-/**
- * Normalise the APOC `apoc.meta.stats() YIELD labels` result shape
- * into a flat `EntityCounts`. The `labels` field is an object whose
- * keys are label names and values are counts.
- */
-function toEntityCountsFromApoc(rows: Array<Record<string, unknown>>): EntityCounts {
-  const counts = emptyEntityCounts();
-  if (rows.length === 0) return counts;
-  const labels = rows[0]?.['labels'];
-  if (labels === null || typeof labels !== 'object') return counts;
-  const entries = labels as Record<string, unknown>;
-  counts.spaces = readLabelCount(entries, 'Space');
-  counts.assets = readLabelCount(entries, 'Asset');
-  counts.people = readLabelCount(entries, 'Person');
-  counts.agents = readLabelCount(entries, 'Agent');
-  return counts;
-}
-
-/**
- * Normalise the UNION-ALL fallback result shape into `EntityCounts`.
- * Each row is `{ kind: <Label>, n: <count> }`. Missing rows mean 0.
+ * Normalise the UNION-ALL result shape into `EntityCounts`. Each row is
+ * `{ kind: <Label>, n: <count> }`. Missing rows mean 0. (The APOC
+ * whole-graph path and its parser were removed in ADR-084 — those
+ * numbers were the account's, not the viewer's.)
  */
 function toEntityCountsFromFallback(
   rows: Array<Record<string, unknown>>
@@ -6537,11 +6503,6 @@ function emptyEntityCounts(): EntityCounts {
   return { spaces: 0, assets: 0, people: 0, agents: 0 };
 }
 
-function readLabelCount(entries: Record<string, unknown>, label: string): number {
-  const v = entries[label];
-  if (typeof v !== 'number' || !Number.isFinite(v)) return 0;
-  return Math.max(0, Math.floor(v));
-}
 
 /**
  * Compute the `sinceMs` epoch parameter for `topContributors()` from
