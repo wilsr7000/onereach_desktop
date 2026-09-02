@@ -163,3 +163,16 @@ describe('origin fence at the handler', () => {
     expect(res.headers['Access-Control-Allow-Methods']).toContain('GET');
   });
 });
+
+describe('malformed URL encoding is a client error', () => {
+  it('a bad percent-sequence in an item id → 400, not 500 (2026-09-01 hunt)', async () => {
+    const reads = fakeReads();
+    const h = makeNeonBridgeHandler({ reads });
+    const res = await call(h, 'GET', '/neon/items/%E0%A4%A');
+    expect(res.status).toBe(400);
+    expect(reads.getItem).not.toHaveBeenCalled();
+    const res2 = await call(h, 'GET', '/neon/spaces/%E0%A4%A/items');
+    expect(res2.status).toBe(400);
+    expect(reads.listItems).not.toHaveBeenCalled();
+  });
+});

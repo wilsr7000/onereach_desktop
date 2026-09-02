@@ -170,3 +170,23 @@ describe('real MCP round trip', () => {
     expect(w.items.get('i-2')!.metadata?.[INGEST_FLAG_KEY]).toBeUndefined();
   });
 });
+
+describe('deadlines: a server that accepts but never answers cannot wedge the client', () => {
+  it('connect rejects with a clear timeout instead of hanging (2026-09-01 hunt)', async () => {
+    const { createMemoryConnector } = await import('../../memory-ingest/client.js');
+    const blackhole = createServer(() => { /* never respond */ });
+    await new Promise<void>((resolve) => blackhole.listen(0, '127.0.0.1', resolve));
+    const port = (blackhole.address() as AddressInfo).port;
+    try {
+      const connect = createMemoryConnector({ connectMs: 400, listToolsMs: 400, callToolMs: 400 });
+      const started = Date.now();
+      await expect(
+        connect({ id: 'b', name: 'Blackhole', url: `http://127.0.0.1:${port}/mcp`, createdAt: '2026-09-01T00:00:00.000Z' })
+      ).rejects.toThrow(/timed out/);
+      // Promptly — on the order of the deadline, not the SDK's forever.
+      expect(Date.now() - started).toBeLessThan(3000);
+    } finally {
+      await new Promise<void>((resolve) => blackhole.close(() => resolve()));
+    }
+  });
+});

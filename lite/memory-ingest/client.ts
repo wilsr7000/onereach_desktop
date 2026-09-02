@@ -152,51 +152,110 @@ export function buildIngestArgs(
   return args;
 }
 
-/**
- * Production connect: SDK `Client` over streamable HTTP, bearer auth
- * when the server has an apiKey. Imports are dynamic so the (heavy)
- * SDK only loads when an ingestion actually runs.
- */
-export const connectMemoryServer: MemoryConnectFn = async (server) => {
-  const [{ Client }, { StreamableHTTPClientTransport }] = await Promise.all([
-    import('@modelcontextprotocol/sdk/client/index.js'),
-    import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
-  ]);
-  const headers: Record<string, string> = {};
-  if (server.apiKey !== undefined && server.apiKey.length > 0) {
-    headers.Authorization = `Bearer ${server.apiKey}`;
-  }
-  const transport = new StreamableHTTPClientTransport(new URL(server.url), {
-    requestInit: { headers },
-  });
-  const client = new Client(
-    { name: 'onereach-lite-memory-ingest', version: '1.0.0' },
-    { capabilities: {} }
-  );
-  // exactOptionalPropertyTypes friction: the SDK's Transport interface
-  // declares optional props without `| undefined`. Runtime-compatible.
-  await client.connect(transport as unknown as Parameters<typeof client.connect>[0]);
-  return {
-    async listTools() {
-      const res = await client.listTools();
-      return res.tools as RemoteTool[];
-    },
-    async callTool(name, args) {
-      const res = await client.callTool({ name, arguments: args });
-      // MCP tools report failure in-band; surface it as a throw so the
-      // engine records a failure instead of flagging the item ingested.
-      if ((res as { isError?: boolean }).isError === true) {
-        const content = (res as { content?: Array<{ text?: string }> }).content;
-        const text = content?.map((c) => c.text ?? '').join(' ').trim();
-        throw new Error(
-          text !== undefined && text.length > 0
-            ? text
-            : `Tool "${name}" reported an error`
-        );
-      }
-    },
-    async close() {
-      await client.close();
-    },
-  };
+/** Per-phase deadlines. A memory server that accepts the socket but never
+ *  answers must not wedge the caller (2026-09-01 API bug hunt: a blackhole
+ *  endpoint hung connect() forever — the Settings "Test" button and a whole
+ *  ingest run had no way to recover). Tool calls get a longer budget: real
+ *  ingestion can be slow. */
+export interface MemoryDeadlines {
+  connectMs: number;
+  listToolsMs: number;
+  callToolMs: number;
+}
+
+export const DEFAULT_MEMORY_DEADLINES: MemoryDeadlines = {
+  connectMs: 15_000,
+  listToolsMs: 15_000,
+  callToolMs: 90_000,
 };
+
+/** Race a promise against a deadline; the loser is cleaned up by the caller. */
+async function withDeadline<T>(label: string, ms: number, work: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s — the server accepted the connection but never answered`)),
+      ms
+    );
+  });
+  try {
+    return await Promise.race([work, timeout]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
+ * Build a connector with explicit deadlines (tests use short ones).
+ * Production uses {@link connectMemoryServer} = the default deadlines.
+ * Imports are dynamic so the (heavy) SDK only loads when an ingestion
+ * actually runs.
+ */
+export function createMemoryConnector(
+  deadlines: MemoryDeadlines = DEFAULT_MEMORY_DEADLINES
+): MemoryConnectFn {
+  return async (server) => {
+    const [{ Client }, { StreamableHTTPClientTransport }] = await Promise.all([
+      import('@modelcontextprotocol/sdk/client/index.js'),
+      import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+    ]);
+    const headers: Record<string, string> = {};
+    if (server.apiKey !== undefined && server.apiKey.length > 0) {
+      headers.Authorization = `Bearer ${server.apiKey}`;
+    }
+    const transport = new StreamableHTTPClientTransport(new URL(server.url), {
+      requestInit: { headers },
+    });
+    const client = new Client(
+      { name: 'onereach-lite-memory-ingest', version: '1.0.0' },
+      { capabilities: {} }
+    );
+    // exactOptionalPropertyTypes friction: the SDK's Transport interface
+    // declares optional props without `| undefined`. Runtime-compatible.
+    try {
+      await withDeadline(
+        `Connecting to ${server.name}`,
+        deadlines.connectMs,
+        client.connect(transport as unknown as Parameters<typeof client.connect>[0])
+      );
+    } catch (err) {
+      // Never leave a half-open transport behind on a timed-out connect.
+      await transport.close().catch(() => undefined);
+      throw err;
+    }
+    return {
+      async listTools() {
+        const res = await withDeadline(
+          `Listing tools on ${server.name}`,
+          deadlines.listToolsMs,
+          client.listTools()
+        );
+        return res.tools as RemoteTool[];
+      },
+      async callTool(name, args) {
+        const res = await withDeadline(
+          `Tool "${name}" on ${server.name}`,
+          deadlines.callToolMs,
+          client.callTool({ name, arguments: args })
+        );
+        // MCP tools report failure in-band; surface it as a throw so the
+        // engine records a failure instead of flagging the item ingested.
+        if ((res as { isError?: boolean }).isError === true) {
+          const content = (res as { content?: Array<{ text?: string }> }).content;
+          const text = content?.map((c) => c.text ?? '').join(' ').trim();
+          throw new Error(
+            text !== undefined && text.length > 0
+              ? text
+              : `Tool "${name}" reported an error`
+          );
+        }
+      },
+      async close() {
+        await client.close();
+      },
+    };
+  };
+}
+
+/** Production connect: default deadlines. */
+export const connectMemoryServer: MemoryConnectFn = createMemoryConnector();

@@ -64,3 +64,10 @@ describe('real loopback bridge', () => {
     expect((await res.json()) as { ok: boolean }).toMatchObject({ ok: true });
   });
 });
+
+describe('malformed URL encoding over the wire', () => {
+  it('answers 400 for a bad percent-sequence instead of 500', async () => {
+    const res = await fetch(`${base}/neon/items/%E0%A4%A`);
+    expect(res.status).toBe(400);
+  });
+});

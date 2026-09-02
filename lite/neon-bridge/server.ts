@@ -39,6 +39,20 @@ export interface NeonBridgeDeps {
 
 type Handler = (req: http.IncomingMessage, res: http.ServerResponse) => void;
 
+/**
+ * decodeURIComponent that reports a malformed percent-sequence as null
+ * instead of throwing. A bad encoding is a client error (400), not a
+ * server fault — the generic catch used to answer it with a 500 "URI
+ * malformed" (2026-09-01 API bug hunt).
+ */
+function safeDecode(segment: string): string | null {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
 function sendJson(
   res: http.ServerResponse,
   status: number,
@@ -126,13 +140,21 @@ export function makeNeonBridgeHandler(deps: NeonBridgeDeps): Handler {
         }
         const itemsMatch = path.match(/^\/neon\/spaces\/([^/]+)\/items$/);
         if (itemsMatch) {
-          const spaceId = decodeURIComponent(itemsMatch[1] ?? '');
+          const spaceId = safeDecode(itemsMatch[1] ?? '');
+          if (spaceId === null) {
+            sendJson(res, 400, { error: 'Malformed URL encoding in path' }, cors);
+            return;
+          }
           sendJson(res, 200, { items: await deps.reads.listItems(spaceId) }, cors);
           return;
         }
         const itemMatch = path.match(/^\/neon\/items\/([^/]+)$/);
         if (itemMatch) {
-          const id = decodeURIComponent(itemMatch[1] ?? '');
+          const id = safeDecode(itemMatch[1] ?? '');
+          if (id === null) {
+            sendJson(res, 400, { error: 'Malformed URL encoding in path' }, cors);
+            return;
+          }
           const item = await deps.reads.getItem(id);
           if (item === null || item === undefined) {
             sendJson(res, 404, { error: 'Not found (or not visible to you)' }, cors);
