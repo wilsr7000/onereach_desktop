@@ -189,6 +189,7 @@ const MAIN_WINDOW_GET_ACTIVE = 'lite:main-window:get-active';
 const MAIN_WINDOW_GO_HOME = 'lite:main-window:go-home';
 const MAIN_WINDOW_RELOAD_ACTIVE = 'lite:main-window:reload-active';
 const MAIN_WINDOW_CHANGED = 'lite:main-window:changed';
+const MAIN_WINDOW_CONTENT_TONE = 'lite:main-window:content-tone';
 
 const IDW_LIST = 'lite:idw:list';
 const IDW_LIST_BY_KIND = 'lite:idw:list-by-kind';
@@ -2321,6 +2322,15 @@ interface MainWindowBridge {
   onTabsChanged(
     handler: (payload: { tabs: MainWindowTabView[]; activeId: string | null }) => void
   ): () => void;
+  /**
+   * The tone of the content under the tab bar (2026-09-01): the active
+   * tab's, or Home's while it is visible. `tone: null` means nothing is
+   * under the bar (boot chat) — paint from the theme. `color` is the
+   * content's mean top-edge colour as `#rrggbb`.
+   */
+  onContentTone(
+    handler: (payload: { tabId: string | null; tone: 'dark' | 'light' | null; color: string | null }) => void
+  ): () => void;
   parseError(err: unknown): MainWindowErrorJSON | null;
 }
 
@@ -2354,6 +2364,29 @@ const mainWindow: MainWindowBridge = {
     ipcRenderer.on(MAIN_WINDOW_CHANGED, listener);
     return (): void => {
       ipcRenderer.removeListener(MAIN_WINDOW_CHANGED, listener);
+    };
+  },
+  onContentTone: (handler) => {
+    const listener = (
+      _event: Electron.IpcRendererEvent,
+      payload: { tabId?: unknown; tone?: unknown; color?: unknown }
+    ): void => {
+      const tone = payload?.tone === 'dark' || payload?.tone === 'light' ? payload.tone : null;
+      const color =
+        typeof payload?.color === 'string' && /^#[0-9a-f]{6}$/i.test(payload.color) ? payload.color : null;
+      try {
+        handler({
+          tabId: typeof payload?.tabId === 'string' ? payload.tabId : null,
+          tone: color === null ? null : tone,
+          color: tone === null ? null : color,
+        });
+      } catch {
+        // best-effort: never let a buggy handler crash IPC
+      }
+    };
+    ipcRenderer.on(MAIN_WINDOW_CONTENT_TONE, listener);
+    return (): void => {
+      ipcRenderer.removeListener(MAIN_WINDOW_CONTENT_TONE, listener);
     };
   },
   parseError: (err) => {

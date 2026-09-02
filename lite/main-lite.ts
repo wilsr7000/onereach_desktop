@@ -437,15 +437,34 @@ ipcMain.on('lite:logging:enqueue', (_event, payload: LogEnqueuePayload) => {
   // future LoggingStore-side validation, sampling, or tagging. Fall back
   // to the lib queue directly if the logging module itself is unhealthy
   // -- losing a log line is preferable to dropping it on the floor.
+  //
+  // Both calls MUST keep their receiver (2026-09-01 sweep crash): the
+  // level methods are prototype methods that reach `this.enqueue`, and
+  // the detached `const fn = obj[level]; fn(...)` form threw
+  // "Cannot read properties of undefined (reading 'enqueue')" INSIDE
+  // the catch block — an uncaught exception in the IPC dispatcher that
+  // took the whole app down the moment the AI Run Times window logged
+  // its first line. The fallback is now itself guarded: a renderer log
+  // line can be lost, it can never quit the app.
   try {
-    const fn = getLoggingApi()[payload.level];
+    const api = getLoggingApi();
+    const fn = api[payload.level];
     if (typeof fn === 'function') {
-      fn(payload.category, payload.message, payload.data);
+      fn.call(api, payload.category, payload.message, payload.data);
     }
-  } catch {
-    const fn = logQueue[payload.level];
-    if (typeof fn === 'function') {
-      fn(payload.category, payload.message, payload.data);
+  } catch (primaryErr) {
+    try {
+      const fn = logQueue[payload.level];
+      if (typeof fn === 'function') {
+        fn.call(logQueue, payload.category, payload.message, payload.data);
+      }
+      logQueue.warn.call(logQueue, LOGGING_SELF_CATEGORY, 'renderer log line fell back to the lib queue', {
+        level: payload.level,
+        category: payload.category,
+        error: (primaryErr as Error)?.message,
+      });
+    } catch {
+      /* last resort: the line is lost, the app is not */
     }
   }
 });

@@ -57,6 +57,11 @@
   --or-on-accent: #ffffff;
   --or-on-accent-soft: #1d4fb8;
   --or-on-bright: #0a1018;
+  /* Ink for a surface whose colour comes from CONTENT, not the theme
+   * (the main-window tab bar wearing the page under it): white on a
+   * dark page, near-black on a light one, in both themes. */
+  --or-tone-dark-ink-rgb: 255, 255, 255;
+  --or-tone-light-ink-rgb: 17, 20, 28;
   --or-success: #15803d;
   --or-success-rgb: 21, 128, 61;
   --or-green-deep: #166534;
@@ -151,6 +156,11 @@
     --or-on-accent: #ffffff;
     --or-on-accent-soft: #ffffff;
     --or-on-bright: #0a1018;
+  /* Ink for a surface whose colour comes from CONTENT, not the theme
+   * (the main-window tab bar wearing the page under it): white on a
+   * dark page, near-black on a light one, in both themes. */
+  --or-tone-dark-ink-rgb: 255, 255, 255;
+  --or-tone-light-ink-rgb: 17, 20, 28;
     --or-success: #6bff8a;
     --or-success-rgb: 107, 255, 138;
     --or-green-deep: #3ad968;

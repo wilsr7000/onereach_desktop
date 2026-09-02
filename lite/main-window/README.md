@@ -59,6 +59,16 @@ Per ADR-019 / Rule 11, consumers import ONLY from `api.ts`
   partitions; ad-hoc tabs `persist:tab-<uuid>` (ADR-038: no preload on
   tab views).
 - `goHome()` / `reloadActive()` — Home-pill + refresh behavior.
+- Content tone (2026-09-01): the tab bar is the window header (macOS
+  `titleBarStyle: 'hiddenInset'`, traffic lights inset) and wears the
+  colour of the content under it. `window.ts` samples a 6px strip of the
+  active view's top edge (`webContents.capturePage`) after each load, on
+  in-page navigations, on a declared `theme-color`, and every 4s while
+  visible; `content-tone.ts` (pure) turns the pixels into
+  `{ tone, color }`; the chrome receives it over
+  `lite:main-window:content-tone` (preload: `mainWindow.onContentTone`)
+  and paints the bar in that colour with `--or-tone-*-ink-rgb` ink.
+  `tone: null` (boot chat under the bar) = theme colours.
 - IPC `lite:main-window:homeUrl:get|set` (preload:
   `window.lite.homeUrl`) — the configurable Home-tab URL
   (`home-url-store.ts`; default = GSX Product Expert email-triage;

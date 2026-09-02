@@ -59,6 +59,26 @@ function mainWindow(): LiteMainWindowBridge {
   return mw;
 }
 
+/**
+ * Paint the tab bar in the tone of the content under it (2026-09-01:
+ * "detect if the content is dark or light and change the header to
+ * match"). The main process samples the active view's top edge and
+ * sends its mean colour + tone; the bar takes the colour as its
+ * background and flips its ink (`data-tone`, see chrome.css). A null
+ * tone (nothing under the bar — the boot chat) returns to the theme.
+ */
+export function applyContentTone(payload: LiteMainWindowContentTone): void {
+  const bar = document.getElementById('tab-bar');
+  if (bar === null) return;
+  if (payload.tone === null || payload.color === null) {
+    delete bar.dataset['tone'];
+    bar.style.removeProperty('--chrome-content-color');
+    return;
+  }
+  bar.dataset['tone'] = payload.tone;
+  bar.style.setProperty('--chrome-content-color', payload.color);
+}
+
 function renderTabBar(): void {
   const list = document.getElementById('tab-list');
   const homePill = document.getElementById('home-pill');
@@ -361,6 +381,9 @@ window.__chromeForTesting = {
 };
 
 async function bootstrap(boot?: RendererBootContext): Promise<void> {
+  // The bar is the window header on macOS (hidden-inset title bar):
+  // chrome.css pads it past the traffic lights only there.
+  document.documentElement.dataset['platform'] = String(window.lite?.platform ?? '');
   // Test env / broken preload: without the bridge nothing below can
   // work -- bail instead of throwing halfway through boot.
   if (window.lite === undefined) return;
@@ -473,6 +496,10 @@ async function bootstrap(boot?: RendererBootContext): Promise<void> {
       activeId = payload.activeId;
       renderTabBar();
     });
+    // The bar wears the colour of what is under it (2026-09-01).
+    if (typeof mw.onContentTone === 'function') {
+      mw.onContentTone(applyContentTone);
+    }
     // Initial fetch — in case we missed an early broadcast.
     try {
       const initialTabs = await mw.listTabs();

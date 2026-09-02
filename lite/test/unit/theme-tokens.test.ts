@@ -146,7 +146,10 @@ describe.each(THEMED_SHEETS)('theme tokens — no bare palette literal: %s', (sh
       }
     }
     expect(offenders, 'bare colour literals (use a --or-* token, or mark a theme-invariant region)').toEqual([]);
-  });
+    // spaces.css is ~10k lines of regex work; under a loaded machine
+    // (two dev Electron instances + a build alongside the gate) the
+    // default 5s budget timed out once (2026-09-01) with zero offenders.
+  }, 20_000);
 });
 
 describe('theme tokens — window chrome', () => {

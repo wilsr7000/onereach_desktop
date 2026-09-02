@@ -1526,7 +1526,22 @@ interface LiteMainWindowBridge {
   onTabsChanged(
     handler: (payload: { tabs: LiteMainWindowTab[]; activeId: string | null }) => void
   ): () => void;
+  /**
+   * The tone of the content under the tab bar (2026-09-01): the active
+   * tab's, or Home's while it is visible. `tone: null` = nothing under
+   * the bar (boot chat), paint from the theme. `color` is the content's
+   * mean top-edge colour (`#rrggbb`) so the bar can wear it.
+   */
+  onContentTone(
+    handler: (payload: LiteMainWindowContentTone) => void
+  ): () => void;
   parseError(err: unknown): LiteMainWindowErrorJSON | null;
+}
+
+interface LiteMainWindowContentTone {
+  tabId: string | null;
+  tone: 'dark' | 'light' | null;
+  color: string | null;
 }
 
 // ---------------------------------------------------------------------------

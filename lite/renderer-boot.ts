@@ -90,7 +90,10 @@ export function bootRenderer(opts: BootRendererOptions): void {
         'display:flex', 'flex-direction:column', 'gap:12px',
         'align-items:center', 'justify-content:center',
         'padding:32px', 'text-align:center',
-        'background:#0F1115', 'color:#e6e6e6',
+        // Theme tokens when signature.css made it in (light or dark
+        // follows the app); the original dark palette only as a
+        // fallback for a boot that failed before any stylesheet loaded.
+        'background:var(--or-bg-canvas, #0F1115)', 'color:var(--or-text-primary, #e6e6e6)',
         'font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',
       ].join(';');
 
@@ -107,17 +110,23 @@ export function bootRenderer(opts: BootRendererOptions): void {
       pre.style.cssText = [
         'max-width:80ch', 'max-height:30vh', 'overflow:auto',
         'text-align:left', 'padding:12px', 'border-radius:8px',
-        'background:#171A21', 'color:#c6c9d1',
+        'background:rgba(var(--or-ink-rgb, 255, 255, 255), 0.06)',
+        'border:1px solid rgba(var(--or-ink-rgb, 255, 255, 255), 0.12)',
+        'color:var(--or-text-primary, #c6c9d1)',
         'font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace',
-        // Dark scrollbars -- never a white slab on a dark surface.
-        'scrollbar-color:#3a3f4b #171A21', 'scrollbar-width:thin',
+        // Scrollbars in the ink of the current theme -- never a white
+        // slab on a dark surface, never a black one on light.
+        'scrollbar-color:rgba(var(--or-ink-rgb, 255, 255, 255), 0.3) transparent',
+        'scrollbar-width:thin',
       ].join(';');
 
       const reload = document.createElement('button');
       reload.textContent = 'Reload';
       reload.style.cssText =
-        'padding:8px 18px;border-radius:6px;border:1px solid #3a3f4b;' +
-        'background:#232833;color:#e6e6e6;cursor:pointer;font-size:13px';
+        'padding:8px 18px;border-radius:6px;' +
+        'border:1px solid rgba(var(--or-ink-rgb, 255, 255, 255), 0.18);' +
+        'background:rgba(var(--or-ink-rgb, 255, 255, 255), 0.08);' +
+        'color:var(--or-text-primary, #e6e6e6);cursor:pointer;font-size:13px';
       reload.addEventListener('click', () => window.location.reload());
 
       banner.append(title, body, pre, reload);

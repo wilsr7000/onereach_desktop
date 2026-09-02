@@ -36,16 +36,46 @@ body {
  * ============================================================ */
 
 .tab-bar {
+  /* The bar's ink ladder. Default: the theme's ink. When the bar wears
+   * the content's colour (data-tone, set from chrome.ts), the ink flips
+   * to whichever reads on it — white on dark content, near-black on
+   * light — independent of the app theme. Every control in the bar
+   * paints through --bar-ink-rgb, never a theme text token, so one
+   * switch recolours all of them. (2026-09-01: "change the header to
+   * match" / "keep it dark because the IDW is dark".) */
+  --bar-ink-rgb: var(--or-ink-rgb);
   flex: 0 0 48px;
   height: 48px;
   display: flex;
   align-items: stretch;
-  background: var(--or-bg-shell);
-  border-bottom: 1px solid var(--or-border-subtle);
+  background: var(--chrome-content-color, var(--or-bg-shell));
+  border-bottom: 1px solid rgba(var(--bar-ink-rgb), 0.12);
   padding: 0 6px 0 8px;
   -webkit-app-region: drag; /* allow window drag from the empty bar area */
   user-select: none;
   overflow: hidden;
+  transition: background 220ms ease;
+}
+
+/* macOS: the native title bar is hidden and the traffic lights are
+ * inset into this bar (trafficLightPosition x:14, y:18 in window.ts) —
+ * keep the Spaces pill clear of them. */
+html[data-platform="darwin"] .tab-bar {
+  padding-left: 82px;
+}
+
+.tab-bar[data-tone="dark"] {
+  --bar-ink-rgb: var(--or-tone-dark-ink-rgb);
+}
+
+.tab-bar[data-tone="light"] {
+  --bar-ink-rgb: var(--or-tone-light-ink-rgb);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-bar {
+    transition: none;
+  }
 }
 
 /* theme-invariant:start — the brand orb is dark-blue with a light label in both themes */
@@ -203,7 +233,7 @@ body {
   border: 1px solid transparent;
   border-radius: var(--or-radius-sm);
   background: transparent;
-  color: var(--or-text-muted);
+  color: rgba(var(--bar-ink-rgb), 0.62);
   cursor: pointer;
   transition:
     background var(--or-transition-fast),
@@ -212,12 +242,12 @@ body {
 }
 
 .tab-bar-refresh-btn:hover {
-  background: var(--or-bg-hover);
-  color: var(--or-text-secondary);
+  background: rgba(var(--bar-ink-rgb), 0.08);
+  color: rgba(var(--bar-ink-rgb), 0.86);
 }
 
 .tab-bar-refresh-btn:active {
-  background: var(--or-bg-active);
+  background: rgba(var(--bar-ink-rgb), 0.14);
 }
 
 .tab-bar-refresh-btn:focus-visible {
@@ -267,7 +297,7 @@ body {
   align-self: center;
   padding: 0 10px 0 12px;
   background: transparent;
-  color: var(--or-text-muted);
+  color: rgba(var(--bar-ink-rgb), 0.62);
   border: 1px solid transparent;
   border-radius: var(--or-radius-sm);
   font-family: inherit;
@@ -282,14 +312,14 @@ body {
 }
 
 .tab-pill:hover {
-  background: var(--or-bg-hover);
-  color: var(--or-text-secondary);
+  background: rgba(var(--bar-ink-rgb), 0.08);
+  color: rgba(var(--bar-ink-rgb), 0.86);
 }
 
 .tab-pill.active {
-  background: var(--or-bg-active);
-  color: var(--or-text-primary);
-  border-color: var(--or-border-signal);
+  background: rgba(var(--bar-ink-rgb), 0.12);
+  color: rgba(var(--bar-ink-rgb), 0.95);
+  border-color: rgba(var(--bar-ink-rgb), 0.2);
 }
 
 /* Auto-login gave up on this tab -- amber ⚠, tooltip carries the fix. */

@@ -65,6 +65,22 @@ import type { Tab } from './types.js';
 import { CHROME_HEIGHT_PX } from './types.js';
 import { MAIN_WINDOW_EVENTS } from './events.js';
 import { windowBackgroundColor } from '../theme/main.js';
+import { toneFromBgra, toneFromHex, type ContentTone } from './content-tone.js';
+
+/**
+ * Content tone (2026-09-01): the tab bar matches what is under it. The
+ * main process samples a thin strip of the active view's top edge and
+ * tells the chrome its tone + mean colour over this channel; the bar
+ * paints itself in that colour with ink that reads on it. Home (the
+ * remote page) and every tab are sampled the same way; `tone: null`
+ * means "nothing under the bar" (the boot chat) and the bar falls back
+ * to the theme.
+ */
+const CONTENT_TONE_CHANNEL = 'lite:main-window:content-tone';
+const TONE_STRIP_HEIGHT_PX = 6;
+const TONE_STRIP_MAX_WIDTH_PX = 800;
+const TONE_RESAMPLE_MS = 4000;
+const TONE_SETTLE_DELAYS_MS = [150, 800, 2500];
 
 interface CreateMainWindowConfig {
   /** Path to the chrome HTML file (built bundle). */
@@ -96,6 +112,12 @@ interface AttachedTab {
   stopTotpAutofill: () => void;
   /** Stops the per-tab login-outcome verifier (no-op for non-OneReach tabs). */
   stopLoginVerifier: () => void;
+  /** Last sampled tone of this tab's content (null until the first sample). */
+  tone: ContentTone | null;
+  /** Re-sample the content tone now (used on activation). */
+  sampleToneNow: () => void;
+  /** Detaches the tone sampler's timers. */
+  stopToneSampler: () => void;
 }
 
 const DEFAULT_WIDTH = 1280;
@@ -185,6 +207,12 @@ let activeAttachedTabId: string | null = null;
  * BrowserWindow — destroyed when the window closes.
  */
 let homeFeedView: WebContentsView | null = null;
+/** Last sampled tone of the Home view's content. */
+let homeTone: ContentTone | null = null;
+/** Detaches the Home view's tone sampler. */
+let stopHomeToneSampler: (() => void) | null = null;
+/** JSON of the last payload sent over CONTENT_TONE_CHANNEL (dedupe). */
+let lastPublishedTone: string | null = null;
 
 /**
  * Create (or focus) the main window. Idempotent: subsequent calls
@@ -214,6 +242,14 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     backgroundColor: BACKGROUND(),
     show: false,
     autoHideMenuBar: true,
+    // The tab bar IS the window header (2026-09-01): with the native
+    // title bar hidden, the bar can take the colour of the content
+    // under it (see CONTENT_TONE_CHANNEL) instead of sitting as a
+    // light strip over a dark IDW. Traffic lights are inset into the
+    // 48px bar; chrome.css pads the bar past them on darwin.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 14, y: 18 } }
+      : {}),
     webPreferences: {
       preload: config.preloadPath,
       contextIsolation: true,
@@ -647,6 +683,11 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
         /* best-effort */
       }
       try {
+        attached.stopToneSampler();
+      } catch {
+        /* best-effort */
+      }
+      try {
         attached.view.webContents.close();
       } catch {
         /* best-effort -- some Electron versions throw if already destroyed */
@@ -695,6 +736,139 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
     if (showFeed) {
       homeFeedView.setBounds(computeContentBounds(win));
     }
+  }
+
+  // The bar follows whatever is now under it: publish the cached tone
+  // at once (no flash of the wrong ink on a tab switch) and re-sample
+  // the newly visible view in case it changed while hidden.
+  publishActiveTone(win);
+  if (activeId !== null) {
+    attachedTabs.get(activeId)?.sampleToneNow();
+  }
+}
+
+// ─── Content tone: the tab bar matches what is under it ────────────────
+
+/**
+ * Watch one view's content tone. Samples a TONE_STRIP_HEIGHT_PX strip
+ * across the top of the view (the seam right under the tab bar) after
+ * each load settles, on in-page navigations, on a declared
+ * `theme-color`, and on a slow interval while visible — pages restyle
+ * themselves (an IDW flipping to dark) without any navigation event.
+ * A capture of a hidden view is skipped, never forced. `tabId === null`
+ * is the Home view.
+ */
+function startToneSampler(
+  win: BrowserWindow,
+  view: WebContentsView,
+  tabId: string | null
+): { sampleNow: () => void; stop: () => void } {
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  let stopped = false;
+
+  const previous = (): ContentTone | null =>
+    tabId === null ? homeTone : (attachedTabs.get(tabId)?.tone ?? null);
+
+  const record = (tone: ContentTone | null): void => {
+    if (stopped || tone === null) return;
+    if (tabId === null) {
+      homeTone = tone;
+    } else {
+      const attached = attachedTabs.get(tabId);
+      if (attached === undefined) return;
+      attached.tone = tone;
+    }
+    publishActiveTone(win);
+  };
+
+  const sample = async (): Promise<void> => {
+    if (stopped || win.isDestroyed() || view.webContents.isDestroyed()) return;
+    let bounds: Rectangle;
+    try {
+      if (!view.getVisible()) return;
+      bounds = view.getBounds();
+    } catch {
+      return;
+    }
+    if (bounds.width < 8 || bounds.height < TONE_STRIP_HEIGHT_PX) return;
+    try {
+      const image = await view.webContents.capturePage({
+        x: 0,
+        y: 0,
+        width: Math.min(bounds.width, TONE_STRIP_MAX_WIDTH_PX),
+        height: TONE_STRIP_HEIGHT_PX,
+      });
+      if (image.isEmpty()) return;
+      const { width, height } = image.getSize();
+      record(toneFromBgra(image.toBitmap(), width, height, previous()));
+    } catch {
+      /* a view mid-teardown, or a page that refuses capture: keep the last tone */
+    }
+  };
+
+  const later = (ms: number): void => {
+    const t = setTimeout(() => {
+      timers.delete(t);
+      void sample();
+    }, ms);
+    timers.add(t);
+  };
+  const settle = (): void => {
+    for (const ms of TONE_SETTLE_DELAYS_MS) later(ms);
+  };
+
+  view.webContents.on('did-finish-load', settle);
+  view.webContents.on('did-navigate-in-page', () => later(300));
+  view.webContents.on('did-change-theme-color', (_e, color) => {
+    // The page's own declaration is a good first guess; the pixels
+    // decide shortly after (a theme-color rarely matches the header
+    // exactly, and some pages declare one they never paint).
+    record(toneFromHex(color, previous()));
+    later(300);
+  });
+  const interval = setInterval(() => {
+    void sample();
+  }, TONE_RESAMPLE_MS);
+
+  return {
+    sampleNow: (): void => later(120),
+    stop: (): void => {
+      stopped = true;
+      clearInterval(interval);
+      for (const t of timers) clearTimeout(t);
+      timers.clear();
+    },
+  };
+}
+
+/**
+ * Tell the chrome the tone of whatever is under the bar right now: the
+ * active tab's, else the Home view's while it is visible, else null
+ * (the boot chat is the chrome's own page — the bar keeps the theme).
+ * Deduped so a re-sample that agrees with the last answer is silent.
+ */
+function publishActiveTone(win: BrowserWindow): void {
+  if (win.isDestroyed()) return;
+  let current: ContentTone | null = null;
+  let tabId: string | null = null;
+  if (activeAttachedTabId !== null) {
+    tabId = activeAttachedTabId;
+    current = attachedTabs.get(activeAttachedTabId)?.tone ?? null;
+  } else if (homeFeedView !== null && !homeFeedView.webContents.isDestroyed()) {
+    try {
+      if (homeFeedView.getVisible()) current = homeTone;
+    } catch {
+      /* best-effort */
+    }
+  }
+  const payload = { tabId, tone: current?.tone ?? null, color: current?.color ?? null };
+  const key = JSON.stringify(payload);
+  if (key === lastPublishedTone) return;
+  lastPublishedTone = key;
+  try {
+    win.webContents.send(CONTENT_TONE_CHANNEL, payload);
+  } catch {
+    /* best-effort */
   }
 }
 
@@ -963,6 +1137,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     stopCurrentVerifier();
   };
 
+  const toneSampler = startToneSampler(win, view, tab.id);
   const attached: AttachedTab = {
     id: tab.id,
     view,
@@ -972,6 +1147,9 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
     initialLoadStarted: false,
     stopTotpAutofill,
     stopLoginVerifier,
+    tone: null,
+    sampleToneNow: toneSampler.sampleNow,
+    stopToneSampler: toneSampler.stop,
   };
   attachedTabs.set(tab.id, attached);
 
@@ -1429,6 +1607,7 @@ function attachRemoteHome(win: BrowserWindow): void {
       const show = shouldShowRemoteHome(liveUrl, env, hasSession);
       if (view.getVisible() !== show) {
         view.setVisible(show);
+        publishActiveTone(win);
         getLoggingApi().info('main-window', show
           ? 'remote home visible again (left the login interstitial)'
           : 'remote home on signed-out login page; revealing boot-chat wall', {
@@ -1443,6 +1622,8 @@ function attachRemoteHome(win: BrowserWindow): void {
   view.webContents.on('did-navigate', updateRemoteHomeVisibility);
   view.webContents.on('did-navigate-in-page', updateRemoteHomeVisibility);
   homeFeedView = view;
+  stopHomeToneSampler?.();
+  stopHomeToneSampler = startToneSampler(win, view, null).stop;
   win.contentView.addChildView(view);
   view.setBounds(computeContentBounds(win));
   // Visible only with an app session — otherwise the boot-chat wall
