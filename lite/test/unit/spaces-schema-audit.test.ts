@@ -122,3 +122,23 @@ describe('registry annotations', () => {
     expect(s).toContain('void client.ensureLiteSchemaAnnotations();');
   });
 });
+
+// ── The escape that broke the registry write ─────────────────────────
+describe('no Cypher constant carries an unbalanced quote line', () => {
+  it('every line of every runtime query has an even number of apostrophes', () => {
+    // In a JS template literal `\'` is just `'` — the backslash never
+    // reaches Cypher — so an apostrophe in prose closed a Cypher string
+    // and the annotation write failed at runtime (silently: the method
+    // is soft). Evaluated on the exported strings, not the source, for
+    // the same reason the 0.0.77 byte test is.
+    const offenders: string[] = [];
+    for (const [name, query] of Object.entries(CYPHER)) {
+      if (typeof query !== 'string') continue;
+      query.split('\n').forEach((line, i) => {
+        const code = line.replace(/\/\/.*$/, ''); // Cypher line comments may hold prose
+        if ((code.match(/'/g) ?? []).length % 2 === 1) offenders.push(`${name}:${i + 1}: ${code.trim().slice(0, 80)}`);
+      });
+    }
+    expect(offenders, 'a bare apostrophe inside a Cypher string literal').toEqual([]);
+  });
+});
