@@ -39,6 +39,7 @@ const EXEMPT: Record<string, string> = {
   ENSURE_CHECKLIST_SCHEMA: 'registry documentation, not user data',
   ENSURE_ACCESS_ROLE_SCHEMA: 'registry documentation, not user data',
   ENSURE_JOURNEY_SCHEMA: 'registry documentation, not user data',
+  ENSURE_LITE_SCHEMA_ANNOTATIONS: 'registry documentation, not user data',
   SET_PLAYBOOK_DESCRIPTION:
     'derived-metadata backfill, not user content: copies the riff sheet\'s own ' +
     'KV summary onto its graph node, and ONLY while description is empty (the ' +

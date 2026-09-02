@@ -246,6 +246,7 @@ const OTHER_SPACE_VISIBLE = `(
             MATCH (:Person {id: $viewerId})-[r2:HAS_ACCESS]->(other)
             WHERE (r2.expiresUnixMs IS NULL OR r2.expiresUnixMs > $nowMs)
           }
+          OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(other) }
         )
       )`;
 
@@ -283,6 +284,10 @@ const SPACE_WRITABLE = `(
         )
       )`;
 
+// ADR-078 — the account-membership signal the other writers use
+// (WISER / GSX-Desktop stamp [:OWNS] per Space, 313 edges) grants
+// SIGHT. Before this, 89 of robb's Spaces were invisible to him
+// in Lite. Writes stay on createdBy / HAS_ACCESS (SPACE_WRITABLE).
 const SPACE_VISIBLE = `(
         $viewerId <> '' AND (
           coalesce(s.createdBy, '') = $viewerId
@@ -290,6 +295,7 @@ const SPACE_VISIBLE = `(
             MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(s)
             WHERE ${GRANT_LIVE}
           }
+          OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(s) }
         )
       )`;
 
@@ -347,7 +353,8 @@ const ASSET_VISIBLE = `(
                   OR EXISTS {
                     MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(vs)
                     WHERE ${GRANT_LIVE}
-                  }))
+                  }
+                  OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(vs) }))
         }
       )`;
 
@@ -1242,7 +1249,8 @@ export const CYPHER = {
                  OR EXISTS {
                    MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(ms)
                    WHERE ${GRANT_LIVE}
-                 })
+                 }
+                 OR EXISTS { MATCH (:Person {id: $viewerId})-[:OWNS]->(ms) })
         }
         // Per-meeting audience (2026-08-14): membership only bounds who MAY
         // be rung at all; the doorbell rings ONLY the host and the people
@@ -2688,6 +2696,66 @@ export const CYPHER = {
    * Builder, the full app, agents) the shape to read and write, so a
    * journey created in one surface opens in the others.
    */
+  /**
+   * ADR-078 — the schema audit's registry repairs (2026-08-20). Lite
+   * writes properties the registry never documented (Space.createdBy /
+   * kind / iconKey / deletedAt, Asset.mimeType / content / metadata /
+   * description, Commit.assetId …) and reads ten relationship types the
+   * `_RelationshipTypes` node never mentioned. Every other writer that
+   * reads the registry to learn the model was flying blind on Lite's
+   * slice. Annotations land in LITE-NAMESPACED keys (`lite_*`) on the
+   * existing entity nodes — never touching `properties_def`, which other
+   * writers own — so this MERGE-on-entity write is idempotent and can
+   * never clobber someone else's documentation. Idempotent: safe at
+   * every boot.
+   */
+  ENSURE_LITE_SCHEMA_ANNOTATIONS: `
+    MERGE (sp:Schema {entity: 'Space'})
+    SET sp.lite_properties =
+          'createdBy: Person.id of the creator (Lite; other writers use created_by_user) · ' +
+          'kind: user|shared · visibility: open|restricted (GSX-Desktop writes private, read as restricted; ' +
+          'team|org|public read as open) · color, iconKey, description · deletedAt: ISO soft-delete tombstone · ' +
+          'createdAt/updatedAt: ISO strings (other writers: created_at/updated_at epoch ms — read with the tsMs rule)',
+        sp.lite_sight_rule =
+          'A Space is visible to a viewer when createdBy = viewer, OR a live [:HAS_ACCESS] grant exists, ' +
+          'OR a [:OWNS] edge exists (the account-membership signal WISER / GSX-Desktop write). ' +
+          'Writes require createdBy or a non-reader [:HAS_ACCESS] — OWNS grants sight only.',
+        sp.lite_annotated_at = $nowMs
+    MERGE (as:Schema {entity: 'Asset'})
+    SET as.lite_properties =
+          'type: ItemKind (document|image|url|text|audio|video|playbook|ticket|agent|transcript|knowledge|journey|other; ' +
+          'legacy rows carry assetType) · name = title · content: inline body (markdown/text) · description · ' +
+          'mimeType (camelCase; the registry\'s mime_type was never written) · url: storage key · size · ' +
+          'metadata: JSON string · sourceUrl · deletedAt: ISO tombstone · createdAt/updatedAt: ISO · ' +
+          'membership is the [:BELONGS_TO]->(:Space) edge, not a spaceId property',
+        as.lite_annotated_at = $nowMs
+    MERGE (cm:Schema {entity: 'Commit'})
+    SET cm.lite_properties =
+          'timestamp: epoch MILLISECONDS (integer), not a datetime · assetId: the touched Asset (mirrors [:TOUCHED]) · ' +
+          'hash is unique (constraint Commit_hash_unique, 2026-08-20)',
+        cm.lite_annotated_at = $nowMs
+    MERGE (pe:Schema {entity: 'Person'})
+    SET pe.lite_properties =
+          'Two id conventions coexist: Lite/WISER use the lowercased email as id; the tracker sync uses person-<slug> ' +
+          'with no email. Lite stamps gsxMultiUserId/gsxAccountId/gsxEmail at sign-in (unique constraint on gsxMultiUserId).',
+        pe.lite_annotated_at = $nowMs
+    MERGE (pb:Schema {entity: 'Playbook'})
+    SET pb.lite_properties =
+          'Riff (WISER) nodes carry no content in the graph — the body is in KV at kv_ref. isTrashed is the riff tombstone ' +
+          '(Lite filters it like deletedAt). description may be backfilled by Lite from the KV summary ' +
+          '(descriptionSource = lite:riff-kv-summary) only while empty.',
+        pb.lite_annotated_at = $nowMs
+    MERGE (rt:Schema {entity: '_RelationshipTypes'})
+    SET rt.lite_relationships =
+          'CURRENT_PLAYBOOK (Space→Asset[type=playbook], one per Space) · PINNED (Person→Space, per-viewer sidebar pin, pinnedAt) · ' +
+          'VIEWED (Person→Asset audit: firstAt, lastAt, count) · LAST_EDITED (Person→Asset) · TOUCHED (Commit→Asset) · ' +
+          'TAGGED_AS (Asset→Tag) · PRESENCE_OF (Presence→Person) · HAS_TYPE (Agent→AgentType) · ' +
+          'REACHABLE_VIA (Agent→AgentEndpoint) · REPRESENTS (Asset[type=agent]→Agent) · DECOMPOSED_FROM (Asset[ticket]→Asset[playbook]) · ' +
+          'OWNS (Person→Space): account membership written by WISER / GSX-Desktop — grants SIGHT in Lite, never write',
+        rt.lite_annotated_at = $nowMs
+    RETURN 6 AS annotated
+  `,
+
   ENSURE_JOURNEY_SCHEMA: `
     MERGE (js:Schema {entity: 'Journey'})
     SET js.description = $journeyDoc,
@@ -5320,6 +5388,16 @@ export class SdkSpacesClient {
    * like ensureChecklistSchema.
    */
   /** ADR-072 — register the journey-map asset contract. Best-effort. */
+  /** ADR-078 — publish Lite's slice of the model into the registry (idempotent). */
+  async ensureLiteSchemaAnnotations(): Promise<void> {
+    try {
+      await this.run(CYPHER.ENSURE_LITE_SCHEMA_ANNOTATIONS, {});
+    } catch {
+      // Documentation, not data: a failed annotation write must never
+      // affect boot.
+    }
+  }
+
   async ensureJourneySchema(): Promise<void> {
     try {
       await this.run(CYPHER.ENSURE_JOURNEY_SCHEMA, {
@@ -5917,7 +5995,12 @@ function toSpace(row: Record<string, unknown>): Space {
   const kind = optString(row, 'kind');
   if (kind === 'shared' || kind === 'user') space.kind = kind;
   const visibility = optString(row, 'visibility');
+  // ADR-078 — GSX-Desktop writes visibility 'private' (its registry enum is
+  // private|team|org|public); Lite's is open|restricted. 'private' MUST read
+  // as restricted: dropping it read as open and the menu offered "Unshare"
+  // on a Space its writer had already locked down.
   if (visibility === 'open' || visibility === 'restricted') space.visibility = visibility;
+  else if (visibility === 'private') space.visibility = 'restricted';
   // ADR-069 — viewer's pin mark (only ever true from the graph edge).
   if (row['pinned'] === true) space.pinned = true;
   return space;

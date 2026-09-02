@@ -1844,3 +1844,14 @@ forwarding, CORS echo/refusal) + 4 live loopback tests. Live-probed in
 the running app on 47294: allowed origin → 200 + echoed CORS,
 evil.example.com → 403 with no CORS header, POST → 405, and
 /neon/spaces → 0 on a signed-out profile (viewer scoping, fail-closed).
+
+## ADR-078: The NEON schema audit — sight follows the graph's own membership signal
+
+- **Date**: 2026-08-20
+- **Status**: Accepted
+- **Audit**: live census of the shared graph (58 labels, 54 relationship types, 59 uniqueness constraints, a 77-entity `:Schema` registry) against Lite's Cypher and the registry's own documentation. Full findings in the session report; the decisions that changed code or data are here.
+- **Sight follows OWNS**: Lite's belonging predicate (ADR-065) honored only `createdBy` and `[:HAS_ACCESS]` — Lite's OWN vocabulary. The other writers (WISER, GSX-Desktop) record account membership as `(:Person)-[:OWNS]->(:Space)`, 313 edges; 92 live Spaces had neither `createdBy` nor a grant, so **nobody could see them in Lite** — robb saw 20 of 114 live Spaces, Rich 3. `OWNS` now grants SIGHT in every visibility predicate (SPACE_VISIBLE, OTHER_SPACE_VISIBLE, ASSET_VISIBLE, and the live-meetings audience). Writes are unchanged: `createdBy` or a non-reader `[:HAS_ACCESS]` (ADR-074). This is exactly the "everybody sees, members write" model chosen on 2026-08-18, applied to the membership signal the graph actually carries. Dry-run before the change: robb 109 of 114, Rich 100 of 114.
+- **`private` reads as restricted**: GSX-Desktop's registry enum for `Space.visibility` is `private|team|org|public`; Lite's is `open|restricted`. Lite dropped unknown values, so a `private` Space read as open. It now normalizes to `restricted`.
+- **Constraints added** (0 duplicates verified first): `Commit(hash)`, `AssetVersion(id)`, `Presence(id)`, `MeetingLive(id)`, and — after deleting one edge-less duplicate created 1 ms apart by a racing MERGE — `Checklist(id)`. Every label Lite MERGEs on is now constraint-backed.
+- **Registry annotations**: `ENSURE_LITE_SCHEMA_ANNOTATIONS` documents, at every boot and only in `lite_*` keys, the properties Lite writes on Space/Asset/Commit/Person/Playbook and the ten relationship types Lite reads that `_RelationshipTypes` never mentioned (CURRENT_PLAYBOOK, PINNED, VIEWED, LAST_EDITED, TOUCHED, TAGGED_AS, PRESENCE_OF, HAS_TYPE, REACHABLE_VIA, REPRESENTS, DECOMPOSED_FROM) plus OWNS. It never touches `properties_def` — other writers own those.
+- **Documented, not changed**: three timestamp encodings coexist (ISO strings, epoch ms, zoned datetimes; read via the `tsMs` rule); two Person id conventions (lowercased email vs `person-<slug>` from the tracker sync); `Asset.type` vs legacy `assetType`; `Commit.timestamp` is epoch ms where the registry says datetime; `Heartbeat` nodes (580, another writer) carry no id and no app stamp.
