@@ -102,3 +102,76 @@ describe('buildFallbackSelectAccountScript — email + single-account clicks', (
     expect(clicks).toBe(1);
   });
 });
+
+describe('buildFallbackSelectAccountScript — Edison v3 picker: plain <div> rows (2026-09-02)', () => {
+  // The live failure ("login issues AGAIN", Marvin 2, 02:53:02Z): the
+  // wait script SAW the email in body text (type:'email'), but the
+  // fallback answered email_not_found — Edison's v3 list-users page
+  // renders each account as a plain <div> row: no <a>/<li>/<button>,
+  // no "account"/"user" class, the email in a nested <span>. Nothing
+  // in the CLICKABLE selector contained it, so the user was told to
+  // pick manually. These DOMs mirror that shape.
+  function v3PickerDom(rows: string[], rowStyle = 'cursor:pointer'): void {
+    document.body.innerHTML = `<div class="or-list-v3 layout-column">${rows
+      .map(
+        (r) =>
+          `<div class="or-list-item-v3 layout-row" style="${rowStyle}"><div class="avatar"></div><div class="meta"><span class="name">${r.split(' (')[0]}</span><span class="email">${r.replace(/^.*\(|\)$/g, '')}</span></div></div>`
+      )
+      .join('')}</div>`;
+  }
+
+  it('clicks the pointer-cursor <div> row that holds the email (ancestor walk)', () => {
+    v3PickerDom(['Ada (ada@x.com)', `Robb Wilson (${EMAIL})`, 'Bo (bo@y.com)']);
+    const clicked: string[] = [];
+    document.querySelectorAll('.or-list-item-v3').forEach((row) => {
+      row.addEventListener('click', () => clicked.push(row.textContent ?? ''));
+    });
+    const result = eval(buildFallbackSelectAccountScript(EMAIL)) as {
+      success?: boolean;
+      method?: string;
+      depth?: number;
+    };
+    expect(result.success).toBe(true);
+    expect(result.method).toBe('email-ancestor-walk');
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]).toContain(EMAIL);
+    expect(clicked[0]).not.toContain('ada@x.com');
+  });
+
+  it('with no clickable signal at all, clicks the email text so the click bubbles to the row', () => {
+    v3PickerDom(['Ada (ada@x.com)', `Robb Wilson (${EMAIL})`], '');
+    const clicked: string[] = [];
+    document.querySelectorAll('.or-list-item-v3').forEach((row) => {
+      row.addEventListener('click', () => clicked.push(row.textContent ?? ''));
+    });
+    const result = eval(buildFallbackSelectAccountScript(EMAIL)) as {
+      success?: boolean;
+      method?: string;
+    };
+    expect(result.success).toBe(true);
+    expect(result.method).toBe('email-text-bubble');
+    expect(clicked).toHaveLength(1);
+    expect(clicked[0]).toContain(EMAIL);
+  });
+
+  it('never picks a row for someone else — no email match means no click', () => {
+    v3PickerDom(['Ada (ada@x.com)', 'Bo (bo@y.com)']);
+    let clicks = 0;
+    document.querySelectorAll('.or-list-item-v3').forEach((row) => {
+      row.addEventListener('click', () => clicks++);
+    });
+    const result = eval(buildFallbackSelectAccountScript(EMAIL)) as {
+      success?: boolean;
+      reason?: string;
+    };
+    expect(result.success).not.toBe(true);
+    expect(result.reason).toBe('email_not_found');
+    expect(clicks).toBe(0);
+  });
+
+  it('the legacy <li> picker still takes the email-text path (no behavior change)', () => {
+    pickerDom(['Ada (ada@x.com)', `Robb Wilson (${EMAIL})`]);
+    const result = eval(buildFallbackSelectAccountScript(EMAIL)) as { method?: string };
+    expect(result.method).toBe('email-text');
+  });
+});

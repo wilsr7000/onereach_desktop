@@ -1040,6 +1040,55 @@ export function buildFallbackSelectAccountScript(targetEmail: string | null): st
       candidates[0].click();
       return { success: true, method: 'single-account' };
     }
+    // Markup-agnostic strategy (2026-09-02, "login issues AGAIN"): the
+    // wait script had already SEEN the email in body text, yet nothing
+    // in CLICKABLE contained it -- Edison's v3 picker renders each
+    // account as a plain <div> row (no <a>/<li>/<button>, no
+    // account/user class), so the row was invisible to the selector
+    // above and the user was told to pick manually. Find the innermost
+    // element whose text carries the email, then walk up to the
+    // nearest thing that behaves clickable: an interactive role/tag,
+    // tabindex/onclick, or a pointer cursor (the only signal a styled
+    // <div> row reliably gives). Click that. Only ever fires on the
+    // signed-in user's own email, so a miss cannot pick someone else.
+    if (EMAIL) {
+      function isClickable(el) {
+        if (!el || el === document.body || el === document.documentElement) return false;
+        var tag = (el.tagName || '').toLowerCase();
+        if (tag === 'a' || tag === 'button') return true;
+        var role = el.getAttribute && (el.getAttribute('role') || '');
+        if (/^(button|option|listitem|menuitem|link|row|tab)$/i.test(role)) return true;
+        if (el.hasAttribute && (el.hasAttribute('onclick') || el.hasAttribute('tabindex'))) return true;
+        var cur = (el.style && el.style.cursor) || '';
+        if (!cur && window.getComputedStyle) {
+          try { cur = window.getComputedStyle(el).cursor || ''; } catch (e) { cur = ''; }
+        }
+        return cur === 'pointer';
+      }
+      var all = document.body ? document.body.querySelectorAll('*') : [];
+      var innermost = null;
+      for (var k = 0; k < all.length && k < 3000; k++) {
+        var el = all[k];
+        var own = ((el.innerText || el.textContent) || '').toLowerCase();
+        if (own.indexOf(EMAIL) < 0) continue;
+        if (innermost === null || innermost.contains(el)) innermost = el;
+      }
+      if (innermost !== null) {
+        var node = innermost;
+        for (var depth = 0; node && depth < 8; depth++) {
+          if (isClickable(node)) {
+            node.click();
+            return { success: true, method: 'email-ancestor-walk', depth: depth };
+          }
+          node = node.parentElement;
+        }
+        // Nothing announced itself clickable: click the row text
+        // itself -- Vue-style pickers bind the handler on the row, and
+        // a click on descendant text bubbles to it.
+        innermost.click();
+        return { success: true, method: 'email-text-bubble' };
+      }
+    }
     return { success: false, reason: EMAIL ? 'email_not_found' : 'no_email_multiple_accounts' };
   })()`;
 }
