@@ -638,11 +638,14 @@ export class IdwStore {
       'audio',
       'storeMetadata',
       'botType',
+      'archiveConversations',
     ];
     for (const key of assignable) {
       const value = input[key];
       if (value === undefined) continue;
-      if (key === 'botType' && kind !== undefined && kind !== 'external-bot') continue;
+      if ((key === 'botType' || key === 'archiveConversations') && kind !== undefined && kind !== 'external-bot') {
+        continue;
+      }
       // Type-safe assignment: each key maps to its own type in IdwEntry.
       // Cast through `Partial<IdwEntry>` rather than asserting per-key.
       (out as Record<string, unknown>)[key] = value;

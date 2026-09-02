@@ -39,6 +39,8 @@ import { dirname, join } from 'node:path';
 import { readHomeUrl, resolveHomeUrl , looksLikeOneReachLoginUrl, shouldShowRemoteHome } from './home-url-store.js';
 import { attachChromeParity, chromeParityUserAgent } from './browser-parity.js';
 import { getLoggingApi } from '../logging/api.js';
+import { getIdwApi } from '../idw/api.js';
+import { attachConversationTap } from '../idw/conversation-tap.js';
 import { getMainWindowApi } from './api.js';
 import { getAuthApi, getEnvironmentForUrl } from '../auth/api.js';
 import { isOneReachSsoSkipUrl, tryAutoSkipSso } from '../auth/sso-skip.js';
@@ -62,6 +64,7 @@ const IDW_LOGIN_STUCK_CHANNEL = 'lite:auth:idw-login-stuck';
 import type { Tab } from './types.js';
 import { CHROME_HEIGHT_PX } from './types.js';
 import { MAIN_WINDOW_EVENTS } from './events.js';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface CreateMainWindowConfig {
   /** Path to the chrome HTML file (built bundle). */
@@ -73,6 +76,11 @@ interface CreateMainWindowConfig {
 interface AttachedTab {
   id: string;
   view: WebContentsView;
+  /**
+   * Stops the conversation-capture tap on an external-bot tab
+   * (2026-09-01). Always present; a no-op for every other tab.
+   */
+  stopConversationTap: () => void;
   /** Tracks the tab object we mounted; used to detect navigation churn. */
   lastUrl: string;
   /**
@@ -94,7 +102,7 @@ const DEFAULT_WIDTH = 1280;
 const DEFAULT_HEIGHT = 800;
 const MIN_WIDTH = 720;
 const MIN_HEIGHT = 480;
-const BACKGROUND = '#0e0e10';
+const BACKGROUND = (): string => windowBackgroundColor();
 
 /**
  * The IDW Feed shown as the Home-tab CONTENT (deployed to Edison). The
@@ -203,7 +211,7 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     title: 'Onereach.ai Lite',
-    backgroundColor: BACKGROUND,
+    backgroundColor: BACKGROUND(),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -623,6 +631,11 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
       // WebContentsView destruction: close webContents to release the
       // partition's renderer process. (Electron 30+ preferred path.)
       try {
+        attached.stopConversationTap();
+      } catch {
+        /* best-effort */
+      }
+      try {
         attached.view.webContents.close();
       } catch {
         /* best-effort -- some Electron versions throw if already destroyed */
@@ -732,6 +745,27 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   // right-click menu, downloads, external-scheme routing. Popups the
   // page opens inherit all of it recursively.
   attachChromeParity(view.webContents, { partition: tab.partition });
+  // Conversation archiving (2026-09-01): external-bot tabs get a
+  // DevTools-protocol network tap that files each exchange into the
+  // provider's Space — no preload, the page is handed nothing. Resolved
+  // from the IDW entry so the per-bot switch and the provider are the
+  // store's truth, not the URL's.
+  let stopConversationTap: () => void = (): void => undefined;
+  if (tab.idwId !== undefined) {
+    void getIdwApi()
+      .get(tab.idwId)
+      .then((entry) => {
+        if (entry === null || entry.kind !== 'external-bot') return;
+        if (entry.archiveConversations === false) return;
+        if (view.webContents.isDestroyed()) return;
+        stopConversationTap = attachConversationTap(view.webContents, entry.botType, tab.id);
+        const attachedNow = attachedTabs.get(tab.id);
+        if (attachedNow !== undefined) attachedNow.stopConversationTap = stopConversationTap;
+      })
+      .catch(() => {
+        /* no entry — no tap */
+      });
+  }
   // Capture accountId from the IDW URL so the watcher can auto-select
   // it on the OneReach account-picker page (`/multi-user/list-users`).
   // OneReach drops the `?accountId=...` query when redirecting through
@@ -921,6 +955,7 @@ function attachTab(win: BrowserWindow, tab: Tab): void {
   const attached: AttachedTab = {
     id: tab.id,
     view,
+    stopConversationTap: (): void => stopConversationTap(),
     lastUrl: tab.url,
     partition: tab.partition,
     initialLoadStarted: false,

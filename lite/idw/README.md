@@ -237,3 +237,12 @@ future E2E covers it.
 - `lite/api-docs/window.ts` -- single-instance window factory pattern.
 - `lite/settings/sections/two-factor.ts` -- expandable inline form
   pattern + `window.confirm` for destructive actions.
+
+## Conversation archiving + memory export (2026-09-01)
+
+External-bot tabs (ChatGPT, Claude, Gemini, Grok, Perplexity) archive every exchange into the provider's own **"<Provider> Conversations"** Space — the same Space the full app writes, in the same markdown shape.
+
+- [`conversation-capture.ts`](conversation-capture.ts) — the pure engine: per-provider request/response decoders and the prompt↔reply state machine. Unit-tested against wire-shaped fixtures in [`../test/unit/idw-conversation-capture.test.ts`](../test/unit/idw-conversation-capture.test.ts).
+- [`conversation-tap.ts`](conversation-tap.ts) — the Electron glue. Tab views carry NO preload (ADR-038), so capture is a **DevTools-protocol network tap** from the main process: the page is handed nothing. Only conversation-turn requests are decoded; nothing else on the wire is retained. Attached in `main-window/window.ts` after chrome parity; stopped before the webContents closes.
+- **Per-bot switch**: `IdwEntry.archiveConversations` (absent = on for known providers; `custom` bots are never captured). Settings → IDWs → "Archive chats".
+- **Memory export**: Settings → IDWs → "Export memory" opens the provider's memory settings page in a hidden view on the bot's own partition (the signed-in session applies), reads the visible text over the protocol, and files it as a text asset in the same Space. The providers expose memory only through their UI, so this is best-effort by construction — an unrecognized page reports why instead of filing a blank.

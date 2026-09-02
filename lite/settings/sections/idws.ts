@@ -331,6 +331,7 @@ function renderRow(entry: LiteIdwEntry): string {
         <span class="idw-pill idw-pill-source">${escapeHtml(sourceLabel)}</span>
         <span class="idw-row-updated">${escapeHtml(updated)}</span>
         <div class="idw-row-actions">
+          ${renderBotControls(entry)}
           <button type="button" class="idw-link-button" data-action="edit" data-id="${escapeAttr(entry.id)}">Edit</button>
           <button type="button" class="idw-link-button danger" data-action="remove" data-id="${escapeAttr(entry.id)}">Remove</button>
         </div>
@@ -338,6 +339,51 @@ function renderRow(entry: LiteIdwEntry): string {
       <div class="idw-row-edit" hidden></div>
     </div>
   `;
+}
+
+/**
+ * Third-party bots get two controls the other kinds have no use for
+ * (2026-09-01): the archive switch (conversations file into the
+ * provider's Space as they happen — on unless switched off) and a
+ * one-click memory export (what the provider remembers about you, into
+ * the same Space). `custom` bots have no decoder, so neither shows.
+ */
+function renderBotControls(entry: LiteIdwEntry): string {
+  if (entry.kind !== 'external-bot' || entry.botType === undefined || entry.botType === 'custom') return '';
+  const on = entry.archiveConversations !== false;
+  return `
+          <label class="idw-archive-switch" title="Archive this bot's conversations into its Space as they happen">
+            <input type="checkbox" data-action="archive-toggle" data-id="${escapeAttr(entry.id)}" ${on ? 'checked' : ''} />
+            <span>Archive chats</span>
+          </label>
+          <button type="button" class="idw-link-button" data-action="memory-export" data-id="${escapeAttr(entry.id)}"
+            title="Save what this provider remembers about you into its Space">Export memory</button>
+          <span class="idw-row-status" data-status-for="${escapeAttr(entry.id)}" aria-live="polite"></span>`;
+}
+
+/**
+ * One click → the provider's memory page is read in a hidden view on
+ * the bot's own session and filed into its Space. The row reports the
+ * outcome in place; failures say WHY (usually "sign in first").
+ */
+async function memoryExportFlow(state: SectionState, id: string, btn: HTMLButtonElement): Promise<void> {
+  const bridge = window.lite?.idw;
+  const status = state.container.querySelector<HTMLElement>(`[data-status-for="${CSS.escape(id)}"]`);
+  if (bridge === undefined) return;
+  btn.disabled = true;
+  if (status !== null) status.textContent = 'Reading memory…';
+  try {
+    const result = await bridge.exportMemory(id);
+    if (status !== null) {
+      status.textContent = result.ok
+        ? `Saved to ${result.provider} Conversations (${result.chars ?? 0} chars)`
+        : (result.reason ?? 'Nothing to export');
+    }
+  } catch (err) {
+    if (status !== null) status.textContent = (err as Error).message;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function renderRowIcon(entry: LiteIdwEntry): string {
@@ -411,6 +457,22 @@ function wireActions(state: SectionState): void {
     btn.addEventListener('click', () => {
       if (action === 'edit') openInlineEdit(state, id);
       else if (action === 'remove') void removeFlow(state, id);
+      else if (action === 'memory-export') void memoryExportFlow(state, id, btn);
+    });
+  }
+  // The archive switch persists through the same update path Edit uses.
+  for (const box of Array.from(
+    state.container.querySelectorAll<HTMLInputElement>('input[data-action="archive-toggle"]')
+  )) {
+    const id = box.dataset['id'];
+    if (typeof id !== 'string') continue;
+    box.addEventListener('change', () => {
+      const bridge = window.lite?.idw;
+      if (bridge === undefined) return;
+      void bridge.update(id, { archiveConversations: box.checked }).catch((err: unknown) => {
+        box.checked = !box.checked; // the store is the truth; revert the visual
+        window.logging?.error?.('settings', 'archive toggle failed', { error: (err as Error).message });
+      });
     });
   }
 

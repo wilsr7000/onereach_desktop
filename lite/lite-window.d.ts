@@ -442,6 +442,8 @@ interface LiteIdwEntry {
   audio?: { subCategory: LiteAudioSubCategory };
   /** Present iff `kind === 'external-bot'`. Records the user's preset choice. */
   botType?: LiteBotType;
+  /** Archive this bot's conversations into its Space (absent = on) (2026-09-01). */
+  archiveConversations?: boolean;
   storeMetadata?: LiteIdwStoreMetadata;
   createdAt: string;
   updatedAt: string;
@@ -536,6 +538,8 @@ interface LiteIdwBridge {
   list(): Promise<LiteIdwEntry[]>;
   listByKind(kind: LiteAgentKind): Promise<LiteIdwEntry[]>;
   get(id: string): Promise<LiteIdwEntry | null>;
+  /** Export a provider's memory page into its Space (2026-09-01). */
+  exportMemory(id: string): Promise<{ ok: boolean; provider: string; itemId?: string; chars?: number; reason?: string }>;
   /**
    * Add a new entry, OR (for `source='store'` entries with a matching
    * `storeMetadata.catalogId`) update the existing one in place.
@@ -1028,6 +1032,14 @@ interface LiteHomeUrlState {
   url: string;
   isDefault: boolean;
   defaultUrl: string;
+}
+
+/** Appearance preference (Settings → Appearance). Light is the default. */
+type LiteThemePreference = 'light' | 'dark' | 'system';
+
+interface LiteThemeState {
+  preference: LiteThemePreference;
+  isDefault: boolean;
 }
 
 interface LiteSpacePresenceEntryView {
@@ -1728,6 +1740,11 @@ interface LiteWindowBridge {
   homeUrl?: {
     get(): Promise<LiteHomeUrlState>;
     set(url: string | null): Promise<LiteHomeUrlState>;
+  };
+  /** Appearance: light (default) / dark / system. Applies live. */
+  theme?: {
+    get(): Promise<LiteThemeState>;
+    set(preference: LiteThemePreference | null): Promise<LiteThemeState>;
   };
   apiDocs?: LiteApiDocsBridge;
   health?: LiteHealthBridge;

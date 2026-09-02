@@ -57,6 +57,7 @@ function installBridge(
     remove,
     openStore,
     open: vi.fn(async () => ({ ok: true as const })),
+    exportMemory: vi.fn(async () => ({ ok: false, provider: 'ChatGPT', reason: 'stub' })),
     onChange: (h) => {
       handlers.push(h);
       return () => {

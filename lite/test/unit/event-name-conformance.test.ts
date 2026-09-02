@@ -108,7 +108,8 @@ const MODULES: ModuleSpec[] = [
   },
   {
     name: 'idw',
-    sourceFiles: ['idw/store.ts', 'idw/main.ts', 'idw/menu-builder.ts', 'idw/browser-window.ts'],
+    sourceFiles: ['idw/store.ts', 'idw/main.ts', 'idw/menu-builder.ts', 'idw/conversation-tap.ts',
+      'idw/browser-window.ts'],
     events: IDW_EVENTS,
   },
   {

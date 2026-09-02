@@ -116,6 +116,13 @@ export interface IdwEntry {
    * Dropped silently by `store.ts` for any other kind.
    */
   botType?: BotType;
+  /**
+   * Present iff `kind=external-bot` (2026-09-01). Archive this bot's
+   * conversations into its "<Provider> Conversations" Space as they
+   * happen. Absent means ON for the known providers — the default the
+   * user asked for — and never applies to `custom` bots (no decoder).
+   */
+  archiveConversations?: boolean;
   /** Present iff `source=store`. Used to dedupe Store re-installs / updates. */
   storeMetadata?: {
     /** Matches the IDW or Agent node id in OAGI graph. */

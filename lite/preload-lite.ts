@@ -67,6 +67,9 @@ const MEMORY_INGEST_SPACE = 'lite:memory:ingestSpace';
 const MEMORY_INGEST_PROGRESS = 'lite:memory:ingestProgress';
 const HOME_URL_GET = 'lite:main-window:homeUrl:get';
 const HOME_URL_SET = 'lite:main-window:homeUrl:set';
+// Appearance -- mirror lite/theme/main.ts THEME_IPC.
+const THEME_GET = 'lite:theme:get';
+const THEME_SET = 'lite:theme:set';
 const API_DOCS_OPEN = 'lite:api-docs:open';
 const HEALTH_SNAPSHOT = 'lite:health:snapshot';
 const TELEMETRY_GET_STATUS = 'lite:telemetry:getStatus';
@@ -199,6 +202,7 @@ const IDW_REMOVE = 'lite:idw:remove';
 // run in main process.
 const IDW_OPEN_STORE = 'lite:idw:open-store';
 const IDW_OPEN = 'lite:idw:open';
+const IDW_MEMORY_EXPORT = 'lite:idw:memory-export';
 const IDW_CHANGED = 'lite:idw:changed';
 
 const TOOLS_LIST = 'lite:tools:list';
@@ -1221,6 +1225,8 @@ interface IdwBridge {
   openStore(): Promise<{ ok: true }>;
   /** Open an agent entry as a main-window tab (2026-08-07). */
   open(id: string): Promise<{ ok: true }>;
+  /** Export a provider's memory page into its Space (2026-09-01). */
+  exportMemory(id: string): Promise<{ ok: boolean; provider: string; itemId?: string; chars?: number; reason?: string }>;
   /**
    * Subscribe to `lite:idw:changed` broadcasts. Returns an
    * unsubscribe function. Receives the latest entries on each
@@ -2184,6 +2190,14 @@ const idw: IdwBridge = {
   update: (id, patch) =>
     ipcRenderer.invoke(IDW_UPDATE, { id, patch }) as Promise<IdwEntryView>,
   remove: (id) => ipcRenderer.invoke(IDW_REMOVE, { id }) as Promise<{ ok: true }>,
+  exportMemory: (id) =>
+    ipcRenderer.invoke(IDW_MEMORY_EXPORT, { id }) as Promise<{
+      ok: boolean;
+      provider: string;
+      itemId?: string;
+      chars?: number;
+      reason?: string;
+    }>,
   openStore: () => ipcRenderer.invoke(IDW_OPEN_STORE) as Promise<{ ok: true }>,
   open: (id: string) => ipcRenderer.invoke(IDW_OPEN, { id }) as Promise<{ ok: true }>,
   onChange: (handler) => {
@@ -2990,6 +3004,18 @@ contextBridge.exposeInMainWorld('lite', {
         url: string;
         isDefault: boolean;
         defaultUrl: string;
+      }>,
+  },
+  theme: {
+    get: () =>
+      ipcRenderer.invoke(THEME_GET) as Promise<{
+        preference: 'light' | 'dark' | 'system';
+        isDefault: boolean;
+      }>,
+    set: (preference: 'light' | 'dark' | 'system' | null) =>
+      ipcRenderer.invoke(THEME_SET, { preference }) as Promise<{
+        preference: 'light' | 'dark' | 'system';
+        isDefault: boolean;
       }>,
   },
   auth,

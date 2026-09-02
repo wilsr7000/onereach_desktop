@@ -19,6 +19,7 @@
  */
 
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
+import { exportProviderMemory, type MemoryExportResult } from './conversation-tap.js';
 import {
   getIdwApi,
   IdwError,
@@ -60,6 +61,8 @@ export const IDW_IPC = {
   OPEN: 'lite:idw:open',
   OPEN_STORE: 'lite:idw:open-store',
   CHANGED: 'lite:idw:changed',
+  /** Export what a provider remembers about the user into its Space (2026-09-01). */
+  MEMORY_EXPORT: 'lite:idw:memory-export',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -230,6 +233,20 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
       }
       await openEntryAsTab(entry);
       return { ok: true };
+    })
+  );
+
+  ipcMain.handle(
+    IDW_IPC.MEMORY_EXPORT,
+    wrapIpcHandler(IPC_ERROR_MARKER, async (_event, payload: unknown): Promise<MemoryExportResult> => {
+      const id = typeof (payload as { id?: unknown })?.id === 'string' ? (payload as { id: string }).id : '';
+      const entry = id.length > 0 ? await getIdwApi().get(id) : null;
+      if (entry === null || entry.kind !== 'external-bot') {
+        return { ok: false, provider: 'ChatGPT', reason: 'Not an installed third-party bot.' };
+      }
+      // Same partition the tab uses (main-window/window.ts): the user's
+      // signed-in session applies without a second sign-in.
+      return exportProviderMemory(entry.botType, `persist:idw-${entry.id}`);
     })
   );
 

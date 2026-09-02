@@ -26,6 +26,10 @@ export const IDW_EVENTS = {
   ADD_START: 'idw.add.start',
   ADD_FINISH: 'idw.add.finish',
   ADD_FAIL: 'idw.add.fail',
+  // Conversation archiving (2026-09-01)
+  CONVERSATION_TAP_START: 'idw.conversation.tap.start',
+  CONVERSATION_ARCHIVE_FINISH: 'idw.conversation.archive.finish',
+  MEMORY_EXPORT_FINISH: 'idw.memory.export.finish',
   UPDATE_START: 'idw.update.start',
   UPDATE_FINISH: 'idw.update.finish',
   UPDATE_FAIL: 'idw.update.fail',
