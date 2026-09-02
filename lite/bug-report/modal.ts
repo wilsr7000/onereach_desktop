@@ -136,6 +136,32 @@ const payloadPreview = $<HTMLPreElement>('payload-preview');
 const redactionStatus = $<HTMLSpanElement>('redaction-status');
 const sendBtn = $<HTMLButtonElement>('send');
 const cancelBtn = $<HTMLButtonElement>('cancel');
+const closeBtn = $<HTMLButtonElement>('close');
+
+// ── Guaranteed close paths (2026-09-02) ─────────────────────────────────
+// A macOS sheet has no traffic lights, and a short parent window used to
+// push Cancel below the fold — nothing on screen closed the modal. The
+// header ×, Escape and ⌘W/Ctrl+W all close it. The one exception is a
+// send in flight: the buttons are disabled then (closing mid-save would
+// orphan the report), and cancelBtn.disabled is exactly that signal.
+function requestClose(): void {
+  if (cancelBtn.disabled) return;
+  window.bugReport.close();
+}
+
+closeBtn.addEventListener('click', requestClose);
+
+document.addEventListener('keydown', (e) => {
+  if (e.defaultPrevented) return;
+  const isEscape = e.key === 'Escape';
+  const isCloseChord =
+    (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'w';
+  if (!isEscape && !isCloseChord) return;
+  // The search box stops Escape's propagation while it has text to
+  // clear, so a first Escape there clears and a second one closes.
+  e.preventDefault();
+  requestClose();
+});
 
 // ── Bug ↔ feature toggle ────────────────────────────────────────────────
 // One modal files both; the toggle swaps framing (labels, placeholder,

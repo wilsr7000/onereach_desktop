@@ -42,7 +42,10 @@ body {
   justify-content: center;
 }
 
-/* Single outer scroll. Everything else flows naturally inside. */
+/* Frame = header + ONE scrolling middle + pinned footer (2026-09-02).
+   The frame itself never scrolls: a macOS sheet has no traffic lights,
+   and when the whole frame scrolled, a short parent window pushed the
+   Cancel/Send row below the fold with no visible way out. */
 .modal-frame {
   width: 100%;
   max-width: 760px;
@@ -51,7 +54,45 @@ body {
   display: flex;
   flex-direction: column;
   gap: 18px;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+.modal-frame > header,
+.modal-frame > footer {
+  flex: 0 0 auto;
+}
+
+.modal-frame > header {
+  padding-right: 44px; /* room for the × */
+}
+
+.modal-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-right: 6px;
+  margin-right: -6px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
 }
 
 /* Dark, thin, theme-matched scrollbar. Single rule applies wherever

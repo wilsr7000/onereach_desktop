@@ -16,6 +16,7 @@ import * as http from 'node:http';
 import { capture, isFeedbackType, type BugReportAttachment, type BugReportPayload, type FeedbackType } from './capture.js';
 import { getBugReportApi, _resetBugReportApiForTesting } from './api.js';
 import { getAuthApi } from '../auth/api.js';
+import { BUG_REPORT_SHEET, bugReportSheetSize } from './sheet-size.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getHealthApi, type AppHealthSnapshot } from '../health/api.js';
 import { getFilesApi, FilesError } from '../files/api.js';
@@ -309,11 +310,14 @@ export function openBugReportModal(prefill?: string): void {
   }
 
   const parent = options.getParentWindow();
+  // Fit the sheet inside the parent's content area (sheet-size.ts): a
+  // fixed 680 px hung below short parent windows with Cancel unreachable.
+  const sheet = bugReportSheetSize(parent !== null ? parent.getContentBounds() : null);
   const baseOptions: Electron.BrowserWindowConstructorOptions = {
-    width: 760,
-    height: 680,
-    minWidth: 680,
-    minHeight: 600,
+    width: sheet.width,
+    height: sheet.height,
+    minWidth: BUG_REPORT_SHEET.minWidth,
+    minHeight: BUG_REPORT_SHEET.minHeight,
     title: 'Report a Bug',
     resizable: true,
     minimizable: false,

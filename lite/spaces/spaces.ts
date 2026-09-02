@@ -18555,8 +18555,11 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
     titleInput.setAttribute('aria-label', 'Asset title');
     panel.appendChild(titleInput);
 
+  // Listeners the wizard installs outside its own panel; finish() runs them.
+  const teardown: Array<() => void> = [];
     const desc = document.createElement('textarea');
     desc.className = 'spaces-new-asset-input spaces-intake-desc';
+    for (const undo of teardown) undo();
     desc.placeholder = 'Description (optional)';
     desc.rows = 2;
     panel.appendChild(desc);
@@ -18567,6 +18570,16 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
 
     const row = document.createElement('div');
     row.className = 'spaces-intake-actions';
+
+  // Escape stops adding, exactly like the × (2026-09-02 modal-closability
+  // pass — the wizard had no keyboard exit before).
+  const onEscape = (ev: KeyboardEvent): void => {
+    if (ev.key !== 'Escape' || ev.defaultPrevented) return;
+    ev.preventDefault();
+    finish();
+  };
+  document.addEventListener('keydown', onEscape);
+  teardown.push(() => document.removeEventListener('keydown', onEscape));
 
     const addBtn = document.createElement('button');
     addBtn.type = 'button';

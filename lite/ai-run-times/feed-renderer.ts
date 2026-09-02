@@ -86,6 +86,24 @@ function boot(): void {
   const closeBtn = $('close-btn');
   if (closeBtn !== null) closeBtn.addEventListener('click', () => window.close());
 
+  // Escape closes whichever overlay is up — the article first, then the
+  // preferences panel (2026-09-02 modal-closability pass: both had only
+  // a × before, so keyboard users had no way out).
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || e.defaultPrevented) return;
+    const overlay = $('article-overlay');
+    if (overlay !== null && !overlay.hidden) {
+      e.preventDefault();
+      closeArticle();
+      return;
+    }
+    const prefs = $('prefs-panel');
+    if (prefs !== null && !prefs.hidden) {
+      e.preventDefault();
+      togglePrefsPanel(false);
+    }
+  });
+
   const refreshBtn = $('refresh-btn');
   if (refreshBtn !== null) refreshBtn.addEventListener('click', () => void refreshFeed());
 

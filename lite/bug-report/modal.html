@@ -10,10 +10,14 @@
   <body>
     <div class="modal-frame">
       <header>
+        <button type="button" id="close" class="modal-close" aria-label="Close" title="Close (Esc)">&times;</button>
         <h1 id="modal-title">Report a Bug</h1>
         <p class="subtitle" id="modal-subtitle">Check whether it's already been reported. Otherwise, file a new one below.</p>
       </header>
 
+      <!-- The only scrolling region: the footer below stays pinned so
+           Cancel/Send are reachable at any window height (2026-09-02). -->
+      <div class="modal-scroll">
       <section class="reports-browse">
         <div class="search-row">
           <input
@@ -70,6 +74,7 @@
           <pre id="payload-preview" aria-live="polite">Loading...</pre>
         </details>
       </section>
+      </div>
 
       <footer>
         <button type="button" id="cancel">Cancel</button>
