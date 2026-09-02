@@ -18583,8 +18583,11 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
   backdrop.appendChild(panel);
   document.body.appendChild(backdrop);
 
+  // Listeners the wizard installs outside its own panel; finish() runs them.
+  const teardown: Array<() => void> = [];
   const finish = (): void => {
     backdrop.remove();
+    for (const undo of teardown) undo();
     const bits = [`${summary.added} added`];
     if (summary.duplicates > 0) bits.push(`${summary.duplicates} duplicate${summary.duplicates === 1 ? '' : 's'} skipped`);
     if (summary.skipped > 0) bits.push(`${summary.skipped} skipped`);
@@ -18595,6 +18598,16 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
     }
     if (summary.added > 0) void loadItems();
   };
+
+  // Escape stops adding, exactly like the × (2026-09-02 modal-closability
+  // pass — the wizard had no keyboard exit before).
+  const onEscape = (ev: KeyboardEvent): void => {
+    if (ev.key !== 'Escape' || ev.defaultPrevented) return;
+    ev.preventDefault();
+    finish();
+  };
+  document.addEventListener('keydown', onEscape);
+  teardown.push(() => document.removeEventListener('keydown', onEscape));
 
   const addOne = async (item: IntakeItem, title: string, description: string): Promise<void> => {
     const result = await createAssetFromUploadFile(item.file, {
@@ -18638,30 +18651,6 @@ function openBatchIntakeWizard(queue: IntakeItem[], spaceId: string): void {
     close.type = 'button';
     close.className = 'spaces-member-picker-close';
     close.textContent = '×';
-/**
- * Escape closes an in-page dialog exactly like its × (2026-09-02
- * modal-closability pass — four dialogs had only a ×). Only the TOPMOST
- * backdrop answers, so a confirm stacked on an editor closes alone; the
- * listener unhooks itself once the backdrop leaves the DOM by any route
- * (a reopen's replace-remove, the ×, a backdrop click), so a stale
- * listener can never dismiss a later dialog.
- */
-export function closeOnEscape(backdrop: HTMLElement, dismiss: () => void): void {
-  const onKey = (ev: KeyboardEvent): void => {
-    if (!backdrop.isConnected) {
-      document.removeEventListener('keydown', onKey);
-      return;
-    }
-    if (ev.key !== 'Escape' || ev.defaultPrevented) return;
-    const stacked = document.body.querySelectorAll(':scope > [class*="backdrop"]');
-    if (stacked.length > 0 && stacked[stacked.length - 1] !== backdrop) return;
-    ev.preventDefault();
-    document.removeEventListener('keydown', onKey);
-    dismiss();
-  };
-  document.addEventListener('keydown', onKey);
-}
-
     close.setAttribute('aria-label', 'Stop adding');
     close.addEventListener('click', finish);
     head.appendChild(close);
