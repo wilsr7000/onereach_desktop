@@ -11,7 +11,7 @@
         height: 100%;
         font-family: var(--or-font-sans);
         background:
-          radial-gradient(circle at 50% 14%, rgba(79, 140, 255, 0.12), transparent 38%),
+          radial-gradient(circle at 50% 14%, rgba(var(--or-accent-rgb), 0.12), transparent 38%),
           var(--or-bg-canvas);
         color: var(--or-text-primary);
         -webkit-font-smoothing: antialiased;
@@ -37,9 +37,9 @@
         width: 128px;
         height: 128px;
         transform: translateX(-50%);
-        border: 1px solid rgba(79, 140, 255, 0.14);
+        border: 1px solid rgba(var(--or-accent-rgb), 0.14);
         border-radius: 50%;
-        box-shadow: inset 0 0 36px rgba(79, 140, 255, 0.045);
+        box-shadow: inset 0 0 36px rgba(var(--or-accent-rgb), 0.045);
         pointer-events: none;
       }
       .version {
@@ -65,7 +65,7 @@
       button {
         font: inherit;
         font-size: 13px;
-        background: rgba(255, 255, 255, 0.08);
+        background: rgba(var(--or-raise-rgb), 0.08);
         color: var(--or-text-primary);
         border: 1px solid var(--or-border-subtle);
         border-radius: var(--or-radius-sm);

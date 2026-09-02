@@ -30,6 +30,7 @@ import type { LearningEntry } from './types.js';
 import { KIND_UI } from './curated-content.js';
 import { getLoggingApi } from '../logging/api.js';
 import { UNIVERSITY_EVENTS } from './events.js';
+import { windowBackgroundColor } from '../theme/main.js';
 
 const PARTITION = 'persist:lite-university';
 const DEFAULT_WIDTH = 1400;
@@ -68,7 +69,7 @@ export function openLearningInBrowser(entry: LearningEntry): void {
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
     title: formatTitle(entry),
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {

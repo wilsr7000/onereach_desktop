@@ -25,6 +25,7 @@
 import { BrowserWindow, screen, shell, type Rectangle } from 'electron';
 import { getKVApi } from '../kv/api.js';
 import type { KVApi } from '../kv/api.js';
+import { windowBackgroundColor } from '../theme/main.js';
 
 const KV_COLLECTION = 'lite-window-state';
 const KV_KEY = 'spaces';
@@ -159,7 +160,7 @@ export function createSpacesWindow(config: SpacesWindowConfig): BrowserWindow {
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
     title: 'Spaces',
-    backgroundColor: '#0F1115',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

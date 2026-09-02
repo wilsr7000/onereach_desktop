@@ -21,6 +21,7 @@
 import { BrowserWindow, ipcMain, screen, shell } from 'electron';
 import { join } from 'node:path';
 import { getLoggingApi } from './logging/api.js';
+import { windowBackgroundColor } from './theme/main.js';
 
 /**
  * The deployed Builder. Recorded in the project's own
@@ -98,7 +99,7 @@ export function openJourneyMapWindow(opts?: { itemId?: string }): void {
     width,
     height,
     title: 'Journey Map Builder',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     webPreferences: {
       // A NARROW preload — `window.journeySpaces` only (list / load /

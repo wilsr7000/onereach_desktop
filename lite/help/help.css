@@ -17,7 +17,7 @@ html,
 body {
   height: 100%;
   background:
-    radial-gradient(circle at 14% 0%, rgba(79, 140, 255, 0.08), transparent 36%),
+    radial-gradient(circle at 14% 0%, rgba(var(--or-accent-rgb), 0.08), transparent 36%),
     var(--or-bg-canvas);
   color: var(--or-text-primary);
   font-family: var(--or-font-sans);
@@ -43,7 +43,7 @@ code {
   font-size: 0.875em;
   padding: 1px 6px;
   border-radius: 4px;
-  background: rgba(255, 255, 255, 0.07);
+  background: rgba(var(--or-raise-rgb), 0.07);
   border: 1px solid var(--or-border-subtle);
   color: var(--or-text-primary);
 }
@@ -215,18 +215,18 @@ ul.def-list li {
   padding: 8px 14px;
   border-left: 2px solid var(--or-border-subtle);
   margin-bottom: 6px;
-  background: rgba(255, 255, 255, 0.015);
+  background: rgba(var(--or-raise-rgb), 0.015);
   border-radius: 0 var(--or-radius-sm) var(--or-radius-sm) 0;
 }
 
 ul.def-list li:hover {
   border-left-color: var(--or-accent);
-  background: rgba(79, 140, 255, 0.04);
+  background: rgba(var(--or-accent-rgb), 0.04);
 }
 
 .callout {
   background:
-    radial-gradient(circle at 14% 0%, rgba(79, 140, 255, 0.1), transparent 40%),
+    radial-gradient(circle at 14% 0%, rgba(var(--or-accent-rgb), 0.1), transparent 40%),
     var(--or-bg-elevated);
   border: 1px solid var(--or-border-subtle);
   border-left: 3px solid var(--or-accent);

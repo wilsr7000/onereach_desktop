@@ -15,7 +15,22 @@ import { resolve } from 'node:path';
  * lines — for every stylesheet a lite window loads.
  */
 
-const SHEETS = ['lite/spaces/spaces.css', 'lite/signature.css'];
+/** Every stylesheet a lite window loads (the theme conversion touched them all). */
+const SHEETS = [
+  'lite/spaces/spaces.css',
+  'lite/signature.css',
+  'lite/settings/settings.css',
+  'lite/main-window/chrome.css',
+  'lite/learn/learn.css',
+  'lite/bug-report/modal.css',
+  'lite/idw/catalog.css',
+  'lite/ai-run-times/feed.css',
+  'lite/university/tutorials.css',
+  'lite/api-docs/index.css',
+  'lite/tools/manager.css',
+  'lite/help/help.css',
+  'lite/downloads/picker.css',
+];
 
 interface ScanResult {
   finalDepth: number;

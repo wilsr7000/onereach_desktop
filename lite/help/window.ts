@@ -13,6 +13,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface HelpWindowConfig {
   parent: BrowserWindow | null;
@@ -58,7 +59,7 @@ export function openHelpWindow(config: HelpWindowConfig): BrowserWindow {
     width: 1000,
     height: 720,
     title: 'Onereach.ai Lite Help',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

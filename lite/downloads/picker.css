@@ -16,9 +16,9 @@ html,
 body {
   height: 100%;
   background:
-    radial-gradient(circle at 16% 0%, rgba(79, 140, 255, 0.08), transparent 36%),
-    var(--or-bg-canvas, #0e0e10);
-  color: var(--or-text-primary, #f4f6fb);
+    radial-gradient(circle at 16% 0%, rgba(var(--or-accent-rgb), 0.08), transparent 36%),
+    var(--or-bg-canvas, var(--or-bg-canvas));
+  color: var(--or-text-primary, var(--or-text-primary));
   font-family: var(--or-font-sans);
   font-size: 13px;
   line-height: 1.5;
@@ -44,7 +44,7 @@ body {
 
 .picker-sub {
   font-size: 11px;
-  color: var(--or-text-faint, rgba(244, 246, 251, 0.36));
+  color: var(--or-text-faint, rgba(var(--or-text-rgb), 0.36));
   letter-spacing: 0.2px;
   text-transform: uppercase;
 }
@@ -56,8 +56,8 @@ body {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  background: rgba(var(--or-raise-rgb), 0.03);
+  border: 1px solid var(--or-border-subtle, rgba(var(--or-ink-rgb), 0.06));
   border-radius: var(--or-radius-md, 10px);
 }
 
@@ -66,8 +66,8 @@ body {
   height: 36px;
   flex-shrink: 0;
   border-radius: 6px;
-  background: var(--or-accent-soft, rgba(79, 140, 255, 0.16));
-  color: var(--or-accent-strong, #7bdbff);
+  background: var(--or-accent-soft, rgba(var(--or-accent-rgb), 0.16));
+  color: var(--or-accent-strong, var(--or-accent-strong));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -92,7 +92,7 @@ body {
 
 .picker-file-meta-line {
   font-size: 11px;
-  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  color: var(--or-text-muted, rgba(var(--or-text-rgb), 0.48));
   margin-top: 2px;
 }
 
@@ -110,13 +110,13 @@ body {
   font-size: 10.5px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
-  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  color: var(--or-text-muted, rgba(var(--or-text-rgb), 0.48));
 }
 
 .picker-search {
-  background: var(--or-bg-shell, #121216);
-  color: var(--or-text-primary, #f4f6fb);
-  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  background: var(--or-bg-shell, var(--or-bg-shell));
+  color: var(--or-text-primary, var(--or-text-primary));
+  border: 1px solid var(--or-border-subtle, rgba(var(--or-ink-rgb), 0.06));
   border-radius: var(--or-radius-sm, 6px);
   padding: 7px 11px;
   font: inherit;
@@ -128,16 +128,16 @@ body {
 }
 
 .picker-search:focus {
-  border-color: var(--or-border-signal, rgba(79, 140, 255, 0.46));
-  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.16);
+  border-color: var(--or-border-signal, rgba(var(--or-accent-rgb), 0.46));
+  box-shadow: 0 0 0 3px rgba(var(--or-accent-rgb), 0.16);
 }
 
 .picker-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  background: var(--or-bg-shell, #121216);
-  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  background: var(--or-bg-shell, var(--or-bg-shell));
+  border: 1px solid var(--or-border-subtle, rgba(var(--or-ink-rgb), 0.06));
   border-radius: var(--or-radius-sm, 6px);
   padding: 4px;
 }
@@ -153,22 +153,22 @@ body {
 }
 
 .picker-list-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgba(var(--or-ink-rgb), 0.04);
 }
 
 .picker-list-row.is-active {
-  background: var(--or-accent-soft, rgba(79, 140, 255, 0.16));
+  background: var(--or-accent-soft, rgba(var(--or-accent-rgb), 0.16));
 }
 
 .picker-list-row.is-active .picker-list-name {
-  color: var(--or-accent-hover, #6fa2ff);
+  color: var(--or-accent-hover, var(--or-accent-hover));
 }
 
 .picker-list-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--or-accent, #4f8cff);
+  background: var(--or-accent, var(--or-accent));
   flex-shrink: 0;
 }
 
@@ -183,7 +183,7 @@ body {
 
 .picker-list-count {
   font-size: 11px;
-  color: var(--or-text-faint, rgba(244, 246, 251, 0.36));
+  color: var(--or-text-faint, rgba(var(--or-text-rgb), 0.36));
   font-family: var(--or-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
@@ -191,18 +191,18 @@ body {
   padding: 16px;
   text-align: center;
   font-size: 12px;
-  color: var(--or-text-muted, rgba(244, 246, 251, 0.48));
+  color: var(--or-text-muted, rgba(var(--or-text-rgb), 0.48));
 }
 
 /* ── Error block (e.g. spaces failed to load, upload failed) ───────── */
 
 .picker-error {
   padding: 9px 11px;
-  background: rgba(255, 107, 122, 0.08);
-  border: 1px solid rgba(255, 107, 122, 0.24);
-  border-left: 3px solid var(--or-danger, #ff6b7a);
+  background: rgba(var(--or-danger-rgb), 0.08);
+  border: 1px solid rgba(var(--or-danger-rgb), 0.24);
+  border-left: 3px solid var(--or-danger, var(--or-danger));
   border-radius: 4px;
-  color: var(--or-danger, #ff6b7a);
+  color: var(--or-danger, var(--or-danger));
   font-size: 12px;
   line-height: 1.45;
 }
@@ -228,24 +228,24 @@ body {
 }
 
 .picker-btn-cancel {
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--or-text-primary, #f4f6fb);
-  border: 1px solid var(--or-border-subtle, rgba(255, 255, 255, 0.06));
+  background: rgba(var(--or-raise-rgb), 0.04);
+  color: var(--or-text-primary, var(--or-text-primary));
+  border: 1px solid var(--or-border-subtle, rgba(var(--or-ink-rgb), 0.06));
 }
 
 .picker-btn-cancel:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: var(--or-border-strong, rgba(255, 255, 255, 0.12));
+  background: rgba(var(--or-ink-rgb), 0.08);
+  border-color: var(--or-border-strong, rgba(var(--or-ink-rgb), 0.12));
 }
 
 .picker-btn-save {
-  background: linear-gradient(180deg, var(--or-accent-hover, #6fa2ff), var(--or-accent, #4f8cff));
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: linear-gradient(180deg, var(--or-accent-hover, var(--or-accent-hover)), var(--or-accent, var(--or-accent)));
+  color: var(--or-on-accent);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.12);
 }
 
 .picker-btn-save:hover:not(:disabled) {
-  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover, #6fa2ff));
+  background: linear-gradient(180deg, var(--or-accent-bright), var(--or-accent-hover, var(--or-accent-hover)));
   transform: translateY(-1px);
 }
 

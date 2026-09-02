@@ -10,6 +10,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface ApiDocsWindowConfig {
   parent: BrowserWindow | null;
@@ -34,7 +35,7 @@ export function openApiDocsWindow(config: ApiDocsWindowConfig): BrowserWindow {
     width: 1200,
     height: 800,
     title: 'API Reference',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

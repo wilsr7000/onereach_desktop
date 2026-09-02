@@ -1,35 +1,212 @@
+/*
+ * Design tokens — ONE palette, two themes.
+ *
+ * Light is the default (2026-09-01, by user request). Dark is the
+ * app's original palette, verbatim, and is selected by
+ * `prefers-color-scheme`, which the main process drives through
+ * `nativeTheme.themeSource` from Settings → Appearance (lite/theme/).
+ * Every other lite stylesheet paints ONLY through these tokens — the
+ * `theme-tokens` meta-test fails the build on a bare palette literal.
+ *
+ * Both blocks MUST define the same token names (also meta-tested).
+ * `*-rgb` tokens are bare triples for `rgba(var(--or-ink-rgb), a)`:
+ * "ink" is the foreground overlay colour (white on dark, near-black on
+ * light), so one alpha ladder serves both themes.
+ */
 :root {
-  color-scheme: dark;
-  --or-bg-canvas: #0e0e10;
-  --or-bg-shell: #121216;
-  --or-bg-surface: #161618;
-  --or-bg-elevated: #1b1b20;
-  --or-bg-hover: rgba(255, 255, 255, 0.055);
-  --or-bg-active: rgba(79, 140, 255, 0.14);
-  --or-border-subtle: rgba(255, 255, 255, 0.06);
-  --or-border-strong: rgba(255, 255, 255, 0.12);
-  --or-border-signal: rgba(79, 140, 255, 0.46);
-  --or-text-primary: #f4f6fb;
-  --or-text-secondary: rgba(244, 246, 251, 0.72);
-  --or-text-muted: rgba(244, 246, 251, 0.48);
-  --or-text-faint: rgba(244, 246, 251, 0.3);
-  --or-accent: #4f8cff;
-  --or-accent-hover: #6fa2ff;
-  --or-accent-strong: #7bdbff;
-  --or-accent-soft: rgba(79, 140, 255, 0.16);
-  --or-accent-glow: rgba(79, 140, 255, 0.34);
-  --or-ai-accent: #b87bff;
-  --or-success: #6bff8a;
-  --or-warning: #fbbf24;
-  --or-danger: #ff6b7a;
+  color-scheme: light;
+  --or-ink-rgb: 17, 20, 28;
+  --or-raise-rgb: 255, 255, 255;
+  --or-well-rgb: 150, 158, 172;
+  --or-text-rgb: 21, 23, 31;
+  --or-glass-rgb: 255, 255, 255;
+  --or-bg-deep: #e8eaee;
+  --or-bg-canvas: #f4f5f7;
+  --or-bg-shell: #eceef2;
+  --or-bg-surface: #ffffff;
+  --or-bg-elevated: #f8f9fb;
+  --or-bg-raised: #eef0f4;
+  --or-bg-hover: rgba(17, 20, 28, 0.05);
+  --or-bg-active: rgba(47, 111, 224, 0.12);
+  --or-border-subtle: rgba(17, 20, 28, 0.08);
+  --or-border-strong: rgba(17, 20, 28, 0.16);
+  --or-border-signal: rgba(47, 111, 224, 0.5);
+  --or-border-solid: #d5d8e0;
+  --or-text-primary: #15171f;
+  --or-text-bright: #0b0d14;
+  --or-text-strong: #1f2230;
+  --or-text-secondary: rgba(21, 23, 31, 0.74);
+  --or-text-muted: rgba(21, 23, 31, 0.55);
+  --or-text-faint: rgba(21, 23, 31, 0.38);
+  --or-text-secondary-solid: #3f4453;
+  --or-text-muted-solid: #646a7a;
+  --or-text-faint-solid: #8a90a0;
+  --or-text-dim-solid: #9aa0ae;
+  --or-accent: #2f6fe0;
+  --or-accent-hover: #2563cf;
+  --or-accent-bright: #1f5cc4;
+  --or-accent-deep: #1c56bf;
+  --or-accent-strong: #0b7fb5;
+  --or-accent-tint: #2a62c9;
+  --or-accent-tint-2: #2458b8;
+  --or-accent-soft: rgba(47, 111, 224, 0.12);
+  --or-accent-glow: rgba(47, 111, 224, 0.28);
+  --or-accent-rgb: 47, 111, 224;
+  --or-accent-soft-rgb: 40, 100, 210;
+  --or-cyan-rgb: 11, 127, 181;
+  --or-on-accent: #ffffff;
+  --or-on-accent-soft: #1d4fb8;
+  --or-on-bright: #0a1018;
+  --or-success: #15803d;
+  --or-success-rgb: 21, 128, 61;
+  --or-green-deep: #166534;
+  --or-mint: #0f766e;
+  --or-mint-rgb: 15, 118, 110;
+  --or-warning: #a16207;
+  --or-warning-rgb: 161, 98, 7;
+  --or-amber: #8a5a0a;
+  --or-amber-deep: #7a4f08;
+  --or-amber-rgb: 138, 90, 10;
+  --or-orange: #c2410c;
+  --or-orange-soft: #b45309;
+  --or-orange-rgb: 194, 65, 12;
+  --or-danger: #d0293a;
+  --or-danger-soft: #b91c1c;
+  --or-danger-deep: #991b1b;
+  --or-danger-rgb: 208, 41, 58;
+  --or-ai-accent: #7c3aed;
+  --or-ai-soft: #6d28d9;
+  --or-ai-deep: #6d28d9;
+  --or-ai-vivid: #5b3fd6;
+  --or-ai-rgb: 124, 58, 237;
+  --or-pink: #be185d;
+  --or-pink-rgb: 190, 24, 93;
+  --or-slate-rgb: 100, 110, 130;
+  --or-emerald: #059669;
+  --or-emerald-rgb: 5, 150, 105;
+  --or-success-muted: #15803d;
+  --or-success-muted-rgb: 21, 128, 61;
+  --or-tan: #7a5a1a;
+  --or-tan-rgb: 122, 90, 26;
+  --or-orange-soft-rgb: 180, 83, 9;
+  --or-danger-soft-rgb: 185, 28, 28;
+  --or-text-tint-violet: #3f2c7a;
+  --or-text-tint-violet-rgb: 63, 44, 122;
+  --or-text-tint-mint: #1e5a40;
+  --or-text-tint-mint-rgb: 30, 90, 64;
+  --or-text-tint-blue-rgb: 30, 60, 130;
+  --or-text-tint-red: #7f1d1d;
+  --or-tint-green: #e6f6ec;
+  --or-tint-violet: #f1ecfb;
+  --or-tint-warm: #fbf3e6;
+  --or-tint-blue: #e9f0fb;
+  --or-shadow-sm: 0 4px 14px rgba(16, 20, 30, 0.1);
+  --or-shadow-md: 0 12px 36px rgba(16, 20, 30, 0.14);
+  --or-shadow-lg: 0 24px 70px rgba(16, 20, 30, 0.18);
+  --or-shadow-signal: 0 0 0 1px rgba(47, 111, 224, 0.18), 0 0 28px rgba(47, 111, 224, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --or-ink-rgb: 255, 255, 255;
+    --or-raise-rgb: 255, 255, 255;
+    --or-well-rgb: 0, 0, 0;
+    --or-text-rgb: 244, 246, 251;
+    --or-glass-rgb: 20, 20, 22;
+    --or-bg-deep: #0a0a0c;
+    --or-bg-canvas: #0e0e10;
+    --or-bg-shell: #121216;
+    --or-bg-surface: #161618;
+    --or-bg-elevated: #1b1b20;
+    --or-bg-raised: #262833;
+    --or-bg-hover: rgba(255, 255, 255, 0.055);
+    --or-bg-active: rgba(79, 140, 255, 0.14);
+    --or-border-subtle: rgba(255, 255, 255, 0.06);
+    --or-border-strong: rgba(255, 255, 255, 0.12);
+    --or-border-signal: rgba(79, 140, 255, 0.46);
+    --or-border-solid: #3a3d4d;
+    --or-text-primary: #f4f6fb;
+    --or-text-bright: #ffffff;
+    --or-text-strong: #e8e8ea;
+    --or-text-secondary: rgba(244, 246, 251, 0.72);
+    --or-text-muted: rgba(244, 246, 251, 0.48);
+    --or-text-faint: rgba(244, 246, 251, 0.3);
+    --or-text-secondary-solid: #c7c7cd;
+    --or-text-muted-solid: #9a9aa3;
+    --or-text-faint-solid: #6f6f78;
+    --or-text-dim-solid: #5b6172;
+    --or-accent: #4f8cff;
+    --or-accent-hover: #6fa2ff;
+    --or-accent-bright: #83b0ff;
+    --or-accent-deep: #3a78f0;
+    --or-accent-strong: #7bdbff;
+    --or-accent-tint: #7fb3ff;
+    --or-accent-tint-2: #c8d8ff;
+    --or-accent-soft: rgba(79, 140, 255, 0.16);
+    --or-accent-glow: rgba(79, 140, 255, 0.34);
+    --or-accent-rgb: 79, 140, 255;
+    --or-accent-soft-rgb: 125, 165, 255;
+    --or-cyan-rgb: 123, 219, 255;
+    --or-on-accent: #ffffff;
+    --or-on-accent-soft: #ffffff;
+    --or-on-bright: #0a1018;
+    --or-success: #6bff8a;
+    --or-success-rgb: 107, 255, 138;
+    --or-green-deep: #3ad968;
+    --or-mint: #6ee7b7;
+    --or-mint-rgb: 110, 231, 183;
+    --or-warning: #ffd56b;
+    --or-warning-rgb: 255, 213, 107;
+    --or-amber: #e8b34b;
+    --or-amber-deep: #c1922f;
+    --or-amber-rgb: 232, 179, 75;
+    --or-orange: #ff9c4a;
+    --or-orange-soft: #ffca92;
+    --or-orange-rgb: 255, 156, 74;
+    --or-danger: #ff6b7a;
+    --or-danger-soft: #ff9b9b;
+    --or-danger-deep: #b8352f;
+    --or-danger-rgb: 255, 107, 122;
+    --or-ai-accent: #b87bff;
+    --or-ai-soft: #c4b0ff;
+    --or-ai-deep: #8b5cf6;
+    --or-ai-vivid: #7c5cff;
+    --or-ai-rgb: 150, 120, 255;
+    --or-pink: #ff7bb3;
+    --or-pink-rgb: 255, 123, 179;
+    --or-slate-rgb: 148, 163, 184;
+    --or-emerald: #34d399;
+    --or-emerald-rgb: 52, 211, 153;
+    --or-success-muted: #6dc56d;
+    --or-success-muted-rgb: 109, 197, 109;
+    --or-tan: #e8d5ae;
+    --or-tan-rgb: 232, 213, 174;
+    --or-orange-soft-rgb: 255, 195, 145;
+    --or-danger-soft-rgb: 255, 155, 155;
+    --or-text-tint-violet: #ece7f8;
+    --or-text-tint-violet-rgb: 224, 216, 244;
+    --or-text-tint-mint: #cdf0d6;
+    --or-text-tint-mint-rgb: 233, 244, 239;
+    --or-text-tint-blue-rgb: 200, 215, 255;
+    --or-text-tint-red: #ffd1d1;
+    --or-tint-green: #12211b;
+    --or-tint-violet: #1f1a2e;
+    --or-tint-warm: #241913;
+    --or-tint-blue: #131a28;
+    --or-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.28);
+    --or-shadow-md: 0 12px 36px rgba(0, 0, 0, 0.42);
+    --or-shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.56);
+    --or-shadow-signal: 0 0 0 1px rgba(79, 140, 255, 0.2), 0 0 28px rgba(79, 140, 255, 0.18);
+  }
+}
+
+/* Theme-neutral tokens — type, spacing, radii, motion. One set. */
+:root {
   --or-radius-sm: 6px;
   --or-radius-md: 10px;
   --or-radius-lg: 14px;
   --or-radius-xl: 18px;
-  --or-shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.28);
-  --or-shadow-md: 0 12px 36px rgba(0, 0, 0, 0.42);
-  --or-shadow-lg: 0 24px 70px rgba(0, 0, 0, 0.56);
-  --or-shadow-signal: 0 0 0 1px rgba(79, 140, 255, 0.2), 0 0 28px rgba(79, 140, 255, 0.18);
   --or-transition-fast: 120ms ease;
   --or-transition-normal: 200ms ease;
   --or-transition-panel: 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -118,7 +295,7 @@ body::after {
 }
 
 * {
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(var(--or-ink-rgb), 0.18) transparent;
   scrollbar-width: thin;
 }
 
@@ -132,14 +309,14 @@ body::after {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(var(--or-raise-rgb), 0.15);
   border: 2px solid transparent;
   border-radius: 999px;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.28);
+  background: rgba(var(--or-ink-rgb), 0.28);
   background-clip: padding-box;
 }
 
@@ -152,9 +329,9 @@ body::after {
 .btn-primary,
 button.primary {
   background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent)) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  color: #ffffff !important;
-  box-shadow: 0 8px 24px rgba(79, 140, 255, 0.22);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.12) !important;
+  color: var(--or-on-accent) !important;
+  box-shadow: 0 8px 24px rgba(var(--or-accent-rgb), 0.22);
   transition:
     background var(--or-transition-fast),
     border-color var(--or-transition-fast),
@@ -166,8 +343,8 @@ button.primary {
 .signin-button:hover:not(:disabled),
 .btn-primary:hover,
 button.primary:hover {
-  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover)) !important;
-  box-shadow: 0 10px 30px rgba(79, 140, 255, 0.3);
+  background: linear-gradient(180deg, var(--or-accent-bright), var(--or-accent-hover)) !important;
+  box-shadow: 0 10px 30px rgba(var(--or-accent-rgb), 0.3);
   transform: translateY(-1px);
 }
 
@@ -194,12 +371,12 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--or-border-signal) !important;
-  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.15) !important;
+  box-shadow: 0 0 0 3px rgba(var(--or-accent-rgb), 0.15) !important;
 }
 
 .or-signal-panel {
   background:
-    radial-gradient(circle at 16% 0%, rgba(79, 140, 255, 0.12), transparent 36%),
+    radial-gradient(circle at 16% 0%, rgba(var(--or-accent-rgb), 0.12), transparent 36%),
     var(--or-bg-surface) !important;
   border: 1px solid var(--or-border-subtle) !important;
   box-shadow: var(--or-shadow-sm);
@@ -222,9 +399,9 @@ textarea:focus {
   width: 96px;
   height: 96px;
   margin: 0 auto 12px;
-  border: 1px solid rgba(79, 140, 255, 0.16);
+  border: 1px solid rgba(var(--or-accent-rgb), 0.16);
   border-radius: 50%;
-  box-shadow: inset 0 0 28px rgba(79, 140, 255, 0.05);
+  box-shadow: inset 0 0 28px rgba(var(--or-accent-rgb), 0.05);
   /* A slow heartbeat — the empty state is alive, not shrugging. */
   animation: or-breathe 4.5s var(--or-ease-out) infinite;
 }
@@ -237,7 +414,7 @@ textarea:focus {
 .toast,
 .result:not(.hidden) {
   background:
-    radial-gradient(circle at 14% 0%, rgba(79, 140, 255, 0.14), transparent 40%),
+    radial-gradient(circle at 14% 0%, rgba(var(--or-accent-rgb), 0.14), transparent 40%),
     var(--or-bg-elevated) !important;
   border: 1px solid var(--or-border-subtle) !important;
   border-left: 3px solid var(--or-accent) !important;

@@ -31,6 +31,7 @@ import { KIND_META } from './kind-metadata.js';
 import { getLoggingApi } from '../logging/api.js';
 import { IDW_EVENTS } from './events.js';
 import { buildPopupHandler } from '../auth/oauth-popup.js';
+import { windowBackgroundColor } from '../theme/main.js';
 
 const PARTITION = 'persist:lite-idw-browser';
 const DEFAULT_WIDTH = 1280;
@@ -70,7 +71,7 @@ export function openAgentInBrowser(entry: IdwEntry): void {
     width: DEFAULT_WIDTH,
     height: DEFAULT_HEIGHT,
     title: formatTitle(entry),
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {

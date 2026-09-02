@@ -12,6 +12,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface AiRunTimesWindowConfig {
   parent: BrowserWindow | null;
@@ -41,7 +42,7 @@ export function openAiRunTimesWindow(config: AiRunTimesWindowConfig): BrowserWin
     width: 1400,
     height: 900,
     title: 'AI Run Times',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     minWidth: 960,

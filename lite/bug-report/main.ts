@@ -19,6 +19,7 @@ import { getAuthApi } from '../auth/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getHealthApi, type AppHealthSnapshot } from '../health/api.js';
 import { getFilesApi, FilesError } from '../files/api.js';
+import { windowBackgroundColor } from '../theme/main.js';
 
 const IPC_CAPTURE = 'lite:bug-report:capture';
 const IPC_GET_PREFILL = 'lite:bug-report:get-prefill';
@@ -320,7 +321,7 @@ export function openBugReportModal(prefill?: string): void {
     fullscreenable: false,
     show: false,
     autoHideMenuBar: true,
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     webPreferences: {
       preload: options.preloadPath,
       contextIsolation: true,

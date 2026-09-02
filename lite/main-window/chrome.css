@@ -48,6 +48,7 @@ body {
   overflow: hidden;
 }
 
+/* theme-invariant:start — the brand orb is dark-blue with a light label in both themes */
 /*
  * Spaces "OR logo" button — ported VERBATIM from the full app's
  * `#black-hole-button` (tabbed-browser.html). 40x40 dark-blue
@@ -180,6 +181,7 @@ body {
   outline: 2px solid rgba(123, 219, 255, 0.7);
   outline-offset: 2px;
 }
+/* theme-invariant:end */
 
 /*
  * Refresh button — reloads the active tab's WebContentsView, or the
@@ -219,7 +221,7 @@ body {
 }
 
 .tab-bar-refresh-btn:focus-visible {
-  outline: 2px solid rgba(123, 219, 255, 0.7);
+  outline: 2px solid rgba(var(--or-cyan-rgb), 0.7);
   outline-offset: 2px;
 }
 
@@ -292,13 +294,13 @@ body {
 
 /* Auto-login gave up on this tab -- amber ⚠, tooltip carries the fix. */
 .tab-pill.login-stuck {
-  color: var(--or-warning, #e6b450);
-  border-color: rgba(230, 180, 80, 0.4);
+  color: var(--or-warning, var(--or-amber));
+  border-color: rgba(var(--or-amber-rgb), 0.4);
 }
 .tab-pill-warn {
   font-size: 11px;
   line-height: 1;
-  color: var(--or-warning, #e6b450);
+  color: var(--or-warning, var(--or-amber));
 }
 
 .tab-pill-label {
@@ -363,7 +365,7 @@ body {
   position: relative;
   flex: 1 1 auto;
   background:
-    radial-gradient(circle at 50% 12%, rgba(79, 140, 255, 0.12), transparent 36%),
+    radial-gradient(circle at 50% 12%, rgba(var(--or-accent-rgb), 0.12), transparent 36%),
     var(--or-bg-canvas);
   display: flex;
   align-items: stretch;
@@ -381,14 +383,14 @@ body {
   right: -240px;
   width: 720px;
   height: 720px;
-  border: 1px solid rgba(123, 219, 255, 0.10);
+  border: 1px solid rgba(var(--or-cyan-rgb), 0.10);
   border-radius: 50%;
   background:
-    radial-gradient(circle, rgba(123, 219, 255, 0.10), transparent 58%),
-    rgba(79, 140, 255, 0.025);
+    radial-gradient(circle, rgba(var(--or-cyan-rgb), 0.10), transparent 58%),
+    rgba(var(--or-accent-rgb), 0.025);
   box-shadow:
-    inset 0 0 220px rgba(79, 140, 255, 0.08),
-    0 0 200px rgba(79, 140, 255, 0.06);
+    inset 0 0 220px rgba(var(--or-accent-rgb), 0.08),
+    0 0 200px rgba(var(--or-accent-rgb), 0.06);
   opacity: 0.7;
   pointer-events: none;
   z-index: 0;
@@ -404,7 +406,7 @@ body {
 
 .home-orb::before {
   inset: 110px;
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.05);
 }
 
 .home-orb::after {
@@ -414,7 +416,7 @@ body {
   height: 56px;
   margin-top: -28px;
   margin-left: -28px;
-  background: radial-gradient(circle, rgba(167, 233, 255, 0.55), transparent 70%);
+  background: radial-gradient(circle, rgba(var(--or-cyan-rgb), 0.55), transparent 70%);
   filter: blur(2px);
 }
 
@@ -448,7 +450,7 @@ body {
   z-index: 5;
   font-size: 11px;
   font-family: var(--or-font-mono);
-  color: rgba(255, 255, 255, 0.35);
+  color: rgba(var(--or-ink-rgb), 0.35);
   letter-spacing: 0.4px;
   pointer-events: none;
   user-select: none;
@@ -485,11 +487,11 @@ body {
 
 .btn-primary {
   background: linear-gradient(180deg, var(--or-accent-hover), var(--or-accent));
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--or-on-accent);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.12);
 }
 .btn-primary:hover {
-  background: linear-gradient(180deg, #83b0ff, var(--or-accent-hover));
+  background: linear-gradient(180deg, var(--or-accent-bright), var(--or-accent-hover));
   transform: translateY(-1px);
 }
 
@@ -518,10 +520,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(106, 169, 255, 0.18), rgba(123, 219, 255, 0.10));
-  border: 1px solid rgba(123, 219, 255, 0.40);
+  background: linear-gradient(135deg, rgba(var(--or-accent-soft-rgb), 0.18), rgba(var(--or-cyan-rgb), 0.10));
+  border: 1px solid rgba(var(--or-cyan-rgb), 0.40);
   border-radius: 16px;
-  color: var(--or-accent-strong, #7bdbff);
+  color: var(--or-accent-strong, var(--or-accent-strong));
   font-family: var(--or-font-mono, 'SF Mono', Menlo, Consolas, monospace);
   font-size: 18px;
   font-weight: 700;
@@ -537,8 +539,8 @@ body {
   letter-spacing: 0.8px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: linear-gradient(135deg, #7bdbff, #6aa9ff);
-  color: #0a1018;
+  background: linear-gradient(135deg, var(--or-accent-strong), var(--or-accent-tint));
+  color: var(--or-on-bright);
   font-family: inherit;
   text-transform: uppercase;
 }
@@ -547,7 +549,7 @@ body {
   font-size: 24px;
   font-weight: 700;
   letter-spacing: -0.4px;
-  color: #f4f6fb;
+  color: var(--or-text-primary);
 }
 
 /* Conversation thread */
@@ -600,23 +602,23 @@ body {
 }
 
 .boot-chat-bubble-bot .boot-chat-avatar {
-  background: linear-gradient(135deg, #7bdbff, #6aa9ff);
-  color: #0a1018;
+  background: linear-gradient(135deg, var(--or-accent-strong), var(--or-accent-tint));
+  color: var(--or-on-bright);
 }
 
 .boot-chat-bubble-user .boot-chat-avatar {
-  background: rgba(255, 255, 255, 0.12);
-  color: #e8e8ea;
+  background: rgba(var(--or-raise-rgb), 0.12);
+  color: var(--or-text-strong);
 }
 
 .boot-chat-bubble-body {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(var(--or-raise-rgb), 0.04);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.06);
   border-radius: 12px;
   padding: 12px 16px;
   font-size: 14px;
   line-height: 1.55;
-  color: #f4f6fb;
+  color: var(--or-text-primary);
 }
 
 .boot-chat-bubble-bot .boot-chat-bubble-body {
@@ -624,13 +626,13 @@ body {
 }
 
 .boot-chat-bubble-user .boot-chat-bubble-body {
-  background: rgba(106, 169, 255, 0.14);
-  border-color: rgba(106, 169, 255, 0.32);
+  background: rgba(var(--or-accent-soft-rgb), 0.14);
+  border-color: rgba(var(--or-accent-soft-rgb), 0.32);
   border-top-right-radius: 4px;
 }
 
 .boot-chat-bubble-body strong {
-  color: #ffffff;
+  color: var(--or-text-bright);
   font-weight: 600;
 }
 
@@ -646,7 +648,7 @@ body {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: rgba(244, 246, 251, 0.48);
+  background: rgba(var(--or-text-rgb), 0.48);
   animation: boot-chat-typing 1.2s ease-in-out infinite;
 }
 
@@ -672,9 +674,9 @@ body {
 }
 
 .boot-chat-button {
-  background: linear-gradient(180deg, #7fb3ff, #4f8cff);
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, var(--or-accent-tint), var(--or-accent));
+  color: var(--or-on-accent);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.16);
   border-radius: 10px;
   padding: 12px 28px;
   font: inherit;
@@ -692,9 +694,9 @@ body {
 }
 
 .boot-chat-button:hover:not(:disabled) {
-  background: linear-gradient(180deg, #95c2ff, #5f99ff);
+  background: linear-gradient(180deg, var(--or-accent-tint), var(--or-accent-tint));
   transform: translateY(-1px);
-  box-shadow: 0 8px 20px rgba(79, 140, 255, 0.32);
+  box-shadow: 0 8px 20px rgba(var(--or-accent-rgb), 0.32);
 }
 
 .boot-chat-button:disabled {
@@ -704,13 +706,13 @@ body {
 
 .boot-chat-button-secondary {
   background: transparent;
-  color: var(--or-text-secondary, rgba(244, 246, 251, 0.72));
-  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--or-text-secondary, rgba(var(--or-text-rgb), 0.72));
+  border-color: rgba(var(--or-ink-rgb), 0.12);
 }
 
 .boot-chat-button-secondary:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(var(--or-ink-rgb), 0.06);
+  border-color: rgba(var(--or-ink-rgb), 0.22);
   transform: none;
   box-shadow: none;
 }
@@ -722,8 +724,8 @@ body {
 
 /* Error state */
 .boot-chat-bubble.is-error .boot-chat-bubble-body {
-  background: rgba(255, 110, 110, 0.10);
-  border-color: rgba(255, 110, 110, 0.32);
+  background: rgba(var(--or-danger-rgb), 0.10);
+  border-color: rgba(var(--or-danger-rgb), 0.32);
 }
 
 /* Event-log digest list inside a bot bubble. */
@@ -741,7 +743,7 @@ body {
   padding-left: 18px;
   font-size: 13.5px;
   line-height: 1.45;
-  color: rgba(244, 246, 251, 0.92);
+  color: rgba(var(--or-text-rgb), 0.92);
 }
 
 .boot-chat-digest-list li::before {
@@ -749,12 +751,12 @@ body {
   position: absolute;
   left: 4px;
   top: 0;
-  color: var(--or-accent-strong, #7bdbff);
+  color: var(--or-accent-strong, var(--or-accent-strong));
 }
 
 .boot-chat-digest-more {
   margin-top: 8px;
   font-size: 12px;
-  color: rgba(244, 246, 251, 0.48);
+  color: rgba(var(--or-text-rgb), 0.48);
   font-style: italic;
 }

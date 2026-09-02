@@ -11,6 +11,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface ManagerWindowConfig {
   parent: BrowserWindow | null;
@@ -36,7 +37,7 @@ export function openManagerWindow(config: ManagerWindowConfig): BrowserWindow {
     width: 880,
     height: 620,
     title: 'Manage Tools',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

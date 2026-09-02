@@ -20,6 +20,7 @@ export {};
 
 import { bootRenderer } from '../renderer-boot.js';
 import { mountAccount } from './sections/account.js';
+import { mountAppearance } from './sections/appearance.js';
 import { mountHome } from './sections/home.js';
 import { mountUpdates } from './sections/updates.js';
 import { mountTwoFactor } from './sections/two-factor.js';
@@ -51,6 +52,8 @@ const ICON_NEON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" st
 const ICON_ABOUT = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="16" x2="12" y2="12" /><line x1="12" y1="8" x2="12.01" y2="8" /></svg>`;
 
 const ICON_HOME = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5" /><path d="M5 9.5V21h14V9.5" /><path d="M9 21v-6h6v6" /></svg>`;
+// Half-filled circle: light / dark.
+const ICON_APPEARANCE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none" /></svg>`;
 const ICON_DEVELOPER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" /></svg>`;
 
 // Robot/agent icon for the IDWs section.
@@ -79,6 +82,12 @@ const SECTIONS: SectionDescriptor[] = [
     title: 'Account',
     icon: ICON_ACCOUNT,
     mount: mountAccount,
+  },
+  {
+    id: 'appearance',
+    title: 'Appearance',
+    icon: ICON_APPEARANCE,
+    mount: mountAppearance,
   },
   {
     id: 'two-factor',

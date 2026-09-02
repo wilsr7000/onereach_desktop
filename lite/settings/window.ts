@@ -12,6 +12,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface SettingsWindowConfig {
   parent: BrowserWindow | null;
@@ -63,7 +64,7 @@ export function openSettingsWindow(config: SettingsWindowConfig): BrowserWindow 
     width: 960,
     height: 680,
     title: 'Settings',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

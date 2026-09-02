@@ -50,6 +50,7 @@ import { initNeonBridge } from './neon-bridge/main.js';
 import { initApiDocs, type ApiDocsHandle } from './api-docs/main.js';
 import { initHealth, type HealthHandle } from './health/main.js';
 import { initTelemetry, type TelemetryHandle } from './telemetry/main.js';
+import { initTheme, windowBackgroundColor, type ThemeHandle } from './theme/main.js';
 import { initNeon, type NeonHandle } from './neon/main.js';
 import { initIdw, type IdwHandle } from './idw/main.js';
 import { initTools, type ToolsHandle } from './tools/main.js';
@@ -336,6 +337,7 @@ let spacesHandle: SpacesHandle | null = null;
 let apiDocsHandle: ApiDocsHandle | null = null;
 let healthHandle: HealthHandle | null = null;
 let telemetryHandle: TelemetryHandle | null = null;
+let themeHandle: ThemeHandle | null = null;
 let neonHandle: NeonHandle | null = null;
 let idwHandle: IdwHandle | null = null;
 let toolsHandle: ToolsHandle | null = null;
@@ -517,6 +519,16 @@ app
   .then(async () => {
     // Touch ID WebAuthn (ADR-066) — safe only here, never at module load.
     configureTouchIdWebAuthn();
+    // Appearance (Light by default; Settings → Appearance) BEFORE any
+    // window or dialog exists: nativeTheme decides what first paint,
+    // every renderer's prefers-color-scheme and every native dialog use.
+    try {
+      themeHandle = await initTheme();
+    } catch (err) {
+      getLoggingApi().error('theme', 'initTheme threw', {
+        error: (err as Error).message,
+      });
+    }
     // Every session (tabs, popups, partitions) gets the account picker:
     // an unanswered 'select-webauthn-account' pends the ceremony forever.
     app.on('session-created', (sess) => {
@@ -1387,7 +1399,7 @@ function createMainWindow(preloadPath: string): BrowserWindow {
     width: 720,
     height: 480,
     title: LITE_DISPLAY_NAME,
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     webPreferences: {
       preload: preloadPath,
@@ -1437,7 +1449,7 @@ function openAboutWindow(): void {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -1713,6 +1725,11 @@ app.on('before-quit', (event) => {
   }
   try {
     settingsHandle?.teardown();
+  } catch {
+    /* shutdown best-effort */
+  }
+  try {
+    themeHandle?.teardown();
   } catch {
     /* shutdown best-effort */
   }

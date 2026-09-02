@@ -14,6 +14,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface TutorialsWindowConfig {
   parent: BrowserWindow | null;
@@ -39,7 +40,7 @@ export function openTutorialsWindow(config: TutorialsWindowConfig): BrowserWindo
     width: 1200,
     height: 800,
     title: 'Agentic University -- Quick Starts',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

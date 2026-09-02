@@ -13,6 +13,7 @@
  */
 
 import { BrowserWindow, type Rectangle } from 'electron';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface CatalogWindowConfig {
   parent: BrowserWindow | null;
@@ -38,7 +39,7 @@ export function openCatalogWindow(config: CatalogWindowConfig): BrowserWindow {
     width: 1200,
     height: 800,
     title: 'OAGI Store',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,

@@ -20,6 +20,7 @@
 
 import { BrowserWindow, type Rectangle } from 'electron';
 import type { PickerBootstrap, PickerResult } from './types.js';
+import { windowBackgroundColor } from '../theme/main.js';
 
 interface OpenPickerOptions {
   parent: BrowserWindow | null;
@@ -70,7 +71,7 @@ export async function openSpacePicker(
     minWidth: 360,
     minHeight: 420,
     title: 'Save to Space',
-    backgroundColor: '#0e0e10',
+    backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,
     resizable: true,
