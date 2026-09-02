@@ -1,5 +1,5 @@
 /**
- * ADR-078 — the NEON schema audit's code-side decisions, pinned.
+ * ADR-083 — the NEON schema audit's code-side decisions, pinned.
  *
  * The audit's headline: Lite's belonging predicate honored only Lite's
  * own vocabulary (createdBy / HAS_ACCESS) while the graph's other
@@ -28,7 +28,7 @@ const OWNS_S = "[:OWNS]->(s)";
 const OWNS_OTHER = "[:OWNS]->(other)";
 const OWNS_VS = "[:OWNS]->(vs)";
 
-describe('sight follows OWNS (ADR-078)', () => {
+describe('sight follows OWNS (ADR-083)', () => {
   it('every Space-level read honors the OWNS membership signal', () => {
     // Evaluated on the REAL exported strings — a source-only check would
     // have passed the 0.0.77 invisible-byte outage.

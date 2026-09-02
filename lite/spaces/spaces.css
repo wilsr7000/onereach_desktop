@@ -10043,3 +10043,60 @@ body {
 .home-space-group .spaces-chip {
   display: none;
 }
+
+/* ── Just-in-time Claude key walkthrough (2026-09-02) ─────────────── */
+.spaces-keywalk { max-width: 520px; }
+.spaces-keywalk-head {
+  font-family: var(--or-font-hand);
+  font-size: 15px;
+  color: rgba(var(--or-ink-rgb), 0.7);
+  transform: rotate(-0.8deg);
+  display: inline-block;
+  margin-bottom: 6px;
+}
+.spaces-keywalk-title {
+  margin: 0 0 12px;
+  font-family: var(--or-font-display);
+  font-weight: 600;
+  font-size: 17px;
+  line-height: 1.35;
+  color: rgba(var(--or-ink-rgb), 0.92);
+}
+.spaces-keywalk-steps {
+  margin: 0 0 14px;
+  padding-left: 22px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: rgba(var(--or-ink-rgb), 0.82);
+}
+.spaces-keywalk-steps li { margin: 6px 0; }
+.spaces-keywalk-link {
+  color: var(--or-accent);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+.spaces-keywalk-field { margin: 4px 0 8px; }
+.spaces-keywalk-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px;
+  border: 1px solid rgba(var(--or-ink-rgb), 0.18);
+  border-radius: 8px;
+  background: rgba(var(--or-raise-rgb), 0.6);
+  color: rgba(var(--or-ink-rgb), 0.92);
+  font-family: var(--or-font-mono);
+  font-size: 13px;
+}
+.spaces-keywalk-input:focus { outline: none; border-color: var(--or-accent); box-shadow: 0 0 0 3px var(--or-accent-soft); }
+.spaces-keywalk-status { min-height: 18px; margin: 0 0 10px; font-size: 12.5px; color: rgba(var(--or-ink-rgb), 0.62); }
+.spaces-keywalk-status.is-bad { color: var(--or-danger, var(--or-accent-strong)); }
+.spaces-keywalk-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.spaces-keywalk-later {
+  background: none;
+  border: 0;
+  color: rgba(var(--or-ink-rgb), 0.6);
+  cursor: pointer;
+  padding: 8px 10px;
+}
+.spaces-keywalk-later:hover { color: rgba(var(--or-ink-rgb), 0.85); }

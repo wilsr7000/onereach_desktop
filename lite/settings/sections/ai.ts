@@ -87,11 +87,22 @@ function renderForm(container: HTMLElement, configured: boolean): void {
           stay searchable without manual tagging.
         </p>
         <p class="neon-explainer-body">
-          Get a key from the
-          <strong>Anthropic Console</strong> (console.anthropic.com). It's
-          stored only in this device's keychain, never shown again once saved,
-          and never sent anywhere except Anthropic when extracting metadata.
+          It's stored only in this device's keychain, never shown again once
+          saved, and never sent anywhere except Anthropic.
         </p>
+      </div>
+
+      <div class="neon-explainer ai-keywalk">
+        <div class="ai-keywalk-head hand-note">✎ how to get a key — about a minute</div>
+        <ol class="ai-keywalk-steps">
+          <li>
+            Open the Anthropic Console and sign in (or create a free account).
+            <a class="ai-keywalk-link" href="https://console.anthropic.com/settings/keys"
+               target="_blank" rel="noopener noreferrer">Open Anthropic Console ↗</a>
+          </li>
+          <li>Go to <strong>API keys → Create Key</strong>. Name it “Onereach Lite”. Copy the key — it starts with <code>sk-ant-</code> and is shown once.</li>
+          <li>Paste it below and press <strong>Test</strong>, then <strong>Save key</strong>.</li>
+        </ol>
       </div>
 
       <div class="neon-field">

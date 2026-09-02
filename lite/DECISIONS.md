@@ -1845,7 +1845,7 @@ the running app on 47294: allowed origin → 200 + echoed CORS,
 evil.example.com → 403 with no CORS header, POST → 405, and
 /neon/spaces → 0 on a signed-out profile (viewer scoping, fail-closed).
 
-## ADR-078: The NEON schema audit — sight follows the graph's own membership signal
+## ADR-083: The NEON schema audit — sight follows the graph's own membership signal
 
 - **Date**: 2026-08-20
 - **Status**: Accepted

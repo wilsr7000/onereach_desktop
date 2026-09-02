@@ -760,3 +760,46 @@ body {
   color: rgba(var(--or-text-rgb), 0.48);
   font-style: italic;
 }
+
+/* ── The Human voice in the boot chat (2026-09-02 first-run review) ──
+   A pencilled margin note: the hand font, a hair of tilt, ink at
+   reduced weight. Paints only through --or-* tokens (theme guardrail). */
+.hand-note {
+  font-family: var(--or-font-hand);
+  color: rgba(var(--or-ink-rgb), 0.72);
+  transform: rotate(-0.8deg);
+  transform-origin: left center;
+  display: inline-block;
+}
+.boot-chat-needs {
+  display: block;
+  margin-top: 12px;
+  padding: 10px 14px 8px;
+  border: 1px dashed rgba(var(--or-ink-rgb), 0.28);
+  border-radius: 10px 12px 9px 11px;
+  background: rgba(var(--or-raise-rgb), 0.35);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.boot-chat-needs-head {
+  font-family: var(--or-font-hand);
+  font-size: 15px;
+  color: rgba(var(--or-ink-rgb), 0.78);
+  margin-bottom: 4px;
+}
+.boot-chat-needs-list {
+  margin: 0;
+  padding-left: 20px;
+  font-family: var(--or-font-hand);
+  color: rgba(var(--or-ink-rgb), 0.78);
+}
+.boot-chat-needs-list li {
+  margin: 2px 0;
+}
+.boot-chat-needs-list strong {
+  font-weight: 600;
+  color: rgba(var(--or-ink-rgb), 0.92);
+}
+@media (prefers-reduced-motion: reduce) {
+  .hand-note { transform: none; }
+}

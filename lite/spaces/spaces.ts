@@ -4383,6 +4383,7 @@ async function runAgenticItemsSearch(): Promise<void> {
       state.itemsSearchScope === 'space' &&
       state.activeScopeId !== HOME_SCOPE_ID &&
       state.activeScopeId !== UNCATEGORIZED_SPACE_ID;
+    if (!(await ensureClaudeKey('Agentic search'))) return;
     const envelope = await bridge.items.searchAgentic({
       query,
       ...(scopedToSpace ? { spaceId: state.activeScopeId } : {}),
@@ -5412,6 +5413,183 @@ async function cycleTicketStatus(ticket: RendererItem): Promise<void> {
  * the close button and Cancel all resolve false, so the safe answer is
  * the one every accidental interaction produces.
  */
+/**
+ * Just-in-time Claude key (2026-09-02 first-run review). Before a
+ * feature that thinks with Claude runs, make sure a key exists — and
+ * when it doesn't, don't fail with a message: walk the person through
+ * getting one, right here, and continue the moment it's saved.
+ *
+ * Resolves true when a key is present (already, or just saved and
+ * verified live). Resolves false when the person backs out; callers
+ * then simply don't run the feature — no toast, no error, they chose.
+ * A missing AI bridge resolves true so older preloads behave as before.
+ */
+async function ensureClaudeKey(reason: string): Promise<boolean> {
+  const ai = window.lite?.ai;
+  if (ai === undefined) return true;
+  try {
+    const has = await ai.hasKey();
+    if (has.ok === true && has.value.hasKey) return true;
+  } catch {
+    return true; // never block a feature on a probe failure
+  }
+  return new Promise<boolean>((resolve) => {
+    document.querySelector('.spaces-confirm-backdrop')?.remove();
+    let settled = false;
+    const finish = (value: boolean): void => {
+      if (settled) return;
+      settled = true;
+      backdrop.remove();
+      resolve(value);
+    };
+    const backdrop = document.createElement('div');
+    backdrop.className = 'spaces-confirm-backdrop';
+    const panel = document.createElement('div');
+    panel.className = 'spaces-confirm-panel spaces-keywalk';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'Add your Claude API key');
+    panel.appendChild(buildClaudeKeyWalkthrough(reason));
+
+    const input = panel.querySelector<HTMLInputElement>('.spaces-keywalk-input');
+    const status = panel.querySelector<HTMLElement>('.spaces-keywalk-status');
+    const go = panel.querySelector<HTMLButtonElement>('.spaces-keywalk-go');
+    const later = panel.querySelector<HTMLButtonElement>('.spaces-keywalk-later');
+    const say = (text: string, bad = false): void => {
+      if (status === null) return;
+      status.textContent = text;
+      status.classList.toggle('is-bad', bad);
+    };
+    go?.addEventListener('click', () => {
+      void (async () => {
+        const key = (input?.value ?? '').trim();
+        if (!key.startsWith('sk-ant-') || key.length < 20) {
+          say('That doesn’t look like a Claude key — they start with sk-ant-.', true);
+          input?.focus();
+          return;
+        }
+        if (go !== null) go.disabled = true;
+        say('Checking the key with Anthropic…');
+        try {
+          const test = await ai.testKey(key);
+          if (test.ok !== true) {
+            say(test.error.message, true);
+            if (go !== null) go.disabled = false;
+            return;
+          }
+          const saved = await ai.saveKey(key);
+          if (saved.ok !== true) {
+            say(saved.error.message, true);
+            if (go !== null) go.disabled = false;
+            return;
+          }
+          say(`Saved — ${test.value.model} answered. Continuing.`);
+          setTimeout(() => finish(true), 350);
+        } catch (err) {
+          say(messageFrom(err), true);
+          if (go !== null) go.disabled = false;
+        }
+      })();
+    });
+    input?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        go?.click();
+      }
+    });
+    later?.addEventListener('click', () => finish(false));
+    backdrop.addEventListener('click', (ev) => {
+      if (ev.target === backdrop) finish(false);
+    });
+    panel.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') finish(false);
+    });
+    backdrop.appendChild(panel);
+    document.body.appendChild(backdrop);
+    input?.focus();
+  });
+}
+
+/**
+ * The walkthrough itself — pure DOM, exported for the tests. Three
+ * numbered steps a person can follow without leaving the window (the
+ * console link opens in their browser), then the field. The heading
+ * is the Human voice: a pencilled note, not a system error.
+ */
+export function buildClaudeKeyWalkthrough(reason: string): HTMLElement {
+  const body = document.createElement('div');
+  body.className = 'spaces-confirm-body';
+
+  const head = document.createElement('div');
+  head.className = 'spaces-keywalk-head hand-note';
+  head.textContent = '✎ this one thinks with Claude';
+  body.appendChild(head);
+
+  const title = document.createElement('h3');
+  title.className = 'spaces-keywalk-title';
+  title.textContent = `${reason} needs a Claude API key — takes about a minute.`;
+  body.appendChild(title);
+
+  const steps = document.createElement('ol');
+  steps.className = 'spaces-keywalk-steps';
+  const step = (text: string, link?: { href: string; label: string }): HTMLLIElement => {
+    const li = document.createElement('li');
+    li.appendChild(document.createTextNode(text));
+    if (link !== undefined) {
+      li.appendChild(document.createTextNode(' '));
+      const a = document.createElement('a');
+      a.href = link.href;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.className = 'spaces-keywalk-link';
+      a.textContent = link.label;
+      li.appendChild(a);
+    }
+    return li;
+  };
+  steps.appendChild(
+    step('Open the Anthropic Console and sign in (or create a free account).', {
+      href: 'https://console.anthropic.com/settings/keys',
+      label: 'Open Anthropic Console ↗',
+    })
+  );
+  steps.appendChild(step('Go to API keys → Create Key. Name it “Onereach Lite”. Copy the key — it starts with sk-ant- and is shown once.'));
+  steps.appendChild(step('Paste it below. It’s stored in this Mac’s keychain, never shown again, and sent only to Anthropic.'));
+  body.appendChild(steps);
+
+  const field = document.createElement('div');
+  field.className = 'spaces-keywalk-field';
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.className = 'spaces-keywalk-input';
+  input.placeholder = 'sk-ant-…';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
+  input.setAttribute('aria-label', 'Claude API key');
+  field.appendChild(input);
+  body.appendChild(field);
+
+  const status = document.createElement('p');
+  status.className = 'spaces-keywalk-status';
+  status.setAttribute('aria-live', 'polite');
+  body.appendChild(status);
+
+  const actions = document.createElement('div');
+  actions.className = 'spaces-keywalk-actions';
+  const later = document.createElement('button');
+  later.type = 'button';
+  later.className = 'spaces-keywalk-later';
+  later.textContent = 'Not now';
+  actions.appendChild(later);
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'spaces-confirm-go spaces-keywalk-go';
+  go.textContent = 'Save key & continue';
+  actions.appendChild(go);
+  body.appendChild(actions);
+  return body;
+}
+
 function askToConfirm(
   title: string,
   body: string,
@@ -7651,6 +7829,7 @@ export async function openJourneyComposer(targetSpaceId?: string): Promise<void>
       ? `${picked.subject} — the journey's objective: ${picked.objective}`
       : picked.subject;
 
+  if (!(await ensureClaudeKey('Drafting a journey map'))) return;
   showToast('Mapping the journey…');
   let draft: RendererJourneyDraft;
   try {
@@ -10208,6 +10387,7 @@ async function commitMetadataRemove(itemId: string, key: string): Promise<void> 
 async function autoFillMetadata(itemId: string): Promise<void> {
   const ai = window.lite?.ai;
   if (ai === undefined) throw new Error('AI is not available');
+  if (!(await ensureClaudeKey('Auto-fill'))) return;
   const envelope = await ai.enrichAsset(itemId);
   if (envelope.ok === false) {
     showToast(envelope.error.message);
@@ -13015,6 +13195,7 @@ export function openChecklistEditorPanel(opts: {
       aiBtn.disabled = true;
       aiBtn.textContent = 'Drafting…';
       try {
+        if (!(await ensureClaudeKey('Drafting a checklist'))) return;
         const envelope = await bridge.checklists.draft(prompt);
         if (envelope.ok === false) {
           showToast(envelope.error.message);

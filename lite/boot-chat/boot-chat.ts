@@ -208,7 +208,43 @@ export function buildWelcomeFirstTime(): HTMLElement {
   line2.style.marginTop = '6px';
   line2.textContent = "I'll get you connected — quick sign-in needed.";
   wrap.appendChild(line2);
+  wrap.appendChild(buildWhatYouNeed());
   return wrap;
+}
+
+/**
+ * First-run review (2026-09-02): a new install said "quick sign-in
+ * needed" and nothing else — the user learned about the Claude key the
+ * first time a feature failed with a developer message. This is the
+ * whole shopping list, up front, in the Human voice (a pencilled
+ * margin note — DESIGN-LANGUAGE.md's hand traces), and it promises the
+ * one thing that matters: the key is asked for WHEN it is needed, with
+ * a walkthrough, never as homework.
+ */
+export function buildWhatYouNeed(): HTMLElement {
+  const note = document.createElement('div');
+  note.className = 'boot-chat-needs hand-note';
+  const head = document.createElement('div');
+  head.className = 'boot-chat-needs-head';
+  head.textContent = "✎ what you'll need";
+  note.appendChild(head);
+  const list = document.createElement('ol');
+  list.className = 'boot-chat-needs-list';
+  const items: Array<[string, string]> = [
+    ['your OneReach (GSX) sign-in', 'now — it unlocks your Spaces and agents'],
+    ['a Claude API key', "later — I'll ask, and walk you through getting one, the first time a feature needs it"],
+    ['2FA setup secret', 'optional — lets me fill your GSX login code for you (Settings → Two-factor)'],
+  ];
+  for (const [what, when] of items) {
+    const li = document.createElement('li');
+    const b = document.createElement('strong');
+    b.textContent = what;
+    li.appendChild(b);
+    li.appendChild(document.createTextNode(` — ${when}`));
+    list.appendChild(li);
+  }
+  note.appendChild(list);
+  return note;
 }
 
 export function buildWelcomeBack(displayName: string): HTMLElement {
@@ -430,6 +466,37 @@ export async function runBootChat(deps: BootChatDeps): Promise<void> {
  * so the host knows the chat has come to rest. No CTA — the chat IS
  * the Home tab; the user opens IDWs from the tab bar / menu.
  */
+
+/**
+ * The first time this install ever signs in, say what happens next —
+ * once. Uses the onboarding store (`signed-in` step) as the memory, so
+ * the beat never repeats and the checklist finally records the truth.
+ * Best-effort: no bridge, or a KV hiccup, and the chat simply moves on.
+ */
+async function noteFirstSignIn(deps: BootChatDeps): Promise<void> {
+  const onboarding = window.lite?.onboarding;
+  if (onboarding === undefined) return;
+  try {
+    const state = await onboarding.load();
+    if (state.completedAt['signed-in'] !== undefined) return;
+    await onboarding.markComplete('signed-in');
+    const wrap = document.createElement('span');
+    const line = document.createElement('div');
+    line.textContent =
+      "You're in. Your Spaces and agents are yours now. One thing to know: some features think with Claude — " +
+      "the first time you use one, I'll ask for an API key and show you exactly where to get it.";
+    wrap.appendChild(line);
+    const note = document.createElement('div');
+    note.className = 'hand-note boot-chat-needs-head';
+    note.style.marginTop = '8px';
+    note.textContent = '✎ no key yet? nothing breaks — it just waits for you';
+    wrap.appendChild(note);
+    appendBubble(deps.thread, buildBotBubbleRich(wrap));
+  } catch {
+    /* documentation, not data — never block the welcome */
+  }
+}
+
 async function renderWelcomeAndDigest(
   deps: BootChatDeps,
   runtime: BootChatRuntime
@@ -439,6 +506,7 @@ async function renderWelcomeAndDigest(
     deps.thread,
     buildBotBubbleRich(buildWelcomeHeadline(runtime.cachedDisplayName))
   );
+  await noteFirstSignIn(deps);
   await renderEventDigestSection(deps);
   // Hide the action row (any stale Sign In / Retry button is gone now)
   // and fire onFinish exactly once.

@@ -152,5 +152,18 @@ export function shouldShowRemoteHome(
   env: string | null,
   hasAppSession: boolean
 ): boolean {
-  return !(looksLikeOneReachLoginUrl(liveUrl, env) && !hasAppSession);
+  // First-run review (2026-09-02): the login-URL test alone let a
+  // static hosted Home (the GSX Learning Machine page is not a login
+  // page) sit on top of the boot-chat wall on a VIRGIN install — a new
+  // user saw a chat with no sign-in anywhere on screen. Signed out, the
+  // wall is the whole point of Home; the remote page returns the moment
+  // a session exists (the session-changed handler re-evaluates).
+  // Signed in, a login bounce SHOWS too (ADR-080): the session-changed
+  // handler injects cookies and reloads, and the bounce resolves into
+  // the IDW — hiding it would strand the user on the wall with a valid
+  // session. The URL no longer decides anything here; it still drives
+  // the tab-refresh path (looksLikeOneReachLoginUrl).
+  void liveUrl;
+  void env;
+  return hasAppSession;
 }

@@ -112,7 +112,7 @@ export class AiService {
         message: 'No AI provider is configured.',
         context: { op: 'space-assist' },
         remediation:
-          'Add a Claude API key (ANTHROPIC_API_KEY) or a OneReach flow URL to ai-config.json in the app data folder. See lite/ai/README.md.',
+          'Add your Claude API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.',
       });
     }
 
@@ -183,7 +183,7 @@ export class AiService {
         message: 'Claude is not configured for metadata extraction.',
         context: { op: 'extract-metadata', provider: cfg?.provider ?? null },
         remediation:
-          'Open Settings -> AI and paste your Anthropic API key (or set ANTHROPIC_API_KEY).',
+          'Add your Claude API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.',
       });
     }
 

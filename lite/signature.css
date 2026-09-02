@@ -215,6 +215,9 @@
   /* Display serif — heroes + section identity only, never body.
      Tufte's editorial voice. */
   --or-font-display: 'New York', 'Iowan Old Style', Georgia, 'Times New Roman', serif;
+  /* The Human voice (DESIGN-LANGUAGE.md): traces of the hand, reserved
+     for what a person contributes or a note meant to read as one. */
+  --or-font-hand: 'Bradley Hand', 'Noteworthy', 'Segoe Print', 'Comic Neue', cursive;
 
   /* Modular type scale (1.2, base 13). One ladder for the whole app. */
   --or-text-2xs: 11px;

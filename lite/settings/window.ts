@@ -11,7 +11,7 @@
  * @internal -- consumers go through `getSettingsApi()`.
  */
 
-import { BrowserWindow, type Rectangle } from 'electron';
+import { BrowserWindow, type Rectangle, shell } from 'electron';
 import { windowBackgroundColor } from '../theme/main.js';
 
 interface SettingsWindowConfig {
@@ -81,6 +81,19 @@ export function openSettingsWindow(config: SettingsWindowConfig): BrowserWindow 
       nodeIntegration: false,
       webSecurity: true,
     },
+  });
+
+  // External links (the "Open Anthropic Console" walkthrough, docs)
+  // open in the OS browser — this window never becomes an accidental
+  // browser. Same policy as the Spaces window; http(s) only.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const scheme = new URL(url).protocol;
+      if (scheme === 'https:' || scheme === 'http:') void shell.openExternal(url);
+    } catch {
+      /* unparseable URL — drop it */
+    }
+    return { action: 'deny' };
   });
 
   // file:// loadFile() doesn't accept a query natively, so use the

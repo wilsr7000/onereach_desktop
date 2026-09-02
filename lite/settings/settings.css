@@ -2236,3 +2236,19 @@ body {
   border: 1px solid rgba(128, 128, 128, 0.35);
 }
 /* theme-invariant:end */
+
+/* ── Settings → AI: how-to-get-a-key walkthrough (2026-09-02) ───── */
+.hand-note {
+  font-family: var(--or-font-hand);
+  color: rgba(var(--or-ink-rgb), 0.72);
+  transform: rotate(-0.8deg);
+  transform-origin: left center;
+  display: inline-block;
+}
+.ai-keywalk { border-style: dashed; }
+.ai-keywalk-head { font-size: 15px; margin-bottom: 6px; }
+.ai-keywalk-steps { margin: 0; padding-left: 22px; font-size: 13.5px; line-height: 1.55; color: rgba(var(--or-ink-rgb), 0.85); }
+.ai-keywalk-steps li { margin: 6px 0; }
+.ai-keywalk-steps code { font-family: var(--or-font-mono); font-size: 12.5px; }
+.ai-keywalk-link { color: var(--or-accent); text-decoration: underline; text-decoration-style: dashed; text-underline-offset: 3px; margin-left: 4px; }
+@media (prefers-reduced-motion: reduce) { .hand-note { transform: none; } }

@@ -284,7 +284,7 @@ const SPACE_WRITABLE = `(
         )
       )`;
 
-// ADR-078 — the account-membership signal the other writers use
+// ADR-083 — the account-membership signal the other writers use
 // (WISER / GSX-Desktop stamp [:OWNS] per Space, 313 edges) grants
 // SIGHT. Before this, 89 of robb's Spaces were invisible to him
 // in Lite. Writes stay on createdBy / HAS_ACCESS (SPACE_WRITABLE).
@@ -2697,7 +2697,7 @@ export const CYPHER = {
    * journey created in one surface opens in the others.
    */
   /**
-   * ADR-078 — the schema audit's registry repairs (2026-08-20). Lite
+   * ADR-083 — the schema audit's registry repairs (2026-08-20). Lite
    * writes properties the registry never documented (Space.createdBy /
    * kind / iconKey / deletedAt, Asset.mimeType / content / metadata /
    * description, Commit.assetId …) and reads ten relationship types the
@@ -5388,7 +5388,7 @@ export class SdkSpacesClient {
    * like ensureChecklistSchema.
    */
   /** ADR-072 — register the journey-map asset contract. Best-effort. */
-  /** ADR-078 — publish Lite's slice of the model into the registry (idempotent). */
+  /** ADR-083 — publish Lite's slice of the model into the registry (idempotent). */
   async ensureLiteSchemaAnnotations(): Promise<void> {
     try {
       await this.run(CYPHER.ENSURE_LITE_SCHEMA_ANNOTATIONS, {});
@@ -5995,7 +5995,7 @@ function toSpace(row: Record<string, unknown>): Space {
   const kind = optString(row, 'kind');
   if (kind === 'shared' || kind === 'user') space.kind = kind;
   const visibility = optString(row, 'visibility');
-  // ADR-078 — GSX-Desktop writes visibility 'private' (its registry enum is
+  // ADR-083 — GSX-Desktop writes visibility 'private' (its registry enum is
   // private|team|org|public); Lite's is open|restricted. 'private' MUST read
   // as restricted: dropping it read as open and the menu offered "Unshare"
   // on a Space its writer had already locked down.

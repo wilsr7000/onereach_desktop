@@ -290,8 +290,19 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
   // webContents URL looks like it landed on a OneReach login page.
   // Tabs that are happily loaded against the agent are left alone.
   unsubscribeAuth = getAuthApi().onSessionChanged((env, session) => {
-    if (session === null) return; // Sign-out path doesn't auto-reload.
     if (mainWindow === null || mainWindow.isDestroyed()) return;
+    // Home visibility tracks the session both ways (2026-09-02): signed
+    // out, the hosted Home hides so the boot-chat sign-in wall is in
+    // front; signed in, it shows again. The wall never disappears
+    // behind a page that cannot sign you in.
+    if (homeFeedView !== null && !homeFeedView.webContents.isDestroyed()) {
+      try {
+        homeFeedView.setVisible(session !== null);
+      } catch {
+        /* best-effort */
+      }
+    }
+    if (session === null) return; // Sign-out path doesn't auto-reload.
     void refreshAttachedTabsForEnv(env);
     // The Home view is an IDW too (2026-08-15): give it the fresh
     // session and a reload so signing in un-sticks it without a
@@ -1434,7 +1445,9 @@ function attachRemoteHome(win: BrowserWindow): void {
   homeFeedView = view;
   win.contentView.addChildView(view);
   view.setBounds(computeContentBounds(win));
-  view.setVisible(true);
+  // Visible only with an app session — otherwise the boot-chat wall
+  // (sign-in) stays in front on a fresh install (2026-09-02).
+  view.setVisible(getAuthApi().getSession('edison') !== null);
   void (async () => {
     const { url: configured } = await readHomeUrl();
     const accountId = getAuthApi().getSession('edison')?.accountId ?? null;

@@ -161,9 +161,16 @@ describe('shouldShowRemoteHome', () => {
   it('hides a signed-out login interstitial so the boot-chat wall shows', () => {
     expect(shouldShowRemoteHome(login, 'edison', false)).toBe(false);
   });
-  it('shows everything else: signed-in login bounce, real IDW pages, non-OneReach', () => {
+  it('signed OUT hides the remote Home on every URL — the wall is Home (2026-09-02 first-run review)', () => {
+    // A static hosted page is not a login URL, so the old rule left it
+    // covering the sign-in wall on a virgin install.
+    expect(shouldShowRemoteHome('https://idw.edison.onereach.ai/gsx-expert', 'edison', false)).toBe(false);
+    expect(shouldShowRemoteHome('https://example.com', null, false)).toBe(false);
+    expect(shouldShowRemoteHome('https://files.edison.api.onereach.ai/public/x/gsx-expert-ui/index.html', null, false)).toBe(false);
+  });
+  it('signed in shows the remote Home, including a login bounce it can now pass', () => {
     expect(shouldShowRemoteHome(login, 'edison', true)).toBe(true);
-    expect(shouldShowRemoteHome('https://idw.edison.onereach.ai/gsx-expert', 'edison', false)).toBe(true);
-    expect(shouldShowRemoteHome('https://example.com', null, false)).toBe(true);
+    expect(shouldShowRemoteHome('https://idw.edison.onereach.ai/gsx-expert', 'edison', true)).toBe(true);
+    expect(shouldShowRemoteHome('https://example.com', null, true)).toBe(true);
   });
 });
