@@ -30,6 +30,7 @@ import { z } from 'zod';
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { SdkSpacesClient } from '../spaces/sdk-client.js';
+import { resolveSessionViewer } from './session-identity.js';
 
 const NEON2 =
   'https://em.edison.api.onereach.ai/http/35254342-4a2e-475b-aec1-18547e517e29/omnidata/neon2';
@@ -223,7 +224,12 @@ export async function exportSpace(
 }
 
 async function main(): Promise<void> {
-  const viewerId = process.env['SPACES_VIEWER_ID'] ?? '';
+  // Tied to the signed-in user: ask the running app's bridge for the
+  // authenticated viewer; the env var is only a loud dev fallback.
+  const { viewerId } = await resolveSessionViewer({
+    env: process.env,
+    log: (m) => process.stderr.write(`[spaces-mcp] ${m}\n`),
+  });
   const client = createSpacesClient(viewerId);
 
   const exportAt = process.argv.indexOf('--export');
@@ -248,5 +254,10 @@ async function main(): Promise<void> {
 
 // Only run as a program — imports (tests) get the seams without side effects.
 if (process.argv[1] !== undefined && /spaces-mcp/.test(process.argv[1])) {
-  void main();
+  // Fail closed, but LEGIBLY: a missing identity must be a one-line
+  // refusal on stderr, not an unhandled-rejection dump of the bundle.
+  main().catch((err: unknown) => {
+    process.stderr.write(`[spaces-mcp] refusing to start: ${(err as Error).message}\n`);
+    process.exit(1);
+  });
 }

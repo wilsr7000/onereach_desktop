@@ -21,6 +21,8 @@ import { isAllowedOrigin } from './origin.js';
 
 /** The gated reads the bridge needs. Adapter over SpacesApi in main.ts. */
 export interface NeonReads {
+  /** The signed-in viewer identity, or null when signed out. */
+  whoAmI(): Promise<string | null>;
   listSpaces(): Promise<unknown>;
   listItems(spaceId: string): Promise<unknown>;
   getItem(id: string): Promise<unknown>;
@@ -122,6 +124,13 @@ export function makeNeonBridgeHandler(deps: NeonBridgeDeps): Handler {
       try {
         if (path === '/neon/health') {
           sendJson(res, 200, { ok: true, service: 'neon-bridge', readOnly: true }, cors);
+          return;
+        }
+        if (path === '/neon/whoami') {
+          // The authenticated identity (an identifier, never a credential)
+          // so out-of-process tools — the MCP servers — scope themselves to
+          // the SIGNED-IN user instead of a hand-set env value.
+          sendJson(res, 200, { viewerId: await deps.reads.whoAmI() }, cors);
           return;
         }
         if (path === '/neon/spaces') {

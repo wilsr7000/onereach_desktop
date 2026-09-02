@@ -9,6 +9,7 @@
  */
 
 import { getSpacesApi } from '../spaces/api.js';
+import { getSignedInViewerId } from '../spaces/main.js';
 import { resolveSpaceScope } from '../spaces/scope.js';
 import { getLoggingApi } from '../logging/api.js';
 import { startNeonBridge, type NeonReads, type NeonBridgeServer } from './server.js';
@@ -18,6 +19,7 @@ let server: NeonBridgeServer | null = null;
 /** SpacesApi → NeonReads. Read-only slice; nothing here mutates. */
 function spacesReads(): NeonReads {
   return {
+    whoAmI: async () => getSignedInViewerId(),
     listSpaces: () => getSpacesApi().listSpaces(),
     listItems: (spaceId) =>
       getSpacesApi().items.list(resolveSpaceScope(spaceId), { limit: 500 }),

@@ -14,6 +14,7 @@ let server: NeonBridgeServer;
 let base: string;
 
 const reads: NeonReads = {
+  whoAmI: async () => 'robb@onereach.com',
   listSpaces: async () => [{ id: 'sp-1', name: 'Data Bricks' }],
   listItems: async (spaceId) => [{ id: 'i-1', spaceId }],
   getItem: async (id) => ({ id, title: 'Item' }),

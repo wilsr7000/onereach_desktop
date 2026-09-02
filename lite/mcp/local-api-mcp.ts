@@ -27,6 +27,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z, type ZodTypeAny } from 'zod';
+import { resolveSessionViewer } from './session-identity.js';
 
 /** The three local APIs. Ports are env-overridable (see resolvePorts). */
 export type LocalApiId = 'spaces' | 'control' | 'gateway';
@@ -621,9 +622,33 @@ export function createDeps(
   };
 }
 
+/**
+ * Production deps with the viewer resolved from the SIGNED-IN app session
+ * first (bridge /neon/whoami), env only as a loud fallback. The viewer is
+ * forwarded to viewer-scoped ops (playbook-qa). Missing identity does not
+ * block the server — most tools are reads the app scopes itself — but
+ * playbook-qa then runs unscoped-by-caller and its own fail-closed rule
+ * applies.
+ */
+export async function resolveDeps(
+  env: Record<string, string | undefined> = process.env
+): Promise<CallDeps> {
+  const base = createDeps(env);
+  try {
+    const { viewerId } = await resolveSessionViewer({
+      env,
+      log: (m) => process.stderr.write(`[local-api-mcp] ${m}\n`),
+    });
+    return { ...base, viewerId };
+  } catch {
+    const { viewerId: _drop, ...rest } = base;
+    return rest;
+  }
+}
+
 async function main(): Promise<void> {
   const server = new McpServer({ name: 'onereach-local-apis', version: '1.0.0' });
-  registerTools(server, createDeps());
+  registerTools(server, await resolveDeps());
   await server.connect(new StdioServerTransport());
 }
 

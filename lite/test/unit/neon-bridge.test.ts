@@ -45,6 +45,7 @@ describe('isAllowedOrigin', () => {
 
 function fakeReads(over: Partial<NeonReads> = {}): NeonReads {
   return {
+    whoAmI: vi.fn(async () => 'robb@onereach.com'),
     listSpaces: vi.fn(async () => [{ id: 'sp-1', name: 'Data Bricks' }]),
     listItems: vi.fn(async (spaceId: string) => [{ id: 'i-1', spaceId }]),
     getItem: vi.fn(async (id: string) => (id === 'missing' ? null : { id, title: 'Item' })),
@@ -174,5 +175,14 @@ describe('malformed URL encoding is a client error', () => {
     const res2 = await call(h, 'GET', '/neon/spaces/%E0%A4%A/items');
     expect(res2.status).toBe(400);
     expect(reads.listItems).not.toHaveBeenCalled();
+  });
+});
+
+describe('/neon/whoami', () => {
+  it('returns the signed-in viewer (an identifier), null when signed out', async () => {
+    const signedIn = makeNeonBridgeHandler({ reads: fakeReads() });
+    expect((await call(signedIn, 'GET', '/neon/whoami')).body).toEqual({ viewerId: 'robb@onereach.com' });
+    const signedOut = makeNeonBridgeHandler({ reads: fakeReads({ whoAmI: vi.fn(async () => null) }) });
+    expect((await call(signedOut, 'GET', '/neon/whoami')).body).toEqual({ viewerId: null });
   });
 });
