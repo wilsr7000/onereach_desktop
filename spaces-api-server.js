@@ -256,7 +256,28 @@ class SpacesAPIServer {
           done(null);
         }
       });
-      req.on('end', () => done(body));
+      req.on('end', () => {
+        // Central malformed-JSON guard (2026-09-01 API bug hunt): every
+        // route did an unguarded JSON.parse(body) and answered a client's
+        // bad JSON with a 500 SERVER_ERROR. Validate ONCE here when the
+        // request declares JSON, answer 400, and resolve null — the same
+        // contract routes already honor for the 413 path
+        // (`if (body === null) return;`).
+        const ctype = String(req.headers['content-type'] || '').toLowerCase();
+        if (body.length > 0 && ctype.includes('application/json')) {
+          try {
+            JSON.parse(body);
+          } catch (err) {
+            if (!res.headersSent) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Invalid JSON body: ' + err.message, code: 'BAD_REQUEST' }));
+            }
+            done(null);
+            return;
+          }
+        }
+        done(body);
+      });
       req.on('error', () => {
         if (!res.headersSent) {
           res.writeHead(500, { 'Content-Type': 'application/json' });
