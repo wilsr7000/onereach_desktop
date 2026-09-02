@@ -155,7 +155,9 @@ header h1 {
   appearance: none;
   height: 14px;
   width: 14px;
-  background: rgba(var(--or-raise-rgb), 0.25);
+  /* ink, not raise: raise is white in both themes, so the clear button
+   * vanished on the light field (2026-09-02 review). */
+  background: rgba(var(--or-ink-rgb), 0.25);
   border-radius: 50%;
   cursor: pointer;
   position: relative;

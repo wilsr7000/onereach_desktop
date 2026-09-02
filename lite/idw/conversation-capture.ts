@@ -88,8 +88,34 @@ const TELEMETRY = /cspreport|\/csp\/|googletagmanager|google-analytics|\/measure
  * the full app's per-service URL tests (main.js 14484–14660,
  * preload-external-ai.js).
  */
+/**
+ * The hosts a provider's conversation traffic may come from. A bot tab
+ * can follow a link anywhere; without this anchor a third-party site
+ * whose XHR happens to post to `/responses` or `/api/chat` would be
+ * decoded and archived as a Grok/Perplexity conversation (2026-09-02
+ * review).
+ */
+const PROVIDER_HOSTS: Record<CaptureProvider, readonly string[]> = {
+  ChatGPT: ['chatgpt.com', 'chat.openai.com', 'openai.com'],
+  Claude: ['claude.ai'],
+  Grok: ['grok.com', 'x.com', 'twitter.com'],
+  Gemini: ['gemini.google.com', 'bard.google.com'],
+  Perplexity: ['perplexity.ai'],
+};
+
+function isProviderHost(provider: CaptureProvider, url: string): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  return PROVIDER_HOSTS[provider].some((h) => host === h || host.endsWith(`.${h}`));
+}
+
 export function isConversationRequest(provider: CaptureProvider, url: string, method: string): boolean {
   if (method !== 'POST' || TELEMETRY.test(url)) return false;
+  if (!isProviderHost(provider, url)) return false;
   switch (provider) {
     case 'ChatGPT':
       return (

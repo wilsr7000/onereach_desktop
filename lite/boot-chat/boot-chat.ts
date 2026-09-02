@@ -468,30 +468,23 @@ export async function runBootChat(deps: BootChatDeps): Promise<void> {
  */
 
 /**
- * The first time this install ever signs in, say what happens next —
- * once. Uses the onboarding store (`signed-in` step) as the memory, so
- * the beat never repeats and the checklist finally records the truth.
+ * The first time this install ever signs in, record it — once — in the
+ * onboarding store (`signed-in` step), so the checklist finally records
+ * the truth. No bubble here: the moment a session exists the hosted
+ * Home covers this chat, so a post-sign-in line is never seen (2026-09-02
+ * review) — and existing installs would have been greeted with "You're
+ * in" after an update. The Claude-key story is told where it IS seen:
+ * the signed-out wall ("what you'll need") and the just-in-time
+ * walkthrough the first time a feature needs the key.
  * Best-effort: no bridge, or a KV hiccup, and the chat simply moves on.
  */
-async function noteFirstSignIn(deps: BootChatDeps): Promise<void> {
+async function noteFirstSignIn(_deps: BootChatDeps): Promise<void> {
   const onboarding = window.lite?.onboarding;
   if (onboarding === undefined) return;
   try {
     const state = await onboarding.load();
     if (state.completedAt['signed-in'] !== undefined) return;
     await onboarding.markComplete('signed-in');
-    const wrap = document.createElement('span');
-    const line = document.createElement('div');
-    line.textContent =
-      "You're in. Your Spaces and agents are yours now. One thing to know: some features think with Claude — " +
-      "the first time you use one, I'll ask for an API key and show you exactly where to get it.";
-    wrap.appendChild(line);
-    const note = document.createElement('div');
-    note.className = 'hand-note boot-chat-needs-head';
-    note.style.marginTop = '8px';
-    note.textContent = '✎ no key yet? nothing breaks — it just waits for you';
-    wrap.appendChild(note);
-    appendBubble(deps.thread, buildBotBubbleRich(wrap));
   } catch {
     /* documentation, not data — never block the welcome */
   }

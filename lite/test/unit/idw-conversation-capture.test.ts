@@ -75,6 +75,19 @@ describe('isConversationRequest', () => {
     expect(isConversationRequest('Gemini', 'https://gemini.google.com/_/cspreport', 'POST')).toBe(false);
     expect(isConversationRequest('ChatGPT', 'https://chatgpt.com/ces/v1/telemetry/conversation', 'POST')).toBe(false);
   });
+
+  it('is anchored to the provider host — a tab that wandered to another site is never decoded (2026-09-02 review)', () => {
+    // Same paths, foreign hosts: an OpenAI-Responses-shaped API on some
+    // other site, a generic /api/chat, a look-alike domain.
+    expect(isConversationRequest('Grok', 'https://api.somevendor.example/v1/responses', 'POST')).toBe(false);
+    expect(isConversationRequest('Perplexity', 'https://blog.example.com/api/chat', 'POST')).toBe(false);
+    expect(isConversationRequest('Claude', 'https://claude.ai.evil.example/api/organizations/o/chat_conversations/ab12cd34-0000-4000-8000-000000000000/completion', 'POST')).toBe(false);
+    expect(isConversationRequest('ChatGPT', '/backend-api/f/conversation', 'POST')).toBe(false); // no host at all
+    // The real hosts (and their subdomains) still pass.
+    expect(isConversationRequest('Perplexity', 'https://www.perplexity.ai/rest/sse/perplexity_ask', 'POST')).toBe(true);
+    expect(isConversationRequest('Grok', 'https://grok.com/rest/app-chat/conversations_v2/abc', 'POST')).toBe(true);
+    expect(isConversationRequest('ChatGPT', 'https://chat.openai.com/backend-api/f/conversation', 'POST')).toBe(true);
+  });
 });
 
 // ── Request decoding ─────────────────────────────────────────────────

@@ -58,14 +58,44 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 // ─── The Spaces sink ─────────────────────────────────────────────────
 
+/**
+ * provider → Space id, PER VIEWER (2026-09-02 review): a process-global
+ * cache outlived a sign-out, so after an account switch every archive
+ * targeted the previous user's Space — refused by the write guard and
+ * silently dropped. The key is the signed-in identity; a different
+ * identity starts from an empty cache.
+ */
+let spaceCacheViewer: string | null = null;
 const spaceIdByProvider = new Map<CaptureProvider, string>();
+
+function currentViewerKey(): string | null {
+  try {
+    const session = getAuthApi().getSession('edison');
+    if (session === null) return null;
+    const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
+    return email.length > 0 ? email : (session.accountId ?? null);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The provider's Space — found by name (the full app's contract) or
  * created with the full app's icon/colour so both apps converge on ONE
- * Space per provider.
+ * Space per provider. Nothing is archived while signed out.
+ *
+ * Known gap (punch-listed 2026-09-02): the name match does not check who
+ * CREATED the Space — a colleague who names a Space "Claude
+ * Conversations" and adds you as a member would receive your archives.
+ * Closing it needs `createdBy` projected through listSpaces.
  */
 async function providerSpaceId(provider: CaptureProvider): Promise<string | null> {
+  const viewer = currentViewerKey();
+  if (viewer === null) return null;
+  if (viewer !== spaceCacheViewer) {
+    spaceIdByProvider.clear();
+    spaceCacheViewer = viewer;
+  }
   const cached = spaceIdByProvider.get(provider);
   if (cached !== undefined) return cached;
   const cfg = PROVIDER_SPACES[provider];
@@ -275,6 +305,11 @@ export async function exportProviderMemory(botType: string | undefined, partitio
   });
   host.contentView.addChildView(view);
   view.setBounds({ x: 0, y: 0, width: 1100, height: 900 });
+  // A hidden view stays hidden (2026-09-02 review): no popups out of
+  // it, and no navigation away from the memory page — a redirect (to a
+  // login, say) just means "nothing readable", which fails closed below.
+  view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  view.webContents.on('will-navigate', (ev) => ev.preventDefault());
   try {
     await view.webContents.loadURL(page.url);
     // Settings panes render after load; give the SPA a moment, twice.

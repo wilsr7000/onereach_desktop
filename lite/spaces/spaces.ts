@@ -5483,13 +5483,30 @@ async function ensureClaudeKey(reason: string): Promise<boolean> {
       backdrop.remove();
       resolve(value);
     };
+    // Same scrim + box as askToConfirm (2026-09-02 review: with only
+    // the confirm classes there was NO overlay rule at all — the
+    // walkthrough rendered as a bare strip pinned to the bottom of the
+    // window with the app still clickable behind it).
     const backdrop = document.createElement('div');
-    backdrop.className = 'spaces-confirm-backdrop';
+    backdrop.className = 'spaces-member-picker-backdrop spaces-confirm-backdrop';
     const panel = document.createElement('div');
-    panel.className = 'spaces-confirm-panel spaces-keywalk';
+    panel.className = 'spaces-member-picker spaces-confirm-panel spaces-keywalk';
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-modal', 'true');
     panel.setAttribute('aria-label', 'Add your Claude API key');
+    const head = document.createElement('div');
+    head.className = 'spaces-member-picker-head';
+    const heading = document.createElement('span');
+    heading.textContent = 'Claude API key';
+    head.appendChild(heading);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'spaces-member-picker-close';
+    close.setAttribute('aria-label', 'Not now');
+    close.textContent = '×';
+    close.addEventListener('click', () => finish(false));
+    head.appendChild(close);
+    panel.appendChild(head);
     panel.appendChild(buildClaudeKeyWalkthrough(reason));
 
     const input = panel.querySelector<HTMLInputElement>('.spaces-keywalk-input');
@@ -5542,12 +5559,28 @@ async function ensureClaudeKey(reason: string): Promise<boolean> {
     backdrop.addEventListener('click', (ev) => {
       if (ev.target === backdrop) finish(false);
     });
-    panel.addEventListener('keydown', (ev) => {
-      if (ev.key === 'Escape') finish(false);
-    });
+    // Escape at the DOCUMENT level (works whatever has focus) and
+    // claimed with preventDefault, so the dialog under this one — the
+    // checklist editor that asked for the key — does not also close on
+    // the same keystroke and lose what the person typed.
+    const onKey = (ev: KeyboardEvent): void => {
+      if (ev.key !== 'Escape' || ev.defaultPrevented) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      finish(false);
+    };
+    document.addEventListener('keydown', onKey);
     backdrop.appendChild(panel);
     document.body.appendChild(backdrop);
     input?.focus();
+    // Unhook with the dialog, by any exit.
+    const observer = new MutationObserver(() => {
+      if (!backdrop.isConnected) {
+        document.removeEventListener('keydown', onKey);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true });
   });
 }
 

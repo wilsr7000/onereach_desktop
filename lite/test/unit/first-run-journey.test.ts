@@ -76,14 +76,18 @@ describe('the first-run beat says what you will need', () => {
     expect(text).toMatch(/what you'll need/i);
   });
 
-  it('after the very first sign-in, says the key is asked for when needed — and records the step', () => {
+  it('the very first sign-in is recorded once — with no bubble, because nothing under the hosted Home is seen', () => {
     const s = read('boot-chat/boot-chat.ts', 'lite/boot-chat/boot-chat.ts');
     const fn = s.indexOf('async function noteFirstSignIn(');
     expect(fn).toBeGreaterThan(-1);
-    const block = s.slice(fn, fn + 1800);
+    const block = s.slice(fn, fn + 900);
     expect(block).toContain("state.completedAt['signed-in'] !== undefined) return;"); // once, ever
     expect(block).toContain("onboarding.markComplete('signed-in')"); // the module gets a writer
-    expect(block).toContain("I'll ask for an API key and show you exactly where to get it");
+    // 2026-09-02 review: a post-sign-in bubble is covered by the hosted
+    // Home the instant a session exists, and would greet every EXISTING
+    // install with "You're in" after the update. The key story lives on
+    // the signed-out wall and in the just-in-time walkthrough instead.
+    expect(block).not.toContain('appendBubble(');
     // It runs in the welcome path, before the digest.
     const welcome = s.indexOf('async function renderWelcomeAndDigest(');
     const call = s.indexOf('await noteFirstSignIn(deps);', welcome);
@@ -137,11 +141,27 @@ describe('the just-in-time Claude key walkthrough', () => {
     expect(el.querySelector('.spaces-keywalk-head')?.classList.contains('hand-note')).toBe(true);
     const s = renderer();
     const fn = s.indexOf('async function ensureClaudeKey(');
-    const block = s.slice(fn, fn + 3200);
+    const block = s.slice(fn, fn + 5000);
     const test = block.indexOf('await ai.testKey(key)');
     const save = block.indexOf('await ai.saveKey(key)');
     expect(test).toBeGreaterThan(-1);
     expect(save).toBeGreaterThan(test); // verified live BEFORE it is saved
+  });
+
+  it('is a real modal: the shared scrim + box, a ×, and an Escape that does not leak to the dialog beneath', () => {
+    // 2026-09-02 review: with only the confirm classes there is no
+    // overlay rule at all — the walkthrough rendered as a strip pinned
+    // to the bottom of the window with the app clickable behind it.
+    const s = renderer();
+    const fn = s.indexOf('async function ensureClaudeKey(');
+    const block = s.slice(fn, fn + 5000);
+    expect(block).toContain("backdrop.className = 'spaces-member-picker-backdrop spaces-confirm-backdrop';");
+    expect(block).toContain("panel.className = 'spaces-member-picker spaces-confirm-panel spaces-keywalk';");
+    expect(block).toContain("close.className = 'spaces-member-picker-close';");
+    // Escape is document-level (any focus) and claimed, so the checklist
+    // editor that asked for the key keeps what the person typed.
+    expect(block).toContain("document.addEventListener('keydown', onKey);");
+    expect(block).toContain('ev.preventDefault();');
   });
 
   it('the not-configured error no longer reads like a developer note', () => {

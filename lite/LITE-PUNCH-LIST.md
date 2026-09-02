@@ -167,3 +167,20 @@
 - Keep entries short. Each item should be one bug or one feature with enough context for someone to pick it up.
 - When fixing an item, move it to "Recently Completed" with the version it shipped in.
 - Issues discovered during 0a kernel work should land here as you find them.
+
+## 2026-09-02 pre-0.0.79 release review — deferred findings (three reviewers over 2b80d27..HEAD)
+
+Fixed in the cut: log server + NEON bridge loopback/Host admission (no more `ACAO: *`, no DNS rebinding), renderer log-level allow-list, Home never covers the sign-in wall from `reconcileViews`, non-onereach Home URLs judged by the app session, tone sampler skips hidden/minimized windows + `stayHidden`, Claude-key walkthrough is a real modal with × and a claimed Escape, window drag region, Home pill / warn ink on a toned bar, capture URLs host-anchored per provider, non-web schemes never reach `shell.openExternal` from remote-content windows, memory-export hidden view can't pop or navigate, provider-Space cache keyed per viewer, the hardened `event-logger.js` (f1c4835) ships.
+
+Deferred (owner: whoever picks it up; none blocks 0.0.79 but 1 and 2 should land before the feature is promoted):
+1. [ ] **Memory-ingest config lives in the account-shared KV under one fixed key** (`lite-memory-config/servers`, `lite/memory-ingest/store.ts:22-23`) with the bearer `apiKey` in the record. If keyvalue2 is account-scoped as documented, a colleague can read other users' memory-server keys and add a server they control — every other user's next Ingest pushes their Space items to it. Fix: key per viewer (`servers:<viewerId>`), hold `apiKey` in the safeStorage vault like `saveAiKey`, refuse plain `http:` unless loopback. Verify with two users in one account first.
+2. [ ] **Conversation archive: provider Space resolved by NAME only** (`lite/idw/conversation-tap.ts providerSpaceId`). A colleague who creates "Claude Conversations" and adds you as a member receives your archives (ADD_SPACE_MEMBER needs no consent). Fix: project `createdBy` through `listSpaces`, resolve by `createdBy === viewer` (name match only among Spaces the viewer created), stamp created Spaces with a source marker. Consider a first-run consent for archiving (it moves third-party chats into the org graph, bridge- and MCP-readable).
+3. [ ] `local-api-mcp` `gateway_playbook_qa` still accepts a caller-supplied `viewerId` tool parameter (`lite/mcp/local-api-mcp.ts:373`); ADR-082's session binding is only a default. Drop the parameter; record in ADR-081/082 that the unauthenticated NEON proxy treats the viewer string as the permission scope.
+4. [ ] File logs (now shipped) persist the unredacted stream; redaction runs only on bug-report payloads. Run `redact()` in the writer or document the posture. URLs with OAuth query strings land on disk (`browser-parity.ts:183`).
+5. [ ] `.xlsx` preview parses colleague-supplied workbooks in the main process with only a compressed-size cap (zip bomb → hang/OOM). Parse in a utilityProcess or check central-directory sizes first.
+6. [ ] `@modelcontextprotocol/sdk` and `jszip` are runtime imports but undeclared (resolve via transitive hoists). Declare both in package.json.
+7. [ ] Verify live that the hosted Home (public origin) can reach the NEON bridge under Chromium's local-network-access gate; if blocked, grant LNA for the allowed origin in the Home session's permission handler.
+8. [ ] Bug-report spool: an in-flight `save()` racing `drainSpool()` can double-mirror one report into the Feedback Space. Track in-flight ids.
+9. [ ] `local-api-mcp.ts` `void main()` has no catch (spaces-mcp got the legible refusal in dcdb9f5).
+10. [ ] Log server: `/ai/*`, `/app/desktop/*`, `/app/actions/*` are live code in the Lite build because `lib/**` ships wholesale; they are inert only by accident (`global.settingsManager` unset, `action-executor.js` excluded). Gate them behind a per-boot token or strip them from the Lite build.
+11. [ ] "Bridge unavailable — reload the window." style fallbacks (appearance/agentic-memory/home settings, several Spaces toasts) are developer wording; say "Something went wrong — reload the window."

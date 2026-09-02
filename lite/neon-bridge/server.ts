@@ -80,6 +80,16 @@ export function makeNeonBridgeHandler(deps: NeonBridgeDeps): Handler {
 
   return (req, res) => {
     void (async () => {
+      // Host must be loopback (2026-09-02 review): a page served from
+      // rebind.attacker.example:47294 whose DNS flips to 127.0.0.1 makes
+      // a SAME-origin fetch — no Origin header at all — so the origin
+      // allowlist alone never sees it. The Host header does.
+      const host = String(req.headers.host ?? '').trim();
+      if (!/^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/i.test(host)) {
+        log.warn('neon-bridge: refused non-loopback host', { host: host.slice(0, 80) });
+        sendJson(res, 403, { error: 'Host not allowed' }, {});
+        return;
+      }
       const origin = req.headers.origin;
       const allowed = isAllowed(origin);
 

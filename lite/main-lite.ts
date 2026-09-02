@@ -429,10 +429,14 @@ interface LogEnqueuePayload {
 // would double the volume for every renderer log call without
 // providing new diagnostic value, and risks subtle recursion if the
 // logging module itself ever logs at debug level inside event().
+const LOG_LEVEL_METHODS = new Set(['debug', 'info', 'warn', 'error']);
 ipcMain.on('lite:logging:enqueue', (_event, payload: LogEnqueuePayload) => {
   if (typeof payload?.level !== 'string' || typeof payload.category !== 'string' || typeof payload.message !== 'string') {
     return;
   }
+  // The level names a METHOD on the logger — allow-list it, so a
+  // renderer can only ever log, never reach `start`/`setMinLevel`/etc.
+  if (!LOG_LEVEL_METHODS.has(payload.level)) return;
   // Route through getLoggingApi() so renderer log lines pick up any
   // future LoggingStore-side validation, sampling, or tagging. Fall back
   // to the lib queue directly if the logging module itself is unhealthy

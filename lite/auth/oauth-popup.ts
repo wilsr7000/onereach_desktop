@@ -237,6 +237,22 @@ export function buildPopupHandler(
     }
 
     const deniedOrigin = safeOriginOf(url);
+    // Only web URLs go to the OS browser (2026-09-02 review): a page in
+    // a remote view could otherwise hand macOS `open` a
+    // x-apple.systempreferences: / shortcuts: / file: / vnc: URL.
+    let scheme = '';
+    try {
+      scheme = new URL(url).protocol;
+    } catch {
+      scheme = '';
+    }
+    if (scheme !== 'http:' && scheme !== 'https:') {
+      logger?.('warn', 'oauth-popup: refused a non-web scheme', {
+        scheme,
+        ...(source !== undefined ? { source } : {}),
+      });
+      return { action: 'deny' };
+    }
     logger?.('info', 'oauth-popup: routed to OS default browser', {
       url: deniedOrigin,
       ...(source !== undefined ? { source } : {}),

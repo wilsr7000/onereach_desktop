@@ -118,9 +118,13 @@ describe('the header follows the content', () => {
     const s = windowSrc();
     const fn = s.indexOf('function startToneSampler(');
     expect(fn).toBeGreaterThan(-1);
-    const block = s.slice(fn, fn + 3200);
-    expect(block).toContain('capturePage({');
+    const block = s.slice(fn, fn + 4000);
+    expect(block).toContain('capturePage(');
     expect(block).toContain('height: TONE_STRIP_HEIGHT_PX');
+    // A capture must never wake a hidden page, and the window in the
+    // tray / minimized is not sampled at all (2026-09-02 review).
+    expect(block).toContain('{ stayHidden: true }');
+    expect(block).toContain('if (!win.isVisible() || win.isMinimized()) return;');
     expect(block).toContain("on('did-finish-load', settle)");
     expect(block).toContain("on('did-navigate-in-page'");
     expect(block).toContain("on('did-change-theme-color'");

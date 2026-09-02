@@ -612,7 +612,20 @@ function stopAllAttachedTabWatchers(): void {
     } catch {
       /* best-effort */
     }
+    try {
+      attached.stopToneSampler();
+    } catch {
+      /* best-effort */
+    }
   }
+  try {
+    stopHomeToneSampler?.();
+  } catch {
+    /* best-effort */
+  }
+  stopHomeToneSampler = null;
+  homeTone = null;
+  lastPublishedTone = null;
 }
 
 // ─── store -> view reconciliation ─────────────────────────────────────────
@@ -731,7 +744,13 @@ function reconcileViews(win: BrowserWindow, tabs: Tab[], activeId: string | null
   // a tab — never the tab bar. When an IDW tab is active it hides so the
   // tab shows through; closing all tabs returns to the feed.
   if (homeFeedView !== null) {
-    const showFeed = activeId === null;
+    // Signed out, the remote Home stays hidden here too (2026-09-02
+    // review): without this, a tab round-trip while signed out — or the
+    // rehydrate on a virgin install — re-showed the hosted page over the
+    // boot-chat sign-in wall, and nothing re-evaluated it until the
+    // next navigation event. Same rule as shouldShowRemoteHome.
+    const signedIn = HOME_TAB_MODE !== 'remote-learn' || getAuthApi().getSession('edison') !== null;
+    const showFeed = activeId === null && signedIn;
     homeFeedView.setVisible(showFeed);
     if (showFeed) {
       homeFeedView.setBounds(computeContentBounds(win));
@@ -783,6 +802,13 @@ function startToneSampler(
 
   const sample = async (): Promise<void> => {
     if (stopped || win.isDestroyed() || view.webContents.isDestroyed()) return;
+    // Nothing to match while the window is in the tray or minimized —
+    // and capturing a hidden page would flip its visibility every 4s.
+    try {
+      if (!win.isVisible() || win.isMinimized()) return;
+    } catch {
+      return;
+    }
     let bounds: Rectangle;
     try {
       if (!view.getVisible()) return;
@@ -792,12 +818,17 @@ function startToneSampler(
     }
     if (bounds.width < 8 || bounds.height < TONE_STRIP_HEIGHT_PX) return;
     try {
-      const image = await view.webContents.capturePage({
-        x: 0,
-        y: 0,
-        width: Math.min(bounds.width, TONE_STRIP_MAX_WIDTH_PX),
-        height: TONE_STRIP_HEIGHT_PX,
-      });
+      const image = await view.webContents.capturePage(
+        {
+          x: 0,
+          y: 0,
+          width: Math.min(bounds.width, TONE_STRIP_MAX_WIDTH_PX),
+          height: TONE_STRIP_HEIGHT_PX,
+        },
+        // Never wake a hidden page for a sample (Electron flips the
+        // page to "visible" for a capture unless told otherwise).
+        { stayHidden: true }
+      );
       if (image.isEmpty()) return;
       const { width, height } = image.getSize();
       record(toneFromBgra(image.toBitmap(), width, height, previous()));
@@ -1603,7 +1634,11 @@ function attachRemoteHome(win: BrowserWindow): void {
     try {
       const liveUrl = view.webContents.getURL();
       const env = getEnvironmentForUrl(liveUrl);
-      const hasSession = env !== null && getAuthApi().getSession(env) !== null;
+      // A Home URL outside *.onereach.ai (Settings → Home accepts any
+      // https page) has no env of its own — judge it by the app session,
+      // like the other two sites do (2026-09-02 review: it was hidden on
+      // every load for a signed-in user, flapping against reconcile).
+      const hasSession = getAuthApi().getSession(env ?? 'edison') !== null;
       const show = shouldShowRemoteHome(liveUrl, env, hasSession);
       if (view.getVisible() !== show) {
         view.setVisible(show);

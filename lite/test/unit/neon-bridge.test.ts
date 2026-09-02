@@ -64,11 +64,13 @@ function call(
   handler: (req: IncomingMessage, res: ServerResponse) => void,
   method: string,
   url: string,
-  origin?: string
+  origin?: string,
+  host = '127.0.0.1:47294'
 ): Promise<Captured> {
   const req = new IncomingMessage(new Socket());
   req.method = method;
   req.url = url;
+  req.headers.host = host;
   if (origin !== undefined) req.headers.origin = origin;
   const res = new ServerResponse(req);
   const cap: Captured = { status: 0, headers: {}, body: undefined };
@@ -93,6 +95,21 @@ function call(
     handler(req, res);
   });
 }
+
+describe('loopback host admission (2026-09-02 review)', () => {
+  it('refuses a request whose Host is not loopback — DNS rebinding sends no Origin at all', async () => {
+    const h = makeNeonBridgeHandler({ reads: fakeReads() });
+    const rebound = await call(h, 'GET', '/neon/spaces', undefined, 'rebind.attacker.example:47294');
+    expect(rebound.status).toBe(403);
+    expect(rebound.headers['Access-Control-Allow-Origin']).toBeUndefined();
+    const missing = await call(h, 'GET', '/neon/spaces', undefined, '');
+    expect(missing.status).toBe(403);
+    for (const ok of ['127.0.0.1:47294', 'localhost:47294', '[::1]:47294', 'LOCALHOST']) {
+      const res = await call(h, 'GET', '/neon/health', undefined, ok);
+      expect(res.status, ok).toBe(200);
+    }
+  });
+});
 
 describe('read-only surface', () => {
   it('serves GET routes and forwards to the gated reads', async () => {

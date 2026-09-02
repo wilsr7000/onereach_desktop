@@ -284,7 +284,10 @@ html[data-platform="darwin"] .tab-bar {
   flex: 1 1 auto;
   overflow-x: auto;
   scrollbar-width: none;
-  -webkit-app-region: no-drag;
+  /* The list itself stays DRAGGABLE: with the native title bar hidden
+   * (2026-09-01) this is most of the header, and it is empty space
+   * right of the last pill. The pills and their close buttons carry
+   * no-drag themselves, so clicks still land. */
 }
 .tab-list::-webkit-scrollbar { display: none; }
 
@@ -333,6 +336,17 @@ html[data-platform="darwin"] .tab-bar {
   color: var(--or-warning, var(--or-amber));
 }
 
+/* On a content-toned bar the theme's amber may not read (the light
+ * theme's warning is a dark amber). The ⚠ glyph carries the state; the
+ * label just needs to be legible in the bar's ink. */
+.tab-bar[data-tone] .tab-pill.login-stuck,
+.tab-bar[data-tone] .tab-pill-warn {
+  color: rgba(var(--bar-ink-rgb), 0.9);
+}
+.tab-bar[data-tone] .tab-pill.login-stuck {
+  border-color: rgba(var(--bar-ink-rgb), 0.35);
+}
+
 .tab-pill-label {
   white-space: nowrap;
   overflow: hidden;
@@ -366,7 +380,7 @@ html[data-platform="darwin"] .tab-bar {
 }
 
 .tab-pill-close:hover {
-  background: var(--or-border-strong);
+  background: rgba(var(--bar-ink-rgb), 0.16);
   opacity: 1 !important;
 }
 
@@ -374,7 +388,10 @@ html[data-platform="darwin"] .tab-bar {
   flex: 0 0 auto;
   margin-right: 4px;
   padding: 0 12px;
-  color: var(--or-text-secondary);
+  /* Bar ink, not a theme text token: on a content-toned bar the theme
+   * token is the wrong colour (2026-09-02 review: near-black Home on a
+   * near-black IDW bar). */
+  color: rgba(var(--bar-ink-rgb), 0.72);
 }
 .home-pill svg {
   flex: 0 0 14px;
@@ -637,7 +654,9 @@ html[data-platform="darwin"] .tab-bar {
 }
 
 .boot-chat-bubble-user .boot-chat-avatar {
-  background: rgba(var(--or-raise-rgb), 0.12);
+  /* ink, not raise: raise is white in BOTH themes, so this was
+   * white-on-white in light (2026-09-02 review). */
+  background: rgba(var(--or-ink-rgb), 0.1);
   color: var(--or-text-strong);
 }
 

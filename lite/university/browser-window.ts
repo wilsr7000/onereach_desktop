@@ -117,7 +117,18 @@ export function openLearningInBrowser(entry: LearningEntry): void {
   // External links + window.open() targets route to the OS default
   // browser; never spawn child Electron windows.
   browserWindow.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
+    // Web URLs only (2026-09-02 review): this window hosts third-party
+    // pages, which must not be able to hand macOS `open` a
+    // x-apple.systempreferences: / shortcuts: / file: URL.
+    let scheme = '';
+    try {
+      scheme = new URL(url).protocol;
+    } catch {
+      scheme = '';
+    }
+    if (scheme === 'http:' || scheme === 'https:') {
+      void shell.openExternal(url);
+    }
     return { action: 'deny' };
   });
 }
