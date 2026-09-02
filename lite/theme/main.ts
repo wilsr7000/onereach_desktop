@@ -35,7 +35,7 @@ const IPC_ERROR_MARKER = '__themeError';
  * signature.css's light block. Keep these in sync with the stylesheet.
  */
 export const DARK_WINDOW_BACKGROUND = '#0e0e10';
-export const LIGHT_WINDOW_BACKGROUND = '#f4f5f7';
+export const LIGHT_WINDOW_BACKGROUND = '#f1ede4'; // WISER paper canvas (= --or-bg-canvas light)
 
 /**
  * The `backgroundColor` a BrowserWindow should be created with right

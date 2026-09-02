@@ -15,53 +15,58 @@
  */
 :root {
   color-scheme: light;
-  --or-ink-rgb: 17, 20, 28;
-  --or-raise-rgb: 255, 255, 255;
-  --or-well-rgb: 150, 158, 172;
-  --or-text-rgb: 21, 23, 31;
-  --or-glass-rgb: 255, 255, 255;
-  --or-bg-deep: #e8eaee;
-  --or-bg-canvas: #f4f5f7;
-  --or-bg-shell: #eceef2;
-  --or-bg-surface: #ffffff;
-  --or-bg-elevated: #f8f9fb;
-  --or-bg-raised: #eef0f4;
-  --or-bg-hover: rgba(17, 20, 28, 0.05);
-  --or-bg-active: rgba(47, 111, 224, 0.12);
-  --or-border-subtle: rgba(17, 20, 28, 0.08);
-  --or-border-strong: rgba(17, 20, 28, 0.16);
-  --or-border-signal: rgba(47, 111, 224, 0.5);
-  --or-border-solid: #d5d8e0;
-  --or-text-primary: #15171f;
-  --or-text-bright: #0b0d14;
-  --or-text-strong: #1f2230;
-  --or-text-secondary: rgba(21, 23, 31, 0.74);
-  --or-text-muted: rgba(21, 23, 31, 0.55);
-  --or-text-faint: rgba(21, 23, 31, 0.38);
-  --or-text-secondary-solid: #3f4453;
-  --or-text-muted-solid: #646a7a;
-  --or-text-faint-solid: #8a90a0;
-  --or-text-dim-solid: #9aa0ae;
-  --or-accent: #2f6fe0;
-  --or-accent-hover: #2563cf;
-  --or-accent-bright: #1f5cc4;
-  --or-accent-deep: #1c56bf;
-  --or-accent-strong: #0b7fb5;
-  --or-accent-tint: #2a62c9;
-  --or-accent-tint-2: #2458b8;
-  --or-accent-soft: rgba(47, 111, 224, 0.12);
-  --or-accent-glow: rgba(47, 111, 224, 0.28);
-  --or-accent-rgb: 47, 111, 224;
-  --or-accent-soft-rgb: 40, 100, 210;
-  --or-cyan-rgb: 11, 127, 181;
+  /* Light = WISER PAPER (2026-09-02, user: "white style is great but
+     should match more with WISER playbook style"): the same family the
+     paper playbook tiles and the WISER riff app use — paper #f1ede4,
+     tile #faf8f2, warm ink 27,23,18, ruled borders #dcd6c8, a calmer
+     #3f78c0 accent. Dark below is untouched. */
+  --or-ink-rgb: 27, 23, 18;
+  --or-raise-rgb: 250, 248, 242;
+  --or-well-rgb: 139, 133, 116;
+  --or-text-rgb: 27, 23, 18;
+  --or-glass-rgb: 250, 248, 242;
+  --or-bg-deep: #e7e2d6;
+  --or-bg-canvas: #f1ede4;
+  --or-bg-shell: #ebe6da;
+  --or-bg-surface: #faf8f2;
+  --or-bg-elevated: #f7f4ec;
+  --or-bg-raised: #efebe0;
+  --or-bg-hover: rgba(27, 23, 18, 0.06);
+  --or-bg-active: rgba(63, 120, 192, 0.14);
+  --or-border-subtle: rgba(27, 23, 18, 0.09);
+  --or-border-strong: rgba(27, 23, 18, 0.18);
+  --or-border-signal: rgba(63, 120, 192, 0.55);
+  --or-border-solid: #dcd6c8;
+  --or-text-primary: #1b1712;
+  --or-text-bright: #120f0b;
+  --or-text-strong: #221d16;
+  --or-text-secondary: rgba(27, 23, 18, 0.76);
+  --or-text-muted: rgba(27, 23, 18, 0.56);
+  --or-text-faint: rgba(27, 23, 18, 0.4);
+  --or-text-secondary-solid: #4b463c;
+  --or-text-muted-solid: #8b8574;
+  --or-text-faint-solid: #a49e8d;
+  --or-text-dim-solid: #b6b0a0;
+  --or-accent: #3f78c0;
+  --or-accent-hover: #345f9d;
+  --or-accent-bright: #2f6cb5;
+  --or-accent-deep: #2c5f9e;
+  --or-accent-strong: #23708f;
+  --or-accent-tint: #3a6fb0;
+  --or-accent-tint-2: #34639f;
+  --or-accent-soft: rgba(63, 120, 192, 0.12);
+  --or-accent-glow: rgba(63, 120, 192, 0.26);
+  --or-accent-rgb: 63, 120, 192;
+  --or-accent-soft-rgb: 58, 110, 178;
+  --or-cyan-rgb: 35, 112, 143;
   --or-on-accent: #ffffff;
-  --or-on-accent-soft: #1d4fb8;
-  --or-on-bright: #0a1018;
+  --or-on-accent-soft: #2b5a96;
+  --or-on-bright: #120f0b;
   /* Ink for a surface whose colour comes from CONTENT, not the theme
    * (the main-window tab bar wearing the page under it): white on a
    * dark page, near-black on a light one, in both themes. */
   --or-tone-dark-ink-rgb: 255, 255, 255;
-  --or-tone-light-ink-rgb: 17, 20, 28;
+  --or-tone-light-ink-rgb: 17, 20, 28; /* ink over light CONTENT (a web page), not the app palette — stays neutral */
   --or-success: #15803d;
   --or-success-rgb: 21, 128, 61;
   --or-green-deep: #166534;

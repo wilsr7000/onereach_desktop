@@ -70,9 +70,15 @@ animation is wrapped by `prefers-reduced-motion`.
 **Focus** — `--or-focus-ring` is the *only* focus style. Beautiful blue
 halo, 2px offset. It appears on `:focus-visible`, never on mouse click.
 
-**Color** — the neutrals stay cool and deep (Tufte quiet); warmth
-enters through the accent temperature and the grain, not the base. The
-kind-accents are tuned as a set.
+**Color** — two bases, one family. Dark: the neutrals stay cool and
+deep (Tufte quiet); warmth enters through the accent temperature and
+the grain, not the base. Light (the default since 2026-09-01): the base
+IS paper — the same family as the WISER playbook tiles and the WISER
+riff app (paper `#f1ede4`, tile `#faf8f2`, warm ink `27,23,18`, ruled
+borders `#dcd6c8`, a calmer `#3f78c0` accent), so the app and the
+playbooks it holds read as one object (user decision, 2026-09-02:
+"white style is great but should match more with WISER playbook
+style"). The kind-accents are tuned as a set.
 
 ## The three typographic voices
 
