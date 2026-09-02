@@ -68,7 +68,7 @@ const CONFIG = {
   },
 
   // LLM Context Management
-  llmModel: 'claude-opus-4-5-20251101', // Use most powerful model for diagnosis
+  llmModel: 'claude-fable-5-1', // Use most powerful model for diagnosis
   llmMaxTokens: 2000, // Enough for detailed analysis
   contextWindowSize: 50, // Track last N processed events for context
   contextOverlap: 5, // Include N previous events as context overlap
@@ -828,7 +828,7 @@ Summary:`;
 
         this._broadcastHUD({
           type: 'cost',
-          model: 'claude-haiku-4-5',
+          model: 'claude-fable-5-1',
           inputTokens,
           outputTokens,
           cost: estimatedCost,

@@ -5219,7 +5219,7 @@ Write the structured summary now:`;
         }
 
         // Get model from settings (defaults to Claude Sonnet 4.5 or GPT-4o)
-        const llmModel = settingsManager.get('llmModel') || (claudeKey ? 'claude-sonnet-4-5-20250929' : 'gpt-4o');
+        const llmModel = settingsManager.get('llmModel') || (claudeKey ? 'claude-fable-5-1' : 'gpt-4o');
         log.info('clipboard', 'Using model', { llmModel });
 
         // Try to get timecoded segments from metadata for better analysis

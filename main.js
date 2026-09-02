@@ -16250,7 +16250,7 @@ Return ONLY valid JSON with this exact structure:
       // Test the connection with a simple request
       // Using Claude 4.5 Sonnet for consistency - only 4.5 models allowed
       const _result = await ai.chat({
-        profile: 'standard', // Uses claude-sonnet-4-5-20250929 by default
+        profile: 'standard', // Uses claude-fable-5-1 by default
         messages: [{ role: 'user', content: 'Hello' }],
         maxTokens: 10,
         feature: 'connection-test',
@@ -18253,7 +18253,7 @@ ipcMain.handle('budget:trackUsage', async (event, provider, projectId, usage) =>
     let result;
     if (provider === 'anthropic' || provider === 'claude') {
       result = llmTracker.trackClaudeCall({
-        model: usage.model || 'claude-sonnet-4-5-20250929',
+        model: usage.model || 'claude-fable-5-1',
         inputTokens: usage.inputTokens || 0,
         outputTokens: usage.outputTokens || 0,
         feature,
@@ -21254,7 +21254,7 @@ function registerClaudeTerminalHandlers() {
       console.log('[ClaudeTerminal] Starting PTY with claude at:', claudePath);
 
       // Spawn claude in PTY — pin to Opus 4.8 at max effort.
-      claudePty = pty.spawn(claudePath, ['--model', 'claude-opus-4-8', '--effort', 'max'], {
+      claudePty = pty.spawn(claudePath, ['--model', 'claude-fable-5-1', '--effort', 'max'], {
         name: 'xterm-256color',
         cols: cols || 80,
         rows: rows || 24,

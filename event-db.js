@@ -222,7 +222,7 @@ class EventDB {
       // Recalculate cost using unified pricing if not provided or if we have token data
       const inputTokens = tx.inputTokens || 0;
       const outputTokens = tx.outputTokens || 0;
-      const model = tx.model || 'claude-sonnet-4-5-20250929';
+      const model = tx.model || 'claude-fable-5-1';
 
       let cost = tx.cost;
       let costBreakdown = null;

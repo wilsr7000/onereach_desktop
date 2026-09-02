@@ -14,7 +14,7 @@ the main process.
 - **Claude** uses the official `@anthropic-ai/sdk` (added to
   `lite/package.json` and externalized in `lite/esbuild.config.mjs` per
   ADR-047's dependency recipe; ships with its tiny transitive deps). Model
-  defaults to `claude-fable-5`, with structured JSON output.
+  defaults to `claude-fable-5-1`, with structured JSON output.
 - **OneReach flow** uses raw HTTP to a user-supplied flow URL, authenticated
   with a **FLOW token minted from the logged-in session** — the same
   `/http/{accountId}/refresh_token` mechanism `kv/flow-http-client.ts` uses.
@@ -35,7 +35,7 @@ never logged or sent over the bridge.
 | Var | Meaning |
 |---|---|
 | `ANTHROPIC_API_KEY` | Use Claude. The key. |
-| `ANTHROPIC_MODEL` | Optional. Defaults to `claude-fable-5`. |
+| `ANTHROPIC_MODEL` | Optional. Defaults to `claude-fable-5-1`. |
 | `ANTHROPIC_BASE_URL` | Optional. Defaults to `https://api.anthropic.com`. |
 | `ONEREACH_FLOW_URL` | Use a OneReach flow. The flow's HTTP URL. |
 | `ONEREACH_FLOW_TOKEN` | Optional token override. Normally the token is minted from login — leave unset. |
@@ -47,7 +47,7 @@ never logged or sent over the bridge.
 ```json
 {
   "provider": "claude",
-  "claude": { "apiKey": "sk-ant-...", "model": "claude-fable-5" },
+  "claude": { "apiKey": "sk-ant-...", "model": "claude-fable-5-1" },
   "onereachFlow": { "url": "https://...", "token": "..." }
 }
 ```

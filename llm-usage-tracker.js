@@ -38,7 +38,7 @@ class LLMUsageTracker {
    */
   trackClaudeCall(data) {
     const {
-      model = 'claude-sonnet-4-5-20250929',
+      model = 'claude-fable-5-1',
       inputTokens = 0,
       outputTokens = 0,
       feature = 'other',

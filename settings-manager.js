@@ -161,7 +161,7 @@ class SettingsManager {
     // Return default settings
     return {
       llmProvider: 'anthropic',
-      llmModel: 'claude-opus-4-5-20251101',
+      llmModel: 'claude-fable-5-1',
       theme: 'dark',
       autoSave: true,
       claude4ThinkingMode: 'enabled',
@@ -298,7 +298,7 @@ class SettingsManager {
     // Otherwise, return the default value
     const defaults = {
       llmProvider: 'anthropic',
-      llmModel: 'claude-opus-4-5-20251101',
+      llmModel: 'claude-fable-5-1',
       theme: 'dark',
       autoSave: true,
       claude4ThinkingMode: 'enabled',
@@ -501,7 +501,7 @@ class SettingsManager {
   }
 
   getLLMModel() {
-    return this.get('llmModel') || 'claude-opus-4-5-20251101';
+    return this.get('llmModel') || 'claude-fable-5-1';
   }
 
   setLLMModel(model) {

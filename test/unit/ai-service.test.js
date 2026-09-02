@@ -115,7 +115,7 @@ describe('AI Service', () => {
       const { DEFAULT_MODEL_PROFILES } = require('../../lib/ai-service');
       const fast = DEFAULT_MODEL_PROFILES.fast;
       expect(fast.provider).toBe('anthropic');
-      expect(fast.model).toBe('claude-haiku-4-5-20251001');
+      expect(fast.model).toBe('claude-fable-5-1');
       expect(fast.fallback).toBeDefined();
       expect(fast.fallback.provider).toBe('openai');
     });
@@ -133,7 +133,7 @@ describe('AI Service', () => {
       const { DEFAULT_MODEL_PROFILES } = require('../../lib/ai-service');
       const powerful = DEFAULT_MODEL_PROFILES.powerful;
       expect(powerful.provider).toBe('anthropic');
-      expect(powerful.model).toBe('claude-fable-5');
+      expect(powerful.model).toBe('claude-fable-5-1');
     });
 
     it('realtime profile has no fallback (single provider)', () => {

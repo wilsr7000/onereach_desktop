@@ -24,7 +24,7 @@ describe('testAiKey', () => {
     const createMessage = vi.fn(async () => ({ content: [], stop_reason: 'end_turn' }));
     const makeCreator = vi.fn(() => createMessage);
     const res = await testAiKey('sk-ant-good', { makeCreator });
-    expect(res).toEqual({ ok: true, model: 'claude-fable-5' });
+    expect(res).toEqual({ ok: true, model: 'claude-fable-5-1' });
     // The candidate key was handed to the creator, and a minimal ping ran.
     expect(makeCreator).toHaveBeenCalledWith(
       expect.objectContaining({ provider: 'claude', apiKey: 'sk-ant-good' })

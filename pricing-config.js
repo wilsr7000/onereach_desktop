@@ -18,6 +18,8 @@ const PRICING = {
 
   // Claude Fable 5 (Latest - 2026, new tier above Opus)
   'claude-fable-5': { input: 10.0, output: 50.0, provider: 'anthropic' },
+  // Fable 5.1 (2026-09-02 model upgrade). Pricing copied from Fable 5 pending confirmation.
+  'claude-fable-5-1': { input: 10.0, output: 50.0, provider: 'anthropic' },
 
   // Claude 4.7 (2026) -- Opus dropped to $5/$25 from 4.5 onward
   'claude-opus-4-7': { input: 5.0, output: 25.0, provider: 'anthropic' },
@@ -123,8 +125,8 @@ const PRICING = {
 
 const MODEL_ALIASES = {
   // Claude shortcuts
-  fable: 'claude-fable-5',
-  'claude-fable': 'claude-fable-5',
+  fable: 'claude-fable-5-1',
+  'claude-fable': 'claude-fable-5-1',
   'claude-opus': 'claude-opus-4-7',
   'claude-sonnet': 'claude-sonnet-4-5-20250929',
   'claude-4-opus': 'claude-opus-4-7',
@@ -152,7 +154,7 @@ const MODEL_ALIASES = {
   'gpt-realtime': 'gpt-realtime-2',
 
   // Generic
-  default: 'claude-sonnet-4-5-20250929',
+  default: 'claude-fable-5-1',
 };
 
 // =============================================================================
@@ -179,6 +181,7 @@ function resolveModelName(model) {
   if (MODEL_ALIASES[lowerModel]) return MODEL_ALIASES[lowerModel];
 
   // Partial match for Claude models
+  if (model.includes('fable') || model.includes('mythos')) return 'claude-fable-5-1';
   if (model.includes('opus')) return 'claude-opus-4-7';
   if (model.includes('sonnet')) return 'claude-sonnet-4-5-20250929';
   if (model.includes('haiku')) return 'claude-3-haiku-20240307';
