@@ -13,7 +13,9 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
+  agentTileBody,
   buildItemCard,
+  looksLikeYaml,
   humanizeTileTitle,
   looksLikeCode,
   looksLikeMarkup,
@@ -143,6 +145,36 @@ describe('buildItemCard', () => {
     const preview = card.querySelector('.spaces-card-preview-playbook');
     expect(preview?.querySelector('.spaces-card-playbook-label')?.textContent).toBe('PLAYBOOK');
     expect(preview?.querySelector('.spaces-card-excerpt')).not.toBeNull();
+  });
+});
+
+describe('agent tile body (a skill added to a Space)', () => {
+  it('drops a leading repeat of the title and reads prose as prose', () => {
+    expect(agentTileBody('50/50 Risk Analyst A Claude skill that reviews a plan.', '50/50 Risk Analyst')).toBe(
+      'A Claude skill that reviews a plan.'
+    );
+    expect(agentTileBody('50/50 Risk Analyst — reviews a plan.', '50/50 Risk Analyst')).toBe('reviews a plan.');
+    expect(agentTileBody('Something else entirely.', '50/50 Risk Analyst')).toBe('Something else entirely.');
+    expect(agentTileBody('50/50 Risk Analyst', '50/50 Risk Analyst')).toBeNull();
+    expect(looksLikeYaml('name: risk-analyst description: reviews plans channels: claude-code')).toBe(true);
+    expect(looksLikeYaml('A Claude skill that reviews a plan and returns the two most likely ways it fails.')).toBe(false);
+  });
+
+  it('renders: SKILL chip, no title echo, prose face', () => {
+    const card = buildItemCard(
+      base({
+        kind: 'agent',
+        title: '50/50 Risk Analyst',
+        agentType: 'tool',
+        agentEndpoints: [{ kind: 'skill', url: 'https://skills.example/x', channels: [] }],
+        excerpt: '# 50/50 Risk Analyst\n\nA Claude skill that reviews a plan and returns the two most likely ways it fails.',
+      }),
+      false
+    );
+    expect(card.querySelector('.spaces-card-agent-endpoint-skill')?.textContent).toBe('SKILL');
+    const body = card.querySelector('.spaces-card-agent-okf');
+    expect(body?.textContent?.startsWith('A Claude skill')).toBe(true);
+    expect(body?.classList.contains('is-prose')).toBe(true);
   });
 });
 

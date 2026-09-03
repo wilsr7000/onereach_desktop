@@ -10265,3 +10265,12 @@ body {
 .spaces-card-preview-agent .spaces-card-agent-okf {
   overflow-wrap: anywhere;
 }
+
+/* A prose description (a skill's SKILL.md body) reads as prose; the
+   mono face stays for OKF/YAML, which is what it was written in. */
+.spaces-card-preview-agent .spaces-card-agent-okf.is-prose {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(var(--or-text-tint-violet-rgb), 0.85);
+}

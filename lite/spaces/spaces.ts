@@ -9618,13 +9618,43 @@ function buildAgentTilePreview(item: RendererItemSummary, preview: HTMLElement):
     preview.appendChild(chips);
   }
 
-  const excerpt = tileExcerptText(item.excerpt);
+  const excerpt = agentTileBody(tileExcerptText(item.excerpt), item.title);
   if (excerpt !== null) {
     const body = document.createElement('p');
     body.className = 'spaces-card-excerpt spaces-card-agent-okf';
+    // OKF/YAML keeps the mono face it was written in; a prose
+    // description (a Claude skill's SKILL.md body, say) reads as prose.
+    if (!looksLikeYaml(excerpt)) body.classList.add('is-prose');
     body.textContent = excerpt;
     preview.appendChild(body);
   }
+}
+
+/**
+ * Agent tile body (2026-09-02 tile pass): an OKF/markdown excerpt often
+ * opens with the agent's own name as a heading — stripped of its `#`
+ * that becomes "50/50 Risk Analyst A Claude skill that…" under a title
+ * that already says 50/50 Risk Analyst. Drop a leading repeat of the
+ * title (plus any separator after it).
+ */
+export function agentTileBody(excerpt: string | null, title: string): string | null {
+  if (excerpt === null) return null;
+  const t = title.trim();
+  if (t.length > 0 && excerpt.toLowerCase().startsWith(t.toLowerCase())) {
+    const rest = excerpt.slice(t.length).replace(/^[\s:—–\-·.]+/, '').trim();
+    return rest.length > 0 ? rest : null;
+  }
+  return excerpt;
+}
+
+/** `key: value` lines dominate — OKF/YAML, not prose. */
+export function looksLikeYaml(text: string): boolean {
+  const lines = text.split(/\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+  if (lines.length === 0) return false;
+  const keyed = lines.filter((l) => /^[A-Za-z_][\w-]*\s*:(\s|$)/.test(l)).length;
+  // Excerpts are usually collapsed to one line: count keyed tokens too.
+  const inline = (text.match(/(^|\s)[A-Za-z_][\w-]*:\s/g) ?? []).length;
+  return keyed >= Math.max(2, Math.ceil(lines.length / 2)) || inline >= 3;
 }
 
 /**
