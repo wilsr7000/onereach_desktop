@@ -285,6 +285,18 @@ const SPACE_WRITABLE = `(
         )
       )`;
 
+/**
+ * SPACE_WRITABLE for a Space bound under another alias — the TARGET of
+ * an add/move (2026-09-02, ADR-084 addendum). Filing an asset into a
+ * Space is a write to that Space: it changes what its members see. The
+ * viewer must be its creator or a non-reader member; a Space the viewer
+ * cannot write (or cannot see) refuses the same way any other write
+ * does, and the renderer's submenu is no longer the only thing standing
+ * between an IPC caller and "add my asset to any Space by id".
+ */
+const SPACE_WRITABLE_FOR = (alias: string): string =>
+  SPACE_WRITABLE.replace(/\bs\./g, `${alias}.`).replace(/->\(s\)/g, `->(${alias})`);
+
 // ADR-084 (2026-09-02) — sight is EXPLICIT PERMISSION ONLY. Two signals
 // and nothing inferred:
 //   1. the viewer created the Space — Lite stamps `createdBy`, the
@@ -2310,6 +2322,7 @@ export const CYPHER = {
         AND coalesce(a.isTrashed, false) = false
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
+        AND ${SPACE_WRITABLE_FOR('target')}
     OPTIONAL MATCH (a)-[old:BELONGS_TO]->(source:Space {id: $fromSpaceId})
       WHERE source.deletedAt IS NULL
     OPTIONAL MATCH (source)-[oldContains:CONTAINS]->(a)
@@ -2335,6 +2348,7 @@ export const CYPHER = {
         AND coalesce(a.isTrashed, false) = false
     MATCH (target:Space {id: $toSpaceId})
       WHERE target.deletedAt IS NULL
+        AND ${SPACE_WRITABLE_FOR('target')}
     MERGE (a)-[:BELONGS_TO]->(target)
     FOREACH (x IN CASE WHEN a:Note THEN [1] ELSE [] END |
       MERGE (target)-[:CONTAINS]->(a))
