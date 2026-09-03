@@ -178,6 +178,18 @@ describe('agent tile body (a skill added to a Space)', () => {
   });
 });
 
+describe('untitled playbooks', () => {
+  it('never wear their riff deep-link as a title', () => {
+    const card = buildItemCard(
+      base({ id: '8b0a8281-29f5-416b-987e-9aa69577464b', kind: 'playbook', title: '', fileKey: 'https://files.example/riff/index.html?open=8b0a8281-29f5' }),
+      false
+    );
+    const title = card.querySelector('.spaces-card-title')?.textContent ?? '';
+    expect(title.startsWith('Playbook · ')).toBe(true);
+    expect(title).not.toContain('?open=');
+  });
+});
+
 describe('CSS: text stays inside the tile', () => {
   const block = (selector: string): string => {
     const start = css.indexOf(`\n${selector} {`);

@@ -14500,9 +14500,13 @@ export function generateItemTitle(item: GenerateItemTitleInput): string {
     if (urlTitle !== null) return urlTitle;
   }
 
-  // 3. File-backed items: derive from `fileKey` path segment.
+  // 3. File-backed items: derive from `fileKey` path segment. A WISER
+  //    playbook's fileKey is its riff deep-link, not a file — deriving
+  //    from it produced "Riff?open=8b0a8281" tiles (2026-09-02); the
+  //    honest "<Kind> · <id>" fallback below is what those want.
   if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
-    const fileTitle = titleFromFileKey(item.fileKey);
+    const isDeepLink = kind === 'playbook' && /^https?:\/\//i.test(item.fileKey);
+    const fileTitle = isDeepLink ? null : titleFromFileKey(item.fileKey);
     if (fileTitle !== null) return fileTitle;
   }
 
