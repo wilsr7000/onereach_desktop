@@ -311,6 +311,8 @@ import type {
   AssetViewer,
   JourneyDraft,
   JourneySuggestions,
+  NestedSpaceRef,
+  SpaceNesting,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 import { createBinaryAsset } from './create-binary.js';
@@ -1716,6 +1718,28 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       const result = await client.renameSpace(id, name);
       nukeReadCache();
       return result;
+    },
+    // ADR-085 — nested Spaces. Mutations change what a Space holds or
+    // how it is exposed, so the read cache goes like any space mutation.
+    async nestSpace(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpaceNesting> {
+      const result = await client.nestSpace(childId, parentId, inheritsPermissions, inheritsUntil ?? null);
+      nukeReadCache();
+      return result;
+    },
+    async unnestSpace(childId: string, parentId: string): Promise<void> {
+      await client.unnestSpace(childId, parentId);
+      nukeReadCache();
+    },
+    async setNestInheritance(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpaceNesting> {
+      const result = await client.setNestInheritance(childId, parentId, inheritsPermissions, inheritsUntil ?? null);
+      nukeReadCache();
+      return result;
+    },
+    async listChildSpaces(parentId: string): Promise<NestedSpaceRef[]> {
+      return client.listChildSpaces(parentId);
+    },
+    async listParentSpaces(childId: string): Promise<NestedSpaceRef[]> {
+      return client.listParentSpaces(childId);
     },
     async updateSpace(id: string, patch: UpdateSpaceInput): Promise<Space> {
       const result = await client.updateSpace(id, patch);

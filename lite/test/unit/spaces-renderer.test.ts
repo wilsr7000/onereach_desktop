@@ -1722,6 +1722,7 @@ describe('space context menu — every action is wired (coverage contract)', () 
       sendToMemory: h('sendToMemory'),
       deleteSpace: h('deleteSpace'),
       togglePin: h('togglePin'),
+      nestInside: h('nestInside'),
     };
     const entries = mod.buildSpaceContextEntries(
       { id: 's1', name: 'X', visibility: 'open', kind: 'user' } as never,

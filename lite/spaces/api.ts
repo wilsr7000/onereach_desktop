@@ -75,6 +75,8 @@ import type {
   AssetViewer,
   JourneyDraft,
   JourneySuggestions,
+  NestedSpaceRef,
+  SpaceNesting,
 } from './types.js';
 import type { SpaceScope } from './scope.js';
 
@@ -801,6 +803,23 @@ export interface SpacesApi {
   renameSpace(id: string, name: string): Promise<Space>;
 
   /**
+   * ADR-085 — nested Spaces. Put `childId` inside `parentId` (a Space may
+   * sit inside several). Requires write access to BOTH. Default
+   * `inheritsPermissions = false`: the inner Space keeps its own grants;
+   * true lets the parent's explicit permissions flow down.
+   */
+  nestSpace(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpaceNesting>;
+  /** Take `childId` out of `parentId`. A writer of either Space may. */
+  unnestSpace(childId: string, parentId: string): Promise<void>;
+  /** Flip the per-edge opt-in. Only a writer of the child may. */
+  /** `inheritsUntil` (ISO) puts a TTL on the opt-in — inheritance lapses when it passes; null/absent = no TTL. */
+  setNestInheritance(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpaceNesting>;
+  /** The Spaces inside `parentId` the viewer can see. */
+  listChildSpaces(parentId: string): Promise<NestedSpaceRef[]>;
+  /** The Spaces `childId` sits inside that the viewer can see. */
+  listParentSpaces(childId: string): Promise<NestedSpaceRef[]>;
+
+  /**
    * Patch a Space's non-identity fields (`description`, `color`,
    * `iconKey`). Each is optional; only fields present in the patch
    * are written. Pass an empty string for `description` to clear it.
@@ -1144,6 +1163,26 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async renameSpace(_id: string, _name: string): Promise<Space> {
     throw notInitialized('renameSpace');
+  }
+
+  async nestSpace(_childId: string, _parentId: string, _inherit: boolean, _until?: string | null): Promise<SpaceNesting> {
+    throw notInitialized('nestSpace');
+  }
+
+  async unnestSpace(_childId: string, _parentId: string): Promise<void> {
+    throw notInitialized('unnestSpace');
+  }
+
+  async setNestInheritance(_childId: string, _parentId: string, _inherit: boolean, _until?: string | null): Promise<SpaceNesting> {
+    throw notInitialized('setNestInheritance');
+  }
+
+  async listChildSpaces(_parentId: string): Promise<NestedSpaceRef[]> {
+    throw notInitialized('listChildSpaces');
+  }
+
+  async listParentSpaces(_childId: string): Promise<NestedSpaceRef[]> {
+    throw notInitialized('listParentSpaces');
   }
 
   async updateSpace(_id: string, _patch: UpdateSpaceInput): Promise<Space> {

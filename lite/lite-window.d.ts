@@ -640,6 +640,24 @@ interface LiteTicketDetails {
   playbookId?: string;
 }
 
+/** ADR-085 — a Space seen through a nesting edge (child or parent of the viewed Space). */
+interface LiteNestedSpace {
+  id: string;
+  name: string;
+  color?: string;
+  iconKey?: string;
+  kind?: 'user' | 'shared';
+  inheritsPermissions: boolean;
+  inheritsUntil?: string;
+}
+/** ADR-085 — one nesting edge as written. */
+interface LiteSpaceNesting {
+  childId: string;
+  parentId: string;
+  inheritsPermissions: boolean;
+  inheritsUntil?: string;
+}
+
 interface LiteSpace {
   id: string;
   name: string;
@@ -1171,6 +1189,17 @@ interface LiteSpacesBridge {
    */
   createSpace(input: LiteSpacesCreateSpaceInput): Promise<LiteSpacesIpcResult<LiteSpace>>;
   renameSpace(id: string, name: string): Promise<LiteSpacesIpcResult<LiteSpace>>;
+  /**
+   * ADR-085 — nested Spaces. Put `childId` inside `parentId` (write access
+   * to BOTH required); `inheritsPermissions` is the per-edge opt-in, default
+   * false (the inner Space keeps its own grants).
+   */
+  nestSpace(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<LiteSpacesIpcResult<LiteSpaceNesting>>;
+  unnestSpace(childId: string, parentId: string): Promise<LiteSpacesIpcResult<null>>;
+  /** `inheritsUntil` (ISO) is a TTL on the opt-in; null/absent = none. */
+  setNestInheritance(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<LiteSpacesIpcResult<LiteSpaceNesting>>;
+  listChildSpaces(parentId: string): Promise<LiteSpacesIpcResult<LiteNestedSpace[]>>;
+  listParentSpaces(childId: string): Promise<LiteSpacesIpcResult<LiteNestedSpace[]>>;
   /**
    * Patch a Space's non-identity fields (description, color, iconKey).
    * Name changes go through `renameSpace` (uniqueness checks differ).

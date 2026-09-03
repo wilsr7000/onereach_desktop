@@ -160,6 +160,12 @@ const SPACES_HOME_PERMISSION_SUMMARY = 'lite:spaces:home:permissionSummary';
 // Mutations (Phase 3a). ADR-048.
 const SPACES_CREATE_SPACE = 'lite:spaces:create';
 const SPACES_RENAME_SPACE = 'lite:spaces:rename';
+// ADR-085 — nested Spaces.
+const SPACES_NEST_SPACE = 'lite:spaces:nest';
+const SPACES_UNNEST_SPACE = 'lite:spaces:unnest';
+const SPACES_SET_NEST_INHERITANCE = 'lite:spaces:nestInheritance';
+const SPACES_LIST_CHILD_SPACES = 'lite:spaces:listChildSpaces';
+const SPACES_LIST_PARENT_SPACES = 'lite:spaces:listParentSpaces';
 const SPACES_UPDATE_SPACE = 'lite:spaces:update';
 const SPACES_PIN_SPACE = 'lite:spaces:pin';
 const SPACES_DELETE_SPACE = 'lite:spaces:delete';
@@ -1018,6 +1024,12 @@ interface SpacesBridge {
   /** Mutations (Phase 3a). ADR-048. Mirror `SpacesApi` write methods. */
   createSpace(input: SpacesCreateSpaceInputView): Promise<SpacesIpcResultView<unknown>>;
   renameSpace(id: string, name: string): Promise<SpacesIpcResultView<unknown>>;
+  /** ADR-085 — nested Spaces. */
+  nestSpace(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpacesIpcResultView<unknown>>;
+  unnestSpace(childId: string, parentId: string): Promise<SpacesIpcResultView<unknown>>;
+  setNestInheritance(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpacesIpcResultView<unknown>>;
+  listChildSpaces(parentId: string): Promise<SpacesIpcResultView<unknown>>;
+  listParentSpaces(childId: string): Promise<SpacesIpcResultView<unknown>>;
   updateSpace(
     id: string,
     patch: SpacesUpdateSpaceInputView
@@ -1899,6 +1911,26 @@ const spaces: SpacesBridge = {
     >,
   renameSpace: (id, name) =>
     ipcRenderer.invoke(SPACES_RENAME_SPACE, { id, name }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  nestSpace: (childId, parentId, inheritsPermissions, inheritsUntil) =>
+    ipcRenderer.invoke(SPACES_NEST_SPACE, { childId, parentId, inheritsPermissions, inheritsUntil: inheritsUntil ?? null }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  unnestSpace: (childId, parentId) =>
+    ipcRenderer.invoke(SPACES_UNNEST_SPACE, { childId, parentId }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  setNestInheritance: (childId, parentId, inheritsPermissions, inheritsUntil) =>
+    ipcRenderer.invoke(SPACES_SET_NEST_INHERITANCE, { childId, parentId, inheritsPermissions, inheritsUntil: inheritsUntil ?? null }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  listChildSpaces: (parentId) =>
+    ipcRenderer.invoke(SPACES_LIST_CHILD_SPACES, { parentId }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  listParentSpaces: (childId) =>
+    ipcRenderer.invoke(SPACES_LIST_PARENT_SPACES, { childId }) as Promise<
       SpacesIpcResultView<unknown>
     >,
   updateSpace: (id, patch) =>

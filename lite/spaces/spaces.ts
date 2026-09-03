@@ -1689,6 +1689,8 @@ export function buildSpaceContextEntries(
     sendToMemory: () => void;
     deleteSpace: () => void;
     togglePin: () => void;
+    /** ADR-085 — put this Space inside another (optional: older callers/tests omit it). */
+    nestInside?: () => void;
   }
 ): CtxEntry[] {
   const isOpen = space.visibility !== 'restricted';
@@ -1741,6 +1743,11 @@ export function buildSpaceContextEntries(
     // edits re-send themselves.
     { type: 'action', label: 'Send to agentic memory', run: handlers.sendToMemory },
     { type: 'separator' },
+    {
+      type: 'action',
+      label: 'Put inside a Space…',
+      run: () => handlers.nestInside?.(),
+    },
     {
       type: 'submenu',
       label: 'Convert',
@@ -2021,6 +2028,9 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     },
     deleteSpace: () => {
       void performSoftDelete(space.id);
+    },
+    nestInside: () => {
+      void openNestSpacePicker(space);
     },
     togglePin: () => {
       void (async () => {
@@ -5857,6 +5867,317 @@ async function openCreateTicketPrompt(spaceId: string): Promise<void> {
  * Works on any Space from the sidebar's right-click, including one that
  * isn't the active scope, so it fetches rather than reading `state`.
  */
+// ─── ADR-085: nested Spaces ─────────────────────────────────────────
+/** A Space seen through a nesting edge, as the bridge returns it. */
+export interface NestedSpaceChip {
+  id: string;
+  name: string;
+  color?: string;
+  kind?: string;
+  inheritsPermissions: boolean;
+  /** ISO instant the opt-in lapses (TTL); absent = no TTL. */
+  inheritsUntil?: string;
+}
+
+/**
+ * The Inside / Contains row on a Space header. Built empty (hidden)
+ * and filled once both listings return — the header stays synchronous.
+ */
+function buildSpaceNestingRow(space: RendererSpace): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'spaces-nesting';
+  row.hidden = true;
+  void hydrateSpaceNesting(space.id, row);
+  return row;
+}
+
+async function hydrateSpaceNesting(spaceId: string, row: HTMLElement): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  try {
+    const [parents, children] = await Promise.all([
+      bridge.listParentSpaces(spaceId),
+      bridge.listChildSpaces(spaceId),
+    ]);
+    if (!row.isConnected) return;
+    renderNestingChips(
+      row,
+      parents.ok === true ? (parents.value as NestedSpaceChip[]) : [],
+      children.ok === true ? (children.value as NestedSpaceChip[]) : [],
+      {
+        open: (id) => setActiveScope(id),
+        unnest: (childId, parentId, otherName) => {
+          void unnestSpaceFlow(spaceId, childId, parentId, otherName);
+        },
+        toggleInherit: (parentId, next) => {
+          void setNestInheritanceFlow(spaceId, parentId, next);
+        },
+      }
+    );
+  } catch (err) {
+    window.logging?.warn?.('spaces', 'nesting load failed', { spaceId, error: messageFrom(err) });
+  }
+}
+
+/**
+ * Pure DOM: "Inside" chips (the Spaces this one sits in) and "Contains"
+ * chips (the Spaces inside it). A parent chip carries the inherit
+ * toggle — exposure is the CHILD's call, and the viewed Space is the
+ * child of its parents. Every chip has an × that unnests. Exported for
+ * tests.
+ */
+export function renderNestingChips(
+  row: HTMLElement,
+  parents: ReadonlyArray<NestedSpaceChip>,
+  children: ReadonlyArray<NestedSpaceChip>,
+  handlers: {
+    open: (id: string) => void;
+    unnest: (childId: string, parentId: string, otherName: string) => void;
+    toggleInherit: (parentId: string, next: boolean) => void;
+  }
+): void {
+  row.replaceChildren();
+  row.hidden = parents.length === 0 && children.length === 0;
+  if (row.hidden) return;
+  const viewedIsChildOf = (ref: NestedSpaceChip, kind: 'parent' | 'child'): HTMLElement => {
+    const chip = document.createElement('span');
+    chip.className = `spaces-nesting-chip spaces-nesting-chip-${kind}`;
+    chip.setAttribute('data-space-id', ref.id);
+    const dot = document.createElement('span');
+    dot.className = 'spaces-nesting-dot';
+    const color = safeCssColor(ref.color);
+    if (color !== null) dot.style.setProperty('--chip-color', color);
+    chip.appendChild(dot);
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'spaces-nesting-chip-name';
+    name.textContent = ref.name;
+    name.title = kind === 'parent' ? `Open ${ref.name}` : `Open ${ref.name} (inside this Space)`;
+    name.addEventListener('click', () => handlers.open(ref.id));
+    chip.appendChild(name);
+    const inherit = document.createElement('button');
+    inherit.type = 'button';
+    inherit.className = 'spaces-nesting-inherit' + (ref.inheritsPermissions ? '' : ' is-off');
+    inherit.textContent = ref.inheritsPermissions
+      ? typeof ref.inheritsUntil === 'string'
+        ? `inherits · ${accessLabel({ accessExpiresAt: ref.inheritsUntil })}`
+        : 'inherits'
+      : 'own permissions';
+    if (kind === 'parent') {
+      inherit.title = ref.inheritsPermissions
+        ? `People who can see ${ref.name} can see this Space. Click to keep this Space's own permissions.`
+        : `This Space keeps its own permissions. Click to let people who can see ${ref.name} see it too.`;
+      inherit.addEventListener('click', () => handlers.toggleInherit(ref.id, !ref.inheritsPermissions));
+    } else {
+      inherit.disabled = true;
+      inherit.title = ref.inheritsPermissions
+        ? `${ref.name} inherits this Space's permissions (its writers decide that).`
+        : `${ref.name} keeps its own permissions (its writers decide that).`;
+    }
+    chip.appendChild(inherit);
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'spaces-nesting-remove';
+    remove.textContent = '×';
+    remove.setAttribute('aria-label', kind === 'parent' ? `Take this Space out of ${ref.name}` : `Take ${ref.name} out of this Space`);
+    remove.title = remove.getAttribute('aria-label') ?? '';
+    remove.addEventListener('click', () => {
+      const viewed = row.closest('[data-space-id]')?.getAttribute('data-space-id') ?? '';
+      void viewed;
+      if (kind === 'parent') handlers.unnest('__viewed__', ref.id, ref.name);
+      else handlers.unnest(ref.id, '__viewed__', ref.name);
+    });
+    chip.appendChild(remove);
+    return chip;
+  };
+  const group = (label: string, refs: ReadonlyArray<NestedSpaceChip>, kind: 'parent' | 'child'): void => {
+    if (refs.length === 0) return;
+    const lab = document.createElement('span');
+    lab.className = 'spaces-nesting-label';
+    lab.textContent = label;
+    row.appendChild(lab);
+    for (const ref of refs) row.appendChild(viewedIsChildOf(ref, kind));
+  };
+  group('Inside', parents, 'parent');
+  group('Contains', children, 'child');
+}
+
+async function refreshNestingView(spaceId: string): Promise<void> {
+  await loadSpaces();
+  if (state.activeScopeId === spaceId) await loadItems();
+}
+
+async function unnestSpaceFlow(
+  viewedId: string,
+  childId: string,
+  parentId: string,
+  otherName: string
+): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const child = childId === '__viewed__' ? viewedId : childId;
+  const parent = parentId === '__viewed__' ? viewedId : parentId;
+  try {
+    const envelope = await bridge.unnestSpace(child, parent);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(child === viewedId ? `Taken out of "${otherName}"` : `"${otherName}" taken out of this Space`);
+    await refreshNestingView(viewedId);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+async function setNestInheritanceFlow(childId: string, parentId: string, next: boolean): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  // Turning inheritance ON asks how long, with the same presets a member
+  // grant uses; permanent is a choice, cancel is a choice.
+  let until: string | null = null;
+  if (next) {
+    const parentName = state.spaces.find((s) => s.id === parentId)?.name ?? 'that Space';
+    const choice = await promptAccessDuration(`inheriting ${parentName}`);
+    if (choice === undefined) return;
+    until = choice;
+  }
+  try {
+    const envelope = await bridge.setNestInheritance(childId, parentId, next, until);
+    if (envelope.ok === false) {
+      showToast(envelope.error.message);
+      return;
+    }
+    showToast(next ? 'This Space now inherits that Space\'s permissions' : 'This Space keeps its own permissions');
+    await refreshNestingView(childId);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
+}
+
+/** "Put inside a Space…" — pick a parent; inheritance is off by default. */
+async function openNestSpacePicker(space: RendererSpace): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  document.querySelector('.spaces-member-picker-backdrop')?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'spaces-member-picker-backdrop spaces-nest-picker-backdrop';
+  const panel = document.createElement('div');
+  panel.className = 'spaces-member-picker';
+  const head = document.createElement('div');
+  head.className = 'spaces-member-picker-head';
+  const title = document.createElement('span');
+  title.textContent = `Put "${space.name}" inside…`;
+  head.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'spaces-member-picker-close';
+  close.setAttribute('aria-label', 'Close');
+  close.textContent = '×';
+  const dismiss = (): void => backdrop.remove();
+  close.addEventListener('click', dismiss);
+  closeOnEscape(backdrop, dismiss);
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  const inheritRow = document.createElement('label');
+  inheritRow.className = 'spaces-nest-inherit-row';
+  const inheritBox = document.createElement('input');
+  inheritBox.type = 'checkbox';
+  inheritBox.id = 'spaces-nest-inherit';
+  inheritRow.appendChild(inheritBox);
+  const inheritText = document.createElement('span');
+  inheritText.textContent =
+    "Inherit that Space's permissions — people who can see it will see this Space too. Off: this Space keeps its own permissions.";
+  inheritRow.appendChild(inheritText);
+  panel.appendChild(inheritRow);
+  const untilRow = document.createElement('label');
+  untilRow.className = 'spaces-nest-inherit-row spaces-nest-until-row';
+  untilRow.hidden = true;
+  const untilText = document.createElement('span');
+  untilText.textContent = 'For';
+  untilRow.appendChild(untilText);
+  const untilSelect = document.createElement('select');
+  untilSelect.className = 'spaces-nest-until';
+  for (const opt of [{ value: '', label: 'no time limit' }, ...ACCESS_PRESETS.map((p) => ({ value: p.value, label: p.label }))]) {
+    const o = document.createElement('option');
+    o.value = opt.value;
+    o.textContent = opt.label;
+    untilSelect.appendChild(o);
+  }
+  untilRow.appendChild(untilSelect);
+  panel.appendChild(untilRow);
+  inheritBox.addEventListener('change', () => {
+    untilRow.hidden = !inheritBox.checked;
+  });
+
+  const list = document.createElement('div');
+  list.className = 'spaces-member-picker-list';
+  const loading = document.createElement('p');
+  loading.className = 'spaces-member-picker-empty';
+  loading.textContent = 'Loading Spaces…';
+  list.appendChild(loading);
+  panel.appendChild(list);
+  backdrop.appendChild(panel);
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) dismiss();
+  });
+  document.body.appendChild(backdrop);
+
+  let parentIds = new Set<string>();
+  try {
+    const parents = await bridge.listParentSpaces(space.id);
+    if (parents.ok === true) parentIds = new Set((parents.value as NestedSpaceChip[]).map((p) => p.id));
+  } catch {
+    /* the server refuses duplicates and cycles anyway */
+  }
+  list.replaceChildren();
+  const candidates = state.spaces.filter((s) => s.id !== space.id && !parentIds.has(s.id));
+  if (candidates.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'spaces-member-picker-empty';
+    empty.textContent = 'No other Space to put this one inside.';
+    list.appendChild(empty);
+    return;
+  }
+  for (const target of [...candidates].sort((a, b) => a.name.localeCompare(b.name))) {
+    const rowBtn = document.createElement('button');
+    rowBtn.type = 'button';
+    rowBtn.className = 'spaces-member-picker-row';
+    const name = document.createElement('span');
+    name.className = 'spaces-member-picker-name';
+    name.textContent = target.name;
+    rowBtn.appendChild(name);
+    const meta = document.createElement('span');
+    meta.className = 'spaces-member-picker-email';
+    meta.textContent = target.kind === 'shared' ? 'shared Space' : 'Space';
+    rowBtn.appendChild(meta);
+    rowBtn.addEventListener('click', () => {
+      const inherit = inheritBox.checked;
+      const until = inherit ? accessPresetToIso(untilSelect.value) : null;
+      dismiss();
+      void (async () => {
+        try {
+          const envelope = await bridge.nestSpace(space.id, target.id, inherit, until);
+          if (envelope.ok === false) {
+            showToast(envelope.error.message);
+            return;
+          }
+          showToast(
+            inherit
+              ? `"${space.name}" is inside "${target.name}" and inherits its permissions${until === null ? '' : ` (${accessLabel({ accessExpiresAt: until })})`}`
+              : `"${space.name}" is inside "${target.name}" (own permissions)`
+          );
+          await refreshNestingView(space.id);
+        } catch (err) {
+          showToast(messageFrom(err));
+        }
+      })();
+    });
+    list.appendChild(rowBtn);
+  }
+}
+
 async function openSetPlaybookPicker(spaceId: string, spaceName: string): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
@@ -6521,6 +6842,7 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
     meta.className = 'spaces-view-header-meta';
     meta.appendChild(buildSpaceVisibilityRow(space));
     meta.appendChild(buildSpaceMembersStrip(space));
+    meta.appendChild(buildSpaceNestingRow(space));
     mountPresenceStrip(meta);
     activity = buildSpaceActivityStrip();
   }

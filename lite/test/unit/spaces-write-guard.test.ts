@@ -138,6 +138,10 @@ describe('ADR-074 — every graph WRITE is role-gated or justified', () => {
       'SET_CURRENT_PLAYBOOK',
       'ADD_SPACE_MEMBER',
       'REMOVE_SPACE_MEMBER',
+      // ADR-085 — nesting changes what a Space holds / how it is exposed.
+      'NEST_SPACE',
+      'UNNEST_SPACE',
+      'SET_NEST_INHERITANCE',
     ]) {
       expect(byName.get(name), `${name} missing from the write surface`).toBeDefined();
       expect(byName.get(name), `${name} is not role-gated`).toContain('SPACE_WRITABLE');

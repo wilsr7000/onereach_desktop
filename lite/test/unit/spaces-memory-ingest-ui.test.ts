@@ -29,6 +29,7 @@ function noopHandlers(): Parameters<typeof buildSpaceContextEntries>[1] {
     sendToMemory: h,
     deleteSpace: h,
     togglePin: h,
+    nestInside: h,
   };
 }
 

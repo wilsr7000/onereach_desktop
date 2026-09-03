@@ -126,6 +126,31 @@ export interface Space {
   visibility?: SpaceVisibility;
 }
 
+/**
+ * ADR-085 — a Space seen through a nesting edge: a child of the Space
+ * being viewed, or a parent it sits inside. `inheritsPermissions` is the
+ * edge's per-edge opt-in (default false): when true, the parent's
+ * explicit sight/write flows to the child.
+ */
+export interface NestedSpaceRef {
+  id: string;
+  name: string;
+  color?: string;
+  iconKey?: string;
+  kind?: SpaceKind;
+  inheritsPermissions: boolean;
+  /** ISO instant the opt-in lapses (ADR-085 TTL); absent = no TTL. */
+  inheritsUntil?: string;
+}
+
+/** ADR-085 — one `(child)-[:NESTED_IN]->(parent)` edge, as written. */
+export interface SpaceNesting {
+  childId: string;
+  parentId: string;
+  inheritsPermissions: boolean;
+  inheritsUntil?: string;
+}
+
 // ─── Items ───────────────────────────────────────────────────────────────
 
 /**

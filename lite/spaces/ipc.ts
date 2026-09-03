@@ -60,6 +60,8 @@ import type {
   ItemMetadata,
   AssetViewer,
   JourneyDraft,
+  NestedSpaceRef,
+  SpaceNesting,
 } from './types.js';
 import { runDiscovery } from './discovery.js';
 import { openWiserPlaybooksWindow } from '../wiser-playbooks-window.js';
@@ -108,6 +110,12 @@ export const SPACES_IPC = {
   /** Mutations (Phase 3a). ADR-048. */
   CREATE_SPACE: 'lite:spaces:create',
   RENAME_SPACE: 'lite:spaces:rename',
+  // ADR-085 — nested Spaces.
+  NEST_SPACE: 'lite:spaces:nest',
+  UNNEST_SPACE: 'lite:spaces:unnest',
+  SET_NEST_INHERITANCE: 'lite:spaces:nestInheritance',
+  LIST_CHILD_SPACES: 'lite:spaces:listChildSpaces',
+  LIST_PARENT_SPACES: 'lite:spaces:listParentSpaces',
   UPDATE_SPACE: 'lite:spaces:update',
   PIN_SPACE: 'lite:spaces:pin',
   DELETE_SPACE: 'lite:spaces:delete',
@@ -820,6 +828,88 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         const name = typeof payload?.name === 'string' ? payload.name : '';
         const value = await getSpacesApi().renameSpace(id, name);
         return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ADR-085 — nested Spaces. Same envelope as every other mutation; the
+  // permission decision lives in the Cypher (write guard on BOTH ends).
+  const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+  handleSpacesIpc(
+    SPACES_IPC.NEST_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { childId?: unknown; parentId?: unknown; inheritsPermissions?: unknown; inheritsUntil?: unknown }
+    ): Promise<SpacesIpcResult<SpaceNesting>> => {
+      try {
+        const value = await getSpacesApi().nestSpace(
+          str(payload?.childId),
+          str(payload?.parentId),
+          payload?.inheritsPermissions === true,
+          typeof payload?.inheritsUntil === 'string' ? payload.inheritsUntil : null
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.UNNEST_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { childId?: unknown; parentId?: unknown }
+    ): Promise<SpacesIpcResult<null>> => {
+      try {
+        await getSpacesApi().unnestSpace(str(payload?.childId), str(payload?.parentId));
+        return { ok: true, value: null };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.SET_NEST_INHERITANCE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { childId?: unknown; parentId?: unknown; inheritsPermissions?: unknown; inheritsUntil?: unknown }
+    ): Promise<SpacesIpcResult<SpaceNesting>> => {
+      try {
+        const value = await getSpacesApi().setNestInheritance(
+          str(payload?.childId),
+          str(payload?.parentId),
+          payload?.inheritsPermissions === true,
+          typeof payload?.inheritsUntil === 'string' ? payload.inheritsUntil : null
+        );
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.LIST_CHILD_SPACES,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { parentId?: unknown }
+    ): Promise<SpacesIpcResult<NestedSpaceRef[]>> => {
+      try {
+        return { ok: true, value: await getSpacesApi().listChildSpaces(str(payload?.parentId)) };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.LIST_PARENT_SPACES,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { childId?: unknown }
+    ): Promise<SpacesIpcResult<NestedSpaceRef[]>> => {
+      try {
+        return { ok: true, value: await getSpacesApi().listParentSpaces(str(payload?.childId)) };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

@@ -65,6 +65,9 @@ describe('visibility predicates in the Cypher surface', () => {
     ['HOME_TOP_CONTRIBUTORS', CYPHER.HOME_TOP_CONTRIBUTORS],
     ['HOME_PERMISSION_SUMMARY', CYPHER.HOME_PERMISSION_SUMMARY],
     ['HOME_ENTITY_COUNTS', CYPHER.HOME_ENTITY_COUNTS],
+    // ADR-085 — both ends of a nesting edge are gated on their own.
+    ['LIST_CHILD_SPACES', CYPHER.LIST_CHILD_SPACES],
+    ['LIST_PARENT_SPACES', CYPHER.LIST_PARENT_SPACES],
   ];
   const gatedAssetQueries: Array<[string, string]> = [
     ['GET_ITEM', CYPHER.GET_ITEM],

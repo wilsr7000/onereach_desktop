@@ -40,7 +40,7 @@ describe('sight is explicit permission only (ADR-084)', () => {
     expect(offenders, 'a query still reads [:OWNS] as access').toEqual([]);
   });
 
-  it('every visibility predicate is exactly: creator (either writer stamp) OR a live HAS_ACCESS grant', () => {
+  it('every visibility predicate is exactly: creator (either writer stamp) OR a live HAS_ACCESS grant — or, ADR-085, an opted-in nested chain up to a parent with that standing', () => {
     const s = sdkSource();
     for (const [name, alias] of [
       ['SPACE_VISIBLE', 's'],
@@ -54,6 +54,30 @@ describe('sight is explicit permission only (ADR-084)', () => {
       expect(body, `${name}: Playbooks creator stamp`).toContain(`coalesce(${alias}.created_by_user, '') = $viewerId`);
       expect(body, `${name}: explicit grant`).toContain(`HAS_ACCESS]->(${alias})`);
       expect(body, `${name}: nothing inferred`).not.toMatch(/OWNS|visibility|open/);
+      expect(body, `${name}: ADR-085 nested sight (opt-in only)`).toContain('NESTED_SIGHT(');
+    }
+  });
+
+  it('ADR-085: nested sight/write is a per-edge OPT-IN, bounded, broken by a deleted Space, and evaluates the PARENT explicitly', () => {
+    const s = sdkSource();
+    for (const name of ['NESTED_SIGHT', 'NESTED_WRITE'] as const) {
+      const i = s.indexOf(`const ${name} = (alias: string): string => \``);
+      expect(i, `${name} missing`).toBeGreaterThan(-1);
+      const body = s.slice(i, s.indexOf('`;', i));
+      expect(body, `${name}: opt-in flag on EVERY edge of the chain`).toContain('all(e IN relationships(nest_${alias}) WHERE e.inheritsPermissions = true');
+      expect(body, `${name}: bounded`).toContain('[:NESTED_IN*1..6]');
+      expect(body, `${name}: the opt-in may lapse (TTL, like a grant)`).toContain('(e.inheritsUntilUnixMs IS NULL OR e.inheritsUntilUnixMs > $nowMs)');
+      expect(body, `${name}: a deleted Space breaks the chain`).toContain('all(n IN nodes(nest_${alias}) WHERE n.deletedAt IS NULL)');
+      expect(body, `${name}: parent creator (Lite)`).toContain("coalesce(top_${alias}.createdBy, '') = $viewerId");
+      expect(body, `${name}: parent creator (Playbooks)`).toContain("coalesce(top_${alias}.created_by_user, '') = $viewerId");
+      expect(body, `${name}: parent live grant`).toContain('HAS_ACCESS]->(top_${alias})');
+      expect(body, `${name}: nothing inferred`).not.toMatch(/OWNS|visibility|open/);
+    }
+    const w = s.slice(s.indexOf('const NESTED_WRITE'), s.indexOf('`;', s.indexOf('const NESTED_WRITE')));
+    expect(w, 'a reader on the parent cannot write the child').toContain("<> 'reader'");
+    for (const name of ['SPACE_WRITABLE', 'ASSET_WRITABLE'] as const) {
+      const i = s.indexOf(`const ${name} = \``);
+      expect(s.slice(i, s.indexOf('`;', i)), `${name}: ADR-085 nested write`).toContain('NESTED_WRITE(');
     }
   });
 
@@ -105,6 +129,8 @@ describe('sight is explicit permission only (ADR-084)', () => {
   it('the registry tells other writers the rule, in the same words', () => {
     const q = CYPHER.ENSURE_LITE_SCHEMA_ANNOTATIONS;
     expect(q).toContain('NOT permission (ADR-084)');
+    expect(q, 'the nesting edge and its opt-in are documented for other writers').toContain('NESTED_IN');
+    expect(q).toContain('ADR-085');
     expect(q).toContain('created_by_user');
   });
 });

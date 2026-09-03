@@ -42,7 +42,9 @@ import {
 } from './note-standard';
 import { SpacesError } from './errors.js';
 import type { LearnSignals } from './learn-content.js';
-import type { SpacePresenceEntry } from './types.js';
+import type { SpacePresenceEntry,
+  NestedSpaceRef,
+  SpaceNesting } from './types.js';
 import type { Span } from '../logging/events.js';
 import type {
   Space,
@@ -239,6 +241,52 @@ const GRANT_LIVE = `(r.expiresUnixMs IS NULL OR r.expiresUnixMs > $nowMs)`;
  * the viewer doesn't belong to, and names are often the sensitive
  * part.
  */
+/**
+ * ADR-085 — nested Spaces (2026-09-02). robb: "support spaces inside one
+ * or more spaces … permissions would land on the inside space for
+ * scoping by default, with the option to inherit top level space
+ * permissions." A child Space hangs off a parent via
+ * `(child)-[:NESTED_IN {inheritsPermissions}]->(parent)`; a Space may
+ * sit inside several parents. By DEFAULT the edge changes nothing about
+ * sight: the inner Space keeps ADR-084's two signals. Only an edge whose
+ * `inheritsPermissions` is true — a per-edge opt-in written by a writer
+ * of the child — lets the parent's EXPLICIT standing (creator, or a live
+ * grant, evaluated on the parent; nothing inferred) flow down. Chains
+ * inherit only through consecutive opted-in edges, bounded to six hops;
+ * a deleted Space anywhere on the chain breaks it. `alias` is the Space
+ * being tested; inner names carry the alias so several predicates can
+ * share one query.
+ */
+const NESTED_SIGHT = (alias: string): string => `EXISTS {
+            MATCH nest_${alias} = (${alias})-[:NESTED_IN*1..6]->(top_${alias}:Space)
+            WHERE all(e IN relationships(nest_${alias}) WHERE e.inheritsPermissions = true
+              AND (e.inheritsUntilUnixMs IS NULL OR e.inheritsUntilUnixMs > $nowMs))
+              AND all(n IN nodes(nest_${alias}) WHERE n.deletedAt IS NULL)
+              AND (
+                coalesce(top_${alias}.createdBy, '') = $viewerId
+                OR coalesce(top_${alias}.created_by_user, '') = $viewerId
+                OR EXISTS {
+                  MATCH (:Person {id: $viewerId})-[g_${alias}:HAS_ACCESS]->(top_${alias})
+                  WHERE (g_${alias}.expiresUnixMs IS NULL OR g_${alias}.expiresUnixMs > $nowMs)
+                }
+              )
+          }`;
+/** The write-side twin: the parent's standing must be a writer's. */
+const NESTED_WRITE = (alias: string): string => `EXISTS {
+            MATCH nest_${alias} = (${alias})-[:NESTED_IN*1..6]->(top_${alias}:Space)
+            WHERE all(e IN relationships(nest_${alias}) WHERE e.inheritsPermissions = true
+              AND (e.inheritsUntilUnixMs IS NULL OR e.inheritsUntilUnixMs > $nowMs))
+              AND all(n IN nodes(nest_${alias}) WHERE n.deletedAt IS NULL)
+              AND (
+                coalesce(top_${alias}.createdBy, '') = $viewerId
+                OR coalesce(top_${alias}.created_by_user, '') = $viewerId
+                OR EXISTS {
+                  MATCH (:Person {id: $viewerId})-[g_${alias}:HAS_ACCESS]->(top_${alias})
+                  WHERE (g_${alias}.expiresUnixMs IS NULL OR g_${alias}.expiresUnixMs > $nowMs)
+                    AND coalesce(g_${alias}.role, 'writer') <> 'reader'
+                }
+              )
+          }`;
 const OTHER_SPACE_VISIBLE = `(
         $viewerId <> '' AND (
           coalesce(other.createdBy, '') = $viewerId
@@ -247,6 +295,7 @@ const OTHER_SPACE_VISIBLE = `(
             MATCH (:Person {id: $viewerId})-[r2:HAS_ACCESS]->(other)
             WHERE (r2.expiresUnixMs IS NULL OR r2.expiresUnixMs > $nowMs)
           }
+          OR ${NESTED_SIGHT('other')}
         )
       )`;
 
@@ -282,6 +331,7 @@ const SPACE_WRITABLE = `(
             WHERE ${GRANT_LIVE.replace(/\br\./g, 'w.')}
               AND coalesce(w.role, 'writer') <> 'reader'
           }
+          OR ${NESTED_WRITE('s')}
         )
       )`;
 
@@ -295,7 +345,11 @@ const SPACE_WRITABLE = `(
  * between an IPC caller and "add my asset to any Space by id".
  */
 const SPACE_WRITABLE_FOR = (alias: string): string =>
-  SPACE_WRITABLE.replace(/\bs\./g, `${alias}.`).replace(/->\(s\)/g, `->(${alias})`);
+  SPACE_WRITABLE.replace(/\bs\./g, `${alias}.`)
+    .replace(/->\(s\)/g, `->(${alias})`)
+    // ADR-085: the nested-chain pattern and its alias-suffixed names.
+    .replace(/\(s\)-\[:NESTED_IN/g, `(${alias})-[:NESTED_IN`)
+    .replace(/\b(nest|top|g)_s\b/g, `$1_${alias}`);
 
 // ADR-084 (2026-09-02) — sight is EXPLICIT PERMISSION ONLY. Two signals
 // and nothing inferred:
@@ -318,8 +372,15 @@ const SPACE_VISIBLE = `(
             MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(s)
             WHERE ${GRANT_LIVE}
           }
+          OR ${NESTED_SIGHT('s')}
         )
       )`;
+/** SPACE_VISIBLE for a Space bound under another alias (ADR-085 listings). */
+const SPACE_VISIBLE_FOR = (alias: string): string =>
+  SPACE_VISIBLE.replace(/\bs\./g, `${alias}.`)
+    .replace(/->\(s\)/g, `->(${alias})`)
+    .replace(/\(s\)-\[:NESTED_IN/g, `(${alias})-[:NESTED_IN`)
+    .replace(/\b(nest|top|g)_s\b/g, `$1_${alias}`);
 
 /**
  * ADR-084 — the agent catalog respects asset permissions. A `:Agent`
@@ -383,6 +444,7 @@ const ASSET_WRITABLE = `(
                 WHERE (wr.expiresUnixMs IS NULL OR wr.expiresUnixMs > $nowMs)
                   AND coalesce(wr.role, 'writer') <> 'reader'
               }
+              OR ${NESTED_WRITE('ws')}
             )
         }
       )`;
@@ -405,7 +467,8 @@ const ASSET_VISIBLE = `(
                   OR EXISTS {
                     MATCH (:Person {id: $viewerId})-[r:HAS_ACCESS]->(vs)
                     WHERE ${GRANT_LIVE}
-                  }))
+                  }
+                  OR ${NESTED_SIGHT('vs')}))
         }
       )`;
 
@@ -490,6 +553,80 @@ export const CYPHER = {
            lastActivityMs AS lastActivityMs,
            pin IS NOT NULL AS pinned
     ORDER BY toLower(coalesce(s.name, s.id, '')) ASC
+  `,
+
+  /**
+   * ADR-085 — put a Space inside another: `(child)-[:NESTED_IN]->(parent)`.
+   * A write to BOTH Spaces (you change what the parent holds and how the
+   * child is exposed), so both carry the write guard. No self-nesting;
+   * no cycles (the parent may not already sit below the child, checked
+   * eight hops deep — two beyond what inheritance ever walks).
+   * `$inherit` is the per-edge opt-in; re-nesting an existing edge just
+   * updates it.
+   */
+  NEST_SPACE: `
+    MATCH (s:Space {id: $childId})
+      WHERE s.deletedAt IS NULL AND ${SPACE_WRITABLE}
+    MATCH (p:Space {id: $parentId})
+      WHERE p.deletedAt IS NULL AND ${SPACE_WRITABLE_FOR('p')}
+        AND s.id <> p.id
+        AND NOT EXISTS { MATCH (p)-[:NESTED_IN*1..8]->(s) }
+    MERGE (s)-[n:NESTED_IN]->(p)
+      ON CREATE SET n.createdAt = $now, n.createdBy = $viewerId
+    SET n.inheritsPermissions = $inherit, n.inheritsUntilUnixMs = $inheritUntil, n.updatedAt = $now
+    RETURN s.id AS childId, p.id AS parentId,
+           coalesce(n.inheritsPermissions, false) AS inheritsPermissions,
+           n.inheritsUntilUnixMs AS inheritsUntilUnixMs
+  `,
+  /** ADR-085 — take a Space out of a parent. Either Space's writer may. */
+  UNNEST_SPACE: `
+    MATCH (s:Space {id: $childId})-[n:NESTED_IN]->(p:Space {id: $parentId})
+      WHERE (${SPACE_WRITABLE} OR ${SPACE_WRITABLE_FOR('p')})
+    DELETE n
+    RETURN s.id AS childId, p.id AS parentId
+  `,
+  /**
+   * ADR-085 — flip the per-edge opt-in. Exposure is the CHILD's call:
+   * only a writer of the child may let (or stop letting) the parent's
+   * permissions flow into it.
+   */
+  SET_NEST_INHERITANCE: `
+    MATCH (s:Space {id: $childId})-[n:NESTED_IN]->(p:Space {id: $parentId})
+      WHERE s.deletedAt IS NULL AND ${SPACE_WRITABLE}
+    SET n.inheritsPermissions = $inherit, n.inheritsUntilUnixMs = $inheritUntil, n.updatedAt = $now
+    RETURN s.id AS childId, p.id AS parentId,
+           coalesce(n.inheritsPermissions, false) AS inheritsPermissions,
+           n.inheritsUntilUnixMs AS inheritsUntilUnixMs
+  `,
+  /** ADR-085 — the Spaces inside a Space the viewer can see, each gated on its own. */
+  LIST_CHILD_SPACES: `
+    MATCH (s:Space {id: $parentId})
+      WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE}
+    MATCH (child:Space)-[n:NESTED_IN]->(s)
+      WHERE child.deletedAt IS NULL AND ${SPACE_VISIBLE_FOR('child')}
+    RETURN child.id AS id,
+           coalesce(child.name, child.id) AS name,
+           coalesce(child.color, '') AS color,
+           coalesce(child.iconKey, child.icon, '') AS iconKey,
+           coalesce(child.kind, 'user') AS kind,
+           coalesce(n.inheritsPermissions, false) AS inheritsPermissions,
+           n.inheritsUntilUnixMs AS inheritsUntilUnixMs
+    ORDER BY toLower(coalesce(child.name, child.id, '')) ASC
+  `,
+  /** ADR-085 — the Spaces a Space sits inside, each gated on its own. */
+  LIST_PARENT_SPACES: `
+    MATCH (s:Space {id: $childId})
+      WHERE s.deletedAt IS NULL AND ${SPACE_VISIBLE}
+    MATCH (s)-[n:NESTED_IN]->(parent:Space)
+      WHERE parent.deletedAt IS NULL AND ${SPACE_VISIBLE_FOR('parent')}
+    RETURN parent.id AS id,
+           coalesce(parent.name, parent.id) AS name,
+           coalesce(parent.color, '') AS color,
+           coalesce(parent.iconKey, parent.icon, '') AS iconKey,
+           coalesce(parent.kind, 'user') AS kind,
+           coalesce(n.inheritsPermissions, false) AS inheritsPermissions,
+           n.inheritsUntilUnixMs AS inheritsUntilUnixMs
+    ORDER BY toLower(coalesce(parent.name, parent.id, '')) ASC
   `,
 
   /**
@@ -2781,7 +2918,8 @@ export const CYPHER = {
           'A Space is visible to a viewer ONLY when the viewer created it (createdBy, or the Playbooks ' +
           'writer stamp created_by_user) OR a live HAS_ACCESS grant exists. OWNS edges are account membership ' +
           'stamped by other writers for every member on every Space and are NOT permission (ADR-084). ' +
-          'Writes require the creator or a non-reader HAS_ACCESS grant.',
+          'Writes require the creator or a non-reader HAS_ACCESS grant. A Space nested inside another (NESTED_IN) keeps its own ' +
+          'grants unless that edge opts into inheriting the grants of the parent (inheritsPermissions = true, ADR-085).',
         sp.lite_annotated_at = $nowMs
     MERGE (as:Schema {entity: 'Asset'})
     SET as.lite_properties =
@@ -2813,7 +2951,10 @@ export const CYPHER = {
           'VIEWED (Person→Asset audit: firstAt, lastAt, count) · LAST_EDITED (Person→Asset) · TOUCHED (Commit→Asset) · ' +
           'TAGGED_AS (Asset→Tag) · PRESENCE_OF (Presence→Person) · HAS_TYPE (Agent→AgentType) · ' +
           'REACHABLE_VIA (Agent→AgentEndpoint) · REPRESENTS (Asset[type=agent]→Agent) · DECOMPOSED_FROM (Asset[ticket]→Asset[playbook]) · ' +
-          'OWNS (Person→Space): account membership written by WISER / GSX-Desktop — grants SIGHT in Lite, never write',
+          'OWNS (Person→Space): account membership written by WISER / GSX-Desktop — NOT permission (ADR-084), read by no predicate · ' +
+          'NESTED_IN (Space→Space, child→parent, ADR-085): a Space inside one or more Spaces; inheritsPermissions (per-edge opt-in, default false) ' +
+          'with an optional inheritsUntilUnixMs TTL (epoch ms; inheritance lapses when it passes, like HAS_ACCESS.expiresUnixMs) ' +
+          'lets the explicit sight/write of the parent flow to the child through consecutive opted-in edges (at most 6 hops); no self-edges, no cycles',
         rt.lite_annotated_at = $nowMs
     RETURN 6 AS annotated
   `,
@@ -2899,6 +3040,122 @@ export class SdkSpacesClient {
     return this.withSpan('spaces.listSpaces', async () => {
       const rows = await this.run(CYPHER.LIST_SPACES, { viewerId: this.viewerParam() });
       return rows.map(toSpace);
+    });
+  }
+
+  // ─── ADR-085: nested Spaces ─────────────────────────────────────────
+  async nestSpace(
+    childId: string,
+    parentId: string,
+    inheritsPermissions: boolean,
+    inheritsUntil?: string | null
+  ): Promise<SpaceNesting> {
+    return this.withSpan('spaces.nest', async () => {
+      const child = validateSpaceId(childId);
+      const parent = validateSpaceId(parentId);
+      if (child === parent) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: 'A Space cannot be placed inside itself.',
+          remediation: 'Pick a different Space.',
+          context: { childId: child },
+        });
+      }
+      const rows = await this.run(CYPHER.NEST_SPACE, {
+        childId: child,
+        parentId: parent,
+        inherit: inheritsPermissions === true,
+        inheritUntil: this.inheritUntilParam(inheritsPermissions, inheritsUntil),
+        now: nowIso(),
+        viewerId: this.viewerParam(),
+      });
+      const row = rows[0];
+      if (row === undefined) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message:
+            'Could not place the Space: you need write access to both Spaces, and a Space cannot go inside one of its own children.',
+          remediation: 'Check both Spaces exist, that you can write both, and that the target is not nested under this one.',
+          context: { childId: child, parentId: parent },
+        });
+      }
+      return rowToNesting(row);
+    });
+  }
+
+  async unnestSpace(childId: string, parentId: string): Promise<void> {
+    return this.withSpan('spaces.unnest', async () => {
+      const rows = await this.run(CYPHER.UNNEST_SPACE, {
+        childId: validateSpaceId(childId),
+        parentId: validateSpaceId(parentId),
+        viewerId: this.viewerParam(),
+      });
+      if (rows.length === 0) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'That nesting was not found, or you cannot write either Space.',
+          remediation: 'Refresh and try again.',
+          context: { childId, parentId },
+        });
+      }
+    });
+  }
+
+  async setNestInheritance(
+    childId: string,
+    parentId: string,
+    inheritsPermissions: boolean,
+    inheritsUntil?: string | null
+  ): Promise<SpaceNesting> {
+    return this.withSpan('spaces.nestInheritance', async () => {
+      const rows = await this.run(CYPHER.SET_NEST_INHERITANCE, {
+        childId: validateSpaceId(childId),
+        parentId: validateSpaceId(parentId),
+        inherit: inheritsPermissions === true,
+        inheritUntil: this.inheritUntilParam(inheritsPermissions, inheritsUntil),
+        now: nowIso(),
+        viewerId: this.viewerParam(),
+      });
+      const row = rows[0];
+      if (row === undefined) {
+        throw new SpacesError({
+          code: 'SPACES_NOT_FOUND',
+          message: 'That nesting was not found, or you cannot write the inner Space (only its writers decide what it inherits).',
+          remediation: 'Refresh and try again.',
+          context: { childId, parentId },
+        });
+      }
+      return rowToNesting(row);
+    });
+  }
+
+  /**
+   * ADR-085 TTL — the inherit opt-in may lapse: an ISO instant becomes
+   * epoch ms (the same rule as a grant's expiry); null/absent = no TTL.
+   * Meaningless without the opt-in, so it is dropped when inherit is off.
+   */
+  private inheritUntilParam(inherit: boolean, until: string | null | undefined): number | null {
+    if (inherit !== true || until === null || until === undefined || until.trim().length === 0) return null;
+    return parseGrantExpiry(until, this.now());
+  }
+
+  async listChildSpaces(parentId: string): Promise<NestedSpaceRef[]> {
+    return this.withSpan('spaces.listChildren', async () => {
+      const rows = await this.run(CYPHER.LIST_CHILD_SPACES, {
+        parentId: validateSpaceId(parentId),
+        viewerId: this.viewerParam(),
+      });
+      return rows.map(rowToNestedRef).filter((r): r is NestedSpaceRef => r !== null);
+    });
+  }
+
+  async listParentSpaces(childId: string): Promise<NestedSpaceRef[]> {
+    return this.withSpan('spaces.listParents', async () => {
+      const rows = await this.run(CYPHER.LIST_PARENT_SPACES, {
+        childId: validateSpaceId(childId),
+        viewerId: this.viewerParam(),
+      });
+      return rows.map(rowToNestedRef).filter((r): r is NestedSpaceRef => r !== null);
     });
   }
 
@@ -6837,6 +7094,30 @@ export function sanitizeChecklistItems(raw: ReadonlyArray<ChecklistItemSpec>): C
 }
 
 /** Indexes that count toward completion (non-optional items). */
+/** ADR-085 row shapes. */
+function rowToNesting(r: Record<string, unknown>): SpaceNesting {
+  return {
+    childId: typeof r['childId'] === 'string' ? r['childId'] : '',
+    parentId: typeof r['parentId'] === 'string' ? r['parentId'] : '',
+    inheritsPermissions: r['inheritsPermissions'] === true,
+    ...(typeof r['inheritsUntilUnixMs'] === 'number' ? { inheritsUntil: new Date(r['inheritsUntilUnixMs']).toISOString() } : {}),
+  };
+}
+function rowToNestedRef(r: Record<string, unknown>): NestedSpaceRef | null {
+  const id = typeof r['id'] === 'string' ? r['id'] : '';
+  if (id.length === 0) return null;
+  const out: NestedSpaceRef = {
+    id,
+    name: typeof r['name'] === 'string' && r['name'].length > 0 ? r['name'] : id,
+    inheritsPermissions: r['inheritsPermissions'] === true,
+  };
+  if (typeof r['color'] === 'string' && r['color'].length > 0) out.color = r['color'];
+  if (typeof r['iconKey'] === 'string' && r['iconKey'].length > 0) out.iconKey = r['iconKey'];
+  if (r['kind'] === 'shared' || r['kind'] === 'user') out.kind = r['kind'];
+  if (typeof r['inheritsUntilUnixMs'] === 'number') out.inheritsUntil = new Date(r['inheritsUntilUnixMs']).toISOString();
+  return out;
+}
+
 export function requiredIndexes(items: ReadonlyArray<ChecklistItemSpec>): number[] {
   const out: number[] = [];
   items.forEach((item, i) => {

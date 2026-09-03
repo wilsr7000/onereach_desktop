@@ -36,6 +36,7 @@
  * Restore the missing public re-export and re-run.
  */
 
+import type { NestedSpaceRef, SpaceNesting } from '../../../spaces/types.js';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 // ────────────────────────────────────────────────────────────────────────
@@ -226,6 +227,14 @@ function buildStubConsumer(): {
         name: input.name,
       }),
     renameSpace: async (id, name) => maybeFail<Space>({ id, name }),
+    // ADR-085 — nested Spaces.
+    nestSpace: async (childId, parentId, inheritsPermissions) =>
+      maybeFail<SpaceNesting>({ childId, parentId, inheritsPermissions }),
+    unnestSpace: async () => maybeFail<void>(undefined),
+    setNestInheritance: async (childId, parentId, inheritsPermissions) =>
+      maybeFail<SpaceNesting>({ childId, parentId, inheritsPermissions }),
+    listChildSpaces: async () => maybeFail<NestedSpaceRef[]>([]),
+    listParentSpaces: async () => maybeFail<NestedSpaceRef[]>([]),
     pinSpace: async (_id, _pinned) => {
       /* stub: contract only needs the method to exist */
     },
