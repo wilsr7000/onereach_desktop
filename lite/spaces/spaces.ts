@@ -17254,6 +17254,10 @@ function wireRowMenu(): void {
       void performSoftDelete(spaceId);
     } else if (action === 'toggle-shared') {
       void toggleSpaceKind(spaceId);
+    } else if (action === 'nest') {
+      // ADR-085 — the same picker the right-click menu opens.
+      const space = state.spaces.find((s) => s.id === spaceId);
+      if (space !== undefined) void openNestSpacePicker(space);
     }
   });
   // Outside-click closes the menu.
