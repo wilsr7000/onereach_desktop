@@ -8110,7 +8110,7 @@ export function buildItemCard(
   // generateItemTitle returns the real title when it's a normal human
   // string, or a derived one ("Image · 5b4375", "sunset · example.com",
   // …) when the title was missing or hash-shaped. Never empty.
-  title.textContent = generateItemTitle(item);
+  title.textContent = humanizeTileTitle(generateItemTitle(item));
   titleRow.appendChild(title);
 
   // Hover-reveal pencil. Click opens the detail pane (which has the
@@ -9153,6 +9153,27 @@ function buildTextTilePreview(
     preview.appendChild(paper);
     return;
   }
+  // No excerpt of its own: the AI summary is the next-best paper, with a
+  // small type chip so the tile still says what the file is.
+  const summary = tileSummaryText(item);
+  if (summary !== null) {
+    if (typeof item.fileKey === 'string' && item.fileKey.length > 0) {
+      const badge = fileExtBadge(item.title);
+      if (badge.length > 0 && badge.length <= 5) {
+        const chip = document.createElement('span');
+        chip.className = 'spaces-card-filecard-ext spaces-card-type-chip';
+        chip.setAttribute('data-family', fileExtFamily(badge));
+        chip.setAttribute('aria-hidden', 'true');
+        chip.textContent = badge;
+        preview.appendChild(chip);
+      }
+    }
+    const paper = document.createElement('p');
+    paper.className = 'spaces-card-excerpt spaces-card-excerpt-summary';
+    paper.textContent = summary;
+    preview.appendChild(paper);
+    return;
+  }
   // Binary-backed doc with nothing to excerpt: PDFs get a real
   // first-page preview and text-like files fetch a text excerpt
   // (both lazy, same near-viewport gate as image thumbnails); other
@@ -9185,6 +9206,18 @@ function buildTextTilePreview(
     }
     swapTilePreviewToFileBadge(preview, item.title);
     return;
+  }
+  // No file key (content lived inline) but a filename we know: the
+  // badge still tells the reader "this is an HTML page / a script"
+  // instead of a bare glyph (2026-09-02 tile pass).
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  const filename = typeof meta['filename'] === 'string' ? (meta['filename'] as string) : item.title;
+  if (/\.[a-z0-9]{1,5}$/i.test(filename)) {
+    const badge = fileExtBadge(filename);
+    if (badge.length > 0 && badge.length <= 5) {
+      swapTilePreviewToFileBadge(preview, filename);
+      return;
+    }
   }
   const glyph = document.createElement('span');
   glyph.className = 'spaces-card-glyph spaces-card-glyph-doc';
@@ -9444,8 +9477,89 @@ export function tileExcerptText(excerpt: string | undefined): string | null {
   const raw = excerpt.trim();
   if (raw.length === 0) return null;
   if (raw.startsWith('data:')) return null;
-  const cleaned = stripMarkdownForExcerpt(raw);
+  // Markup/code hygiene (2026-09-02 tile pass, found live): a saved web
+  // page showed its <!DOCTYPE …> and a bundled script its minified
+  // source as "paper". Tags are stripped; code is refused so the tile
+  // falls back to its file badge instead of a wall of symbols.
+  const deMarked = looksLikeMarkup(raw) ? stripMarkupForExcerpt(raw) : raw;
+  if (deMarked.length === 0 || looksLikeCode(deMarked)) return null;
+  const cleaned = stripMarkdownForExcerpt(deMarked);
   return cleaned.length > 0 ? cleaned : null;
+}
+
+/** HTML/XML document or a run of tags (3+) in the first 400 chars. */
+export function looksLikeMarkup(text: string): boolean {
+  const head = text.slice(0, 400);
+  if (/^\s*(<!doctype\b|<html\b|<head\b|<body\b|<\?xml\b|<!--)/i.test(head)) return true;
+  return (head.match(/<\/?[a-z][\w-]*(?:\s[^<>]*)?>/gi)?.length ?? 0) >= 3;
+}
+
+/** Tags, comments, script/style bodies and common entities → plain text. */
+export function stripMarkupForExcerpt(text: string): string {
+  return text
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<!--[\s\S]*$/g, ' ') // comment cut open by the excerpt length
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<(script|style)\b[^>]*>[\s\S]*$/gi, ' ') // unterminated tail of a truncated excerpt
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Source code (minified bundles especially) is not prose. Two signals:
+ * a leading code construct, or a first 300 chars where code symbols
+ * outnumber whitespace. A long URL inside a sentence is NOT code.
+ */
+export function looksLikeCode(text: string): boolean {
+  const head = text.slice(0, 300);
+  if (/^\s*(import\s*[{"']|export\s+(default|const|function|class)\b|\(function\b|function\s*\w*\s*\(|(const|let|var)\s+\w+\s*=|window\.\w+\s*=|\{\s*"[^"]+"\s*:)/.test(head)) {
+    return true;
+  }
+  const symbols = (head.match(/[{};=()<>[\]|\\]/g) ?? []).length;
+  const whitespace = (head.match(/\s/g) ?? []).length;
+  return symbols >= 12 && symbols > whitespace;
+}
+
+/**
+ * The asset's AI summary (`metadata.ai_summary`, written at ingest for
+ * most uploads) as tile paper, when the item carries no excerpt of its
+ * own. 35 of 45 items in one real Space had one and rendered as empty
+ * boxes (2026-09-02). Falls back to the description.
+ */
+export function tileSummaryText(item: Pick<RendererItemSummary, 'metadata' | 'description'>): string | null {
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  const summary = meta['ai_summary'];
+  if (typeof summary === 'string') {
+    const cleaned = tileExcerptText(summary);
+    if (cleaned !== null) return cleaned;
+  }
+  const description = typeof item.description === 'string' ? item.description : '';
+  return tileExcerptText(description);
+}
+
+/**
+ * Tile display title (2026-09-02 tile pass): a filename reads as words —
+ * underscores become spaces and a known extension is dropped (the tile's
+ * type chip already says PDF/XLSX). Anything that isn't filename-shaped
+ * is returned untouched, so generated "<Kind> · <id>" titles and real
+ * titles never change.
+ */
+export function humanizeTileTitle(raw: string): string {
+  const t = raw.trim();
+  const filenameShaped = /\.[a-z0-9]{2,5}$/i.test(t) || t.includes('_');
+  if (!filenameShaped) return t;
+  return t
+    .replace(/\.(pdf|docx?|xlsx?|pptx?|md|txt|csv|json|html?|js|ts|png|jpe?g|gif|webp|svg|m4a|mp3|mp4|mov|wav|zip)$/i, '')
+    .replace(/[_+]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 

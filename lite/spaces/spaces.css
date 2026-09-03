@@ -1128,7 +1128,7 @@ body {
 
 .spaces-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(228px, 1fr));
   gap: 18px;
 }
 
@@ -1295,6 +1295,8 @@ body {
     linear-gradient(180deg, var(--or-bg-raised), var(--or-bg-surface));
   align-items: stretch;
   justify-content: flex-start;
+  flex-direction: column;
+  gap: 8px;
   padding: 14px 16px;
 }
 
@@ -1439,7 +1441,7 @@ body {
     linear-gradient(170deg, var(--or-tint-violet), var(--or-tint-violet));
   flex-direction: column;
   align-items: stretch;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 10px;
   padding: 22px 24px;
 }
@@ -1964,9 +1966,14 @@ body {
   line-height: 1.35;
   margin: 0;
   letter-spacing: -0.005em;
-  white-space: nowrap;
+  /* Two lines, not one ellipsized line: a 150-char filename kept
+     nothing legible at one line (2026-09-02 tile pass). */
+  white-space: normal;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -7433,7 +7440,7 @@ body {
 .spaces-card-preview-journey,
 .spaces-card-preview-agent,
 .spaces-card-preview-playbook {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 /* ── Empty states that offer a way out ──────────────────────────────
@@ -10222,3 +10229,39 @@ body {
   padding: 8px 10px;
 }
 .spaces-keywalk-later:hover { color: rgba(var(--or-ink-rgb), 0.85); }
+
+/* ── Tile legibility pass (2026-09-02, "make the tiles look good and
+   text not blow out") ──────────────────────────────────────────────
+   Text never leaves its tile: every preview child may shrink, long
+   tokens (URLs, filenames, minified code that slipped past hygiene)
+   wrap anywhere, and every prose surface — playbook paper included —
+   is clamped with the same soft fade the document tiles use. */
+.spaces-card-preview > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.spaces-card-excerpt {
+  overflow-wrap: anywhere;
+}
+
+.spaces-card-type-chip {
+  flex: 0 0 auto;
+  align-self: flex-start;
+}
+
+.spaces-card-preview-playbook .spaces-card-excerpt {
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent 100%);
+}
+
+.spaces-card-preview-agent .spaces-card-agent-okf {
+  overflow-wrap: anywhere;
+}
