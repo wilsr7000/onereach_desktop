@@ -23,7 +23,7 @@ export interface ToolEntry {
   id: string;
   /** Human-readable name shown in the Tools menu and the manager. */
   label: string;
-  /** Target URL (http/https only). Opens in the user's default browser. */
+  /** Target URL (http/https only). Opens in a large in-app window (2026-09-02; was the OS browser). */
   url: string;
   /** ISO 8601. */
   createdAt: string;

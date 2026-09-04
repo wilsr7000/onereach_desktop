@@ -3318,6 +3318,27 @@ export const MANIFEST: Manifest = {
             "description": "Idempotent registry annotations (lite_* keys) for other writers.",
             "tags": [],
             "examples": []
+          },
+          {
+            "name": "admissionGet",
+            "signature": "admissionGet(id: string): Promise<AdmissionView>",
+            "description": "ADR-087 — the agent's admission checklist (shared KV document, same words and grading as the hosted page).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "admissionSave",
+            "signature": "admissionSave(id: string, patch: AdmissionPatch): Promise<AdmissionView>",
+            "description": "Tick lines, set the platform or owner e-mail (admin or the agent's creator); merged into the shared document.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "admissionAnalyze",
+            "signature": "admissionAnalyze(id: string): Promise<{ view: AdmissionView; analysis: AdmissionAnalysis }>",
+            "description": "\"The system analyzes the agent\": graph-provable lines are ticked with evidence; the AI grades the rest and explains.",
+            "tags": [],
+            "examples": []
           }
         ]
       },
@@ -3498,8 +3519,15 @@ export const MANIFEST: Manifest = {
           },
           {
             "name": "searchAgentLibrary",
-            "signature": "searchAgentLibrary(q: string, limit?: number): Promise<AgentLibraryEntry[]>",
+            "signature": "searchAgentLibrary(q: string, limit?: number, offset?: number): Promise<AgentLibraryEntry[]>",
             "description": "Search the account's agent library (graph `:Agent` nodes) by\nname/description substring for the \"From library\" picker.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "agentLibraryCount",
+            "signature": "agentLibraryCount(q: string): Promise<number>",
+            "description": "How many live, visible agents match `q` (2026-09-04) — the picker's \"N of M\".",
             "tags": [],
             "examples": []
           },
@@ -4355,7 +4383,7 @@ export const MANIFEST: Manifest = {
     {
       "slug": "tools",
       "title": "Tools",
-      "summary": "Tools module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts`.\n\nThe Tools module hosts the top-level \"Tools\" menu and the persistence\nlayer behind it. Each entry is a simple `{ label, url }` shortcut --\nclicking it opens the URL in the user's default browser.\n\nTests: `_setToolsApiForTesting(stub)` to inject a custom\nimplementation, `_resetToolsApiForTesting()` to clear the singleton.",
+      "summary": "Tools module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts`.\n\nThe Tools module hosts the top-level \"Tools\" menu and the persistence\nlayer behind it. Each entry is a simple `{ label, url }` shortcut --\nclicking it opens the URL in a large in-app window (Chrome parity: OAuth popups and \"Connect with Google\" work; one persistent session for all tools).\n\nTests: `_setToolsApiForTesting(stub)` to inject a custom\nimplementation, `_resetToolsApiForTesting()` to clear the singleton.",
       "surface": {
         "interfaceName": "ToolsApi",
         "interfaceDescription": "The public surface of the Tools module.\n\n**Error contract**: `add` / `update` / `remove` throw `ToolsError`\n(extends `LiteError`) on failure. Inspect `.code` to branch on\n`TOOLS_NOT_FOUND`, `TOOLS_INVALID_INPUT`, `TOOLS_INVALID_URL`,\n`TOOLS_DUPLICATE`, `TOOLS_PERSISTENCE_FAILED`. `list` / `get` do not\nthrow; they return empty / null on failure.",
@@ -4449,7 +4477,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "TOOLS_EVENTS",
-        "count": 19,
+        "count": 21,
         "entries": [
           {
             "constantKey": "ADD_START",
@@ -4512,6 +4540,16 @@ export const MANIFEST: Manifest = {
             "description": ""
           },
           {
+            "constantKey": "BROWSER_OPENED",
+            "name": "tools.browser.opened",
+            "description": ""
+          },
+          {
+            "constantKey": "BROWSER_LOADED",
+            "name": "tools.browser.loaded",
+            "description": ""
+          },
+          {
             "constantKey": "IPC_LIST",
             "name": "tools.ipc.list",
             "description": ""
@@ -4548,7 +4586,7 @@ export const MANIFEST: Manifest = {
           }
         ]
       },
-      "readme": "# Tools\n\nUser-curated shortcuts surfaced in the top-level **Tools** menu. Each\nentry is a `{ label, url }` pair; clicking a tool in the menu opens the\nURL in the user's default browser.\n\n## Surface\n\n```\nTools (top:tools)\n  |- (one menu item per saved tool)\n  |- ---\n  |- Manage Tools...   -> opens the manager window\n```\n\nThe manager window is a small CRUD UI where the user can:\n\n- Add a tool (label + URL)\n- Edit a tool\n- Delete a tool\n\n## Storage\n\nKV-backed (`lite-tool-entries / default`). Entries are scoped to the\nsigned-in OneReach `accountId` -- the same multi-user isolation pattern\nas IDW. Signed-out reads return an empty list; signed-out writes throw\n`TOOLS_PERSISTENCE_FAILED`.\n\n## Public API (`api.ts`)\n\n| Method | Purpose |\n|---|---|\n| `list()` | All entries, in storage order. |\n| `get(id)` | Single entry by id, or null. |\n| `add(input)` | Add a new entry. Auto-generates `id` if absent. |\n| `update(id, patch)` | Update label / url. |\n| `remove(id)` | Remove an entry. |\n| `onChange(handler)` | Subscribe to mutations. |\n| `onEvent(handler)` | Subscribe to typed Tools events (ADR-032). |\n\n## Error catalog\n\n| Code | Cause | Remediation |\n|---|---|---|\n| `TOOLS_NOT_FOUND` | `get`/`update`/`remove` with unknown id. | Refresh the list. |\n| `TOOLS_INVALID_INPUT` | Missing or empty label. | Provide a non-empty label. |\n| `TOOLS_INVALID_URL` | Missing, malformed, or non-http(s) url. | Provide an https:// URL. |\n| `TOOLS_DUPLICATE` | Explicit `id` collides on add. | Pick a different label, or update existing. |\n| `TOOLS_PERSISTENCE_FAILED` | KV write rejected (incl. signed-out). | Check connection; sign in. |\n\n## Renderer surface (`window.lite.tools.*`)\n\n- `list()`, `get(id)`, `add(entry)`, `update(id, patch)`, `remove(id)`\n- `openManager()` -- opens the manager window\n- `onChange(handler)` -- subscribe to `lite:tools:changed` broadcasts\n- `parseError(err)` -- recover the structured error JSON from a thrown\n  IPC error, mirroring the IDW pattern\n"
+      "readme": "# Tools\n\nUser-curated shortcuts surfaced in the top-level **Tools** menu. Each\nentry is a `{ label, url }` pair; clicking a tool in the menu opens the\nURL in the user's default browser.\n\n## Surface\n\n```\nTools (top:tools)\n  |- (one menu item per saved tool)\n  |- ---\n  |- Manage Tools...   -> opens the manager window\n```\n\nThe manager window is a small CRUD UI where the user can:\n\n- Add a tool (label + URL)\n- Edit a tool\n- Delete a tool\n\n## Storage\n\nKV-backed (`lite-tool-entries / default`). Entries are scoped to the\nsigned-in OneReach `accountId` -- the same multi-user isolation pattern\nas IDW. Signed-out reads return an empty list; signed-out writes throw\n`TOOLS_PERSISTENCE_FAILED`.\n\n## Public API (`api.ts`)\n\n| Method | Purpose |\n|---|---|\n| `list()` | All entries, in storage order. |\n| `get(id)` | Single entry by id, or null. |\n| `add(input)` | Add a new entry. Auto-generates `id` if absent. |\n| `update(id, patch)` | Update label / url. |\n| `remove(id)` | Remove an entry. |\n| `onChange(handler)` | Subscribe to mutations. |\n| `onEvent(handler)` | Subscribe to typed Tools events (ADR-032). |\n\n## Error catalog\n\n| Code | Cause | Remediation |\n|---|---|---|\n| `TOOLS_NOT_FOUND` | `get`/`update`/`remove` with unknown id. | Refresh the list. |\n| `TOOLS_INVALID_INPUT` | Missing or empty label. | Provide a non-empty label. |\n| `TOOLS_INVALID_URL` | Missing, malformed, or non-http(s) url. | Provide an https:// URL. |\n| `TOOLS_DUPLICATE` | Explicit `id` collides on add. | Pick a different label, or update existing. |\n| `TOOLS_PERSISTENCE_FAILED` | KV write rejected (incl. signed-out). | Check connection; sign in. |\n\n## Renderer surface (`window.lite.tools.*`)\n\n- `list()`, `get(id)`, `add(entry)`, `update(id, patch)`, `remove(id)`\n- `openManager()` -- opens the manager window\n- `onChange(handler)` -- subscribe to `lite:tools:changed` broadcasts\n- `parseError(err)` -- recover the structured error JSON from a thrown\n  IPC error, mirroring the IDW pattern\n\n## The tool window (2026-09-02)\n\nClicking a tool opens it in a large in-app window (`browser-window.ts`, one per tool, reused on the next click) — not the OS browser. ~92% of the primary work area (floored at 1280×800), Chrome parity from `lite/main-window/browser-parity.ts` (Chrome UA, OAuth popups handled on the same partition so \"Connect with Google\" completes, context menu, downloads), one persistent partition `persist:lite-tools` shared by every tool so a sign-in carries across tools and restarts. Still sandboxed, context-isolated, no preload (ADR-038). Events: `tools.browser.opened` (`reused` says focus-vs-create), `tools.browser.loaded`.\n"
     },
     {
       "slug": "totp",
@@ -4826,5 +4864,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-09-04T02:03:27.805Z"
+  "generatedAt": "2026-09-04T23:52:46.146Z"
 } as const;

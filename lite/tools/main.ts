@@ -8,8 +8,9 @@
  *   - Wiring `menu-builder.ts` (registers `top:tools` + per-tool items
  *     + the always-present Manage item).
  *   - Wiring the manager window factory.
- *   - Opening tool URLs in the user's default browser via
- *     `shell.openExternal`.
+ *   - Opening tool URLs in a large in-app window (`browser-window.ts`,
+ *     2026-09-02 — was `shell.openExternal`; the OS browser broke
+ *     "Connect with Google" and popups for the web apps people work in).
  *
  * Per ADR-019 / Rule 11, this module is the boundary between Electron
  * IPC and the typed `ToolsApi`. Renderers never see `ToolsStore`
@@ -18,7 +19,7 @@
  * observable in /logs.
  */
 
-import { BrowserWindow, ipcMain, shell, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import {
   getToolsApi,
   ToolsError,
@@ -29,6 +30,7 @@ import {
 import { TOOLS_EVENTS } from './events.js';
 import { initMenuBuilder, teardownMenuBuilder } from './menu-builder.js';
 import { openManagerWindow, closeManagerWindow } from './manager-window.js';
+import { openToolInBrowser, closeAllToolBrowsers } from './browser-window.js';
 import { getLoggingApi } from '../logging/api.js';
 import { wrapIpcHandler } from '../errors.js';
 
@@ -197,7 +199,7 @@ export function initTools(opts: InitToolsOptions): ToolsHandle {
           remediation: 'Refresh the list -- the tool may have been removed.',
         });
       }
-      openExternal(entry);
+      openToolInBrowser(entry);
       return { ok: true };
     })
   );
@@ -211,7 +213,7 @@ export function initTools(opts: InitToolsOptions): ToolsHandle {
   // ── Menu builder ───────────────────────────────────────────────────────
 
   initMenuBuilder({
-    onOpenEntry: (entry) => openExternal(entry),
+    onOpenEntry: (entry) => openToolInBrowser(entry),
     onOpenManager: () => openManagerFromHandle(),
   });
 
@@ -268,6 +270,11 @@ function teardownInternal(): void {
   } catch {
     // best-effort
   }
+  try {
+    closeAllToolBrowsers();
+  } catch {
+    // best-effort
+  }
   registered = false;
   initOptions = null;
 }
@@ -299,15 +306,6 @@ export function _resetToolsRegistrationForTesting(): void {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function openExternal(entry: ToolEntry): void {
-  void shell.openExternal(entry.url).catch((err: unknown) => {
-    getLoggingApi().warn('tools', 'shell.openExternal rejected', {
-      id: entry.id,
-      error: (err as Error).message,
-    });
-  });
-}
 
 function validateNonEmptyString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value.length === 0) {

@@ -7,7 +7,7 @@
  *
  * The Tools module hosts the top-level "Tools" menu and the persistence
  * layer behind it. Each entry is a simple `{ label, url }` shortcut --
- * clicking it opens the URL in the user's default browser.
+ * clicking it opens the URL in a large in-app window (Chrome parity: OAuth popups and "Connect with Google" work; one persistent session for all tools).
  *
  * Tests: `_setToolsApiForTesting(stub)` to inject a custom
  * implementation, `_resetToolsApiForTesting()` to clear the singleton.

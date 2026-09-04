@@ -114,7 +114,7 @@ const MODULES: ModuleSpec[] = [
   },
   {
     name: 'tools',
-    sourceFiles: ['tools/store.ts', 'tools/main.ts', 'tools/menu-builder.ts'],
+    sourceFiles: ['tools/store.ts', 'tools/main.ts', 'tools/menu-builder.ts', 'tools/browser-window.ts'],
     events: TOOLS_EVENTS,
   },
   {

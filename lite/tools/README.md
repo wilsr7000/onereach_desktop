@@ -55,3 +55,7 @@ as IDW. Signed-out reads return an empty list; signed-out writes throw
 - `onChange(handler)` -- subscribe to `lite:tools:changed` broadcasts
 - `parseError(err)` -- recover the structured error JSON from a thrown
   IPC error, mirroring the IDW pattern
+
+## The tool window (2026-09-02)
+
+Clicking a tool opens it in a large in-app window (`browser-window.ts`, one per tool, reused on the next click) — not the OS browser. ~92% of the primary work area (floored at 1280×800), Chrome parity from `lite/main-window/browser-parity.ts` (Chrome UA, OAuth popups handled on the same partition so "Connect with Google" completes, context menu, downloads), one persistent partition `persist:lite-tools` shared by every tool so a sign-in carries across tools and restarts. Still sandboxed, context-isolated, no preload (ADR-038). Events: `tools.browser.opened` (`reused` says focus-vs-create), `tools.browser.loaded`.

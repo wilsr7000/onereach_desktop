@@ -26,6 +26,10 @@ export const TOOLS_EVENTS = {
   CHANGED: 'tools.changed',
   OPENED: 'tools.opened',
   MANAGE_OPENED: 'tools.manage.opened',
+  // The in-app tool window (2026-09-02): opened (or refocused), and the
+  // page finished loading.
+  BROWSER_OPENED: 'tools.browser.opened',
+  BROWSER_LOADED: 'tools.browser.loaded',
   // IPC entry events (per ADR-030)
   IPC_LIST: 'tools.ipc.list',
   IPC_GET: 'tools.ipc.get',
@@ -146,6 +150,16 @@ export interface ToolsManageOpenedEvent extends ToolsEventBase {
   name: typeof TOOLS_EVENTS.MANAGE_OPENED;
   level: 'info';
 }
+export interface ToolsBrowserOpenedEvent extends ToolsEventBase {
+  name: typeof TOOLS_EVENTS.BROWSER_OPENED;
+  level: 'info';
+  data: { id: string; reused: boolean; width?: number; height?: number };
+}
+export interface ToolsBrowserLoadedEvent extends ToolsEventBase {
+  name: typeof TOOLS_EVENTS.BROWSER_LOADED;
+  level: 'info';
+  data: { id: string; durationMs: number };
+}
 
 // ─── IPC entry events ─────────────────────────────────────────────────────
 
@@ -192,6 +206,8 @@ export type ToolsEvent =
   | ToolsChangedEvent
   | ToolsOpenedEvent
   | ToolsManageOpenedEvent
+  | ToolsBrowserOpenedEvent
+  | ToolsBrowserLoadedEvent
   | ToolsIpcListEvent
   | ToolsIpcGetEvent
   | ToolsIpcAddEvent
