@@ -134,6 +134,7 @@ const SPACES_ITEMS_CREATE = 'lite:spaces:items:create';
 const SPACES_ITEMS_CREATE_BINARY = 'lite:spaces:items:createBinary';
 const SPACES_ITEMS_CREATE_AGENT = 'lite:spaces:items:createAgent';
 const SPACES_ITEMS_AGENT_LIBRARY_SEARCH = 'lite:spaces:items:agentLibrarySearch';
+const SPACES_ITEMS_AGENT_LIBRARY_COUNT = 'lite:spaces:items:agentLibraryCount';
 const SPACES_ITEMS_CREATE_AGENT_FROM_LIBRARY = 'lite:spaces:items:createAgentFromLibrary';
 const SPACES_ITEMS_DELETE = 'lite:spaces:items:delete';
 const SPACES_ITEMS_RESTORE = 'lite:spaces:items:restore';
@@ -688,10 +689,9 @@ interface SpacesItemsBridge {
     creatorName?: string;
   }): Promise<SpacesIpcResultView<unknown>>;
   /** Search the account's agent library (graph :Agent nodes). */
-  agentLibrarySearch(
-    q: string,
-    limit?: number
-  ): Promise<SpacesIpcResultView<Array<{ id: string; name: string; description: string; agentType: string }>>>;
+  agentLibrarySearch(q: string, limit?: number, offset?: number): Promise<SpacesIpcResultView<Array<{ id: string; name: string; description: string; agentType: string; source?: string; reach?: string[]; updatedMs?: number; category?: string }>>>;
+  /** How many live, visible agents match `q` — the picker's "N of M". */
+  agentLibraryCount(q: string): Promise<SpacesIpcResultView<number>>;
   /** Add a LIBRARY agent to the Space (references the existing :Agent). */
   createAgentFromLibrary(input: {
     spaceId: string;
@@ -1793,13 +1793,16 @@ const spaces: SpacesBridge = {
       ipcRenderer.invoke(SPACES_ITEMS_CREATE_AGENT, { input }) as Promise<
         SpacesIpcResultView<unknown>
       >,
-    agentLibrarySearch: (q, limit) =>
+    agentLibraryCount: (q) =>
+      ipcRenderer.invoke(SPACES_ITEMS_AGENT_LIBRARY_COUNT, { q }) as Promise<SpacesIpcResultView<number>>,
+    agentLibrarySearch: (q, limit, offset) =>
       ipcRenderer.invoke(SPACES_ITEMS_AGENT_LIBRARY_SEARCH, {
         q,
         ...(limit !== undefined ? { limit } : {}),
+        ...(offset !== undefined ? { offset } : {}),
       }) as Promise<
         SpacesIpcResultView<
-          Array<{ id: string; name: string; description: string; agentType: string }>
+          Array<{ id: string; name: string; description: string; agentType: string; source?: string; reach?: string[]; updatedMs?: number; category?: string }>
         >
       >,
     createAgentFromLibrary: (input) =>

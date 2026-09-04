@@ -172,7 +172,8 @@ export const REGISTRY_CYPHER = {
   `,
   LIST_IDWS: `
     MATCH (i:IDW)
-    RETURN i.id AS id, coalesce(i.name, i.id) AS name, coalesce(i.description, '') AS description, coalesce(i.status, '') AS status
+    RETURN i.id AS id, coalesce(i.name, i.id) AS name, coalesce(i.description, '') AS description, coalesce(i.status, '') AS status,
+           coalesce(i.url, i.homePageURL, '') AS url
     ORDER BY toLower(coalesce(i.name, i.id)) ASC LIMIT 200
   `,
   LIST_KNOWLEDGE_MODELS: `

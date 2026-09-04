@@ -939,14 +939,13 @@ interface LiteSpacesItemsBridge {
   creatorName?: string;
   }): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;
   /** Search the account's agent library (graph :Agent nodes). */
-  agentLibrarySearch(
-    q: string,
-    limit?: number
-  ): Promise<
+  agentLibrarySearch(q: string, limit?: number, offset?: number): Promise<
     LiteSpacesIpcResult<
-      Array<{ id: string; name: string; description: string; agentType: string }>
+      Array<{ id: string; name: string; description: string; agentType: string; source?: string; reach?: string[]; updatedMs?: number; category?: string }>
     >
   >;
+  /** How many live, visible agents match `q` — the picker's "N of M" (2026-09-04). */
+  agentLibraryCount(q: string): Promise<LiteSpacesIpcResult<number>>;
   /** Add a LIBRARY agent to the Space — references the existing :Agent. */
   createAgentFromLibrary(input: {
     spaceId: string;
@@ -1909,7 +1908,7 @@ interface LiteRegistryAgentSummary {
   source: string; owner: string; updatedMs: number; listing: 'unlisted' | 'submitted' | 'listed' | 'rejected';
   builtin: boolean; isSystem: boolean; reach: Array<'mcp' | 'api' | 'skill'>; idwCount: number; knowledgeCount: number;
 }
-interface LiteRegistryRef { id: string; name: string; description: string; status: string }
+interface LiteRegistryRef { id: string; name: string; description: string; status: string; url?: string }
 interface LiteRegistryEndpoint { id: string; kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }
 interface LiteRegistryAgentDetail extends LiteRegistryAgentSummary {
   status: string; version: string; keywords: string[]; capabilities: string[]; executionType: string; gsxEndpoint: string;

@@ -376,7 +376,9 @@ export interface SpacesItemsApi {
    * Search the account's agent library (graph `:Agent` nodes) by
    * name/description substring for the "From library" picker.
    */
-  searchAgentLibrary(q: string, limit?: number): Promise<AgentLibraryEntry[]>;
+  searchAgentLibrary(q: string, limit?: number, offset?: number): Promise<AgentLibraryEntry[]>;
+  /** How many live, visible agents match `q` (2026-09-04) — the picker's "N of M". */
+  agentLibraryCount(q: string): Promise<number>;
 
   /**
    * Add a LIBRARY agent to a Space — the asset `[:REPRESENTS]` the
@@ -932,8 +934,12 @@ class UninitializedSpacesApi implements SpacesApi {
     async createAgent(_input: CreateAgentInput): Promise<Item> {
       throw notInitialized('items.createAgent');
     },
-    async searchAgentLibrary(_q: string, _limit?: number): Promise<AgentLibraryEntry[]> {
+    async searchAgentLibrary(_q: string, _limit?: number, _offset?: number): Promise<AgentLibraryEntry[]> {
       throw notInitialized('items.searchAgentLibrary');
+    },
+
+    async agentLibraryCount(_q: string): Promise<number> {
+      throw notInitialized('items.agentLibraryCount');
     },
     async createAgentFromLibrary(_input: CreateAgentFromLibraryInput): Promise<Item> {
       throw notInitialized('items.createAgentFromLibrary');

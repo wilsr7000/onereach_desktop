@@ -157,6 +157,7 @@ export const SPACES_IPC = {
   ITEMS_CREATE_BINARY: 'lite:spaces:items:createBinary',
   ITEMS_CREATE_AGENT: 'lite:spaces:items:createAgent',
   ITEMS_AGENT_LIBRARY_SEARCH: 'lite:spaces:items:agentLibrarySearch',
+  ITEMS_AGENT_LIBRARY_COUNT: 'lite:spaces:items:agentLibraryCount',
   ITEMS_CREATE_AGENT_FROM_LIBRARY: 'lite:spaces:items:createAgentFromLibrary',
   ITEMS_DELETE: 'lite:spaces:items:delete',
   ITEMS_RESTORE: 'lite:spaces:items:restore',
@@ -1534,7 +1535,7 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
     SPACES_IPC.ITEMS_AGENT_LIBRARY_SEARCH,
     async (
       _event: IpcMainInvokeEvent,
-      payload?: { q?: unknown; limit?: unknown }
+      payload?: { q?: unknown; limit?: unknown; offset?: unknown }
     ): Promise<SpacesIpcResult<AgentLibraryEntry[]>> => {
       try {
         const q = typeof payload?.q === 'string' ? payload.q : '';
@@ -1542,10 +1543,23 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
           typeof payload?.limit === 'number' && Number.isFinite(payload.limit)
             ? payload.limit
             : undefined;
-        const value = await getSpacesApi().items.searchAgentLibrary(
-          q,
-          ...(limit !== undefined ? [limit] : [])
-        );
+        const offset =
+          typeof payload?.offset === 'number' && Number.isFinite(payload.offset) ? payload.offset : 0;
+        const value = await getSpacesApi().items.searchAgentLibrary(q, limit ?? 25, offset);
+        return { ok: true, value };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.ITEMS_AGENT_LIBRARY_COUNT,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { q?: unknown }
+    ): Promise<SpacesIpcResult<number>> => {
+      try {
+        const value = await getSpacesApi().items.agentLibraryCount(typeof payload?.q === 'string' ? payload.q : '');
         return { ok: true, value };
       } catch (err) {
         return { ok: false, error: serializeError(err) };

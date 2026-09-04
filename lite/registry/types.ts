@@ -46,6 +46,8 @@ export interface RegistryRef {
   name: string;
   description: string;
   status: string;
+  /** IDWs: chat / home URL, so Settings can install one into the IDW menu. */
+  url?: string;
 }
 
 export interface RegistryAgentDetail extends RegistryAgentSummary {

@@ -273,6 +273,13 @@ export interface AgentLibraryEntry {
   name: string;
   description: string;
   agentType: string;
+  /** `created_by_app_name` — Playbooks, GSX-Desktop, Onereach.ai Lite … (2026-09-04). */
+  source?: string;
+  /** Reachability endpoint kinds (mcp | api | skill). */
+  reach?: string[];
+  /** Last update, epoch ms (0 when unknown). */
+  updatedMs?: number;
+  category?: string;
 }
 
 /**

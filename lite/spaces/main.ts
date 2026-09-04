@@ -1203,8 +1203,11 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
       nukeReadCache();
       return result;
     },
-    async searchAgentLibrary(q: string, limit?: number): Promise<AgentLibraryEntry[]> {
-      return client.searchAgentLibrary(q, limit);
+    async searchAgentLibrary(q: string, limit?: number, offset?: number): Promise<AgentLibraryEntry[]> {
+      return client.searchAgentLibrary(q, limit, offset);
+    },
+    async agentLibraryCount(q: string): Promise<number> {
+      return client.countAgentLibrary(q);
     },
     async createAgentFromLibrary(input: CreateAgentFromLibraryInput): Promise<Item> {
       const result = await client.createAgentFromLibrary(input);

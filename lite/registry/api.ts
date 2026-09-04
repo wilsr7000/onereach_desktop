@@ -125,7 +125,12 @@ const refs = (v: unknown): RegistryRef[] =>
   Array.isArray(v)
     ? v
         .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
-        .map((x) => ({ id: str(x, 'id'), name: str(x, 'name'), description: str(x, 'description'), status: str(x, 'status') }))
+        .map((x) => {
+          const ref: RegistryRef = { id: str(x, 'id'), name: str(x, 'name'), description: str(x, 'description'), status: str(x, 'status') };
+          const url = str(x, 'url');
+          if (url.length > 0) ref.url = url;
+          return ref;
+        })
         .filter((x) => x.id.length > 0)
     : [];
 

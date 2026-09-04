@@ -18279,6 +18279,55 @@ let agentLibrarySelection: { id: string; name: string } | null = null;
 let agentLibraryLoadedOnce = false;
 let agentLibrarySearchTimer: number | null = null;
 let agentLibrarySearchSeq = 0;
+/** One library row as the bridge returns it, plus the collapsed-copies count. */
+export interface AgentLibraryRowEntry {
+  id: string;
+  name: string;
+  description: string;
+  agentType: string;
+  source?: string;
+  reach?: string[];
+  updatedMs?: number;
+  category?: string;
+  copies?: number;
+}
+const AGENT_LIBRARY_PAGE = 50;
+let agentLibraryOffset = 0;
+let agentLibraryTotal = 0;
+let agentLibraryQuery = '';
+let agentLibraryEntries: AgentLibraryRowEntry[] = [];
+
+/**
+ * The Playbooks writer mints one :Agent per document it touches, so the
+ * catalog holds e.g. 251 identical "Slack Share" rows. Collapse rows
+ * that share name + description + source into one (the newest id wins,
+ * `copies` says how many) — the picker reads as a library, not a log.
+ * Exported for tests.
+ */
+export function collapseAgentCopies(entries: ReadonlyArray<AgentLibraryRowEntry>): AgentLibraryRowEntry[] {
+  const groups = new Map<string, AgentLibraryRowEntry>();
+  const order: string[] = [];
+  for (const e of entries) {
+    const key = `${e.name.trim().toLowerCase()}|${e.description.trim().toLowerCase()}|${e.source ?? ''}`;
+    const current = groups.get(key);
+    if (current === undefined) {
+      groups.set(key, { ...e, copies: 1 });
+      order.push(key);
+    } else {
+      const newer = (e.updatedMs ?? 0) > (current.updatedMs ?? 0) ? { ...e, copies: (current.copies ?? 1) + 1 } : { ...current, copies: (current.copies ?? 1) + 1 };
+      groups.set(key, newer);
+    }
+  }
+  return order.map((k) => groups.get(k) as AgentLibraryRowEntry);
+}
+
+export function agentSourceLabel(source: string | undefined): string {
+  if (source === undefined || source.length === 0) return '';
+  if (/gsx-desktop/i.test(source)) return 'Library';
+  if (/playbooks/i.test(source)) return 'Playbooks';
+  if (/lite/i.test(source)) return 'Lite';
+  return source;
+}
 
 function switchAgentSourceMode(mode: AgentSourceMode): void {
   agentSourceMode = mode;
@@ -18296,28 +18345,46 @@ function switchAgentSourceMode(mode: AgentSourceMode): void {
     });
 }
 
-async function runAgentLibrarySearch(q: string): Promise<void> {
+async function runAgentLibrarySearch(q: string, append = false): Promise<void> {
   const results = document.getElementById('spaces-new-asset-agent-results');
   const bridge = window.lite?.spaces;
   if (results === null || bridge === undefined) return;
   const seq = ++agentLibrarySearchSeq;
-  results.replaceChildren(buildAgentLibraryStatus('Searching the library…'));
+  if (!append) {
+    agentLibraryOffset = 0;
+    agentLibraryEntries = [];
+    agentLibraryQuery = q;
+    results.replaceChildren(buildAgentLibraryStatus('Searching the library…'));
+  }
   try {
-    const envelope = await bridge.items.agentLibrarySearch(q, 25);
+    // Paged (2026-09-04): the whole live catalog is reachable — the first
+    // page plus "Show more" — and the count says how much is out there.
+    const [envelope, countEnvelope] = await Promise.all([
+      bridge.items.agentLibrarySearch(q, AGENT_LIBRARY_PAGE, agentLibraryOffset),
+      append ? Promise.resolve(null) : bridge.items.agentLibraryCount(q),
+    ]);
     if (seq !== agentLibrarySearchSeq) return; // superseded (slow prime vs typed query)
     if (envelope.ok === false) {
       results.replaceChildren(buildAgentLibraryStatus(envelope.error.message));
       return;
     }
+    if (countEnvelope !== null && countEnvelope.ok === true) agentLibraryTotal = countEnvelope.value;
+    agentLibraryEntries = append ? [...agentLibraryEntries, ...envelope.value] : [...envelope.value];
+    agentLibraryOffset += envelope.value.length;
     // A selection pointing outside the new result set would be
     // invisible yet still drive Create — drop it.
     if (
       agentLibrarySelection !== null &&
-      !envelope.value.some((e) => e.id === agentLibrarySelection?.id)
+      !agentLibraryEntries.some((e) => e.id === agentLibrarySelection?.id)
     ) {
       agentLibrarySelection = null;
     }
-    renderAgentLibraryResults(results, envelope.value);
+    renderAgentLibraryResults(results, collapseAgentCopies(agentLibraryEntries), {
+      total: agentLibraryTotal,
+      loaded: agentLibraryOffset,
+      hasMore: envelope.value.length === AGENT_LIBRARY_PAGE && agentLibraryOffset < agentLibraryTotal,
+      onMore: () => void runAgentLibrarySearch(agentLibraryQuery, true),
+    });
   } catch (err) {
     if (seq !== agentLibrarySearchSeq) return;
     window.logging?.warn?.('spaces', 'agent library search failed', { error: messageFrom(err) });
@@ -18334,7 +18401,8 @@ function buildAgentLibraryStatus(text: string): HTMLElement {
 
 function renderAgentLibraryResults(
   container: HTMLElement,
-  entries: Array<{ id: string; name: string; description: string; agentType: string }>
+  entries: ReadonlyArray<AgentLibraryRowEntry>,
+  meta?: { total: number; loaded: number; hasMore: boolean; onMore: () => void }
 ): void {
   container.replaceChildren();
   if (entries.length === 0) {
@@ -18344,15 +18412,39 @@ function renderAgentLibraryResults(
   for (const entry of entries) {
     container.appendChild(buildAgentLibraryRow(entry));
   }
+  if (meta !== undefined) container.appendChild(buildAgentLibraryFooter(entries, meta));
+}
+
+/** "Showing 50 of 12,079 agents · 37 duplicate copies collapsed" + Show more. Exported for tests. */
+export function buildAgentLibraryFooter(
+  entries: ReadonlyArray<AgentLibraryRowEntry>,
+  meta: { total: number; loaded: number; hasMore: boolean; onMore: () => void }
+): HTMLElement {
+  const footer = document.createElement('div');
+  footer.className = 'spaces-agent-result-footer';
+  const collapsed = entries.reduce((n, e) => n + Math.max(0, (e.copies ?? 1) - 1), 0);
+  const text = document.createElement('span');
+  const total = meta.total > 0 ? meta.total : meta.loaded;
+  text.textContent =
+    `Showing ${Math.min(meta.loaded, total).toLocaleString()} of ${total.toLocaleString()} agents in NEON` +
+    (collapsed > 0 ? ` · ${collapsed.toLocaleString()} duplicate cop${collapsed === 1 ? 'y' : 'ies'} collapsed` : '');
+  footer.appendChild(text);
+  if (meta.hasMore) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'spaces-agent-result-more';
+    more.textContent = 'Show more';
+    more.addEventListener('click', () => {
+      more.disabled = true;
+      meta.onMore();
+    });
+    footer.appendChild(more);
+  }
+  return footer;
 }
 
 /** One selectable library row: name + type badge + description snippet. */
-export function buildAgentLibraryRow(entry: {
-  id: string;
-  name: string;
-  description: string;
-  agentType: string;
-}): HTMLElement {
+export function buildAgentLibraryRow(entry: AgentLibraryRowEntry): HTMLElement {
   const row = document.createElement('button');
   row.type = 'button';
   row.className = 'spaces-agent-result';
@@ -18370,6 +18462,20 @@ export function buildAgentLibraryRow(entry: {
   type.className = 'spaces-agent-result-type';
   type.textContent = entry.agentType;
   top.appendChild(type);
+  // Provenance + reachability chips (2026-09-04): which writer made it,
+  // how it can be reached, how many identical copies it stands for,
+  // and how fresh it is — the facts that tell 251 "Slack Share"s apart.
+  const chip = (cls: string, text: string): void => {
+    const c = document.createElement('span');
+    c.className = `spaces-agent-result-chip ${cls}`.trim();
+    c.textContent = text;
+    top.appendChild(c);
+  };
+  const sourceLabel = agentSourceLabel(entry.source);
+  if (sourceLabel.length > 0) chip('is-source', sourceLabel);
+  for (const r of [...new Set(entry.reach ?? [])]) chip(`is-reach is-${r}`, r === 'api' ? 'RESTful' : r.toUpperCase());
+  if ((entry.copies ?? 1) > 1) chip('is-copies', `×${entry.copies} copies`);
+  if (typeof entry.updatedMs === 'number' && entry.updatedMs > 0) chip('is-when', formatRelativeMs(entry.updatedMs));
   row.appendChild(top);
 
   if (entry.description.trim().length > 0) {

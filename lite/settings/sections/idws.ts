@@ -196,6 +196,7 @@ function render(state: SectionState): void {
   buildFilterPills(state);
   wireActions(state);
   wireThirdPartyTiles(state);
+  void appendNeonCard(state);
 }
 
 function renderEmpty(state: SectionState): void {
@@ -222,6 +223,7 @@ function renderEmpty(state: SectionState): void {
   `;
   wireActions(state);
   wireThirdPartyTiles(state);
+  void appendNeonCard(state);
 }
 
 /**
@@ -1038,4 +1040,153 @@ function cssEscape(s: string): string {
   // Minimal CSS attribute selector escape -- allows letters, numbers,
   // dash, underscore, slash. Other chars are escaped with backslash.
   return s.replace(/([^a-zA-Z0-9\-_/])/g, '\\$1');
+}
+
+// ---------------------------------------------------------------------------
+// Connected in NEON (2026-09-04, robb: "Manage agents in settings does not
+// list all agents / IDWs — both local and connected agents populated from
+// NEON"). The list above is the LOCAL menu store. This card is what the
+// organization has registered in NEON: its IDWs (installable into the
+// menu with one click) and its agent catalog (totals by source, the
+// library agents, and the door to the Agent Registry for the rest).
+// ---------------------------------------------------------------------------
+let neonCardGeneration = 0;
+
+export function neonAgentSourceLabel(source: string): string {
+  if (/gsx-desktop/i.test(source)) return 'library';
+  if (/playbooks/i.test(source)) return 'from Playbooks';
+  if (/lite/i.test(source)) return 'built in Lite';
+  return source.length > 0 ? source : 'other';
+}
+
+export async function appendNeonCard(state: SectionState): Promise<void> {
+  const registry = window.lite?.registry;
+  if (registry === undefined) return;
+  const generation = ++neonCardGeneration;
+  let idws: LiteRegistryRef[] = [];
+  let agents: LiteRegistryAgentSummary[] = [];
+  let total = 0;
+  let sources: LiteRegistryFacet[] = [];
+  try {
+    const [idwEnv, libraryEnv, allEnv] = await Promise.all([
+      registry.listIdws(),
+      registry.search({ source: 'GSX-Desktop', limit: 8 }),
+      registry.search({ limit: 1 }),
+    ]);
+    if (idwEnv.ok === true && idwEnv.value !== undefined) idws = idwEnv.value;
+    if (libraryEnv.ok === true && libraryEnv.value !== undefined) agents = libraryEnv.value.items;
+    if (allEnv.ok === true && allEnv.value !== undefined) {
+      total = allEnv.value.total;
+      sources = allEnv.value.facets.sources;
+    }
+  } catch (err) {
+    window.logging?.warn?.('settings', 'NEON agent card failed', { error: (err as Error).message });
+    return;
+  }
+  if (generation !== neonCardGeneration || !state.container.isConnected) return;
+  const installed = new Set(state.entries.map((e) => e.url.trim().toLowerCase()));
+  const summary =
+    total > 0
+      ? `${total.toLocaleString()} agents registered in NEON` +
+        (sources.length > 0
+          ? ' · ' + sources.filter((f) => f.value.length > 0).slice(0, 4).map((f) => `${f.count.toLocaleString()} ${neonAgentSourceLabel(f.value)}`).join(' · ')
+          : '')
+      : 'No agents registered in NEON yet';
+  const idwRows = idws
+    .map((i) => {
+      const url = (i.url ?? '').trim();
+      const isInstalled = url.length > 0 && installed.has(url.toLowerCase());
+      const action = isInstalled
+        ? '<span class="idw-pill idw-pill-source">Installed</span>'
+        : url.length > 0
+          ? `<button type="button" class="idw-link-button" data-action="neon-install" data-id="${escapeAttr(i.id)}" data-label="${escapeAttr(i.name)}" data-url="${escapeAttr(url)}" data-description="${escapeAttr(i.description)}">Add to menu</button>`
+          : '<span class="idw-row-updated">no URL</span>';
+      return `
+        <div class="idw-row idw-neon-row" data-neon-idw="${escapeAttr(i.id)}">
+          <div class="idw-row-summary">
+            <div class="idw-row-icon">◈</div>
+            <div class="idw-row-text">
+              <div class="idw-row-label">${escapeHtml(i.name)}</div>
+              <div class="idw-row-url">${escapeHtml(url.length > 0 ? url : i.description)}</div>
+            </div>
+            <span class="idw-pill" data-kind="idw">IDW</span>
+            <span class="idw-pill idw-pill-source">NEON</span>
+            <span class="idw-row-updated">${escapeHtml(i.status)}</span>
+            <div class="idw-row-actions">${action}</div>
+          </div>
+        </div>`;
+    })
+    .join('');
+  const agentRows = agents
+    .map(
+      (a) => `
+        <div class="idw-row idw-neon-row" data-neon-agent="${escapeAttr(a.id)}">
+          <div class="idw-row-summary">
+            <div class="idw-row-icon">✦</div>
+            <div class="idw-row-text">
+              <div class="idw-row-label">${escapeHtml(a.name)}</div>
+              <div class="idw-row-url">${escapeHtml(a.description)}</div>
+            </div>
+            <span class="idw-pill" data-kind="idw">${escapeHtml(a.type.length > 0 ? a.type : 'agent')}</span>
+            ${a.reach.map((r) => `<span class="idw-pill idw-pill-source">${escapeHtml(r === 'api' ? 'RESTful' : r.toUpperCase())}</span>`).join('')}
+            <span class="idw-row-updated">${escapeHtml(a.enabled ? 'enabled' : 'disabled')}</span>
+            <div class="idw-row-actions">
+              <button type="button" class="idw-link-button" data-action="neon-registry">Registry</button>
+            </div>
+          </div>
+        </div>`
+    )
+    .join('');
+  const card = document.createElement('div');
+  card.className = 'idw-card idw-neon-card';
+  card.id = 'idw-neon-card';
+  card.innerHTML = `
+    <div class="idw-status-row">
+      <span class="idw-status-pill ok">Connected in NEON</span>
+      <span class="idw-status-help">
+        What your organization has registered in NEON, its digital twin: IDWs you can add to the menu with one click, and the agent catalog — the Agent Registry manages all of it.
+      </span>
+    </div>
+    <div class="idw-actions-row">
+      <button type="button" id="idw-open-registry" class="btn-secondary" data-action="neon-registry">Open Agent Registry…</button>
+      <span class="idw-status-help" id="idw-neon-summary">${escapeHtml(summary)}</span>
+    </div>
+    <div class="idw-table" id="idw-neon-idws">
+      ${idwRows.length > 0 ? idwRows : '<div class="idw-row idw-neon-row"><div class="idw-row-summary"><div class="idw-row-text"><div class="idw-row-url">No IDWs registered in NEON.</div></div></div></div>'}
+    </div>
+    <div class="idw-table" id="idw-neon-agents">
+      ${agentRows}
+    </div>
+  `;
+  state.container.querySelector('#idw-neon-card')?.remove();
+  state.container.appendChild(card);
+  card.querySelectorAll<HTMLButtonElement>('[data-action="neon-registry"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      void registry.openWindow();
+    });
+  });
+  card.querySelectorAll<HTMLButtonElement>('[data-action="neon-install"]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btn.disabled = true;
+      btn.textContent = 'Adding…';
+      void (async () => {
+        try {
+          const description = btn.getAttribute('data-description') ?? '';
+          await idw().add({
+            kind: 'idw',
+            label: btn.getAttribute('data-label') ?? 'IDW',
+            url: btn.getAttribute('data-url') ?? '',
+            source: 'store',
+            ...(description.length > 0 ? { description } : {}),
+          });
+          // The store's onChange re-renders the installed list, which
+          // re-appends this card with the row marked Installed.
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Add to menu';
+          window.logging?.warn?.('settings', 'NEON IDW install failed', { error: (err as Error).message });
+        }
+      })();
+    });
+  });
 }

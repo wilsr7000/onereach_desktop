@@ -1473,18 +1473,54 @@ export const CYPHER = {
    * name/description substring. Powers the "From library" picker in the
    * Add-agent tab. Empty query returns the alphabetical head.
    */
+  // 2026-09-04 (robb: "adding an agent to a space from the library should
+  // grab all agents listed in NEON and it only has some"): the library
+  // used to return the ALPHABETICAL HEAD of the whole label — 8,600 of
+  // the 20,669 :Agent nodes are `deleted` tombstones and the head was a
+  // slice of A-names. Now: live agents only, matched on name /
+  // description / keywords / id, ranked prefix > contains > rest then
+  // newest first, PAGED ($offset), with source / reach / updated so the
+  // picker can tell 251 "Slack Share" copies apart. AGENT_LIBRARY_COUNT
+  // shares the WHERE so the picker can say "N of M".
   AGENT_LIBRARY_SEARCH: `
     MATCH (g:Agent)
     WHERE ${AGENT_VISIBLE('g')}
+      AND coalesce(g.deleted, false) = false
       AND ($q = ''
        OR toLower(coalesce(g.name, g.title, '')) CONTAINS toLower($q)
-       OR toLower(coalesce(g.description, g.summary, '')) CONTAINS toLower($q))
+       OR toLower(coalesce(g.description, g.summary, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.keywords, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.id, '')) CONTAINS toLower($q))
+    WITH g,
+         CASE WHEN $q <> '' AND toLower(coalesce(g.name, g.title, '')) STARTS WITH toLower($q) THEN 0
+              WHEN $q <> '' AND toLower(coalesce(g.name, g.title, '')) CONTAINS toLower($q) THEN 1
+              ELSE 2 END AS rank,
+         coalesce(toInteger(toString(coalesce(g.updatedAt, g.updated_at, g.created_at, 0))), 0) AS updatedMs,
+         CASE WHEN coalesce(g.builtin, false) = true
+                OR EXISTS { MATCH (:Library)-[:CONTAINS]->(g) }
+                OR EXISTS { MATCH (g)-[:REACHABLE_VIA]->(:AgentEndpoint) }
+              THEN 0 ELSE 1 END AS tier
+    ORDER BY rank ASC, tier ASC, updatedMs DESC, toLower(coalesce(g.name, g.id, '')) ASC
+    SKIP toInteger($offset) LIMIT toInteger($limit)
     RETURN g.id AS id,
            coalesce(g.name, g.title, g.id) AS name,
            coalesce(g.description, g.summary, '') AS description,
-           coalesce(g.agentType, 'other') AS agentType
-    ORDER BY toLower(coalesce(g.name, g.id, '')) ASC
-    LIMIT toInteger($limit)
+           coalesce(g.agentType, g.type, 'other') AS agentType,
+           coalesce(g.created_by_app_name, '') AS source,
+           [(g)-[:REACHABLE_VIA]->(e:AgentEndpoint) | e.kind] AS reach,
+           updatedMs,
+           coalesce(g.category, g.menuCategory, '') AS category
+  `,
+  AGENT_LIBRARY_COUNT: `
+    MATCH (g:Agent)
+    WHERE ${AGENT_VISIBLE('g')}
+      AND coalesce(g.deleted, false) = false
+      AND ($q = ''
+       OR toLower(coalesce(g.name, g.title, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.description, g.summary, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.keywords, '')) CONTAINS toLower($q)
+       OR toLower(coalesce(g.id, '')) CONTAINS toLower($q))
+    RETURN count(g) AS total
   `,
 
   /**
@@ -4599,12 +4635,13 @@ export class SdkSpacesClient {
    * Search the account's agent library (graph `:Agent` nodes) by
    * name/description substring. Empty query = alphabetical head.
    */
-  async searchAgentLibrary(q: string, limit = 25): Promise<AgentLibraryEntry[]> {
+  async searchAgentLibrary(q: string, limit = 25, offset = 0): Promise<AgentLibraryEntry[]> {
     const query = typeof q === 'string' ? q.trim() : '';
     const cappedLimit = Math.max(1, Math.min(100, Math.floor(limit)));
     const rows = await this.run(CYPHER.AGENT_LIBRARY_SEARCH, {
       q: query,
       limit: cappedLimit,
+      offset: Math.max(0, Math.floor(Number.isFinite(offset) ? offset : 0)),
     });
     // Skip malformed (id-less) rows — one junk node must not break
     // the whole directory (LIST_SPACE_MEMBERS behaves the same way).
@@ -4612,14 +4649,28 @@ export class SdkSpacesClient {
     for (const r of rows) {
       const id = optString(r, 'id');
       if (id === undefined || id.length === 0) continue;
-      out.push({
+      const entry: AgentLibraryEntry = {
         id,
         name: optString(r, 'name') ?? '',
         description: optString(r, 'description') ?? '',
         agentType: optString(r, 'agentType') ?? 'other',
-      });
+      };
+      const source = optString(r, 'source');
+      if (source !== undefined && source.length > 0) entry.source = source;
+      if (Array.isArray(r['reach'])) entry.reach = [...new Set((r['reach'] as unknown[]).filter((x): x is string => typeof x === 'string'))];
+      if (typeof r['updatedMs'] === 'number') entry.updatedMs = r['updatedMs'] as number;
+      const category = optString(r, 'category');
+      if (category !== undefined && category.length > 0) entry.category = category;
+      out.push(entry);
     }
     return out;
+  }
+
+  /** How many live, visible agents match `q` — the "N of M" for the picker. */
+  async countAgentLibrary(q: string): Promise<number> {
+    const rows = await this.run(CYPHER.AGENT_LIBRARY_COUNT, { q: typeof q === 'string' ? q.trim() : '' });
+    const total = rows[0]?.['total'];
+    return typeof total === 'number' && Number.isFinite(total) ? total : 0;
   }
 
   /** True when a live asset points at the given GSX fileKey. */
