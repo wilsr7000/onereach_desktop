@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https:" />
+    <title>Agent Registry</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./registry.css" />
+  </head>
+  <body>
+    <div class="reg-app">
+      <header class="reg-top">
+        <div class="reg-brand">
+          <span class="reg-brand-mark" aria-hidden="true">◈</span>
+          <h1 class="reg-title">Agent Registry</h1>
+          <span class="reg-count" id="reg-count" aria-live="polite"></span>
+        </div>
+        <div class="reg-search">
+          <input id="reg-q" type="search" placeholder="Search agents — name, description, keywords, category, id" autocomplete="off" aria-label="Search agents" />
+          <kbd class="reg-kbd" aria-hidden="true">/</kbd>
+        </div>
+        <div class="reg-viewer" id="reg-viewer" aria-live="polite"></div>
+      </header>
+      <div class="reg-body">
+        <aside class="reg-facets" id="reg-facets" aria-label="Filters"></aside>
+        <main class="reg-results">
+          <div class="reg-toolbar">
+            <span class="reg-summary" id="reg-summary">Loading…</span>
+            <label class="reg-toggle"><input type="checkbox" id="reg-deleted" /> show deleted</label>
+          </div>
+          <div class="reg-list" id="reg-list" role="listbox" aria-label="Agents" tabindex="0"></div>
+          <button type="button" class="reg-more" id="reg-more" hidden>Load more</button>
+        </main>
+        <section class="reg-detail" id="reg-detail" aria-live="polite">
+          <div class="reg-empty">Select an agent to manage it.</div>
+        </section>
+      </div>
+      <div class="reg-toast" id="reg-toast" role="status" aria-live="polite" hidden></div>
+    </div>
+    <script src="./registry.js"></script>
+  </body>
+</html>

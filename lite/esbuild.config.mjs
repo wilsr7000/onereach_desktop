@@ -47,6 +47,8 @@ const ASSETS_TO_COPY = [
   { from: 'lite/university/tutorials.html', to: 'university-tutorials.html' },
   { from: 'lite/university/tutorials.css', to: 'university-tutorials.css' },
   { from: 'lite/ai-run-times/feed.html', to: 'ai-run-times.html' },
+  { from: 'lite/registry/registry.html', to: 'registry.html' },
+  { from: 'lite/registry/registry.css', to: 'registry.css' },
   { from: 'lite/ai-run-times/feed.css', to: 'ai-run-times.css' },
   { from: 'lite/help/help.html', to: 'help.html' },
   { from: 'lite/help/help.css', to: 'help.css' },
@@ -275,6 +277,17 @@ const aiRunTimesOptions = {
 };
 
 /** @type {esbuild.BuildOptions} */
+const registryOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'registry/renderer.ts')],
+  outfile: resolve(outDir, 'registry.js'),
+  platform: 'browser',
+  target: 'chrome130',
+  format: 'iife',
+  globalName: 'OnereachLiteRegistry',
+};
+
+/** @type {esbuild.BuildOptions} */
 const helpOptions = {
   ...commonOptions,
   entryPoints: [resolve(__dirname, 'help/help.ts')],
@@ -363,6 +376,7 @@ const allConfigs = [
   universityTutorialsOptions,
   chromeOptions,
   aiRunTimesOptions,
+  registryOptions,
   helpOptions,
   spacesOptions,
   learnPageOptions,

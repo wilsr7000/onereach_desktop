@@ -1802,6 +1802,8 @@ interface LiteWindowBridge {
   university?: LiteUniversityBridge;
   ai?: LiteAiBridge;
   aiRunTimes?: LiteAiRunTimesBridge;
+  /** ADR-086 — Agent Registry (search + registry manager over NEON). */
+  registry?: LiteRegistryBridge;
   onboarding?: LiteOnboardingBridge;
   downloadPicker?: LiteDownloadPickerBridge;
   bootChat?: LiteBootChatBridge;
@@ -1894,6 +1896,60 @@ interface LiteAiRunTimesErrorJSON {
   context: Record<string, unknown>;
   remediation: string;
   cause?: string;
+}
+
+/** ADR-086 — Agent Registry. One envelope for every call. */
+interface LiteRegistryResult<T> {
+  ok: boolean;
+  value?: T;
+  error?: { code: string; message: string; remediation: string };
+}
+interface LiteRegistryAgentSummary {
+  id: string; name: string; description: string; type: string; category: string; enabled: boolean; deleted: boolean;
+  source: string; owner: string; updatedMs: number; listing: 'unlisted' | 'submitted' | 'listed' | 'rejected';
+  builtin: boolean; isSystem: boolean; reach: Array<'mcp' | 'api' | 'skill'>; idwCount: number; knowledgeCount: number;
+}
+interface LiteRegistryRef { id: string; name: string; description: string; status: string }
+interface LiteRegistryEndpoint { id: string; kind: 'mcp' | 'api' | 'skill'; url: string; channels: string[] }
+interface LiteRegistryAgentDetail extends LiteRegistryAgentSummary {
+  status: string; version: string; keywords: string[]; capabilities: string[]; executionType: string; gsxEndpoint: string;
+  createdMs: number; endpoints: LiteRegistryEndpoint[]; idws: LiteRegistryRef[]; knowledgeModels: LiteRegistryRef[];
+  capabilityNodes: LiteRegistryRef[]; usedInSpaces: Array<{ id: string; name: string }>;
+  representedBy: Array<{ assetId: string; spaceName: string }>; contributedPlaybooks: number; enabledBy: number; library: string;
+  manualChecks: Record<string, boolean>; listedAt: number | null;
+}
+interface LiteRegistryFacet { value: string; count: number }
+interface LiteRegistrySearchResult {
+  items: LiteRegistryAgentSummary[]; total: number; offset: number; limit: number;
+  facets: { sources: LiteRegistryFacet[]; types: LiteRegistryFacet[]; categories: LiteRegistryFacet[] };
+}
+interface LiteRegistryViewer { viewerId: string | null; isAdmin: boolean; noAdminYet: boolean; admins: string[] }
+interface LiteRegistryCheck { id: string; label: string; kind: 'auto' | 'manual'; required: boolean; passed: boolean; detail: string }
+interface LiteRegistryChecklist { agent: LiteRegistryAgentDetail; checks: LiteRegistryCheck[]; ready: boolean; progress: { passed: number; total: number } }
+interface LiteRegistryBridge {
+  whoAmI(): Promise<LiteRegistryResult<LiteRegistryViewer>>;
+  claimFirstAdmin(): Promise<LiteRegistryResult<LiteRegistryViewer>>;
+  setAdmin(personId: string, isAdmin: boolean): Promise<LiteRegistryResult<LiteRegistryViewer>>;
+  search(input: {
+    q?: string; source?: string; type?: string; category?: string; state?: '' | 'enabled' | 'disabled';
+    listing?: '' | 'unlisted' | 'submitted' | 'listed' | 'rejected'; reach?: '' | 'mcp' | 'api' | 'skill';
+    idwId?: string; knowledgeId?: string; includeDeleted?: boolean; offset?: number; limit?: number;
+  }): Promise<LiteRegistryResult<LiteRegistrySearchResult>>;
+  get(id: string): Promise<LiteRegistryResult<LiteRegistryAgentDetail | null>>;
+  update(id: string, patch: { name?: string; description?: string; type?: string; category?: string; status?: string; version?: string; keywords?: string[] }): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  setEnabled(id: string, enabled: boolean): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  listIdws(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
+  listKnowledgeModels(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
+  listCapabilities(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
+  link(id: string, kind: 'idw' | 'knowledge' | 'capability', targetId: string, on: boolean): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  createKnowledgeModel(name: string, description: string): Promise<LiteRegistryResult<LiteRegistryRef>>;
+  createCapability(name: string, description: string): Promise<LiteRegistryResult<LiteRegistryRef>>;
+  addEndpoint(id: string, kind: 'mcp' | 'api' | 'skill', url: string, channels: string[]): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  removeEndpoint(id: string, endpointId: string): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  checklist(id: string): Promise<LiteRegistryResult<LiteRegistryChecklist>>;
+  setManualCheck(id: string, checkId: string, value: boolean): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  setListing(id: string, listing: 'unlisted' | 'submitted' | 'listed' | 'rejected'): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
+  openWindow(): Promise<LiteRegistryResult<{ ok: true }>>;
 }
 
 interface LiteAiRunTimesBridge {

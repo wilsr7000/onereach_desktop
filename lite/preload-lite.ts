@@ -2615,6 +2615,52 @@ function parseStructuredErrorWith<T>(err: unknown, key: string): T | null {
 
 // `ai` bridge removed alongside the lite/ai/ module (TTS pulled).
 
+// ── ADR-086: Agent Registry ────────────────────────────────────────────
+type RegistryIpcResultView<T> = { ok: boolean; value?: T; error?: { code: string; message: string; remediation: string } };
+interface RegistryBridge {
+  whoAmI(): Promise<RegistryIpcResultView<unknown>>;
+  claimFirstAdmin(): Promise<RegistryIpcResultView<unknown>>;
+  setAdmin(personId: string, isAdmin: boolean): Promise<RegistryIpcResultView<unknown>>;
+  search(input: Record<string, unknown>): Promise<RegistryIpcResultView<unknown>>;
+  get(id: string): Promise<RegistryIpcResultView<unknown>>;
+  update(id: string, patch: Record<string, unknown>): Promise<RegistryIpcResultView<unknown>>;
+  setEnabled(id: string, enabled: boolean): Promise<RegistryIpcResultView<unknown>>;
+  listIdws(): Promise<RegistryIpcResultView<unknown>>;
+  listKnowledgeModels(): Promise<RegistryIpcResultView<unknown>>;
+  listCapabilities(): Promise<RegistryIpcResultView<unknown>>;
+  link(id: string, kind: 'idw' | 'knowledge' | 'capability', targetId: string, on: boolean): Promise<RegistryIpcResultView<unknown>>;
+  createKnowledgeModel(name: string, description: string): Promise<RegistryIpcResultView<unknown>>;
+  createCapability(name: string, description: string): Promise<RegistryIpcResultView<unknown>>;
+  addEndpoint(id: string, kind: 'mcp' | 'api' | 'skill', url: string, channels: string[]): Promise<RegistryIpcResultView<unknown>>;
+  removeEndpoint(id: string, endpointId: string): Promise<RegistryIpcResultView<unknown>>;
+  checklist(id: string): Promise<RegistryIpcResultView<unknown>>;
+  setManualCheck(id: string, checkId: string, value: boolean): Promise<RegistryIpcResultView<unknown>>;
+  setListing(id: string, listing: 'unlisted' | 'submitted' | 'listed' | 'rejected'): Promise<RegistryIpcResultView<unknown>>;
+  openWindow(): Promise<RegistryIpcResultView<unknown>>;
+}
+const REG = (op: string): string => `lite:registry:${op}`;
+const registry: RegistryBridge = {
+  whoAmI: () => ipcRenderer.invoke(REG('whoami')) as Promise<RegistryIpcResultView<unknown>>,
+  claimFirstAdmin: () => ipcRenderer.invoke(REG('claim-first-admin')) as Promise<RegistryIpcResultView<unknown>>,
+  setAdmin: (personId, isAdmin) => ipcRenderer.invoke(REG('set-admin'), { personId, isAdmin }) as Promise<RegistryIpcResultView<unknown>>,
+  search: (input) => ipcRenderer.invoke(REG('search'), { input }) as Promise<RegistryIpcResultView<unknown>>,
+  get: (id) => ipcRenderer.invoke(REG('get'), { id }) as Promise<RegistryIpcResultView<unknown>>,
+  update: (id, patch) => ipcRenderer.invoke(REG('update'), { id, patch }) as Promise<RegistryIpcResultView<unknown>>,
+  setEnabled: (id, enabled) => ipcRenderer.invoke(REG('set-enabled'), { id, enabled }) as Promise<RegistryIpcResultView<unknown>>,
+  listIdws: () => ipcRenderer.invoke(REG('list-idws')) as Promise<RegistryIpcResultView<unknown>>,
+  listKnowledgeModels: () => ipcRenderer.invoke(REG('list-knowledge')) as Promise<RegistryIpcResultView<unknown>>,
+  listCapabilities: () => ipcRenderer.invoke(REG('list-capabilities')) as Promise<RegistryIpcResultView<unknown>>,
+  link: (id, kind, targetId, on) => ipcRenderer.invoke(REG('link'), { id, kind, targetId, on }) as Promise<RegistryIpcResultView<unknown>>,
+  createKnowledgeModel: (name, description) => ipcRenderer.invoke(REG('create-knowledge'), { name, description }) as Promise<RegistryIpcResultView<unknown>>,
+  createCapability: (name, description) => ipcRenderer.invoke(REG('create-capability'), { name, description }) as Promise<RegistryIpcResultView<unknown>>,
+  addEndpoint: (id, kind, url, channels) => ipcRenderer.invoke(REG('add-endpoint'), { id, kind, url, channels }) as Promise<RegistryIpcResultView<unknown>>,
+  removeEndpoint: (id, endpointId) => ipcRenderer.invoke(REG('remove-endpoint'), { id, endpointId }) as Promise<RegistryIpcResultView<unknown>>,
+  checklist: (id) => ipcRenderer.invoke(REG('checklist'), { id }) as Promise<RegistryIpcResultView<unknown>>,
+  setManualCheck: (id, checkId, value) => ipcRenderer.invoke(REG('set-manual-check'), { id, checkId, value }) as Promise<RegistryIpcResultView<unknown>>,
+  setListing: (id, listing) => ipcRenderer.invoke(REG('set-listing'), { id, listing }) as Promise<RegistryIpcResultView<unknown>>,
+  openWindow: () => ipcRenderer.invoke(REG('open-window')) as Promise<RegistryIpcResultView<unknown>>,
+};
+
 const aiRunTimes: AiRunTimesBridge = {
   listArticles: () => ipcRenderer.invoke(ART_LIST_ARTICLES) as Promise<ArtArticleView[]>,
   getArticle: (id) => ipcRenderer.invoke(ART_GET_ARTICLE, { id }) as Promise<ArtArticleView | null>,
@@ -3100,6 +3146,7 @@ contextBridge.exposeInMainWorld('lite', {
   events,
   university,
   aiRunTimes,
+  registry,
   onboarding,
   downloadPicker,
   bootChat,

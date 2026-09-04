@@ -63,6 +63,9 @@ import { initUniversity, type UniversityHandle } from './university/main.js';
 // service module were pulled in the first-run UX hardening pass.
 // Bringing TTS back is a separate chunk that re-introduces lite/ai/.
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
+import { initRegistry, type RegistryHandle } from './registry/main.js';
+import { resolveViewerId as resolveSpacesViewerId } from './spaces/main.js';
+import { getNeonApi } from './neon/api.js';
 import { initOnboarding, type OnboardingHandle } from './onboarding/main.js';
 // Sanctioned exception to auth/window.ts's "don't import directly" rule:
 // this is boot wiring (per-session WebAuthn picker), not an auth flow.
@@ -347,6 +350,8 @@ let mainWindowHandle: MainWindowHandle | null = null;
 let eventBusHandle: EventBusHandle | null = null;
 let universityHandle: UniversityHandle | null = null;
 let aiRunTimesHandle: AiRunTimesHandle | null = null;
+/** ADR-086 — Agent Registry (search + registry manager over NEON). */
+let registryHandle: RegistryHandle | null = null;
 let onboardingHandle: OnboardingHandle | null = null;
 let downloadsHandle: DownloadsHandle | null = null;
 
@@ -985,6 +990,7 @@ app
     // window.lite.neon.queryNamed('idw.oagi-catalog') in the catalog renderer.
     try {
       idwHandle = initIdw({
+        onOpenRegistry: () => registryHandle?.open(),
         preloadPath,
         catalogHtmlPath: path.join(__dirname, 'idw-store.html'),
         getParentWindow: () => mainWindow,
@@ -1131,6 +1137,20 @@ app
       getLoggingApi().error('ai-run-times', 'initAiRunTimes threw', {
         error: (err as Error).message,
       });
+    }
+
+    // ADR-086 — Agent Registry: the account's :Agent catalog from NEON,
+    // with admin management. Opened from IDW → Agent Registry…
+    try {
+      registryHandle = initRegistry({
+        query: (cypher, parameters) => getNeonApi().query(cypher, parameters),
+        viewerId: () => resolveSpacesViewerId(),
+        getMainWindow: () => mainWindow,
+        htmlPath: path.join(__dirname, 'registry.html'),
+        preloadPath,
+      });
+    } catch (err) {
+      getLoggingApi().error('registry', 'initRegistry threw', { error: (err as Error).message });
     }
 
     // Initialize Onboarding module: KV-backed checklist progress

@@ -3179,6 +3179,152 @@ export const MANIFEST: Manifest = {
       "readme": "# lite/onboarding\n\nKV-backed first-run checklist for the chrome home view. Tracks\nwhich onboarding steps the user has completed; the chrome card\nauto-ticks them off and hides itself when everything is done OR\nthe user explicitly dismisses it.\n\nPer ADR-046.\n\n## Steps\n\nStable IDs in [`./types.ts`](./types.ts) -- new steps APPEND, existing\nIDs never change so prior completion state survives upgrades.\n\n| Step ID | Renderer label | Auto-completes when |\n|---|---|---|\n| `signed-in` | Sign in to GSX | `auth.onSessionChanged` fires with a non-null session |\n| `two-factor-saved` | Save your 2FA setup secret (optional) | `totp.hasSecret()` returns true (polled on focus) |\n| `openai-key-set` | Add an OpenAI API key (optional, for TTS) | `ai.status().hasApiKey === true` (polled on focus) |\n| `first-agent-opened` | Open your first agent | `mainWindow.onTabsChanged` reports a non-empty tab list |\n\n## Surface\n\n```typescript\nimport { getOnboardingApi } from '../onboarding/api.js';\n\nconst api = getOnboardingApi();\nconst state = await api.load();\nawait api.markComplete('signed-in');\nawait api.dismiss();\nconst unsub = api.onChange((newState) => { ... });\n```\n\nRenderer side via `window.lite.onboarding`:\n\n```typescript\nconst state = await window.lite!.onboarding!.load();\nawait window.lite!.onboarding!.markComplete('signed-in');\nawait window.lite!.onboarding!.dismiss();\n```\n\n## Persistence\n\nKV collection: `lite-onboarding`, key: `default`. Single blob:\n\n```typescript\n{\n  schemaVersion: 1,\n  completedAt: { 'signed-in': '2026-05-05T...', ... },\n  dismissedAt: '2026-05-05T...' | null,\n}\n```\n\nAtomic writes via `lite/kv/api.ts`. `markComplete` is idempotent;\nrepeated calls preserve the earliest timestamp.\n\n## Listener semantics\n\n`onChange` listeners are isolated -- a throwing listener doesn't\nprevent the others from receiving the change. Same pattern as\n`lite/idw/store.ts`.\n\n## What's NOT in scope (named so we don't lose them)\n\n- **A wizard / coach-mark tour**: rejected for v1; the checklist\n  card is the lighter pattern.\n- **Per-account onboarding state**: today's state is per-device.\n  If we need per-account, add `accountId` to the KV key.\n- **More steps**: append to `ONBOARDING_STEP_IDS` and add a\n  matching auto-complete trigger in `lite/main-window/chrome.ts`.\n\n## Tests\n\n[`lite/test/unit/onboarding-store.test.ts`](../test/unit/onboarding-store.test.ts):\ndefault state, `markComplete` idempotence, `dismiss`, `reset`,\nlistener isolation, persistence across `OnboardingStore`\ninstances.\n\n[`lite/test/unit/onboarding-api.test.ts`](../test/unit/onboarding-api.test.ts):\nRule-12 conformance contract (api singleton + reset + override).\n"
     },
     {
+      "slug": "registry",
+      "title": "Registry",
+      "summary": "Agent Registry — the API over the NEON transport (ADR-086).\nEvery call binds `$viewerId` and `$nowMs`; writes refuse with\nREGISTRY_FORBIDDEN when the Cypher gate (admin or creator) matches\nnothing. Registry-contract vocabularies are enforced here in TS so a\ntypo can never widen a status or a listing.",
+      "surface": {
+        "interfaceName": "RegistryManagerApi",
+        "interfaceDescription": "The Agent Registry surface (ADR-086): the account's `:Agent` catalog\nfrom NEON — search with facets, one agent's full record, and the\nadmin management of what is available on the platform and what each\nagent belongs to (IDWs, knowledge models, skills), plus the\nsubmission checklist. Every write needs a registry admin (a Person\nwhose role is admin/owner) or the agent's own creator and stamps\n`_Manifest` provenance.",
+        "methods": [
+          {
+            "name": "whoAmI",
+            "signature": "whoAmI(): Promise<RegistryViewer>",
+            "description": "Who the viewer is to the registry: signed-in id, admin flag, whether any admin exists yet, and the admin list.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "claimFirstAdmin",
+            "signature": "claimFirstAdmin(): Promise<RegistryViewer>",
+            "description": "Become the first admin — only while the graph holds NO admin at all.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "setAdmin",
+            "signature": "setAdmin(personId: string, isAdmin: boolean): Promise<RegistryViewer>",
+            "description": "Grant or revoke another person's admin role (admin only; never yourself).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "search",
+            "signature": "search(input?: RegistrySearchInput): Promise<RegistrySearchResult>",
+            "description": "Search the catalog: text over name/description/keywords/category/id, facets, paging (limit ≤ 200), newest first.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "get",
+            "signature": "get(id: string): Promise<RegistryAgentDetail | null>",
+            "description": "One agent's full registry record, or null.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "update",
+            "signature": "update(id: string, patch: RegistryAgentPatch): Promise<RegistryAgentDetail>",
+            "description": "Patch record fields (name, description, type, category, status, version, keywords) — vocabularies enforced.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "setEnabled",
+            "signature": "setEnabled(id: string, enabled: boolean): Promise<RegistryAgentDetail>",
+            "description": "Availability on the platform: mirrors `enabled` and `active`.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listIdws",
+            "signature": "listIdws(): Promise<RegistryRef[]>",
+            "description": "The graph's IDWs.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listKnowledgeModels",
+            "signature": "listKnowledgeModels(): Promise<RegistryRef[]>",
+            "description": "The graph's knowledge models.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listCapabilities",
+            "signature": "listCapabilities(): Promise<RegistryRef[]>",
+            "description": "The graph's capabilities (skills).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "link",
+            "signature": "link(id: string, kind: 'idw' | 'knowledge' | 'capability', targetId: string, on: boolean): Promise<RegistryAgentDetail>",
+            "description": "Link or unlink the agent to an IDW (APPLIES_TO_IDW), knowledge model (USES_KNOWLEDGE) or capability (HAS_CAPABILITY).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "createKnowledgeModel",
+            "signature": "createKnowledgeModel(input: { name: string; description?: string; type?: string; status?: string }): Promise<RegistryRef>",
+            "description": "Mint a knowledge model record (admin only; MERGE on a generated id).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "createCapability",
+            "signature": "createCapability(input: { name: string; description?: string }): Promise<RegistryRef>",
+            "description": "Mint a capability (skill) record (admin only).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "addEndpoint",
+            "signature": "addEndpoint(id: string, input: { kind: RegistryReach; url: string; channels?: string[] }): Promise<RegistryAgentDetail>",
+            "description": "Add an MCP / RESTful API / Skill reachability endpoint.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "removeEndpoint",
+            "signature": "removeEndpoint(id: string, endpointId: string): Promise<RegistryAgentDetail>",
+            "description": "Remove a reachability endpoint.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "checklist",
+            "signature": "checklist(id: string): Promise<{ agent: RegistryAgentDetail; checks: ListingCheck[]; ready: boolean; progress: { passed: number; total: number } }>",
+            "description": "The submission checklist for an agent: auto checks from the registry contract plus the admin's manual reviews.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "setManualCheck",
+            "signature": "setManualCheck(id: string, checkId: string, value: boolean): Promise<RegistryAgentDetail>",
+            "description": "Tick or clear a manual review (stored as `lite_listing_checks`).",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "setListing",
+            "signature": "setListing(id: string, listing: RegistryListing): Promise<RegistryAgentDetail>",
+            "description": "Move the listing state (unlisted | submitted | listed | rejected); submit/list refuse until every required check passes; listing is admin-only.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "ensureAnnotations",
+            "signature": "ensureAnnotations(): Promise<void>",
+            "description": "Idempotent registry annotations (lite_* keys) for other writers.",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": null,
+      "readme": "# lite/registry -- the Agent Registry (ADR-086)\n\nPublic surface: `RegistryApi` (implements `RegistryManagerApi`) from\n`./api.ts`, constructed by `initRegistry()` in `./main.ts` over the NEON\ntransport. Renderer surface: `window.lite.registry`. Opened from the\nIDW menu (\"Agent Registry...\") into its own window (`registry.html`).\n\nA search and registry manager over the account's `:Agent` catalog in\nNEON: facets (source, type, category, availability, listing,\nreachability, IDW, knowledge model), server-side search with paging,\nand a management panel for the selected agent -- availability on the\nplatform, record fields, MCP / RESTful / Skill endpoints, what it\nbelongs to (IDWs via `APPLIES_TO_IDW`, knowledge models via\n`USES_KNOWLEDGE`, skills via `HAS_CAPABILITY`), where it is used, and\nthe submission checklist with listing actions.\n\n## Permissions\n\n- Reads are the account-wide directory (agent inventory is not Space\n  content -- the same stance as the agent library search).\n- Writes need a registry **admin** (a `Person` whose `role` is\n  `admin`/`owner`, case-insensitive) or the agent's own creator.\n  Listing on the platform and minting knowledge models / capabilities\n  are admin-only. The first admin is claimed from the window while the\n  graph holds no admin at all; admins grant or revoke others.\n- Every write stamps `_Manifest` provenance (`updated_by_app_id`,\n  `updated_by_app_name`, `updated_by_user`, `updatedAt`). Lite's own\n  additions are namespaced: `lite_listing`, `lite_listed_at`,\n  `lite_listing_checks`.\n\n## Submission checklist (`checklist.ts`, pure)\n\nDerived from the graph's registry contract: id, name, description\n(20+ chars), type, category, reachable (an endpoint, a GSX endpoint or\na system agent), owner, not deleted, enabled, status in the vocabulary\n(`active | inactive | deprecated`); recommended: version, three\nkeywords, an IDW or knowledge model home; manual reviews an admin\nticks (behaviour reviewed, endpoints/credentials reviewed, docs\nlinked). `unlisted -> submitted -> listed` (or `rejected`); submit and\nlist refuse until every required check passes.\n\n## Files\n\n- `types.ts` -- records, search input/result, viewer, checklist types.\n- `queries.ts` -- the Cypher surface (`REGISTRY_CYPHER`), the admin gate\n  and the provenance stamp.\n- `api.ts` -- `RegistryApi`, row mappers, input sanitization.\n- `checklist.ts` -- the checklist evaluation.\n- `main.ts` -- `initRegistry()`: IPC handlers (`lite:registry:*`, one\n  envelope shape) + window.\n- `window.ts`, `registry.html`, `registry.css`, `renderer.ts`.\n\nTests: `test/unit/registry-contract.test.ts`, `test/unit/registry-ui.test.ts`.\n"
+    },
+    {
       "slug": "settings",
       "title": "Settings",
       "summary": "Settings module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts` -- never reach into `main.ts`,\n`window.ts`, or any other internal file.\n\nPer ADR-031, v1 ships one section (Two-Factor). The Settings window\nis opened via the `Onereach.ai Lite -> Settings...` menu entry; the\n`open()` method here is also exposed as `window.lite.settings.open()`\nvia the preload bridge so future placeholder UI (e.g. a Manage 2FA\nbutton) can deep-link in.\n\nNo error class in v1 -- failures inside the Two-Factor section bubble\nthrough `TotpError` (see `lite/totp/api.ts`).\n\nTests: `_setSettingsApiForTesting(stub)` to inject a custom\nimplementation, `_resetSettingsApiForTesting()` to clear the singleton.",
@@ -3462,7 +3608,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 122,
+        "count": 137,
         "entries": [
           {
             "constantKey": "CHECKLISTS_CREATE_START",
@@ -3762,6 +3908,81 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "RENAME_FAIL",
             "name": "spaces.rename.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "NEST_START",
+            "name": "spaces.nest.start",
+            "description": ""
+          },
+          {
+            "constantKey": "NEST_FINISH",
+            "name": "spaces.nest.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "NEST_FAIL",
+            "name": "spaces.nest.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "UNNEST_START",
+            "name": "spaces.unnest.start",
+            "description": ""
+          },
+          {
+            "constantKey": "UNNEST_FINISH",
+            "name": "spaces.unnest.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "UNNEST_FAIL",
+            "name": "spaces.unnest.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "NEST_INHERITANCE_START",
+            "name": "spaces.nestInheritance.start",
+            "description": ""
+          },
+          {
+            "constantKey": "NEST_INHERITANCE_FINISH",
+            "name": "spaces.nestInheritance.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "NEST_INHERITANCE_FAIL",
+            "name": "spaces.nestInheritance.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_CHILDREN_START",
+            "name": "spaces.listChildren.start",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_CHILDREN_FINISH",
+            "name": "spaces.listChildren.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_CHILDREN_FAIL",
+            "name": "spaces.listChildren.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_PARENTS_START",
+            "name": "spaces.listParents.start",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_PARENTS_FINISH",
+            "name": "spaces.listParents.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "LIST_PARENTS_FAIL",
+            "name": "spaces.listParents.fail",
             "description": ""
           },
           {
@@ -4605,5 +4826,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-09-02T03:03:48.960Z"
+  "generatedAt": "2026-09-04T02:03:27.805Z"
 } as const;

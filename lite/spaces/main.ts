@@ -914,7 +914,7 @@ export function getSignedInViewerId(): string | null {
   return resolveViewerId();
 }
 
-function resolveViewerId(): string | null {
+export function resolveViewerId(): string | null {
   const session = getAuthApi().getSession('edison');
   if (session === null) return null;
   const email = typeof session.email === 'string' ? session.email.trim().toLowerCase() : '';
