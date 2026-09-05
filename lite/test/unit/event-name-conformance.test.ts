@@ -197,7 +197,7 @@ const MODULES: ModuleSpec[] = [
     // the store's injected spanEmitter/eventEmitter seams using
     // GSX_EVENTS constants; events.ts is included so the quoted
     // catalog literals count as emit sites for the static scan.
-    sourceFiles: ['gsx/store.ts', 'gsx/main.ts', 'gsx/window.ts', 'gsx/events.ts'],
+    sourceFiles: ['gsx/store.ts', 'gsx/main.ts', 'gsx/window.ts', 'gsx/events.ts', 'gsx/menu-builder.ts'],
     events: GSX_EVENTS,
   },
 ];

@@ -24,6 +24,7 @@ import {
 } from './api.js';
 import { GSX_EVENTS } from './events.js';
 import { createGsxWindowPort } from './window.js';
+import { initGsxMenuBuilder, teardownGsxMenuBuilder } from './menu-builder.js';
 import type {
   GsxInvokeAgentOptions,
   GsxOpenWindowOptions,
@@ -119,6 +120,17 @@ export function initGsx(opts: InitGsxOptions): GsxHandle {
   setGsxAgentPublisher(publishAgentToGsxBuildSpace);
 
   const log = getLoggingApi();
+
+  // The GSX menu (2026-09-02) — Open GSX Studio + the per-environment
+  // surfaces, every entry opening in the signed-in GSX window. A menu
+  // failure must never take the IPC surface down with it.
+  try {
+    initGsxMenuBuilder();
+  } catch (err) {
+    log.warn('gsx', 'menu builder failed to initialize', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   ipcMain.handle(IPC_OPEN_WINDOW, async (_event, input?: GsxOpenWindowOptions) => {
     log.event(GSX_EVENTS.IPC_OPEN_WINDOW);
@@ -267,6 +279,11 @@ export function initGsx(opts: InitGsxOptions): GsxHandle {
 
   return {
     teardown(): void {
+      try {
+        teardownGsxMenuBuilder();
+      } catch {
+        /* best-effort */
+      }
       for (const channel of [
         IPC_OPEN_WINDOW,
         IPC_CLOSE_WINDOW,

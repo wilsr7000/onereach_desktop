@@ -195,3 +195,7 @@ records, persisted in `gsx-automation.json` under userData.
 
 Repair-path failures never throw out of `runScript` — they land in the
 run record's `repair.skippedReason`.
+
+## The GSX menu (2026-09-02)
+
+`menu-builder.ts` registers the `GSX` top-level menu (order 65, between IDW and Tools — where the full app has it): **Open GSX Studio**, then the GSX surfaces the full app's `generateDefaultGSXLinks` lists — HITL, Action Desk, Designer, Agents, Tickets, Calendar, Developer — each `https://<surface>.<env>.onereach.ai/…?accountId=<session account>`. Environments come from the signed-in auth sessions (flat list for one env, a submenu per env for several; Edison without an account id when signed out) and the menu rebuilds on every sign-in / sign-out. Every entry opens in this module's signed-in, contained GSX window (`getGsxApi().openWindow`), never the OS browser. Events: `gsx.menu.open-studio`, `gsx.menu.open-link`.

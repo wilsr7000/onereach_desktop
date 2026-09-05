@@ -48,6 +48,9 @@ export const GSX_EVENTS = {
   SCRIPT_LEARNED: 'gsx.script.learned',
   SCRIPT_INVALIDATED: 'gsx.script.invalidated',
   WINDOW_CLOSED: 'gsx.window.closed',
+  // The GSX menu (2026-09-02): a click on Open GSX Studio / a surface link.
+  MENU_OPEN_STUDIO: 'gsx.menu.open-studio',
+  MENU_OPEN_LINK: 'gsx.menu.open-link',
   // IPC entry events (per ADR-030).
   IPC_OPEN_WINDOW: 'gsx.ipc.open-window',
   IPC_CLOSE_WINDOW: 'gsx.ipc.close-window',
@@ -103,6 +106,16 @@ export interface GsxOpenWindowFailEvent extends GsxSpanBase {
   level: 'error';
   durationMs: number;
   error: SerializedEventError;
+}
+export interface GsxMenuOpenStudioEvent extends GsxEventBase {
+  name: typeof GSX_EVENTS.MENU_OPEN_STUDIO;
+  level: 'info';
+  data: { env: string };
+}
+export interface GsxMenuOpenLinkEvent extends GsxEventBase {
+  name: typeof GSX_EVENTS.MENU_OPEN_LINK;
+  level: 'info';
+  data: { env: string; link: string };
 }
 export interface GsxRunScriptStartEvent extends GsxSpanBase {
   name: typeof GSX_EVENTS.RUN_SCRIPT_START;
@@ -356,7 +369,9 @@ export type GsxEvent =
   | GsxIpcInvokeAgentEvent
   | GsxIpcListAgentsEvent
   | GsxIpcGetAgentEvent
-  | GsxIpcDeleteAgentEvent;
+  | GsxIpcDeleteAgentEvent
+  | GsxMenuOpenStudioEvent
+  | GsxMenuOpenLinkEvent;
 
 const GSX_EVENT_NAMES: ReadonlySet<string> = new Set(Object.values(GSX_EVENTS));
 
