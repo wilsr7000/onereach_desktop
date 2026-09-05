@@ -1142,7 +1142,7 @@ app
     }
 
     // ADR-086 — Agent Registry: the account's :Agent catalog from NEON,
-    // with admin management. Opened from IDW → Agent Registry…
+    // with admin management. Opened from IDW → Agent Library… (shown as the Agent Library since ADR-089)
     try {
       registryHandle = initRegistry({
         query: (cypher, parameters) => getNeonApi().query(cypher, parameters),

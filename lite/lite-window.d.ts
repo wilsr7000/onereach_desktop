@@ -1906,6 +1906,9 @@ interface LiteRegistryResult<T> {
   error?: { code: string; message: string; remediation: string };
 }
 interface LiteRegistryAgentSummary {
+  /** ADR-089 — where it lives. */
+  hosting: 'library' | 'hosted' | 'catalog'; account: string; isSkill: boolean;
+  spaces: Array<{ id: string; name: string; via: 'asset' | 'usage' }>;
   id: string; name: string; description: string; type: string; category: string; enabled: boolean; deleted: boolean;
   source: string; owner: string; updatedMs: number; listing: 'unlisted' | 'submitted' | 'listed' | 'rejected';
   builtin: boolean; isSystem: boolean; reach: Array<'mcp' | 'api' | 'skill'>; idwCount: number; knowledgeCount: number;
@@ -1922,7 +1925,7 @@ interface LiteRegistryAgentDetail extends LiteRegistryAgentSummary {
 interface LiteRegistryFacet { value: string; count: number }
 interface LiteRegistrySearchResult {
   items: LiteRegistryAgentSummary[]; total: number; offset: number; limit: number;
-  facets: { sources: LiteRegistryFacet[]; types: LiteRegistryFacet[]; categories: LiteRegistryFacet[] };
+  facets: { sources: LiteRegistryFacet[]; types: LiteRegistryFacet[]; categories: LiteRegistryFacet[]; hosting: LiteRegistryFacet[]; kinds: LiteRegistryFacet[]; };
 }
 interface LiteRegistryViewer { viewerId: string | null; isAdmin: boolean; noAdminYet: boolean; admins: string[] }
 interface LiteRegistryCheck { id: string; label: string; kind: 'auto' | 'manual'; required: boolean; passed: boolean; detail: string }
@@ -1934,12 +1937,14 @@ interface LiteRegistryBridge {
   search(input: {
     q?: string; source?: string; type?: string; category?: string; state?: '' | 'enabled' | 'disabled';
     listing?: '' | 'unlisted' | 'submitted' | 'listed' | 'rejected'; reach?: '' | 'mcp' | 'api' | 'skill';
-    idwId?: string; knowledgeId?: string; includeDeleted?: boolean; offset?: number; limit?: number;
+    idwId?: string; knowledgeId?: string; spaceId?: string; hosting?: '' | 'library' | 'hosted' | 'catalog'; kind?: '' | 'skill' | 'agent'; includeDeleted?: boolean; offset?: number; limit?: number;
   }): Promise<LiteRegistryResult<LiteRegistrySearchResult>>;
   get(id: string): Promise<LiteRegistryResult<LiteRegistryAgentDetail | null>>;
   update(id: string, patch: { name?: string; description?: string; type?: string; category?: string; status?: string; version?: string; keywords?: string[] }): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
   setEnabled(id: string, enabled: boolean): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
   listIdws(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
+  /** ADR-089 — Spaces (as the viewer may see them) that hold agents. */
+  listSpaces(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
   listKnowledgeModels(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
   listCapabilities(): Promise<LiteRegistryResult<LiteRegistryRef[]>>;
   link(id: string, kind: 'idw' | 'knowledge' | 'capability', targetId: string, on: boolean): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;

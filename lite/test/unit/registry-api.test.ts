@@ -67,3 +67,41 @@ describe('RegistryApi', () => {
     expect(rowToSummary({})).toBeNull();
   });
 });
+
+// ── ADR-089: where an agent lives ────────────────────────────────────
+import { RegistryApi as Api089, rowToSummary as rowToSummary089 } from '../../registry/api.js';
+describe('registry API — Spaces, hosting, Skills (ADR-089)', () => {
+  const base = { id: 'ag-1', name: 'Extract Tickets', description: 'Break a document into tickets', type: 'micro-ui', category: 'writing', enabled: true, deleted: false, source: 'Playbooks', owner: 'robb@onereach.com', updatedMs: 1, listing: 'unlisted', builtin: false, isSystem: false, reach: [], idwCount: 0, knowledgeCount: 0 };
+  it('maps hosting, account, the Skill marker and the sight-filtered Spaces (deduplicated, via kept)', () => {
+    const s = rowToSummary089({ ...base, hosting: 'hosted', account: 'onereach.com', isSkill: true, spaces: [{ id: 's1', name: 'Procurement', via: 'asset' }, { id: 's1', name: 'Procurement', via: 'usage' }, { id: 's2', name: 'Ops', via: 'usage' }, { name: 'no id' }] })!;
+    expect(s).toMatchObject({ hosting: 'hosted', account: 'onereach.com', isSkill: true });
+    expect(s.spaces).toEqual([{ id: 's1', name: 'Procurement', via: 'asset' }, { id: 's2', name: 'Ops', via: 'usage' }]);
+    expect(rowToSummary089({ ...base })!).toMatchObject({ hosting: 'catalog', account: '', isSkill: false, spaces: [] });
+    expect(rowToSummary089({ ...base, hosting: 'bogus' })!.hosting).toBe('catalog');
+  });
+  it('search binds the Space, hosting and kind filters, and parses the new facets; listSpaces reads the Space list', async () => {
+    const seen: Array<{ cypher: string; params: Record<string, unknown> }> = [];
+    const query = async (cypher: string, params: Record<string, unknown>): Promise<Array<Record<string, unknown>>> => {
+      seen.push({ cypher, params });
+      if (/AS known/.test(cypher)) return [{ known: true, isAdmin: true, admins: [] }];
+      if (/'hosting' AS facet/.test(cypher)) return [{ facet: 'hosting', value: 'hosted', n: 3189 }, { facet: 'kind', value: 'skill', n: 700 }, { facet: 'source', value: 'Playbooks', n: 12044 }];
+      if (/RETURN count\(a\) AS total/.test(cypher)) return [{ total: 1 }];
+      if (/MATCH \(sp:Space\)/.test(cypher)) return [{ id: 's1', name: 'Procurement', description: '', status: '2 agents' }];
+      if (/MATCH \(a:Agent\)/.test(cypher)) return [{ ...base, hosting: 'library', account: 'onereach.com', isSkill: false, spaces: [] }];
+      return [];
+    };
+    const api = new Api089({ query, viewerId: () => 'robb@onereach.com' });
+    const res = await api.search({ spaceId: 's1', hosting: 'library', kind: 'agent' });
+    const search = seen.find((s) => /SKIP toInteger\(\$offset\)/.test(s.cypher));
+    expect(search?.params).toMatchObject({ spaceId: 's1', hosting: 'library', kind: 'agent' });
+    expect(res.facets.hosting).toEqual([{ value: 'hosted', count: 3189 }]);
+    expect(res.facets.kinds).toEqual([{ value: 'skill', count: 700 }]);
+    expect(res.items[0]).toMatchObject({ hosting: 'library', account: 'onereach.com' });
+    const spaces = await api.listSpaces();
+    expect(spaces).toEqual([{ id: 's1', name: 'Procurement', description: '', status: '2 agents' }]);
+    // Sight travels with the query: the Space list carries the viewer id and the ADR-084 grant predicate.
+    const list = seen.find((s) => /MATCH \(sp:Space\)/.test(s.cypher));
+    expect(list?.cypher).toContain('HAS_ACCESS');
+    expect(list?.params).toMatchObject({ viewerId: 'robb@onereach.com' });
+  });
+});

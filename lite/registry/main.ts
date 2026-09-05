@@ -18,6 +18,7 @@ export const REGISTRY_IPC = {
   UPDATE: 'lite:registry:update',
   SET_ENABLED: 'lite:registry:set-enabled',
   LIST_IDWS: 'lite:registry:list-idws',
+  LIST_SPACES: 'lite:registry:list-spaces',
   LIST_KNOWLEDGE: 'lite:registry:list-knowledge',
   LIST_CAPABILITIES: 'lite:registry:list-capabilities',
   LINK: 'lite:registry:link',
@@ -92,6 +93,7 @@ export function initRegistry(opts: InitRegistryOptions): RegistryHandle {
     [REGISTRY_IPC.UPDATE, (_e, p) => envelope(() => api.update(s(p?.['id']), (p?.['patch'] ?? {}) as RegistryAgentPatch))],
     [REGISTRY_IPC.SET_ENABLED, (_e, p) => envelope(() => api.setEnabled(s(p?.['id']), p?.['enabled'] === true))],
     [REGISTRY_IPC.LIST_IDWS, () => envelope(() => api.listIdws())],
+    [REGISTRY_IPC.LIST_SPACES, () => envelope(() => api.listSpaces())],
     [REGISTRY_IPC.LIST_KNOWLEDGE, () => envelope(() => api.listKnowledgeModels())],
     [REGISTRY_IPC.LIST_CAPABILITIES, () => envelope(() => api.listCapabilities())],
     [

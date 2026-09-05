@@ -118,7 +118,7 @@ export function initMenuBuilder(config: MenuBuilderConfig): void {
       id: 'idw.agent-registry',
       type: 'item',
       parentId: TOP_LEVEL_ID,
-      label: 'Agent Registry...',
+      label: 'Agent Library...',
       order: TAIL_BASE + 2,
       click: () => onOpenRegistry(),
     });

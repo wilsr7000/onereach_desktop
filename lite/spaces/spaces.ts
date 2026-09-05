@@ -10002,13 +10002,13 @@ export function buildAgentRegistryBlock(item: RendererItem): HTMLElement | null 
   head.className = 'spaces-agent-registry-head';
   const title = document.createElement('div');
   title.className = 'spaces-agent-registry-title';
-  title.textContent = 'Registry';
+  title.textContent = 'Agent Library';
   head.appendChild(title);
   const open = document.createElement('button');
   open.type = 'button';
   open.className = 'spaces-agent-registry-open';
   open.textContent = 'Open checklist…';
-  open.title = 'The admission checklist for this agent, in the Agent Registry.';
+  open.title = 'The admission checklist for this agent, in the Agent Library.';
   open.addEventListener('click', () => {
     void reg.openWindow({ agentId });
   });

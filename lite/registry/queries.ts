@@ -9,6 +9,8 @@
  * provenance fields. The Playbooks writer keeps its own fields; Lite
  * namespaces its additions (`lite_listing*`).
  */
+import { SPACE_VISIBLE_FOR } from '../spaces/sdk-client.js';
+
 
 export const REGISTRY_APP_ID = 'onereach-lite';
 export const REGISTRY_APP_NAME = 'Onereach.ai Lite';
@@ -33,6 +35,43 @@ export const PROVENANCE = (alias: string): string => `${alias}.updated_by_app_id
         ${alias}.updatedAt = $nowMs,
         ${alias}.updated_at = toString($nowMs)`;
 
+// ── ADR-089: where an agent lives — Spaces (sight-filtered), hosting, Skills ──
+/**
+ * The Spaces an agent belongs to, as the VIEWER may see them (ADR-084:
+ * creator or live HAS_ACCESS grant, nested opt-in per ADR-085; nothing
+ * inferred): through an asset that represents it inside a Space, or
+ * through the full app's usage edge.
+ */
+const SPACES_OF = `([(a)<-[:REPRESENTS]-(rep:Asset)-[:BELONGS_TO]->(sp:Space)
+                WHERE rep.deletedAt IS NULL AND sp.deletedAt IS NULL AND ${SPACE_VISIBLE_FOR('sp')}
+                | {id: sp.id, name: coalesce(sp.name, sp.id), via: 'asset'}]
+              + [(a)-[:USED_IN]->(sp:Space)
+                WHERE sp.deletedAt IS NULL AND ${SPACE_VISIBLE_FOR('sp')}
+                | {id: sp.id, name: coalesce(sp.name, sp.id), via: 'usage'}])`;
+const IN_LIBRARY = `count { (:Library)-[:CONTAINS]->(a) } > 0`;
+/** library = in a GSX-Desktop Library; hosted = has a GSX endpoint; catalog = a directory entry with no runtime recorded. */
+const HOSTING = `CASE WHEN ${IN_LIBRARY} THEN 'library' WHEN a.gsxEndpoint IS NOT NULL THEN 'hosted' ELSE 'catalog' END`;
+/** The account: the Library's name for library agents, else the creator's domain (the record carries nothing better). */
+const ACCOUNT = `coalesce(CASE WHEN ${IN_LIBRARY}
+                THEN head([(l:Library)-[:CONTAINS]->(a) | replace(coalesce(l.name, l.id), ' Library', '')])
+                ELSE split(coalesce(a.created_by_user, ''), '@')[1] END, '')`;
+/** A Skill is an agent with a UI (human in the loop): the micro-ui type, or a Skill endpoint. */
+const IS_SKILL = `(coalesce(a.agentType, a.type, '') = 'micro-ui'
+                OR EXISTS { MATCH (a)-[:REACHABLE_VIA]->(se:AgentEndpoint) WHERE se.kind = 'skill' })`;
+const WHERE_FRAGMENT = `
+        AND ($spaceId = ''
+             OR EXISTS { MATCH (a)<-[:REPRESENTS]-(rep:Asset)-[:BELONGS_TO]->(:Space {id: $spaceId}) WHERE rep.deletedAt IS NULL }
+             OR EXISTS { MATCH (a)-[:USED_IN]->(:Space {id: $spaceId}) })
+        AND ($hosting = '' OR ${HOSTING} = $hosting)
+        AND ($kind = ''
+             OR ($kind = 'skill' AND ${IS_SKILL})
+             OR ($kind = 'agent' AND NOT ${IS_SKILL}))`;
+const WHERE_FRAGMENT_FIELDS = `
+             ${HOSTING} AS hosting,
+             ${ACCOUNT} AS account,
+             ${IS_SKILL} AS isSkill,
+             ${SPACES_OF} AS spaces,`;
+
 const SEARCH_WHERE = `
       WHERE ($includeDeleted OR coalesce(a.deleted, false) = false)
         AND ($q = ''
@@ -52,10 +91,10 @@ const SEARCH_WHERE = `
              OR EXISTS { MATCH (a)-[:REACHABLE_VIA]->(re:AgentEndpoint) WHERE re.kind = $reach }
              OR ($reach = 'api' AND a.gsxEndpoint IS NOT NULL))
         AND ($idwId = '' OR EXISTS { MATCH (a)-[:APPLIES_TO_IDW]->(:IDW {id: $idwId}) })
-        AND ($knowledgeId = '' OR EXISTS { MATCH (a)-[:USES_KNOWLEDGE]->(:KnowledgeModel {id: $knowledgeId}) })`;
+        AND ($knowledgeId = '' OR EXISTS { MATCH (a)-[:USES_KNOWLEDGE]->(:KnowledgeModel {id: $knowledgeId}) })${WHERE_FRAGMENT}`;
 
 const SUMMARY_RETURN = `
-      RETURN a.id AS id,
+      RETURN a.id AS id,${WHERE_FRAGMENT_FIELDS}
              coalesce(a.name, a.id) AS name,
              left(coalesce(a.description, ''), 240) AS description,
              coalesce(a.agentType, a.type, '') AS type,
@@ -135,10 +174,26 @@ export const REGISTRY_CYPHER = {
              OR toLower(coalesce(a.description, '')) CONTAINS $q)
     WITH coalesce(a.category, a.menuCategory, '') AS category
     RETURN 'category' AS facet, category AS value, count(*) AS n
+    UNION ALL
+    MATCH (a:Agent)
+      WHERE ($includeDeleted OR coalesce(a.deleted, false) = false)
+        AND ($q = ''
+             OR toLower(coalesce(a.name, '')) CONTAINS $q
+             OR toLower(coalesce(a.description, '')) CONTAINS $q)
+    WITH ${HOSTING} AS hosting
+    RETURN 'hosting' AS facet, hosting AS value, count(*) AS n
+    UNION ALL
+    MATCH (a:Agent)
+      WHERE ($includeDeleted OR coalesce(a.deleted, false) = false)
+        AND ($q = ''
+             OR toLower(coalesce(a.name, '')) CONTAINS $q
+             OR toLower(coalesce(a.description, '')) CONTAINS $q)
+    WITH CASE WHEN ${IS_SKILL} THEN 'skill' ELSE 'agent' END AS kind
+    RETURN 'kind' AS facet, kind AS value, count(*) AS n
   `,
   GET: `
     MATCH (a:Agent {id: $id})
-    RETURN a.id AS id,
+    RETURN a.id AS id,${WHERE_FRAGMENT_FIELDS}
            coalesce(a.name, a.id) AS name,
            coalesce(a.description, '') AS description,
            coalesce(a.agentType, a.type, '') AS type,
@@ -169,6 +224,17 @@ export const REGISTRY_CYPHER = {
            size([(a)-[:CONTRIBUTED_TO]->(:Playbook) | 1]) AS contributedPlaybooks,
            size([(:Person)-[:ENABLED]->(a) | 1]) AS enabledBy,
            coalesce(head([(l:Library)-[:CONTAINS]->(a) | coalesce(l.name, l.id)]), '') AS library
+  `,
+  /** ADR-089 — the Spaces (as the viewer may see them) that hold agents, for the Space facet. */
+  LIST_SPACES: `
+    MATCH (sp:Space)
+    WHERE sp.deletedAt IS NULL AND ${SPACE_VISIBLE_FOR('sp')}
+    WITH sp,
+         count { (sp)<-[:BELONGS_TO]-(rep:Asset)-[:REPRESENTS]->(:Agent) WHERE rep.deletedAt IS NULL }
+           + count { (:Agent)-[:USED_IN]->(sp) } AS agents
+    WHERE agents > 0
+    RETURN sp.id AS id, coalesce(sp.name, sp.id) AS name, '' AS description, toString(agents) + ' agents' AS status
+    ORDER BY toLower(coalesce(sp.name, sp.id)) ASC LIMIT 200
   `,
   LIST_IDWS: `
     MATCH (i:IDW)

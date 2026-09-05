@@ -6,6 +6,7 @@
  * typo can never widen a status or a listing.
  */
 
+import type { RegistryHosting, RegistrySpaceRef } from './types.js';
 import { randomBytes } from 'node:crypto';
 import { evaluateListingChecklist, listingReady, checklistProgress } from './checklist.js';
 import {
@@ -89,7 +90,7 @@ export interface AdmissionPatch {
  * from NEON — search with facets, one agent's full record, and the
  * admin management of what is available on the platform and what each
  * agent belongs to (IDWs, knowledge models, skills), plus the
- * submission checklist. Every write needs a registry admin (a Person
+ * submission checklist. Every write needs a library admin (a Person
  * whose role is admin/owner) or the agent's own creator and stamps
  * `_Manifest` provenance.
  */
@@ -110,6 +111,8 @@ export interface RegistryManagerApi {
   setEnabled(id: string, enabled: boolean): Promise<RegistryAgentDetail>;
   /** The graph's IDWs. */
   listIdws(): Promise<RegistryRef[]>;
+  /** ADR-089 — the Spaces (as the viewer may see them) that hold agents, for the Space facet. */
+  listSpaces(): Promise<RegistryRef[]>;
   /** The graph's knowledge models. */
   listKnowledgeModels(): Promise<RegistryRef[]>;
   /** The graph's capabilities (skills). */
@@ -175,6 +178,24 @@ const refs = (v: unknown): RegistryRef[] =>
         .filter((x) => x.id.length > 0)
     : [];
 
+function hostingOf(v: unknown): RegistryHosting {
+  return v === 'library' || v === 'hosted' ? v : 'catalog';
+}
+function spacesOf(v: unknown): RegistrySpaceRef[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>();
+  const out: RegistrySpaceRef[] = [];
+  for (const x of v) {
+    if (typeof x !== 'object' || x === null) continue;
+    const m = x as Record<string, unknown>;
+    const id = str(m, 'id');
+    if (id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name: str(m, 'name') || id, via: m['via'] === 'usage' ? 'usage' : 'asset' });
+  }
+  return out;
+}
+
 export function rowToSummary(r: Record<string, unknown>): RegistryAgentSummary | null {
   const id = str(r, 'id');
   if (id.length === 0) return null;
@@ -195,6 +216,11 @@ export function rowToSummary(r: Record<string, unknown>): RegistryAgentSummary |
     reach: [...new Set(reachOf(r['reach']))],
     idwCount: num(r, 'idwCount'),
     knowledgeCount: num(r, 'knowledgeCount'),
+    // ADR-089 — where it lives.
+    hosting: hostingOf(r['hosting']),
+    account: str(r, 'account'),
+    isSkill: r['isSkill'] === true,
+    spaces: spacesOf(r['spaces']),
   };
 }
 
@@ -270,7 +296,7 @@ export class RegistryApi implements RegistryManagerApi {
   private requireViewer(): string {
     const v = this.viewer();
     if (v.length === 0) {
-      throw new RegistryError('REGISTRY_NOT_AUTHENTICATED', 'Sign in to use the Agent Registry.', 'Sign in with your OneReach account first.');
+      throw new RegistryError('REGISTRY_NOT_AUTHENTICATED', 'Sign in to use the Agent Library.', 'Sign in with your OneReach account first.');
     }
     return v;
   }
@@ -281,8 +307,8 @@ export class RegistryApi implements RegistryManagerApi {
     if (row === undefined) {
       throw new RegistryError(
         'REGISTRY_FORBIDDEN',
-        `Could not ${what}: it needs a registry admin (or the agent's creator), and the target must exist.`,
-        'Ask a registry admin, or claim the first admin role if none exists yet.'
+        `Could not ${what}: it needs a library admin (or the agent's creator), and the target must exist.`,
+        'Ask a library admin, or claim the first admin role if none exists yet.'
       );
     }
     return row;
@@ -326,6 +352,9 @@ export class RegistryApi implements RegistryManagerApi {
       reach: input.reach ?? '',
       idwId: input.idwId ?? '',
       knowledgeId: input.knowledgeId ?? '',
+      spaceId: input.spaceId ?? '',
+      hosting: input.hosting ?? '',
+      kind: input.kind ?? '',
       includeDeleted: input.includeDeleted === true,
       offset,
       limit,
@@ -335,13 +364,15 @@ export class RegistryApi implements RegistryManagerApi {
       this.run(REGISTRY_CYPHER.SEARCH_COUNT, params),
       this.run(REGISTRY_CYPHER.FACETS, { q: params.q, includeDeleted: params.includeDeleted }),
     ]);
-    const facets = { sources: [] as RegistryFacet[], types: [] as RegistryFacet[], categories: [] as RegistryFacet[] };
+    const facets = { sources: [] as RegistryFacet[], types: [] as RegistryFacet[], categories: [] as RegistryFacet[], hosting: [] as RegistryFacet[], kinds: [] as RegistryFacet[] };
     for (const f of facetRows) {
       const entry = { value: str(f, 'value'), count: num(f, 'n') };
       const facet = str(f, 'facet');
       if (facet === 'source') facets.sources.push(entry);
       else if (facet === 'type') facets.types.push(entry);
       else if (facet === 'category') facets.categories.push(entry);
+      else if (facet === 'hosting') facets.hosting.push(entry);
+      else if (facet === 'kind') facets.kinds.push(entry);
     }
     for (const list of [facets.sources, facets.types, facets.categories]) list.sort((a, b) => b.count - a.count);
     return {
@@ -390,6 +421,11 @@ export class RegistryApi implements RegistryManagerApi {
 
   listIdws(): Promise<RegistryRef[]> {
     return this.run(REGISTRY_CYPHER.LIST_IDWS).then(refs);
+  }
+
+  /** ADR-089 — Spaces (as the viewer may see them) that hold agents. */
+  listSpaces(): Promise<RegistryRef[]> {
+    return this.run(REGISTRY_CYPHER.LIST_SPACES).then(refs);
   }
   listKnowledgeModels(): Promise<RegistryRef[]> {
     return this.run(REGISTRY_CYPHER.LIST_KNOWLEDGE_MODELS).then(refs);
@@ -529,7 +565,7 @@ export class RegistryApi implements RegistryManagerApi {
     this.requireViewer();
     const detail = await this.mustGet(id);
     if (!(await this.canWriteAgent(detail))) {
-      throw new RegistryError('REGISTRY_FORBIDDEN', "Only a registry admin or the agent's creator can edit its admission checklist.");
+      throw new RegistryError('REGISTRY_FORBIDDEN', "Only a library admin or the agent's creator can edit its admission checklist.");
     }
     if (this.opts.kv === undefined) throw new RegistryError('REGISTRY_INVALID_INPUT', 'The shared checklist store is not configured.', 'Sign in so KV is reachable, then try again.');
     const fresh = (await this.readAdmissionDoc()) ?? { v: 1, agents: {} };
@@ -559,7 +595,7 @@ export class RegistryApi implements RegistryManagerApi {
     this.requireViewer();
     const detail = await this.mustGet(id);
     if (!(await this.canWriteAgent(detail))) {
-      throw new RegistryError('REGISTRY_FORBIDDEN', "Only a registry admin or the agent's creator can analyze the agent.");
+      throw new RegistryError('REGISTRY_FORBIDDEN', "Only a library admin or the agent's creator can analyze the agent.");
     }
     const auto = autoChecks({
       name: detail.name,
@@ -644,7 +680,7 @@ export class RegistryApi implements RegistryManagerApi {
 const METHODS: ReadonlyArray<keyof RegistryManagerApi> = [
   'whoAmI', 'claimFirstAdmin', 'setAdmin', 'search', 'get', 'update', 'setEnabled', 'listIdws', 'listKnowledgeModels',
   'listCapabilities', 'link', 'createKnowledgeModel', 'createCapability', 'addEndpoint', 'removeEndpoint', 'checklist',
-  'setManualCheck', 'setListing', 'ensureAnnotations', 'admissionGet', 'admissionSave', 'admissionAnalyze',
+  'setManualCheck', 'setListing', 'ensureAnnotations', 'admissionGet', 'admissionSave', 'admissionAnalyze', 'listSpaces',
 ];
 
 /** Every method refuses until `configureRegistryApi()` has run (boot order bug, not a user error). */

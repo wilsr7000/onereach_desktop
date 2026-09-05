@@ -10,7 +10,7 @@ import { ADMISSION_LINE_IDS, computeAdmission, type AdmissionEntry } from '../..
 const summary = (over: Partial<LiteRegistryAgentSummary> = {}): LiteRegistryAgentSummary => ({
   id: 'agent-1', name: 'Slack Share', description: 'Post to Slack channel', type: 'gsx', category: 'social', enabled: true, deleted: false,
   source: 'Playbooks', owner: 'robb@onereach.com', updatedMs: Date.now() - 3600_000, listing: 'listed', builtin: false, isSystem: false,
-  reach: ['api', 'mcp'], idwCount: 1, knowledgeCount: 0, ...over,
+  reach: ['api', 'mcp'], idwCount: 1, knowledgeCount: 0, hosting: 'hosted', account: 'onereach.com', isSkill: false, spaces: [], ...over,
 });
 
 describe('buildAgentRow', () => {
@@ -150,5 +150,21 @@ describe('buildAdmissionPanel (ADR-088)', () => {
     expect(panel.querySelector('[data-line="a1"] .reg-adm-evidence')?.textContent).toContain('purpose (61 chars)');
     expect(panel.querySelector('[data-line="c2"] .reg-adm-badge')?.textContent).toBe('model: unmet');
     expect(panel.querySelector('[data-line="c2"] .reg-adm-ai')?.textContent).toBe('no heartbeat in the record');
+  });
+});
+
+// ── ADR-089: Skill, hosting + account, Spaces on the row ──────────────
+describe('buildAgentRow — where the agent lives (ADR-089)', () => {
+  it('shows Hosted · account, a Skill badge for agents with a UI, and the Spaces the viewer may see', () => {
+    const row = buildAgentRow(summary({ isSkill: true, spaces: [{ id: 's1', name: 'Procurement', via: 'asset' }, { id: 's2', name: 'Ops', via: 'usage' }, { id: 's3', name: 'Legal', via: 'asset' }] }), false);
+    expect(row.querySelector('.reg-chip.skill')?.textContent).toBe('Skill · HiTL');
+    expect(row.querySelector('.reg-chip.hosting')?.textContent).toBe('Hosted · onereach.com');
+    expect(Array.from(row.querySelectorAll('.reg-chip.space')).map((c) => c.textContent)).toEqual(['Procurement', 'Ops', '+1']);
+    expect(row.querySelector('.reg-chip.space')?.getAttribute('title')).toBe('In Procurement');
+  });
+  it('library and catalog agents read as such', () => {
+    expect(buildAgentRow(summary({ hosting: 'library', account: 'onereach.com' }), false).querySelector('.reg-chip.hosting')?.textContent).toBe('Library · onereach.com');
+    expect(buildAgentRow(summary({ hosting: 'catalog', account: '' }), false).querySelector('.reg-chip.hosting')?.textContent).toBe('Catalog');
+    expect(buildAgentRow(summary(), false).querySelector('.reg-chip.skill')).toBeNull();
   });
 });

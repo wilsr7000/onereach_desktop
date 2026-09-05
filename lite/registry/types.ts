@@ -13,7 +13,23 @@
 export type RegistryListing = 'unlisted' | 'submitted' | 'listed' | 'rejected';
 export type RegistryReach = 'mcp' | 'api' | 'skill';
 
+export type RegistryHosting = 'library' | 'hosted' | 'catalog';
+export interface RegistrySpaceRef {
+  id: string;
+  name: string;
+  /** asset = an asset in the Space represents the agent; usage = the full app recorded use there. */
+  via: 'asset' | 'usage';
+}
+
 export interface RegistryAgentSummary {
+  /** ADR-089 — where it lives. */
+  hosting: RegistryHosting;
+  /** The account (Library name for library agents, else the creator's domain). */
+  account: string;
+  /** A Skill: an agent with a UI (human in the loop). */
+  isSkill: boolean;
+  /** Spaces the VIEWER may see that hold this agent (ADR-084 sight). */
+  spaces: RegistrySpaceRef[];
   id: string;
   name: string;
   description: string;
@@ -85,6 +101,10 @@ export interface RegistrySearchInput {
   includeDeleted?: boolean;
   offset?: number;
   limit?: number;
+  /** ADR-089 */
+  spaceId?: string;
+  hosting?: '' | RegistryHosting;
+  kind?: '' | 'skill' | 'agent';
 }
 
 export interface RegistryFacet {
@@ -97,7 +117,7 @@ export interface RegistrySearchResult {
   total: number;
   offset: number;
   limit: number;
-  facets: { sources: RegistryFacet[]; types: RegistryFacet[]; categories: RegistryFacet[] };
+  facets: { sources: RegistryFacet[]; types: RegistryFacet[]; categories: RegistryFacet[]; hosting: RegistryFacet[]; kinds: RegistryFacet[] };
 }
 
 export interface RegistryViewer {

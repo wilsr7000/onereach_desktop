@@ -1148,7 +1148,7 @@ export async function appendNeonCard(state: SectionState): Promise<void> {
       </span>
     </div>
     <div class="idw-actions-row">
-      <button type="button" id="idw-open-registry" class="btn-secondary" data-action="neon-registry">Open Agent Registry…</button>
+      <button type="button" id="idw-open-registry" class="btn-secondary" data-action="neon-registry">Open Agent Library…</button>
       <span class="idw-status-help" id="idw-neon-summary">${escapeHtml(summary)}</span>
     </div>
     <div class="idw-table" id="idw-neon-idws">

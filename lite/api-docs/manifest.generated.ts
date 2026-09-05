@@ -3194,7 +3194,7 @@ export const MANIFEST: Manifest = {
       "summary": "Agent Registry — the API over the NEON transport (ADR-086).\nEvery call binds `$viewerId` and `$nowMs`; writes refuse with\nREGISTRY_FORBIDDEN when the Cypher gate (admin or creator) matches\nnothing. Registry-contract vocabularies are enforced here in TS so a\ntypo can never widen a status or a listing.",
       "surface": {
         "interfaceName": "RegistryManagerApi",
-        "interfaceDescription": "The Agent Registry surface (ADR-086): the account's `:Agent` catalog\nfrom NEON — search with facets, one agent's full record, and the\nadmin management of what is available on the platform and what each\nagent belongs to (IDWs, knowledge models, skills), plus the\nsubmission checklist. Every write needs a registry admin (a Person\nwhose role is admin/owner) or the agent's own creator and stamps\n`_Manifest` provenance.",
+        "interfaceDescription": "The Agent Registry surface (ADR-086): the account's `:Agent` catalog\nfrom NEON — search with facets, one agent's full record, and the\nadmin management of what is available on the platform and what each\nagent belongs to (IDWs, knowledge models, skills), plus the\nsubmission checklist. Every write needs a library admin (a Person\nwhose role is admin/owner) or the agent's own creator and stamps\n`_Manifest` provenance.",
         "methods": [
           {
             "name": "whoAmI",
@@ -3249,6 +3249,13 @@ export const MANIFEST: Manifest = {
             "name": "listIdws",
             "signature": "listIdws(): Promise<RegistryRef[]>",
             "description": "The graph's IDWs.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "listSpaces",
+            "signature": "listSpaces(): Promise<RegistryRef[]>",
+            "description": "ADR-089 — the Spaces (as the viewer may see them) that hold agents, for the Space facet.",
             "tags": [],
             "examples": []
           },
@@ -4874,5 +4881,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-09-05T00:11:49.060Z"
+  "generatedAt": "2026-09-05T00:32:14.145Z"
 } as const;

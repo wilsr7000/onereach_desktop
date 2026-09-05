@@ -61,3 +61,7 @@ Tests: `test/unit/registry-contract.test.ts`, `test/unit/registry-ui.test.ts`.
 - `admissionAnalyze(id)` — graph-proven lines ticked with evidence (A1, A4, D5, E2); a Claude grading pass over the rest, recorded under `lite.analysis`, never auto-ticked.
 - `setListing` is gated by admission: submit needs a grade above Critical; list needs F1 + F2.
 - `openWindow({ agentId })` opens the registry on that agent (from a Space's agent detail).
+
+## Where an agent lives (ADR-089)
+
+Shown as the **Agent Library**. Each summary carries `spaces` (Spaces the viewer may see that hold the agent, via an asset that represents it or the full app's usage edge; sight-filtered with the ADR-084 predicate), `hosting` (`library` | `hosted` | `catalog`) with `account`, and `isSkill` (an agent with a UI: micro-ui or a Skill endpoint). Filters: `spaceId`, `hosting`, `kind`. `listSpaces()` feeds the Space facet.

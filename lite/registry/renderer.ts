@@ -26,15 +26,19 @@ interface Filters {
   reach: '' | 'mcp' | 'api' | 'skill';
   idwId: string;
   knowledgeId: string;
+  /** ADR-089 */
+  spaceId: string;
+  hosting: '' | 'library' | 'hosted' | 'catalog';
+  kind: '' | 'skill' | 'agent';
   includeDeleted: boolean;
 }
 
 const PAGE = 50;
 const state = {
-  filters: { q: '', source: '', type: '', category: '', state: '', listing: '', reach: '', idwId: '', knowledgeId: '', includeDeleted: false } as Filters,
+  filters: { q: '', source: '', type: '', category: '', state: '', listing: '', reach: '', idwId: '', knowledgeId: '', spaceId: '', hosting: '', kind: '', includeDeleted: false } as Filters,
   items: [] as Summary[],
   total: 0,
-  facets: { sources: [] as LiteRegistryFacet[], types: [] as LiteRegistryFacet[], categories: [] as LiteRegistryFacet[] },
+  facets: { sources: [] as LiteRegistryFacet[], types: [] as LiteRegistryFacet[], categories: [] as LiteRegistryFacet[], hosting: [] as LiteRegistryFacet[], kinds: [] as LiteRegistryFacet[] },
   selectedId: null as string | null,
   checklist: null as Checklist | null,
   /** ADR-088 — the selected agent's admission checklist (shared KV document). */
@@ -44,6 +48,8 @@ const state = {
   idws: [] as Ref[],
   knowledge: [] as Ref[],
   capabilities: [] as Ref[],
+  /** ADR-089 — Spaces (as the viewer may see them) that hold agents. */
+  spaces: [] as Ref[],
   busy: false,
 };
 
@@ -75,6 +81,14 @@ export function listingBadge(listing: Listing): HTMLElement {
   return b;
 }
 
+/** ADR-089 — where the agent lives: Hosted · account, Library · account, or Catalog. */
+export function hostingChip(item: Pick<Summary, 'hosting' | 'account'>): HTMLElement {
+  const label = item.hosting === 'hosted' ? `Hosted${item.account.length > 0 ? ` · ${item.account}` : ''}` : item.hosting === 'library' ? `Library${item.account.length > 0 ? ` · ${item.account}` : ''}` : 'Catalog';
+  const chip = el('span', `reg-chip hosting is-${item.hosting}`, label);
+  chip.title = item.hosting === 'hosted' ? `Hosted: runs behind a GSX endpoint in ${item.account || 'this account'}` : item.hosting === 'library' ? `Library agent (GSX Desktop), ${item.account || 'this account'}` : 'Catalog entry: no runtime recorded on the record';
+  return chip;
+}
+
 export function buildAgentRow(item: Summary, selected: boolean): HTMLElement {
   const row = el('div', 'reg-row' + (selected ? ' is-selected' : ''));
   row.setAttribute('role', 'option');
@@ -89,6 +103,15 @@ export function buildAgentRow(item: Summary, selected: boolean): HTMLElement {
   row.appendChild(main);
   const meta = el('div', 'reg-row-meta');
   if (item.type.length > 0) meta.appendChild(el('span', 'reg-chip', item.type));
+  // ADR-089 — Skill, hosting + account, Spaces.
+  if (item.isSkill) meta.appendChild(el('span', 'reg-chip skill', 'Skill · HiTL'));
+  meta.appendChild(hostingChip(item));
+  for (const s of item.spaces.slice(0, 2)) {
+    const c = el('span', 'reg-chip space', s.name);
+    c.title = s.via === 'usage' ? `Used in ${s.name}` : `In ${s.name}`;
+    meta.appendChild(c);
+  }
+  if (item.spaces.length > 2) meta.appendChild(el('span', 'reg-chip space', `+${item.spaces.length - 2}`));
   for (const r of item.reach) meta.appendChild(el('span', `reg-chip kind ${r}`, r === 'api' ? 'RESTful' : r.toUpperCase()));
   if (item.listing !== 'unlisted') meta.appendChild(listingBadge(item.listing));
   if (item.deleted) meta.appendChild(el('span', 'reg-badge is-deleted', 'deleted'));
@@ -401,7 +424,7 @@ function renderViewer(): void {
   } else if (v.noAdminYet) {
     const claim = el('button', 'reg-btn small primary', 'Become the first admin');
     claim.type = 'button';
-    claim.title = 'No one holds the registry admin role yet. This makes you the first admin; admins can add others.';
+    claim.title = 'No one holds the library admin role yet. This makes you the first admin; admins can add others.';
     claim.addEventListener('click', () => {
       void (async () => {
         const b = bridge();
@@ -410,7 +433,7 @@ function renderViewer(): void {
         if (res.ok !== true || res.value === undefined) return fail(res.error);
         state.viewer = res.value;
         renderViewer();
-        toast('You are the registry admin.');
+        toast('You are the library admin.');
         if (state.selectedId !== null) void select(state.selectedId);
       })();
     });
@@ -497,7 +520,7 @@ function facetGroup(title: string, key: 'source' | 'type' | 'category', values: 
   return wrap;
 }
 
-function choiceGroup<K extends 'state' | 'listing' | 'reach'>(title: string, key: K, choices: Array<[Filters[K], string]>): HTMLElement {
+function choiceGroup<K extends 'state' | 'listing' | 'reach' | 'hosting' | 'kind'>(title: string, key: K, choices: Array<[Filters[K], string]>): HTMLElement {
   const wrap = el('div', 'reg-facet');
   wrap.appendChild(el('div', 'reg-facet-title', title));
   for (const [value, label] of choices) {
@@ -513,7 +536,7 @@ function choiceGroup<K extends 'state' | 'listing' | 'reach'>(title: string, key
   return wrap;
 }
 
-function refSelect(title: string, key: 'idwId' | 'knowledgeId', refs: Ref[], empty: string): HTMLElement {
+function refSelect(title: string, key: 'idwId' | 'knowledgeId' | 'spaceId', refs: Ref[], empty: string): HTMLElement {
   const wrap = el('div', 'reg-facet');
   wrap.appendChild(el('div', 'reg-facet-title', title));
   const sel = el('select');
@@ -542,6 +565,9 @@ function renderFacets(): void {
     facetGroup('Source', 'source', state.facets.sources),
     facetGroup('Type', 'type', state.facets.types),
     facetGroup('Category', 'category', state.facets.categories),
+    choiceGroup('Kind', 'kind', [['', 'Agents and Skills'], ['skill', 'Skills · agents with a UI (HiTL)'], ['agent', 'Agents only']]),
+    choiceGroup('Hosting', 'hosting', [['', 'Any'], ['hosted', 'Hosted (GSX endpoint)'], ['library', 'Library'], ['catalog', 'Catalog only']]),
+    refSelect('Space', 'spaceId', state.spaces, 'No Space you can see holds an agent'),
     choiceGroup('Availability', 'state', [['', 'Any'], ['enabled', 'Enabled'], ['disabled', 'Disabled']]),
     choiceGroup('Listing', 'listing', [['', 'Any'], ['listed', 'Listed'], ['submitted', 'Submitted'], ['unlisted', 'Unlisted'], ['rejected', 'Rejected']]),
     choiceGroup('Reachable via', 'reach', [['', 'Any'], ['mcp', 'MCP'], ['api', 'RESTful API'], ['skill', 'Skill']]),
@@ -843,6 +869,14 @@ function renderDetail(): void {
   // Belongs to
   const belongs = el('div');
   belongs.appendChild(section('Belongs to'));
+  // ADR-089 — Spaces (as the viewer may see them) and hosting.
+  belongs.appendChild(el('div', 'reg-facet-title', 'Spaces'));
+  belongs.appendChild(chipList(a.spaces.map((s) => ({ id: s.id, name: s.name, description: s.via === 'usage' ? 'recorded as used here by the full app' : 'an asset in this Space represents the agent', status: s.via })), null, 'Not in any Space you can see.'));
+  belongs.appendChild(el('div', 'reg-facet-title', 'Hosting'));
+  const hostingRow = el('div', 'reg-chips');
+  hostingRow.appendChild(hostingChip(a));
+  if (a.library.length > 0) hostingRow.appendChild(el('span', 'reg-muted', a.library));
+  belongs.appendChild(hostingRow);
   belongs.appendChild(el('div', 'reg-facet-title', 'IDWs'));
   belongs.appendChild(chipList(a.idws, writable ? (id) => void act((b) => b.link(a.id, 'idw', id, false), 'Removed from IDW') : null, 'Not deployed on an IDW.'));
   if (writable) belongs.appendChild(addRefRow(state.idws, a.idws, (id) => void act((b) => b.link(a.id, 'idw', id, true), 'Added to IDW'), null, 'IDW'));
@@ -924,7 +958,8 @@ function renderDetail(): void {
 async function loadRefs(): Promise<void> {
   const b = bridge();
   if (b === null) return;
-  const [idws, knowledge, caps] = await Promise.all([b.listIdws(), b.listKnowledgeModels(), b.listCapabilities()]);
+  const [idws, knowledge, caps, spaces] = await Promise.all([b.listIdws(), b.listKnowledgeModels(), b.listCapabilities(), b.listSpaces()]);
+  if (spaces.ok === true && spaces.value !== undefined) state.spaces = spaces.value;
   if (idws.ok === true && idws.value !== undefined) state.idws = idws.value;
   if (knowledge.ok === true && knowledge.value !== undefined) state.knowledge = knowledge.value;
   if (caps.ok === true && caps.value !== undefined) state.capabilities = caps.value;

@@ -1969,3 +1969,15 @@ SmartScreen warning).
 **Spaces.** An agent asset carries `representsAgentId` (GET_ITEM); its detail pane shows the admission standing with a Share publicly toggle (share → listed for an admin, submitted otherwise; unshare → unlisted; a refusal explains itself in place) and opens the registry window focused on that agent (`openWindow({ agentId })` → `lite:registry:focus`).
 
 **Rejected.** A Lite-only derived checklist as the gate (kept as quick checks; it no longer decides); copying the page's rules into the graph (one source: the page's constants, extracted by script, regenerated when the page changes); auto-ticking the model's verdicts (the model advises; a person or the graph ticks).
+
+## ADR-089: The Agent Library — where an agent lives: Spaces (sight-filtered), hosting and account, Skills (2026-09-04)
+
+**Decision.** The registry window is shown as the **Agent Library** (menu item IDW → Agent Library…, window title, Settings door, the Space detail block); code identifiers and IPC channels keep `registry`. Every row and the detail's "Belongs to" now answer three questions from the record: **which Spaces** hold the agent, **where it is hosted**, and **whether it is a Skill**.
+
+**Spaces.** An agent belongs to a Space through an asset in that Space that `[:REPRESENTS]` it (Lite's "Add agent" paths write `BELONGS_TO` + `REPRESENTS`), or through the full app's `[:USED_IN]` usage edge. Both are read, deduplicated, and shown with their route. The list is **sight-filtered with the ADR-084 predicate verbatim** (`SPACE_VISIBLE_FOR('sp')`, now exported from the Spaces client: creator or live HAS_ACCESS grant, nested opt-in per ADR-085, nothing inferred, `[:OWNS]` never), so the Library never names a Space the viewer cannot open. A Space facet lists the viewer's visible Spaces that hold agents. The graph on 2026-09-04 held one agent asset and six usage edges, so most rows show no Space yet; the column fills as agents are added to Spaces.
+
+**Hosting.** `library` = in a GSX-Desktop `:Library` (35 agents, "onereach.com Library"); `hosted` = the record carries a GSX endpoint (3,189); `catalog` = a directory entry with no runtime recorded (8,953). The account is the Library's name for library agents and the creator's domain otherwise (onereach.com, playbooks.app): the record carries nothing better — endpoints are relative paths. Shown as a chip (Hosted · onereach.com / Library · onereach.com / Catalog) and a Hosting facet.
+
+**Skills.** A Skill is an agent with a UI, a human in the loop: the `micro-ui` type (700 agents whose payload carries `microUIConfig` and triggers) or a Skill endpoint. A "Skill · HiTL" badge and a Kind facet (Agents and Skills / Skills / Agents only).
+
+**Rejected.** Inferring Space membership from Space-level agent counts or playbooks (only an asset or a usage edge says an agent is there); showing Space names without sight (ADR-084); inventing an account property (the record has none; the derivation is named in the UI). Open: the Library's search itself is not sight-filtered by `AGENT_VISIBLE` (an admin surface; flagged, not changed here).

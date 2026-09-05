@@ -2629,6 +2629,7 @@ interface RegistryBridge {
   update(id: string, patch: Record<string, unknown>): Promise<RegistryIpcResultView<unknown>>;
   setEnabled(id: string, enabled: boolean): Promise<RegistryIpcResultView<unknown>>;
   listIdws(): Promise<RegistryIpcResultView<unknown>>;
+  listSpaces(): Promise<RegistryIpcResultView<unknown>>;
   listKnowledgeModels(): Promise<RegistryIpcResultView<unknown>>;
   listCapabilities(): Promise<RegistryIpcResultView<unknown>>;
   link(id: string, kind: 'idw' | 'knowledge' | 'capability', targetId: string, on: boolean): Promise<RegistryIpcResultView<unknown>>;
@@ -2657,6 +2658,7 @@ const registry: RegistryBridge = {
   update: (id, patch) => ipcRenderer.invoke(REG('update'), { id, patch }) as Promise<RegistryIpcResultView<unknown>>,
   setEnabled: (id, enabled) => ipcRenderer.invoke(REG('set-enabled'), { id, enabled }) as Promise<RegistryIpcResultView<unknown>>,
   listIdws: () => ipcRenderer.invoke(REG('list-idws')) as Promise<RegistryIpcResultView<unknown>>,
+  listSpaces: () => ipcRenderer.invoke(REG('list-spaces')) as Promise<RegistryIpcResultView<unknown>>,
   listKnowledgeModels: () => ipcRenderer.invoke(REG('list-knowledge')) as Promise<RegistryIpcResultView<unknown>>,
   listCapabilities: () => ipcRenderer.invoke(REG('list-capabilities')) as Promise<RegistryIpcResultView<unknown>>,
   link: (id, kind, targetId, on) => ipcRenderer.invoke(REG('link'), { id, kind, targetId, on }) as Promise<RegistryIpcResultView<unknown>>,

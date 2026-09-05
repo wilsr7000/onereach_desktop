@@ -376,7 +376,7 @@ const SPACE_VISIBLE = `(
         )
       )`;
 /** SPACE_VISIBLE for a Space bound under another alias (ADR-085 listings). */
-const SPACE_VISIBLE_FOR = (alias: string): string =>
+export const SPACE_VISIBLE_FOR = (alias: string): string =>
   SPACE_VISIBLE.replace(/\bs\./g, `${alias}.`)
     .replace(/->\(s\)/g, `->(${alias})`)
     .replace(/\(s\)-\[:NESTED_IN/g, `(${alias})-[:NESTED_IN`)

@@ -21,7 +21,7 @@ export function openRegistryWindow(config: RegistryWindowConfig): BrowserWindow 
     height: 880,
     minWidth: 980,
     minHeight: 620,
-    title: 'Agent Registry',
+    title: 'Agent Library',
     backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,

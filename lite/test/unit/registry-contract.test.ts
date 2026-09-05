@@ -58,7 +58,7 @@ describe('registry writes', () => {
 const detail = (over: Partial<RegistryAgentDetail> = {}): RegistryAgentDetail => ({
   id: 'agent-1', name: 'Slack Share', description: 'Posts the current document to a Slack channel of your choice.', type: 'gsx', category: 'social',
   enabled: true, deleted: false, source: 'Playbooks', owner: 'robb@onereach.com', updatedMs: 1, listing: 'unlisted', builtin: false, isSystem: false,
-  reach: ['api'], idwCount: 0, knowledgeCount: 0, status: 'active', version: '1.0.0', keywords: ['slack', 'share', 'post'], capabilities: [],
+  reach: ['api'], idwCount: 0, knowledgeCount: 0, hosting: 'hosted', account: 'onereach.com', isSkill: false, spaces: [], status: 'active', version: '1.0.0', keywords: ['slack', 'share', 'post'], capabilities: [],
   executionType: '', gsxEndpoint: '/agents/slack/post', createdMs: 1, endpoints: [], idws: [], knowledgeModels: [], capabilityNodes: [],
   usedInSpaces: [], representedBy: [], contributedPlaybooks: 0, enabledBy: 1, library: '', manualChecks: {}, listedAt: null, ...over,
 });
@@ -83,5 +83,31 @@ describe('submission checklist', () => {
     const checks = evaluateListingChecklist(detail({ version: '', keywords: [], manualChecks: { reviewed: true, security: true } }));
     expect(listingReady(checks)).toBe(true);
     expect(checks.find((c) => c.id === 'version')?.passed).toBe(false);
+  });
+});
+
+// ── ADR-089: where an agent lives — the Cypher contract ──────────────
+import { REGISTRY_CYPHER as CY089 } from '../../registry/queries.js';
+describe('registry Cypher — Spaces, hosting, Skills (ADR-089)', () => {
+  it('the Spaces column and the Space facet are sight-filtered with the ADR-084 predicate; OWNS never appears', () => {
+    for (const key of ['SEARCH', 'GET', 'LIST_SPACES'] as const) {
+      const text = CY089[key];
+      expect(text, key).toContain('HAS_ACCESS');
+      expect(text, key).toContain('[:REPRESENTS]');
+      expect(text, key).toContain('[:USED_IN]');
+      expect(text, key).not.toContain('[:OWNS]');
+    }
+    for (const [key, text] of Object.entries(CY089)) expect(text, key).not.toContain('[:OWNS]');
+  });
+  it('hosting, account and the Skill marker come from the record: Library membership, the GSX endpoint, micro-ui or a Skill endpoint', () => {
+    expect(CY089.SEARCH).toContain("(:Library)-[:CONTAINS]->(a)");
+    expect(CY089.SEARCH).toContain("a.gsxEndpoint IS NOT NULL THEN 'hosted'");
+    expect(CY089.SEARCH).toContain("= 'micro-ui'");
+    expect(CY089.SEARCH).toContain("se.kind = 'skill'");
+    expect(CY089.SEARCH).toContain('$spaceId');
+    expect(CY089.SEARCH).toContain('$hosting');
+    expect(CY089.SEARCH).toContain('$kind');
+    expect(CY089.FACETS).toContain("'hosting' AS facet");
+    expect(CY089.FACETS).toContain("'kind' AS facet");
   });
 });
