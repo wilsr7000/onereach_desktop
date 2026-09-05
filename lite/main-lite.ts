@@ -64,6 +64,8 @@ import { initUniversity, type UniversityHandle } from './university/main.js';
 // Bringing TTS back is a separate chunk that re-introduces lite/ai/.
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
 import { initRegistry, type RegistryHandle } from './registry/main.js';
+import { initCalendar, type CalendarHandle } from './calendar/main.js';
+import { getGsxApi } from './gsx/api.js';
 import { getKVApi } from './kv/api.js';
 import { getAiApi } from './ai/api.js';
 import { resolveViewerId as resolveSpacesViewerId } from './spaces/main.js';
@@ -354,6 +356,7 @@ let universityHandle: UniversityHandle | null = null;
 let aiRunTimesHandle: AiRunTimesHandle | null = null;
 /** ADR-086 — Agent Registry (search + registry manager over NEON). */
 let registryHandle: RegistryHandle | null = null;
+let calendarHandle: CalendarHandle | null = null;
 let onboardingHandle: OnboardingHandle | null = null;
 let downloadsHandle: DownloadsHandle | null = null;
 
@@ -1056,6 +1059,8 @@ app
     try {
       gsxHandle = initGsx({
         userDataDir: app.getPath('userData'),
+        // ADR-090 — GSX → Calendar opens Lite's scheduled-flows window (late-bound).
+        openCalendar: () => calendarHandle?.open(),
       });
     } catch (err) {
       getLoggingApi().error('gsx', 'initGsx threw', {
@@ -1156,6 +1161,22 @@ app
       });
     } catch (err) {
       getLoggingApi().error('registry', 'initRegistry threw', { error: (err as Error).message });
+    }
+
+    // ADR-090 — Calendar: the account's scheduled flows (GSX → Calendar).
+    try {
+      calendarHandle = initCalendar({
+        getSession: () => {
+          const session = getAuthApi().getSession('edison');
+          return session === null ? null : { env: 'edison', accountId: session.accountId };
+        },
+        openGsxWindow: (o) => getGsxApi().openWindow({ env: 'edison', url: o.url, title: o.title }),
+        getMainWindow: () => mainWindow,
+        htmlPath: path.join(__dirname, 'calendar.html'),
+        preloadPath,
+      });
+    } catch (err) {
+      getLoggingApi().error('calendar', 'initCalendar threw', { error: (err as Error).message });
     }
 
     // Initialize Onboarding module: KV-backed checklist progress

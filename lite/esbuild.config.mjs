@@ -49,6 +49,8 @@ const ASSETS_TO_COPY = [
   { from: 'lite/ai-run-times/feed.html', to: 'ai-run-times.html' },
   { from: 'lite/registry/registry.html', to: 'registry.html' },
   { from: 'lite/registry/registry.css', to: 'registry.css' },
+  { from: 'lite/calendar/calendar.html', to: 'calendar.html' },
+  { from: 'lite/calendar/calendar.css', to: 'calendar.css' },
   { from: 'lite/ai-run-times/feed.css', to: 'ai-run-times.css' },
   { from: 'lite/help/help.html', to: 'help.html' },
   { from: 'lite/help/help.css', to: 'help.css' },
@@ -288,6 +290,17 @@ const registryOptions = {
 };
 
 /** @type {esbuild.BuildOptions} */
+const calendarOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'calendar/renderer.ts')],
+  outfile: resolve(outDir, 'calendar.js'),
+  platform: 'browser',
+  target: 'chrome130',
+  format: 'iife',
+  globalName: 'OnereachLiteCalendar',
+};
+
+/** @type {esbuild.BuildOptions} */
 const helpOptions = {
   ...commonOptions,
   entryPoints: [resolve(__dirname, 'help/help.ts')],
@@ -377,6 +390,7 @@ const allConfigs = [
   chromeOptions,
   aiRunTimesOptions,
   registryOptions,
+  calendarOptions,
   helpOptions,
   spacesOptions,
   learnPageOptions,

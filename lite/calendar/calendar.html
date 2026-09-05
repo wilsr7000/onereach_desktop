@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'none';" />
+    <title>Calendar</title>
+    <link rel="stylesheet" href="./signature.css" />
+    <link rel="stylesheet" href="./calendar.css" />
+  </head>
+  <body>
+    <div class="cal-app">
+      <header class="cal-top">
+        <div class="cal-brand">
+          <span class="cal-brand-mark" aria-hidden="true">◷</span>
+          <h1 class="cal-title">Calendar</h1>
+          <span class="cal-subtitle" id="cal-subtitle">scheduled flows</span>
+        </div>
+        <nav class="cal-nav" aria-label="Month">
+          <button type="button" class="cal-btn" id="cal-prev" title="Previous month (←)">‹</button>
+          <button type="button" class="cal-btn" id="cal-today">Today</button>
+          <button type="button" class="cal-btn" id="cal-next" title="Next month (→)">›</button>
+          <h2 class="cal-month" id="cal-month" aria-live="polite"></h2>
+        </nav>
+        <div class="cal-actions">
+          <span class="cal-status" id="cal-status" aria-live="polite"></span>
+          <button type="button" class="cal-btn" id="cal-refresh" title="Refresh from GSX (⌘R)">Refresh</button>
+        </div>
+      </header>
+      <div class="cal-banner" id="cal-banner" role="status" aria-live="polite" hidden></div>
+      <div class="cal-body">
+        <main class="cal-grid-wrap">
+          <div class="cal-weekdays" id="cal-weekdays" aria-hidden="true"></div>
+          <div class="cal-grid" id="cal-grid" role="grid" aria-label="Scheduled runs by day"></div>
+        </main>
+        <aside class="cal-side" id="cal-side" aria-live="polite">
+          <div class="cal-empty">Select a day to see its scheduled runs.</div>
+        </aside>
+      </div>
+      <div class="cal-toast" id="cal-toast" role="status" aria-live="polite" hidden></div>
+    </div>
+    <script src="./calendar.js"></script>
+  </body>
+</html>

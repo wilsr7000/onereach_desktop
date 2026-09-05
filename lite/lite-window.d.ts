@@ -1805,6 +1805,8 @@ interface LiteWindowBridge {
   aiRunTimes?: LiteAiRunTimesBridge;
   /** ADR-086 — Agent Registry (search + registry manager over NEON). */
   registry?: LiteRegistryBridge;
+  /** ADR-090 — the Calendar: the account's scheduled flows. */
+  calendar?: LiteCalendarBridge;
   onboarding?: LiteOnboardingBridge;
   downloadPicker?: LiteDownloadPickerBridge;
   bootChat?: LiteBootChatBridge;
@@ -2129,4 +2131,29 @@ interface LiteLoggingBridge {
 interface Window {
   lite?: LiteWindowBridge;
   logging?: LiteLoggingBridge;
+}
+
+// ── Calendar (ADR-090) ──────────────────────────────────────────────────
+interface LiteCalendarResult<T> { ok: boolean; value?: T; error?: { code: string; message: string; remediation: string } }
+interface LiteCalendarScheduleEvent {
+  id: string; name: string; color: string; timeZone: string; cron: string[]; recurring: boolean;
+  start: { date: string; time: string } | null; end: { date: string; time: string } | null; preview: string; runAtActivation: boolean;
+}
+interface LiteCalendarScheduledFlow {
+  flowId: string; botId: string; botLabel: string; flowLabel: string; deployed: boolean; stepLabel: string; events: LiteCalendarScheduleEvent[]; modifiedMs: number;
+  active: boolean; armed: boolean; activatedMs: number; nextFireMs: number | null;
+}
+interface LiteCalendarSnapshot {
+  env: string; accountId: string; fetchedAtMs: number; botCount: number; flowCount: number; activeDeployments: number;
+  scheduled: LiteCalendarScheduledFlow[]; errors: Array<{ botId: string; botLabel: string; message: string }>;
+}
+interface LiteCalendarOccurrence { atMs: number; flowId: string; botId: string; botLabel: string; flowLabel: string; eventId: string; eventName: string; color: string; timeZone: string }
+interface LiteCalendarOccurrences { snapshot: LiteCalendarSnapshot; occurrences: LiteCalendarOccurrence[]; truncated: boolean }
+interface LiteCalendarStatus { signedIn: boolean; env: string | null; accountId: string | null; snapshotAgeMs: number | null; lastError: string | null }
+interface LiteCalendarBridge {
+  snapshot(opts?: { refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarSnapshot>>;
+  occurrences(input: { fromMs: number; toMs: number; refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarOccurrences>>;
+  status(): Promise<LiteCalendarResult<LiteCalendarStatus>>;
+  openFlow(input: { flowId: string; botId: string }): Promise<LiteCalendarResult<{ ok: true }>>;
+  openWindow(): Promise<LiteCalendarResult<{ ok: true }>>;
 }

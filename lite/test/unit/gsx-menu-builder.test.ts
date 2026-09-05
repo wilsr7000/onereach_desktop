@@ -34,6 +34,7 @@ import type { Environment } from '../../auth/types.js';
 function makeDeps(sessions: Partial<Record<Environment, { accountId: string }>>): GsxMenuDeps & {
   fire: () => void;
   openWindow: ReturnType<typeof vi.fn>;
+  openCalendar: ReturnType<typeof vi.fn>;
   sessions: Partial<Record<Environment, { accountId: string }>>;
 } {
   const listeners: Array<() => void> = [];
@@ -48,6 +49,7 @@ function makeDeps(sessions: Partial<Record<Environment, { accountId: string }>>)
       };
     },
     openWindow: vi.fn(async () => ({})),
+    openCalendar: vi.fn(),
     environments: ['edison', 'staging', 'production'] as readonly Environment[],
     fire: () => {
       for (const l of [...listeners]) l();
@@ -154,5 +156,20 @@ describe('GSX menu-builder', () => {
     const src = readFileSync(found as string, 'utf8');
     expect(src).not.toContain('shell.openExternal');
     expect(src).toContain('getGsxApi().openWindow(opts)');
+  });
+});
+
+// ── ADR-090: Calendar opens Lite's own window, never the dead host ──────
+describe('GSX menu — Calendar (ADR-090)', () => {
+  beforeEach(() => registry._resetForTesting());
+  afterEach(() => teardownGsxMenuBuilder());
+  it('the Calendar item opens Lite\'s Calendar for the env and never a calendar.<env>.onereach.ai window', () => {
+    const deps = makeDeps({ edison: { accountId: 'acct-1' } });
+    initGsxMenuBuilder(deps);
+    registry.get('gsx:link:edison:calendar')?.click?.();
+    expect(deps.openCalendar).toHaveBeenCalledWith('edison');
+    expect(deps.openWindow).not.toHaveBeenCalled();
+    registry.get('gsx:link:edison:hitl')?.click?.();
+    expect(deps.openWindow).toHaveBeenCalledTimes(1);
   });
 });

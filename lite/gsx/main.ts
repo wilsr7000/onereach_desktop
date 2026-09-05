@@ -25,6 +25,7 @@ import {
 import { GSX_EVENTS } from './events.js';
 import { createGsxWindowPort } from './window.js';
 import { initGsxMenuBuilder, teardownGsxMenuBuilder } from './menu-builder.js';
+import type { Environment } from '../auth/types.js';
 import type {
   GsxInvokeAgentOptions,
   GsxOpenWindowOptions,
@@ -102,6 +103,8 @@ export interface GsxHandle {
 export interface InitGsxOptions {
   /** Absolute path of the app's userData dir (persistence root). */
   userDataDir: string;
+  /** ADR-090 — opens Lite's Calendar from the GSX menu (late-bound; the calendar initializes after GSX). */
+  openCalendar?: (env: Environment) => void;
 }
 
 let registered = false;
@@ -125,7 +128,7 @@ export function initGsx(opts: InitGsxOptions): GsxHandle {
   // surfaces, every entry opening in the signed-in GSX window. A menu
   // failure must never take the IPC surface down with it.
   try {
-    initGsxMenuBuilder();
+    initGsxMenuBuilder(opts.openCalendar !== undefined ? { openCalendar: opts.openCalendar } : {});
   } catch (err) {
     log.warn('gsx', 'menu builder failed to initialize', {
       error: err instanceof Error ? err.message : String(err),

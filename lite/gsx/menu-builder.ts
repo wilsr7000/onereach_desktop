@@ -32,6 +32,7 @@ import { registry } from '../menu/registry.js';
 import { getAuthApi, SUPPORTED_ENVIRONMENTS } from '../auth/api.js';
 import type { Environment } from '../auth/types.js';
 import { getGsxApi } from './api.js';
+import { getCalendarApi } from '../calendar/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { GSX_EVENTS } from './events.js';
 
@@ -73,6 +74,8 @@ export interface GsxMenuDeps {
   openWindow: (opts: { env: Environment; url?: string; title?: string }) => Promise<unknown>;
   /** Environments to consider, in menu order. */
   environments: readonly Environment[];
+  /** ADR-090 — the Calendar link opens Lite's own Calendar (scheduled flows), not a hosted page. */
+  openCalendar: (env: Environment) => void;
 }
 
 let initialized = false;
@@ -89,6 +92,9 @@ function defaultDeps(): GsxMenuDeps {
     onSessionChanged: (cb) => getAuthApi().onSessionChanged(() => cb()),
     openWindow: (opts) => getGsxApi().openWindow(opts),
     environments: SUPPORTED_ENVIRONMENTS,
+    openCalendar: () => {
+      void getCalendarApi().openWindow();
+    },
   };
 }
 
@@ -151,7 +157,7 @@ function rebuild(): void {
         parentId: TOP_LEVEL_ID,
         label: link.label,
         order: 100 + i,
-        click: () => openLink(env, link.key, link.label),
+        click: link.key === 'calendar' ? () => openCalendar(env) : () => openLink(env, link.key, link.label),
       });
     });
   } else {
@@ -165,7 +171,7 @@ function rebuild(): void {
           parentId: envId,
           label: link.label,
           order: i,
-          click: () => openLink(env, link.key, link.label),
+          click: link.key === 'calendar' ? () => openCalendar(env) : () => openLink(env, link.key, link.label),
         });
       });
     });
@@ -194,6 +200,18 @@ function openStudio(): void {
       error: err instanceof Error ? err.message : String(err),
     });
   });
+}
+
+/** ADR-090 — Calendar: Lite's scheduled-flows window (calendar.<env>.onereach.ai does not exist). */
+function openCalendar(env: Environment): void {
+  const deps = depsRef;
+  if (deps === null) return;
+  getLoggingApi().event(GSX_EVENTS.MENU_OPEN_LINK, { env, link: 'calendar', target: 'lite-calendar' });
+  try {
+    deps.openCalendar(env);
+  } catch (err) {
+    getLoggingApi().warn('gsx', 'menu: open calendar failed', { env, error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 function openLink(env: Environment, key: string, label: string): void {
