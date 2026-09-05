@@ -241,7 +241,13 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     title: 'Onereach.ai Lite',
     backgroundColor: BACKGROUND(),
     show: false,
-    autoHideMenuBar: true,
+    // macOS keeps the menu in the system menu bar, so hiding the window
+    // menu bar is free. On Windows / Linux the app menu (Spaces, Agent
+    // Registry, Settings, Help...) lives IN the window's menu bar and
+    // the chrome has no hamburger fallback -- hiding it would leave
+    // users with no way to reach half the app (2026-09-02, Windows
+    // readiness). Alt-to-reveal is not discoverable enough.
+    autoHideMenuBar: process.platform === 'darwin',
     // The tab bar IS the window header (2026-09-01): with the native
     // title bar hidden, the bar can take the colour of the content
     // under it (see CONTENT_TONE_CHANNEL) instead of sitting as a

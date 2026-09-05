@@ -43,10 +43,22 @@ const args = process.argv.slice(2);
 let version = null;
 let publish = 'never';
 let fast = false;
+// --platform=win (2026-09-02, Windows readiness): same merged config,
+// same runtime-deps pinning, but electron-builder targets Windows
+// (nsis + zip per lite/electron-builder.json). Must run ON Windows --
+// NSIS + rcedit need Wine anywhere else, and the mac-only merges below
+// (provisioning profile, timestamp) only touch `merged.mac`, which the
+// Windows build ignores. Default stays 'mac'.
+let platform = 'mac';
 for (const a of args) {
   if (a.startsWith('--version=')) version = a.slice('--version='.length);
   else if (a.startsWith('--publish=')) publish = a.slice('--publish='.length);
+  else if (a.startsWith('--platform=')) platform = a.slice('--platform='.length);
   else if (a === '--fast') fast = true;
+}
+if (platform !== 'mac' && platform !== 'win') {
+  console.error(`[electron-builder-mac] unknown --platform=${platform} (expected mac|win)`);
+  process.exit(2);
 }
 
 // ---------------------------------------------------------------------------
@@ -150,9 +162,16 @@ console.log(`[electron-builder-mac] wrote merged config to ${tempConfigPath}`);
 // ---------------------------------------------------------------------------
 // Invoke electron-builder
 // ---------------------------------------------------------------------------
-const ebArgs = ['electron-builder', 'build', '--mac', '--config', tempConfigPath, '--publish', publish];
+const targetFlag = platform === 'win' ? '--win' : '--mac';
+const ebArgs = ['electron-builder', 'build', targetFlag, '--config', tempConfigPath, '--publish', publish];
 if (fast) {
-  ebArgs.push('--dir', '-c.npmRebuild=false', '-c.mac.notarize=false');
+  ebArgs.push('--dir', '-c.npmRebuild=false');
+  if (platform === 'mac') ebArgs.push('-c.mac.notarize=false');
+}
+if (platform === 'win' && process.platform !== 'win32') {
+  console.warn(
+    '[electron-builder-mac] --platform=win on a non-Windows host: electron-builder needs Wine for NSIS/rcedit here; expect this to fail unless Wine is installed.'
+  );
 }
 
 const start = Date.now();

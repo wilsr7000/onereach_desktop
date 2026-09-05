@@ -343,3 +343,33 @@ describe('seedKernelMenu', () => {
     expect(fired).toEqual(['builder', 'quick']);
   });
 });
+
+describe('seedKernelMenu — top:app per platform (2026-09-02, Windows readiness)', () => {
+  beforeEach(() => {
+    registry._resetForTesting();
+    _resetSeedForTesting();
+  });
+  const handlers = { onReportBug: () => {}, onAbout: () => {}, onQuit: () => {} };
+
+  it("darwin: top:app carries role 'appMenu' (the productName slot) and no label", () => {
+    seedKernelMenu(handlers, 'darwin');
+    const top = registry.get('top:app');
+    expect(top?.role).toBe('appMenu');
+    expect(top?.label).toBeUndefined();
+  });
+
+  it('win32: top:app is a plain labelled menu — appMenu is a macOS-only role', () => {
+    // Electron rejects macOS-only roles at buildFromTemplate time on
+    // Windows; the app would boot with no menu at all.
+    seedKernelMenu(handlers, 'win32');
+    const top = registry.get('top:app');
+    expect(top?.role).toBeUndefined();
+    expect(top?.label).toBe('WISER');
+  });
+
+  it('linux: same as win32', () => {
+    seedKernelMenu(handlers, 'linux');
+    expect(registry.get('top:app')?.role).toBeUndefined();
+    expect(registry.get('top:app')?.label).toBe('WISER');
+  });
+});

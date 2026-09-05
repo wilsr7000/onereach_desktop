@@ -57,6 +57,14 @@ export interface InstallDeps {
   /** True iff the app is packaged. Skips writability check in dev. */
   isPackaged: () => boolean;
   /**
+   * Platform seam (2026-09-02, Windows readiness). Defaults to
+   * `process.platform`. The detached bash helper below is a macOS-only
+   * workaround for Squirrel.Mac; on Windows/Linux electron-updater's
+   * own installer (NSIS / AppImage) is the correct path, reached via
+   * `autoUpdater.quitAndInstall()`. Tests pin either branch on any host.
+   */
+  platform?: NodeJS.Platform;
+  /**
    * Force-close all BrowserWindows. NO LONGER CALLED -- preserved on the
    * interface for backwards compatibility with existing call sites, but the
    * production install flow skips it (Squirrel.Mac closes windows itself).
@@ -129,7 +137,7 @@ export interface InstallResult {
   /** True if install was attempted. False if pre-flight refused. */
   attempted: boolean;
   /** Why we bailed out, if attempted is false. */
-  refusalReason?: 'bundle-not-writable' | 'autoupdater-missing';
+  refusalReason?: 'bundle-not-writable' | 'autoupdater-missing' | 'quit-and-install-threw';
   /** Time spent in the save-state phase. */
   saveStateMs?: number;
 }
@@ -140,7 +148,7 @@ export interface InstallResult {
  * with a Download Manually button).
  */
 export async function checkAppBundleWritable(deps: InstallDeps): Promise<boolean> {
-  if (process.platform !== 'darwin' || !deps.isPackaged()) return true;
+  if ((deps.platform ?? process.platform) !== 'darwin' || !deps.isPackaged()) return true;
   const log = deps.logger ?? { info: () => {}, warn: () => {}, error: () => {} };
   try {
     const exec = deps.execPath ?? process.execPath;
@@ -201,11 +209,37 @@ export async function performUpdateInstall(
     log.warn('updater: save-state phase threw', { error: (err as Error).message });
   }
 
-  // Bypass Squirrel.Mac: spawn the detached install helper, then quit. See
-  // file header. The helper waits for our PID to exit, then swaps the
-  // bundle and relaunches via `open`. We deliberately do NOT call
-  // autoUpdater.quitAndInstall() because Squirrel.Mac's ShipIt handoff is
-  // broken on macOS 26.4 (Tahoe).
+  // Windows / Linux (2026-09-02): there is no Squirrel.Mac to bypass and
+  // no bash helper to spawn -- electron-updater's own installer (NSIS on
+  // Windows, AppImage on Linux) applies the downloaded update and
+  // relaunches. Before this branch existed, a Windows "Install and
+  // Relaunch" tried to spawn /bin/bash, failed, and silently left the
+  // user on the old build. `isForceRunAfter=true` relaunches even for a
+  // silent install; `isSilent=false` lets NSIS show its progress UI.
+  const platform = deps.platform ?? process.platform;
+  if (platform !== 'darwin') {
+    try {
+      log.info('updater: native installer path (electron-updater quitAndInstall)', {
+        platform,
+      });
+      deps.autoUpdater.quitAndInstall(false, true);
+      return { attempted: true, ...(saveStateMs !== undefined ? { saveStateMs } : {}) };
+    } catch (err) {
+      log.error('updater: quitAndInstall threw', { error: (err as Error).message });
+      deps.setUpdatingFlag?.(false);
+      return {
+        attempted: false,
+        refusalReason: 'quit-and-install-threw',
+        ...(saveStateMs !== undefined ? { saveStateMs } : {}),
+      };
+    }
+  }
+
+  // macOS -- bypass Squirrel.Mac: spawn the detached install helper, then
+  // quit. See file header. The helper waits for our PID to exit, then
+  // swaps the bundle and relaunches via `open`. We deliberately do NOT
+  // call autoUpdater.quitAndInstall() because Squirrel.Mac's ShipIt
+  // handoff is broken on macOS 26.4 (Tahoe).
   let helperSpawned = false;
   try {
     log.info('updater: spawning detached install helper');

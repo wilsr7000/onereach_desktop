@@ -532,9 +532,14 @@ export function buildTrayMenuTemplate(
  * `LITE_TRAY_COLOR=1` (trades theme-adaptation for a larger glyph -- only
  * advisable on a menu bar whose theme you control).
  */
-export function trayIconCandidates(): string[] {
+export function trayIconCandidates(platform: NodeJS.Platform = process.platform): string[] {
   const forceColor = process.env['LITE_TRAY_COLOR'] === '1';
-  const preferColor = forceColor;
+  // Template images are a macOS concept: pure black + alpha, tinted by
+  // the menu bar. On Windows / Linux the same asset renders as a flat
+  // black glyph -- invisible on the dark Windows 10/11 taskbar -- so
+  // those platforms take the full-colour mark by default (2026-09-02,
+  // Windows readiness). LITE_TRAY_COLOR=1 still forces colour anywhere.
+  const preferColor = forceColor || platform !== 'darwin';
   const candidates: string[] = [];
   // esbuild-copied siblings in dist-lite/build/ first.
   if (preferColor) {

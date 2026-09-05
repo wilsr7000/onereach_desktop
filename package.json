@@ -24,7 +24,7 @@
     "lite:lib-pin": "node lite/scripts/record-lib-sha.mjs",
     "lite:package:mac": "npm run lite:build && npm run lite:lib-pin && node lite/scripts/electron-builder-mac.mjs --publish=never",
     "lite:package:mac:fast": "npm run lite:build && npm run lite:lib-pin && node lite/scripts/electron-builder-mac.mjs --publish=never --fast",
-    "lite:package:win": "echo 'Windows packaging not yet wired through the lite runner; deferred per LITE-PUNCH-LIST' && exit 1",
+    "lite:package:win": "npm run lite:build && npm run lite:lib-pin && node lite/scripts/electron-builder-mac.mjs --platform=win --publish=never",
     "lite:publish:mac": "npm run lite:build && npm run lite:lib-pin && node lite/scripts/electron-builder-mac.mjs --publish=always",
     "lite:release:mac": "bash lite/scripts/release-lite.sh",
     "package": "npx electron-builder build --mac --win --publish never",

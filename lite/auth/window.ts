@@ -209,8 +209,12 @@ export function createAuthWindow(
     minWidth: 560,
     minHeight: 700,
     title: `Sign in to GSX (${env})`,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 16, y: 16 },
+    // macOS-only chrome (2026-09-02, Windows readiness): `hiddenInset`
+    // and traffic-light placement mean nothing off macOS; Windows gets
+    // its native title bar so the sign-in window can be moved/closed.
+    ...(process.platform === 'darwin'
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 16, y: 16 } }
+      : {}),
     backgroundColor: '#ffffff',
     show: false,
     autoHideMenuBar: true,

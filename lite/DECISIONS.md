@@ -1892,3 +1892,68 @@ evil.example.com → 403 with no CORS header, POST → 405, and
 - **Submission checklist**: auto checks derived from the contract (id, name, description ≥ 20 chars, type, category, reachable — an endpoint, a GSX endpoint or a system agent — owner, not deleted, enabled, status in the vocabulary) plus recommended ones (version, ≥ 3 keywords, belongs to an IDW or knowledge model) and three manual reviews (behaviour reviewed, endpoints/credentials reviewed, docs linked — the first two required). `unlisted → submitted → listed` (or `rejected`); submit and list refuse until every required check passes; listing sets `status = active`.
 - **Tests**: `registry-contract.test.ts` (every write gated + provenance-stamped, admin-only ops, first-admin guard, apostrophe safety, checklist semantics, API sanitization), `registry-ui.test.ts` (rows, checklist panel, actions by role).
 - **Not done here**: mirroring GSX's live IDW catalog into `:IDW` nodes (the three seeded ones are what the graph has); a bulk "list all" action; per-account scoping of the catalog (one account per graph today).
+
+## ADR-087: Windows readiness — platform seams, the native installer path, and a visible menu bar
+
+**Date:** 2026-09-02  ·  **Status:** shipped (code); Windows build + live run still unverified
+
+**Context.** Lite has only ever been built and run on macOS. An audit of
+`lite/` runtime code for Windows-hostile assumptions found the codebase
+already largely platform-aware — user agents, About panel, dock badge,
+title-bar styles on the main and WISER windows, quit-on-all-closed, the
+keychain/safeStorage layer, local servers bound to 127.0.0.1, no shell-outs
+to mac tools outside the updater — and five real defects:
+
+1. **Auto-update could not install on Windows.** `performUpdateInstall`
+   unconditionally spawned the macOS Squirrel-bypass helper
+   (`/bin/bash install-update.sh`); off macOS the spawn threw, the app did
+   not quit, and "Install and Relaunch" silently left the user on the old
+   build.
+2. **No app menu on Windows.** `top:app` used the macOS-only `appMenu`
+   role (Electron rejects it at buildFromTemplate off macOS) and the main
+   window hid its native menu bar (`autoHideMenuBar: true`) with no
+   in-chrome fallback — Spaces, Agent Registry, Settings, Help unreachable.
+3. The **sign-in window** passed `titleBarStyle: 'hiddenInset'` +
+   `trafficLightPosition` unguarded (macOS-only options).
+4. The **tray** resolved the black template glyph first everywhere — on a
+   dark Windows taskbar it is invisible.
+5. **Packaging**: `win.icon` pointed at the tray PNG, `assets/icon.ico` is
+   32×32 (electron-builder requires ≥256), no NSIS options, and
+   `lite:package:win` was a stub that exited 1.
+
+**Decision.** Fix each behind a platform check so macOS behaviour is
+byte-for-byte unchanged:
+- `InstallDeps.platform` seam (default `process.platform`); off darwin,
+  `performUpdateInstall` calls electron-updater's
+  `quitAndInstall(false, true)` (NSIS / AppImage) and returns; the bash
+  helper is reached only on darwin. New refusal reason
+  `quit-and-install-threw` resets the updating flag.
+- `seedKernelMenu(handlers, platform)`: `role: 'appMenu'` on darwin, a
+  labelled `WISER` top-level menu elsewhere. Main window
+  `autoHideMenuBar: process.platform === 'darwin'`.
+- Sign-in window chrome spread gated on darwin like its siblings.
+- `trayIconCandidates(platform)`: colour mark first off darwin;
+  `LITE_TRAY_COLOR=1` unchanged.
+- `win.icon = assets/icon-win.png` (1024px, rendered from the same
+  `icon.icns` the Dock uses), `win.artifactName`, explicit per-user
+  one-click `nsis` block; the shared runner gains `--platform=win` and
+  `lite:package:win` calls it.
+
+**Pinned** by `lite/test/unit/windows-readiness.test.ts` (source
+invariants: every hiddenInset/trafficLightPosition is darwin-gated; bash
+is spawned only in the installer module and after the non-darwin return;
+appMenu only on darwin; menu bar visible off darwin; colour tray off
+darwin; packaging config; notarize hook no-op off darwin; every
+`metaKey` check pairs with `ctrlKey`) plus platform-seam tests in
+`install.test.ts`, `menu-seed.test.ts`, `tray-main.test.ts`. All five
+fixes mutation-checked.
+
+**Not proven here — needs a Windows machine:** the NSIS build itself
+(`npm run lite:package:win` on Windows; on macOS it needs Wine), native
+modules (`keytar` has Windows prebuilds; `better-sqlite3` is an external
+that must resolve on Windows), the updater feed (the GitHub release must
+carry `latest.yml` + the `.exe` + `.blockmap`, which the mac-only
+`release-lite.sh` never uploads), Windows Credential Manager behaviour of
+the vaults, first-run sign-in wall, IDW auto-login, and the tray/menu
+look. Code signing for Windows is unconfigured (unsigned installer →
+SmartScreen warning).

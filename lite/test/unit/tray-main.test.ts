@@ -500,3 +500,39 @@ describe('isPulseEnabled -- idle animation defaults OFF', () => {
     expect(isPulseEnabled('0', false)).toBe(false);
   });
 });
+
+describe('trayIconCandidates — per platform (2026-09-02, Windows readiness)', () => {
+  it('darwin prefers the pre-sized template asset (menu-bar tinting)', () => {
+    const prev = process.env['LITE_TRAY_COLOR'];
+    delete process.env['LITE_TRAY_COLOR'];
+    try {
+      const first = trayIconCandidates('darwin')[0] ?? '';
+      expect(first.endsWith('tray-icon-22Template.png')).toBe(true);
+    } finally {
+      if (prev !== undefined) process.env['LITE_TRAY_COLOR'] = prev;
+    }
+  });
+
+  it('win32 prefers the full-colour mark — a black template glyph vanishes on a dark taskbar', () => {
+    const prev = process.env['LITE_TRAY_COLOR'];
+    delete process.env['LITE_TRAY_COLOR'];
+    try {
+      const first = trayIconCandidates('win32')[0] ?? '';
+      expect(first.endsWith('tray-icon.png')).toBe(true);
+      expect(first.includes('Template')).toBe(false);
+    } finally {
+      if (prev !== undefined) process.env['LITE_TRAY_COLOR'] = prev;
+    }
+  });
+
+  it('LITE_TRAY_COLOR=1 still forces colour on darwin (no behavior change)', () => {
+    const prev = process.env['LITE_TRAY_COLOR'];
+    process.env['LITE_TRAY_COLOR'] = '1';
+    try {
+      expect((trayIconCandidates('darwin')[0] ?? '').endsWith('tray-icon.png')).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env['LITE_TRAY_COLOR'];
+      else process.env['LITE_TRAY_COLOR'] = prev;
+    }
+  });
+});

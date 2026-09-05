@@ -426,3 +426,122 @@ describe('performUpdateInstall', () => {
     expect(quitOrder).toBeGreaterThan(spawnOrder as number);
   });
 });
+
+describe('performUpdateInstall — Windows / Linux take the native installer (2026-09-02)', () => {
+  // Before the platform seam, a Windows "Install and Relaunch" tried to
+  // spawn /bin/bash for the macOS helper, failed, and silently left
+  // the user on the old build. Off macOS the correct path is
+  // electron-updater's own installer via quitAndInstall().
+  function updaterStub(): { quitAndInstall: ReturnType<typeof vi.fn> } & InstallDeps['autoUpdater'] {
+    return {
+      checkForUpdates: vi.fn(async () => null),
+      downloadUpdate: vi.fn(async () => null),
+      quitAndInstall: vi.fn(),
+      on: vi.fn(),
+    } as unknown as { quitAndInstall: ReturnType<typeof vi.fn> } & InstallDeps['autoUpdater'];
+  }
+
+  it('win32: calls quitAndInstall(false, true), never spawns the bash helper, and records the attempt', async () => {
+    const seams = makeBypassSeams();
+    const updater = updaterStub();
+    const flags: boolean[] = [];
+    const result = await performUpdateInstall(
+      {
+        autoUpdater: updater,
+        ui: {} as InstallDeps['ui'],
+        userDataPath: userDataDir,
+        isPackaged: () => true,
+        platform: 'win32',
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
+        setUpdatingFlag: (v) => flags.push(v),
+      },
+      '0.0.79'
+    );
+    expect(result.attempted).toBe(true);
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(seams.spawnImpl).not.toHaveBeenCalled();
+    expect(seams.appQuit).not.toHaveBeenCalled(); // electron-updater quits itself
+    expect(flags[0]).toBe(true);
+  });
+
+  it('linux: same native path', async () => {
+    const seams = makeBypassSeams();
+    const updater = updaterStub();
+    const result = await performUpdateInstall(
+      {
+        autoUpdater: updater,
+        ui: {} as InstallDeps['ui'],
+        userDataPath: userDataDir,
+        isPackaged: () => true,
+        platform: 'linux',
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
+      },
+      null
+    );
+    expect(result.attempted).toBe(true);
+    expect(updater.quitAndInstall).toHaveBeenCalledTimes(1);
+    expect(seams.spawnImpl).not.toHaveBeenCalled();
+  });
+
+  it('win32: a throwing quitAndInstall reports attempted:false and clears the updating flag', async () => {
+    const seams = makeBypassSeams();
+    const updater = updaterStub();
+    updater.quitAndInstall.mockImplementation(() => {
+      throw new Error('nsis exploded');
+    });
+    const flags: boolean[] = [];
+    const result = await performUpdateInstall(
+      {
+        autoUpdater: updater,
+        ui: {} as InstallDeps['ui'],
+        userDataPath: userDataDir,
+        isPackaged: () => true,
+        platform: 'win32',
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
+        setUpdatingFlag: (v) => flags.push(v),
+      },
+      '0.0.79'
+    );
+    expect(result.attempted).toBe(false);
+    expect(result.refusalReason).toBe('quit-and-install-threw');
+    expect(flags).toEqual([true, false]);
+  });
+
+  it('darwin (explicit seam): still spawns the bash helper and never calls quitAndInstall', async () => {
+    const seams = makeBypassSeams();
+    const updater = updaterStub();
+    await performUpdateInstall(
+      {
+        autoUpdater: updater,
+        ui: {} as InstallDeps['ui'],
+        userDataPath: userDataDir,
+        isPackaged: () => true,
+        platform: 'darwin',
+        destroyAllWindows: seams.destroyAllWindows,
+        forceExit: seams.forceExit,
+        appQuit: seams.appQuit,
+        spawnImpl: seams.spawnImpl as unknown as NonNullable<InstallDeps['spawnImpl']>,
+        fsImpl: seams.fsImpl as unknown as NonNullable<InstallDeps['fsImpl']>,
+        getHelperScriptPath: seams.getHelperScriptPath,
+      },
+      null
+    );
+    expect(seams.spawnImpl).toHaveBeenCalled();
+    expect(updater.quitAndInstall).not.toHaveBeenCalled();
+  });
+});

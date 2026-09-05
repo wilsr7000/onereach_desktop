@@ -74,14 +74,23 @@ let seeded = false;
  * Register the kernel's menu entries. Safe to call multiple times
  * (idempotent via upsert), but not necessary.
  */
-export function seedKernelMenu(handlers: SeedHandlers): void {
+export function seedKernelMenu(
+  handlers: SeedHandlers,
+  platform: NodeJS.Platform = process.platform
+): void {
   // Top-level placeholders. App menu first (role 'appMenu' positions it
   // as the productName slot on macOS); Help last (role 'help' marks it
   // for platform conventions like macOS's Help-search affordance).
+  //
+  // `appMenu` is a macOS-only role (Electron: "additional roles
+  // available on macOS"). On Windows / Linux the same top-level menu
+  // is an ordinary labelled menu in the window's menu bar -- Electron
+  // would otherwise reject the role at buildFromTemplate time and the
+  // app would boot with no menu at all (2026-09-02, Windows readiness).
   registry.upsert({
     id: 'top:app',
     type: 'top-level',
-    role: 'appMenu',
+    ...(platform === 'darwin' ? { role: 'appMenu' as const } : { label: 'WISER' }),
     order: 0,
   });
 
