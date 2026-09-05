@@ -5,6 +5,8 @@
  * metadata, reachability, what it belongs to, and the submission
  * checklist). Pure builders are exported for tests.
  */
+import { ADMISSION_LINES, ADMISSION_PLATFORMS, ADMISSION_RUNG_LABEL, ADMISSION_SECTIONS } from './admission.js';
+
 
 type Bridge = NonNullable<NonNullable<typeof window.lite>['registry']>;
 type Summary = LiteRegistryAgentSummary;
@@ -35,6 +37,9 @@ const state = {
   facets: { sources: [] as LiteRegistryFacet[], types: [] as LiteRegistryFacet[], categories: [] as LiteRegistryFacet[] },
   selectedId: null as string | null,
   checklist: null as Checklist | null,
+  /** ADR-088 — the selected agent's admission checklist (shared KV document). */
+  admission: null as LiteRegistryAdmissionView | null,
+  admissionError: '' as string,
   viewer: null as Viewer | null,
   idws: [] as Ref[],
   knowledge: [] as Ref[],
@@ -90,6 +95,206 @@ export function buildAgentRow(item: Summary, selected: boolean): HTMLElement {
   meta.appendChild(el('span', 'reg-row-when', formatAgo(item.updatedMs)));
   row.appendChild(meta);
   return row;
+}
+
+/**
+ * ADR-088 — the admission checklist panel: the Gartner-project page's
+ * checklist, rendered with its own words, over the shared KV document.
+ * Platform-blocked lines are greyed with the reason; the status strip is
+ * the page's compute (progress · rung · ceiling · grade · admission).
+ */
+export function buildAdmissionPanel(
+  agent: Detail,
+  view: LiteRegistryAdmissionView | null,
+  opts: {
+    isAdmin: boolean;
+    canWrite: boolean;
+    loadError?: string;
+    onToggle: (lineId: string, value: boolean) => void;
+    onPlatform: (platform: string) => void;
+    onOwnerEmail: (email: string) => void;
+    onAnalyze: () => void;
+    onOpenPage: () => void;
+    onListing: (listing: 'submitted' | 'listed' | 'unlisted' | 'rejected') => void;
+  }
+): HTMLElement {
+  const panel = el('section', 'reg-adm');
+  const head = el('div', 'reg-adm-head');
+  head.appendChild(el('h3', 'reg-h3', 'Admission checklist'));
+  const openPage = el('button', 'reg-btn reg-btn-quiet', 'Open the checklist page ↗');
+  openPage.type = 'button';
+  openPage.title = 'The same checklist, hosted; it reads and writes the same shared record.';
+  openPage.addEventListener('click', () => opts.onOpenPage());
+  head.appendChild(openPage);
+  panel.appendChild(head);
+  if (view === null) {
+    panel.appendChild(el('p', 'reg-error', opts.loadError !== undefined && opts.loadError.length > 0 ? opts.loadError : 'Loading the admission checklist…'));
+    return panel;
+  }
+  const st = view.status;
+  const entry = view.entry;
+  const gradeClass = st.grade === null ? 'none' : st.grade;
+
+  // Status strip — the page's compute.
+  const strip = el('div', 'reg-adm-status');
+  const cell = (label: string, value: string, cls = ''): void => {
+    const c = el('div', `reg-adm-cell${cls.length > 0 ? ` ${cls}` : ''}`);
+    c.appendChild(el('div', 'reg-adm-cell-label', label));
+    c.appendChild(el('div', 'reg-adm-cell-value', value));
+    strip.appendChild(c);
+  };
+  cell('Progress', `${st.progress.met} of ${st.progress.total}`);
+  cell('Rung', st.rungLabel);
+  cell('Ceiling', `${st.ceilingLabel}`, 'reg-adm-cell-ceiling');
+  cell('Grade', st.gradeLabel, `reg-adm-grade-${gradeClass}`);
+  cell('Admission', st.admit, st.admit === 'admitted, signed off' ? 'reg-adm-ok' : st.admit === 'not admitted to act' ? 'reg-adm-bad' : '');
+  panel.appendChild(strip);
+  panel.appendChild(el('p', 'reg-adm-why', st.why));
+
+  // Controls: platform, owner contact, analyze.
+  const controls = el('div', 'reg-adm-controls');
+  const platWrap = el('label', 'reg-adm-field');
+  platWrap.appendChild(el('span', 'reg-adm-field-label', 'Platform'));
+  const plat = document.createElement('select');
+  plat.className = 'reg-select';
+  plat.id = 'reg-adm-platform';
+  for (const [key, spec] of Object.entries(ADMISSION_PLATFORMS)) {
+    const o = document.createElement('option');
+    o.value = key;
+    o.textContent = `${spec.name} · ceiling ${ADMISSION_RUNG_LABEL[spec.ceiling].split(' · ')[0]}`;
+    if (key === st.platform) o.selected = true;
+    plat.appendChild(o);
+  }
+  plat.disabled = !opts.canWrite;
+  plat.addEventListener('change', () => opts.onPlatform(plat.value));
+  platWrap.appendChild(plat);
+  controls.appendChild(platWrap);
+  const ownerWrap = el('label', 'reg-adm-field');
+  ownerWrap.appendChild(el('span', 'reg-adm-field-label', 'Owner contact'));
+  const owner = document.createElement('input');
+  owner.type = 'email';
+  owner.className = 'reg-input';
+  owner.id = 'reg-adm-owner';
+  owner.placeholder = 'who to call when it misbehaves';
+  owner.value = entry?.ownerEmail ?? agent.owner;
+  owner.disabled = !opts.canWrite;
+  owner.addEventListener('change', () => opts.onOwnerEmail(owner.value.trim()));
+  ownerWrap.appendChild(owner);
+  controls.appendChild(ownerWrap);
+  if (opts.canWrite) {
+    const analyze = el('button', 'reg-btn reg-btn-primary', 'Analyze this agent');
+    analyze.type = 'button';
+    analyze.id = 'reg-adm-analyze';
+    analyze.title = 'The graph proves what it can (card, roster, GSX-fronted tools, version) and ticks it; the model grades the rest and explains.';
+    analyze.addEventListener('click', () => opts.onAnalyze());
+    controls.appendChild(analyze);
+  }
+  panel.appendChild(controls);
+
+  // Last analysis.
+  const analysis = entry?.lite?.analysis;
+  const aiNotes = new Map<string, { verdict: string; note: string }>();
+  const autoNotes = new Map<string, { passed: boolean; evidence: string }>();
+  if (analysis !== undefined) {
+    for (const l of analysis.ai?.lines ?? []) aiNotes.set(l.id, { verdict: l.verdict, note: l.note });
+    for (const c of analysis.auto) autoNotes.set(c.line, { passed: c.passed, evidence: c.evidence });
+    const box = el('div', 'reg-adm-analysis');
+    box.appendChild(el('div', 'reg-adm-analysis-head', `Analyzed ${formatAgo(Date.parse(analysis.at))}${analysis.by.length > 0 ? ` by ${analysis.by}` : ''}`));
+    if (analysis.ai !== null && analysis.ai.summary.length > 0) box.appendChild(el('p', 'reg-adm-analysis-summary', analysis.ai.summary));
+    if (analysis.aiError !== undefined) box.appendChild(el('p', 'reg-muted', `Model grading unavailable: ${analysis.aiError}`));
+    panel.appendChild(box);
+  }
+
+  // Sections A–F.
+  const byId = new Map(st.lines.map((l) => [l.id, l]));
+  for (const sec of ['a', 'b', 'c', 'd', 'e', 'f'] as const) {
+    const meta = ADMISSION_SECTIONS[sec];
+    const lines = ADMISSION_LINES.filter((l) => l.section === sec);
+    const det = document.createElement('details');
+    det.className = 'reg-adm-sec';
+    det.open = true;
+    const sum = document.createElement('summary');
+    sum.appendChild(el('span', 'reg-adm-sec-title', meta.title));
+    const met = lines.filter((l) => byId.get(l.id)?.met === true).length;
+    const usable = lines.filter((l) => byId.get(l.id)?.blocked === null).length;
+    sum.appendChild(el('span', 'reg-adm-sec-count', `${met} of ${usable}`));
+    sum.appendChild(el('span', 'reg-adm-earns', meta.earns));
+    det.appendChild(sum);
+    for (const line of lines) {
+      const ls = byId.get(line.id);
+      const row = el('div', `reg-adm-line${ls?.blocked !== null && ls?.blocked !== undefined ? ' is-blocked' : ''}${ls?.met === true ? ' is-met' : ''}`);
+      row.dataset['line'] = line.id;
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.className = 'reg-adm-check';
+      cb.id = `reg-adm-${line.id}`;
+      cb.checked = ls?.met === true;
+      cb.disabled = !opts.canWrite || (ls?.blocked !== null && ls?.blocked !== undefined);
+      cb.addEventListener('change', () => opts.onToggle(line.id, cb.checked));
+      row.appendChild(cb);
+      const body = el('div', 'reg-adm-body');
+      const titleRow = el('div', 'reg-adm-title-row');
+      const label = document.createElement('label');
+      label.htmlFor = cb.id;
+      label.className = 'reg-adm-title';
+      label.textContent = line.title;
+      label.title = line.plain;
+      titleRow.appendChild(label);
+      for (const q of line.mq) titleRow.appendChild(el('span', 'reg-adm-mq', q));
+      const auto = autoNotes.get(line.id);
+      if (auto !== undefined) titleRow.appendChild(el('span', `reg-adm-badge ${auto.passed ? 'is-pass' : 'is-fail'}`, auto.passed ? 'proven' : 'not shown'));
+      const ai = aiNotes.get(line.id);
+      if (ai !== undefined && auto === undefined) titleRow.appendChild(el('span', `reg-adm-badge is-${ai.verdict}`, ai.verdict === 'met' ? 'model: likely met' : ai.verdict === 'unmet' ? 'model: unmet' : 'model: unknown'));
+      body.appendChild(titleRow);
+      body.appendChild(el('div', 'reg-adm-owner', line.owner));
+      body.appendChild(el('div', 'reg-adm-test', `We test: ${line.test}`));
+      if (ls?.blocked !== null && ls?.blocked !== undefined) body.appendChild(el('div', 'reg-adm-blocked', `Not possible on this platform: ${ls.blocked}.`));
+      if (ls?.federated !== null && ls?.federated !== undefined) body.appendChild(el('div', 'reg-adm-federated', `Federated: ${ls.federated}.`));
+      if (auto !== undefined) body.appendChild(el('div', 'reg-adm-evidence', auto.evidence));
+      if (ai !== undefined && ai.note.length > 0) body.appendChild(el('div', 'reg-adm-ai', ai.note));
+      const more = document.createElement('details');
+      more.className = 'reg-adm-more';
+      const ms = document.createElement('summary');
+      ms.textContent = 'What this means';
+      more.appendChild(ms);
+      more.appendChild(el('p', '', line.meaning));
+      const why = el('p', 'reg-adm-why-line');
+      why.appendChild(el('b', '', 'How it keeps the lion in the cage. '));
+      why.appendChild(document.createTextNode(line.why));
+      more.appendChild(why);
+      body.appendChild(more);
+      row.appendChild(body);
+      det.appendChild(row);
+    }
+    panel.appendChild(det);
+  }
+
+  // G — what the grade means.
+  const g = el('div', 'reg-adm-g');
+  g.appendChild(el('div', 'reg-adm-sec-title', 'G · What the grade means'));
+  g.appendChild(el('p', '', st.grade === null ? 'Not graded until the checklist is started.' : `${st.gradeLabel}: ${st.meanwhile}`));
+  panel.appendChild(g);
+
+  // Listing — gated by admission.
+  const actions = el('div', 'reg-actions');
+  const admitted = st.admit === 'admitted, signed off';
+  const notCritical = st.grade !== null && st.grade !== 'c';
+  const mk = (label: string, listing: 'submitted' | 'listed' | 'unlisted' | 'rejected', cls: string, enabled: boolean, title = ''): void => {
+    const b = el('button', `reg-btn reg-btn-${cls}`, label);
+    b.type = 'button';
+    b.disabled = !enabled;
+    b.dataset['listing'] = listing;
+    if (title.length > 0) b.title = title;
+    b.addEventListener('click', () => opts.onListing(listing));
+    actions.appendChild(b);
+  };
+  const listing = agent.listing;
+  if (opts.canWrite && listing !== 'submitted' && listing !== 'listed') mk('Submit for listing', 'submitted', 'primary', notCritical, notCritical ? '' : 'Not admitted to act: fix the Critical line first.');
+  if (opts.isAdmin && listing !== 'listed') mk('List on the platform', 'listed', 'primary', admitted, admitted ? '' : 'Listing needs every graded line above Critical and the F1 + F2 sign-offs.');
+  if (opts.isAdmin && (listing === 'submitted' || listing === 'listed')) mk('Reject', 'rejected', 'quiet', true);
+  if ((opts.isAdmin || opts.canWrite) && listing === 'listed') mk('Unlist', 'unlisted', 'quiet', true);
+  if (actions.childElementCount > 0) panel.appendChild(actions);
+  return panel;
 }
 
 export function buildChecklistPanel(
@@ -359,6 +564,14 @@ async function select(id: string): Promise<void> {
     return;
   }
   state.checklist = res.value;
+  const adm = await b.admissionGet(id);
+  if (adm.ok === true && adm.value !== undefined) {
+    state.admission = adm.value;
+    state.admissionError = '';
+  } else {
+    state.admission = null;
+    state.admissionError = adm.error?.message ?? 'The admission checklist could not be loaded.';
+  }
   renderDetail();
 }
 
@@ -686,12 +899,21 @@ function renderDetail(): void {
   }
   root.appendChild(belongs);
 
-  // Checklist
+  // Admission checklist (ADR-088) — the page's checklist, shared document.
   root.appendChild(
-    buildChecklistPanel(cl, {
+    buildAdmissionPanel(a, state.admission, {
       isAdmin,
-      canWrite: writable,
-      onToggle: (checkId, value) => void act((b) => b.setManualCheck(a.id, checkId, value), value ? 'Check recorded' : 'Check cleared'),
+      canWrite: writable && (state.admission?.canWrite ?? false),
+      loadError: state.admissionError,
+      onToggle: (lineId, value) => void act((b) => b.admissionSave(a.id, { items: { [lineId]: value } }), value ? `${lineId.toUpperCase()} ticked` : `${lineId.toUpperCase()} cleared`),
+      onPlatform: (platform) => void act((b) => b.admissionSave(a.id, { platform }), 'Platform set'),
+      onOwnerEmail: (ownerEmail) => void act((b) => b.admissionSave(a.id, { ownerEmail }), 'Owner contact saved'),
+      onAnalyze: () => void act((b) => b.admissionAnalyze(a.id), 'Agent analyzed'),
+      onOpenPage: () => {
+        const b = bridge();
+        const url = state.admission?.pageUrl;
+        if (b !== null && url !== undefined) void b.openExternal(url).then((r) => (r.ok === true ? undefined : fail(r.error)));
+      },
       onListing: (listing) => void act((b) => b.setListing(a.id, listing), listing === 'listed' ? 'Listed on the platform' : `Marked ${listing}`),
     })
   );
@@ -759,3 +981,6 @@ if (typeof document !== 'undefined' && document.getElementById('reg-list') !== n
   void loadRefs();
   void runSearch(0);
 }
+
+// ADR-088 — opened from a Space's agent detail: land on that agent.
+bridge()?.onFocus((p) => void select(p.agentId));

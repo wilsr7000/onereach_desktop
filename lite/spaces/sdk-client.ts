@@ -1206,6 +1206,7 @@ export const CYPHER = {
            END AS ticketAssignee,
            a.agentType AS agentType,
            a.agentEndpoints AS agentEndpoints,
+           head([(a)-[:REPRESENTS]->(rep_g:Agent) | rep_g.id]) AS representsAgentId,
            a:Note AS isNote,
            a:Asset AS isAsset,
            a.kv_collection AS noteKvCollection,
@@ -6451,6 +6452,9 @@ function parseAgentEndpointsJson(v: unknown): AgentEndpoint[] | null {
 function toItem(row: Record<string, unknown>): Item {
   const base = toItemSummary(row, { stripOtherSpaces: false });
   const item: Item = { ...base };
+  // ADR-088 — agent assets know the :Agent they represent (registry checklist).
+  const representsAgentId = optString(row, 'representsAgentId');
+  if (representsAgentId !== undefined && representsAgentId.length > 0) item.representsAgentId = representsAgentId;
   const description = optString(row, 'description');
   if (description !== undefined) item.description = description;
   const content = optString(row, 'content');

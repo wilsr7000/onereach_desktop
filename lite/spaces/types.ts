@@ -427,6 +427,8 @@ export interface ItemSummary {
   agentType?: string;
   /** Agent rows only: reachability endpoints for the tile chips. */
   agentEndpoints?: AgentEndpoint[];
+  /** ADR-088 — the NEON :Agent this asset represents (agent items), for the registry checklist. */
+  representsAgentId?: string;
   /**
    * Metadata bag on summary rows — powers tile hover text (objective,
    * ai_summary) without a getItem round-trip. Same JSON property the
@@ -532,6 +534,8 @@ export interface Item extends ItemSummary {
    * when the agent has no registered endpoints.
    */
   agentEndpoints?: AgentEndpoint[];
+  /** ADR-088 — the NEON :Agent this asset represents (agent items), for the registry checklist. */
+  representsAgentId?: string;
 }
 
 // ─── Query options ───────────────────────────────────────────────────────

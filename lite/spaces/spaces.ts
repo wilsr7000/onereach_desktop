@@ -9984,6 +9984,108 @@ export function looksLikeYaml(text: string): boolean {
  * "OKF definition" label, then the OKF text rendered as a monospace
  * structured-text block (reusing the code-preview renderer).
  */
+/**
+ * ADR-088 — the agent's registry standing inside its Space: the admission
+ * status (rung · grade · admission), a Share publicly toggle (share →
+ * listed for an admin, submitted otherwise; unshare → unlisted; a refusal
+ * explains itself), and the door to the registry window on this agent.
+ * Null when the asset represents no :Agent or the registry bridge is absent.
+ */
+export function buildAgentRegistryBlock(item: RendererItem): HTMLElement | null {
+  const agentId = item.representsAgentId;
+  const reg = window.lite?.registry;
+  if (agentId === undefined || agentId.length === 0 || reg === undefined) return null;
+  const block = document.createElement('section');
+  block.className = 'spaces-agent-registry';
+  block.dataset['agentId'] = agentId;
+  const head = document.createElement('div');
+  head.className = 'spaces-agent-registry-head';
+  const title = document.createElement('div');
+  title.className = 'spaces-agent-registry-title';
+  title.textContent = 'Registry';
+  head.appendChild(title);
+  const open = document.createElement('button');
+  open.type = 'button';
+  open.className = 'spaces-agent-registry-open';
+  open.textContent = 'Open checklist…';
+  open.title = 'The admission checklist for this agent, in the Agent Registry.';
+  open.addEventListener('click', () => {
+    void reg.openWindow({ agentId });
+  });
+  head.appendChild(open);
+  block.appendChild(head);
+  const status = document.createElement('div');
+  status.className = 'spaces-agent-registry-status';
+  status.textContent = 'Checking the registry…';
+  block.appendChild(status);
+  const shareRow = document.createElement('label');
+  shareRow.className = 'spaces-agent-registry-share';
+  const toggle = document.createElement('input');
+  toggle.type = 'checkbox';
+  toggle.className = 'spaces-agent-registry-toggle';
+  toggle.disabled = true;
+  const shareText = document.createElement('span');
+  shareText.textContent = 'Share publicly';
+  shareRow.appendChild(toggle);
+  shareRow.appendChild(shareText);
+  block.appendChild(shareRow);
+  const why = document.createElement('div');
+  why.className = 'spaces-agent-registry-why';
+  block.appendChild(why);
+
+  let listing = 'unlisted';
+  let isAdmin = false;
+  let canWrite = false;
+  let lastRefusal = '';
+  const paint = (view: LiteRegistryAdmissionView | null, error: string): void => {
+    if (view === null) {
+      status.textContent = error.length > 0 ? error : 'Not in the registry.';
+      toggle.disabled = true;
+      why.textContent = '';
+      return;
+    }
+    const st = view.status;
+    status.textContent = `${st.rungLabel} · grade ${st.gradeLabel} · ${st.admit}${st.platformName.length > 0 ? ` · ${st.platformName}` : ''}`;
+    canWrite = view.canWrite;
+    toggle.checked = listing === 'listed';
+    toggle.disabled = !(canWrite || isAdmin);
+    shareText.textContent =
+      listing === 'listed' ? 'Shared publicly (listed on the platform)' : listing === 'submitted' ? 'Submitted for listing (an admin lists it)' : 'Share publicly';
+    why.textContent = lastRefusal.length > 0 ? lastRefusal : st.admit === 'admitted, signed off' ? '' : st.why;
+  };
+  const load = async (): Promise<void> => {
+    try {
+      const [cl, adm, who] = await Promise.all([reg.checklist(agentId), reg.admissionGet(agentId), reg.whoAmI()]);
+      if (cl.ok === true && cl.value !== undefined) listing = cl.value.agent.listing;
+      if (who.ok === true && who.value !== undefined) isAdmin = who.value.isAdmin === true;
+      if (adm.ok === true && adm.value !== undefined) paint(adm.value, '');
+      else paint(null, adm.error?.message ?? cl.error?.message ?? 'The registry is not reachable.');
+    } catch (err) {
+      paint(null, err instanceof Error ? err.message : String(err));
+    }
+  };
+  toggle.addEventListener('change', () => {
+    const wantShared = toggle.checked;
+    toggle.disabled = true;
+    const next = wantShared ? (isAdmin ? 'listed' : 'submitted') : 'unlisted';
+    void reg
+      .setListing(agentId, next)
+      .then((res) => {
+        if (res.ok !== true) {
+          const e = res.error;
+          lastRefusal = e === undefined ? 'The registry refused the change.' : e.remediation.length > 0 ? `${e.message} ${e.remediation}` : e.message;
+          showToast(lastRefusal, { durationMs: 6000 });
+        } else {
+          lastRefusal = '';
+          showToast(next === 'listed' ? 'Shared publicly: listed on the platform.' : next === 'submitted' ? 'Submitted for listing. An admin lists it.' : 'Unshared: no longer listed.');
+        }
+      })
+      .finally(() => void load());
+  });
+  void load();
+  return block;
+}
+
 function buildAgentOkfBlock(item: RendererItem, okf: string): HTMLElement {
   const section = document.createElement('section');
   section.className = 'spaces-detail-agent';
@@ -11444,6 +11546,9 @@ export function buildDetailPane(
     // Agents lead with their OKF definition rendered as structured text.
     if (item.kind === 'agent') {
       wrap.appendChild(buildAgentOkfBlock(item, content));
+      // ADR-088 — registry standing + Share publicly.
+      const registryBlock = buildAgentRegistryBlock(item);
+      if (registryBlock !== null) wrap.appendChild(registryBlock);
     } else if (isBase64DataUrl(content)) {
     // Inline uploads stash the file's bytes as a base64 data URL in
     // `content` (no Files-API upload yet — that's a future

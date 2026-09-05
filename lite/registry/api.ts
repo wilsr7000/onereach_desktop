@@ -8,6 +8,23 @@
 
 import { randomBytes } from 'node:crypto';
 import { evaluateListingChecklist, listingReady, checklistProgress } from './checklist.js';
+import {
+  ADMISSION_KV,
+  ADMISSION_LINES,
+  ADMISSION_LINE_IDS,
+  ADMISSION_PAGE_URL,
+  ADMISSION_PLATFORMS,
+  autoChecks,
+  computeAdmission,
+  findAdmissionEntry,
+  type AdmissionAiLine,
+  type AdmissionAnalysis,
+  type AdmissionDoc,
+  type AdmissionEntry,
+  type AdmissionLineId,
+  type AdmissionPlatform,
+  type AdmissionStatus,
+} from './admission.js';
 import { REGISTRY_CYPHER } from './queries.js';
 import type {
   ListingCheck,
@@ -47,6 +64,24 @@ export interface RegistryApiOptions {
   query: (cypher: string, parameters: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
   viewerId: () => string | null;
   now?: () => number;
+  /** ADR-088 — the shared admission-checklist document lives in KV. */
+  kv?: { get(collection: string, key: string): Promise<unknown | null>; set(collection: string, key: string, value: unknown): Promise<void> };
+  /** ADR-088 — "the system analyzes the agent": a chat completion for the grading pass. */
+  ai?: { chat(input: { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; maxTokens?: number }): Promise<{ content: string; model?: string }> };
+}
+
+/** ADR-088 — one agent's admission checklist as the window shows it. */
+export interface AdmissionView {
+  key: string;
+  entry: AdmissionEntry | null;
+  status: AdmissionStatus;
+  pageUrl: string;
+  canWrite: boolean;
+}
+export interface AdmissionPatch {
+  platform?: AdmissionPlatform;
+  ownerEmail?: string;
+  items?: Partial<Record<AdmissionLineId, boolean>>;
 }
 
 /**
@@ -97,6 +132,12 @@ export interface RegistryManagerApi {
   setListing(id: string, listing: RegistryListing): Promise<RegistryAgentDetail>;
   /** Idempotent registry annotations (lite_* keys) for other writers. */
   ensureAnnotations(): Promise<void>;
+  /** ADR-088 — the agent's admission checklist (shared KV document, same words and grading as the hosted page). */
+  admissionGet(id: string): Promise<AdmissionView>;
+  /** Tick lines, set the platform or owner e-mail (admin or the agent's creator); merged into the shared document. */
+  admissionSave(id: string, patch: AdmissionPatch): Promise<AdmissionView>;
+  /** "The system analyzes the agent": graph-provable lines are ticked with evidence; the AI grades the rest and explains. */
+  admissionAnalyze(id: string): Promise<{ view: AdmissionView; analysis: AdmissionAnalysis }>;
 }
 
 const LISTINGS: ReadonlyArray<RegistryListing> = ['unlisted', 'submitted', 'listed', 'rejected'];
@@ -425,12 +466,18 @@ export class RegistryApi implements RegistryManagerApi {
   async setListing(id: string, listing: RegistryListing): Promise<RegistryAgentDetail> {
     if (!LISTINGS.includes(listing)) throw new RegistryError('REGISTRY_INVALID_INPUT', 'listing must be unlisted, submitted, listed or rejected.');
     if (listing === 'listed' || listing === 'submitted') {
-      const { ready, progress } = await this.checklist(id);
-      if (!ready) {
+      // ADR-088: the admission checklist decides. A Critical grade is not
+      // admitted to act; listing on the platform needs the sign-offs.
+      const { status } = await this.admissionGet(id);
+      if (status.grade === null || status.grade === 'c' || (listing === 'listed' && !status.signed)) {
         throw new RegistryError(
           'REGISTRY_NOT_READY',
-          `The submission checklist is not complete (${progress.passed} of ${progress.total} required checks).`,
-          'Complete the required checks, then submit or list.'
+          status.grade === null
+            ? 'The admission checklist has not been started for this agent.'
+            : status.grade === 'c'
+              ? `Not admitted to act: ${status.why}`
+              : `Listing needs the owner and tier-approver sign-offs (F1, F2). ${status.why}`,
+          'Open the admission checklist, tick the lines the agent meets (or run Analyze), and complete F1 and F2.'
         );
       }
     }
@@ -446,6 +493,146 @@ export class RegistryApi implements RegistryManagerApi {
     }
   }
 
+  // ── ADR-088: admission checklist ───────────────────────────────────
+  private async readAdmissionDoc(): Promise<AdmissionDoc | null> {
+    if (this.opts.kv === undefined) return null;
+    let raw = await this.opts.kv.get(ADMISSION_KV.collection, ADMISSION_KV.key);
+    if (typeof raw === 'string') {
+      try {
+        raw = JSON.parse(raw) as unknown;
+      } catch {
+        return null;
+      }
+    }
+    if (typeof raw !== 'object' || raw === null) return null;
+    const agents = (raw as { agents?: unknown }).agents;
+    if (typeof agents !== 'object' || agents === null) return { v: 1, agents: {} };
+    return { v: 1, agents: agents as Record<string, AdmissionEntry> };
+  }
+
+  private async canWriteAgent(detail: RegistryAgentDetail): Promise<boolean> {
+    const viewer = this.viewer();
+    if (viewer.length === 0) return false;
+    if (detail.owner.trim().toLowerCase() === viewer) return true;
+    const who = await this.whoAmI();
+    return who.isAdmin;
+  }
+
+  async admissionGet(id: string): Promise<AdmissionView> {
+    const detail = await this.mustGet(id);
+    const doc = await this.readAdmissionDoc();
+    const { key, entry } = findAdmissionEntry(doc, detail.id, detail.name);
+    return { key, entry, status: computeAdmission(entry), pageUrl: ADMISSION_PAGE_URL, canWrite: await this.canWriteAgent(detail) };
+  }
+
+  async admissionSave(id: string, patch: AdmissionPatch): Promise<AdmissionView> {
+    this.requireViewer();
+    const detail = await this.mustGet(id);
+    if (!(await this.canWriteAgent(detail))) {
+      throw new RegistryError('REGISTRY_FORBIDDEN', "Only a registry admin or the agent's creator can edit its admission checklist.");
+    }
+    if (this.opts.kv === undefined) throw new RegistryError('REGISTRY_INVALID_INPUT', 'The shared checklist store is not configured.', 'Sign in so KV is reachable, then try again.');
+    const fresh = (await this.readAdmissionDoc()) ?? { v: 1, agents: {} };
+    const { key, entry } = findAdmissionEntry(fresh, detail.id, detail.name);
+    const items: Partial<Record<AdmissionLineId, boolean>> = { ...(entry?.items ?? {}) };
+    for (const [k, v] of Object.entries(patch.items ?? {})) {
+      if ((ADMISSION_LINE_IDS as ReadonlyArray<string>).includes(k)) items[k as AdmissionLineId] = v === true;
+    }
+    const platform: AdmissionPlatform = patch.platform !== undefined && patch.platform in ADMISSION_PLATFORMS ? patch.platform : entry?.platform ?? 'gsx';
+    const ownerEmail = typeof patch.ownerEmail === 'string' ? patch.ownerEmail.trim().slice(0, 200) : entry?.ownerEmail ?? detail.owner;
+    const next: AdmissionEntry = {
+      name: entry?.name ?? detail.name,
+      items,
+      platform,
+      ownerEmail,
+      updatedAt: new Date(this.now()).toISOString(),
+      by: this.viewer(),
+      agentId: detail.id,
+      ...(entry?.lite !== undefined ? { lite: entry.lite } : {}),
+    };
+    fresh.agents[key.length > 0 ? key : detail.id] = next;
+    await this.opts.kv.set(ADMISSION_KV.collection, ADMISSION_KV.key, fresh);
+    return this.admissionGet(id);
+  }
+
+  async admissionAnalyze(id: string): Promise<{ view: AdmissionView; analysis: AdmissionAnalysis }> {
+    this.requireViewer();
+    const detail = await this.mustGet(id);
+    if (!(await this.canWriteAgent(detail))) {
+      throw new RegistryError('REGISTRY_FORBIDDEN', "Only a registry admin or the agent's creator can analyze the agent.");
+    }
+    const auto = autoChecks({
+      name: detail.name,
+      description: detail.description,
+      owner: detail.owner,
+      keywords: detail.keywords,
+      capabilities: detail.capabilities,
+      version: detail.version,
+      endpoints: detail.endpoints.map((e) => ({ kind: e.kind, url: e.url })),
+      gsxEndpoint: detail.gsxEndpoint,
+      executionType: detail.executionType,
+    });
+    const before = await this.admissionGet(id);
+    let ai: AdmissionAnalysis['ai'] = null;
+    let aiError: string | undefined;
+    if (this.opts.ai !== undefined) {
+      try {
+        const result = await this.opts.ai.chat({
+          system:
+            'You are the admission reviewer for an enterprise AI agent registry. You are given an agent record and an admission checklist. ' +
+            'For every line, decide whether the record shows the line is met ("met"), shows it is not met ("unmet"), or gives no evidence ("unknown"). ' +
+            'Be conservative: "met" only with direct evidence in the record. Reply with JSON only, no prose: ' +
+            '{"summary": string, "lines": [{"id": "a1", "verdict": "met" | "unmet" | "unknown", "note": string}]}',
+          messages: [
+            {
+              role: 'user',
+              content:
+                `AGENT RECORD\n${JSON.stringify({ id: detail.id, name: detail.name, description: detail.description, type: detail.type, category: detail.category, source: detail.source, owner: detail.owner, status: detail.status, version: detail.version, executionType: detail.executionType, gsxEndpoint: detail.gsxEndpoint, endpoints: detail.endpoints, keywords: detail.keywords, capabilities: detail.capabilities, idws: detail.idws.map((i) => i.name), knowledgeModels: detail.knowledgeModels.map((k) => k.name), usedInSpaces: detail.usedInSpaces.length, library: detail.library, enabled: detail.enabled }, null, 1)}\n\n` +
+                `PLATFORM: ${before.status.platformName}\nLINES ALREADY TICKED: ${before.status.lines.filter((l) => l.met).map((l) => l.id.toUpperCase()).join(', ') || 'none'}\n\n` +
+                'CHECKLIST\n' +
+                ADMISSION_LINES.filter((l) => l.section !== 'f').map((l) => `${l.id.toUpperCase()} ${l.title}\n  owner completes: ${l.owner}\n  we test: ${l.test}`).join('\n'),
+            },
+          ],
+          maxTokens: 2500,
+        });
+        const match = /\{[\s\S]*\}/.exec(result.content);
+        const parsed = match !== null ? (JSON.parse(match[0]) as { summary?: unknown; lines?: unknown }) : null;
+        const lines: AdmissionAiLine[] = Array.isArray(parsed?.lines)
+          ? (parsed.lines as unknown[])
+              .filter((x): x is Record<string, unknown> => typeof x === 'object' && x !== null)
+              .map((x) => ({ id: String(x['id'] ?? '').toLowerCase() as AdmissionLineId, verdict: (['met', 'unmet', 'unknown'] as const).includes(x['verdict'] as 'met') ? (x['verdict'] as AdmissionAiLine['verdict']) : 'unknown', note: String(x['note'] ?? '').slice(0, 400) }))
+              .filter((x) => (ADMISSION_LINE_IDS as ReadonlyArray<string>).includes(x.id))
+          : [];
+        ai = { summary: String(parsed?.summary ?? '').slice(0, 1200), lines };
+      } catch (err) {
+        aiError = err instanceof Error ? err.message : String(err);
+      }
+    } else {
+      aiError = 'AI grading is not configured (add a Claude key in Settings → AI).';
+    }
+    const analysis: AdmissionAnalysis = { at: new Date(this.now()).toISOString(), by: this.viewer(), auto, ai, ...(aiError !== undefined ? { aiError } : {}) };
+    // Persist: tick only what the graph PROVES; record the analysis on the entry.
+    const items: Partial<Record<AdmissionLineId, boolean>> = {};
+    for (const c of auto) if (c.passed) items[c.line] = true;
+    if (this.opts.kv !== undefined) {
+      const fresh = (await this.readAdmissionDoc()) ?? { v: 1, agents: {} };
+      const { key, entry } = findAdmissionEntry(fresh, detail.id, detail.name);
+      const merged: AdmissionEntry = {
+        name: entry?.name ?? detail.name,
+        items: { ...(entry?.items ?? {}), ...items },
+        platform: entry?.platform ?? 'gsx',
+        ownerEmail: entry?.ownerEmail ?? detail.owner,
+        updatedAt: analysis.at,
+        by: this.viewer(),
+        agentId: detail.id,
+        lite: { ...(entry?.lite ?? {}), analysis },
+      };
+      fresh.agents[key.length > 0 ? key : detail.id] = merged;
+      await this.opts.kv.set(ADMISSION_KV.collection, ADMISSION_KV.key, fresh);
+    }
+    return { view: await this.admissionGet(id), analysis };
+  }
+
   private async mustGet(id: string): Promise<RegistryAgentDetail> {
     const agent = await this.get(id);
     if (agent === null) throw new RegistryError('REGISTRY_NOT_FOUND', `Agent ${id} was not found.`);
@@ -457,7 +644,7 @@ export class RegistryApi implements RegistryManagerApi {
 const METHODS: ReadonlyArray<keyof RegistryManagerApi> = [
   'whoAmI', 'claimFirstAdmin', 'setAdmin', 'search', 'get', 'update', 'setEnabled', 'listIdws', 'listKnowledgeModels',
   'listCapabilities', 'link', 'createKnowledgeModel', 'createCapability', 'addEndpoint', 'removeEndpoint', 'checklist',
-  'setManualCheck', 'setListing', 'ensureAnnotations',
+  'setManualCheck', 'setListing', 'ensureAnnotations', 'admissionGet', 'admissionSave', 'admissionAnalyze',
 ];
 
 /** Every method refuses until `configureRegistryApi()` has run (boot order bug, not a user error). */

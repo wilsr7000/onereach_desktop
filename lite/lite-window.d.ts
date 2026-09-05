@@ -818,6 +818,8 @@ interface LiteSpaceItem extends LiteSpaceItemSummary {
   agentType?: string;
   /** Reachability endpoints (only populated when kind === 'agent'). */
   agentEndpoints?: LiteAgentEndpoint[];
+  /** ADR-088 — the NEON :Agent this asset represents (agent items). */
+  representsAgentId?: string;
 }
 
 interface LiteSpacesItemsBridge {
@@ -1948,8 +1950,32 @@ interface LiteRegistryBridge {
   checklist(id: string): Promise<LiteRegistryResult<LiteRegistryChecklist>>;
   setManualCheck(id: string, checkId: string, value: boolean): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
   setListing(id: string, listing: 'unlisted' | 'submitted' | 'listed' | 'rejected'): Promise<LiteRegistryResult<LiteRegistryAgentDetail>>;
-  openWindow(): Promise<LiteRegistryResult<{ ok: true }>>;
+  openWindow(opts?: { agentId?: string }): Promise<LiteRegistryResult<{ ok: true }>>;
+  /** main → renderer: select this agent (opened from a Space's agent detail; ADR-088). */
+  onFocus(cb: (p: { agentId: string }) => void): void;
+  /** ADR-088 — the admission checklist (shared KV document; same words and grading as the hosted page). */
+  admissionGet(id: string): Promise<LiteRegistryResult<LiteRegistryAdmissionView>>;
+  admissionSave(id: string, patch: { platform?: string; ownerEmail?: string; items?: Record<string, boolean> }): Promise<LiteRegistryResult<LiteRegistryAdmissionView>>;
+  admissionAnalyze(id: string): Promise<LiteRegistryResult<{ view: LiteRegistryAdmissionView; analysis: LiteRegistryAdmissionAnalysis }>>;
+  openExternal(url: string): Promise<LiteRegistryResult<{ ok: true }>>;
 }
+interface LiteRegistryAdmissionLineState { id: string; met: boolean; blocked: string | null; federated: string | null }
+interface LiteRegistryAdmissionStatus {
+  progress: { met: number; total: number }; rung: string; rungLabel: string; ceiling: string; ceilingLabel: string;
+  platform: string; platformName: string; grade: 'c' | 'h' | 'm' | 'l' | null; gradeLabel: string; signed: boolean;
+  admit: string; why: string; meanwhile: string; lines: LiteRegistryAdmissionLineState[];
+}
+interface LiteRegistryAdmissionAnalysis {
+  at: string; by: string;
+  auto: Array<{ line: string; passed: boolean; evidence: string }>;
+  ai: { summary: string; lines: Array<{ id: string; verdict: 'met' | 'unmet' | 'unknown'; note: string }> } | null;
+  aiError?: string;
+}
+interface LiteRegistryAdmissionEntry {
+  name: string; items: Record<string, boolean>; platform: string; ownerEmail?: string; updatedAt?: string | null; by?: string | null; agentId?: string;
+  lite?: { analysis?: LiteRegistryAdmissionAnalysis };
+}
+interface LiteRegistryAdmissionView { key: string; entry: LiteRegistryAdmissionEntry | null; status: LiteRegistryAdmissionStatus; pageUrl: string; canWrite: boolean }
 
 interface LiteAiRunTimesBridge {
   listArticles(): Promise<LiteAiRunTimesArticle[]>;

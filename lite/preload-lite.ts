@@ -2639,7 +2639,13 @@ interface RegistryBridge {
   checklist(id: string): Promise<RegistryIpcResultView<unknown>>;
   setManualCheck(id: string, checkId: string, value: boolean): Promise<RegistryIpcResultView<unknown>>;
   setListing(id: string, listing: 'unlisted' | 'submitted' | 'listed' | 'rejected'): Promise<RegistryIpcResultView<unknown>>;
-  openWindow(): Promise<RegistryIpcResultView<unknown>>;
+  openWindow(opts?: { agentId?: string }): Promise<RegistryIpcResultView<unknown>>;
+  /** main → renderer: select this agent (ADR-088). */
+  onFocus(cb: (p: { agentId: string }) => void): void;
+  admissionGet(id: string): Promise<RegistryIpcResultView<unknown>>;
+  admissionSave(id: string, patch: Record<string, unknown>): Promise<RegistryIpcResultView<unknown>>;
+  admissionAnalyze(id: string): Promise<RegistryIpcResultView<unknown>>;
+  openExternal(url: string): Promise<RegistryIpcResultView<unknown>>;
 }
 const REG = (op: string): string => `lite:registry:${op}`;
 const registry: RegistryBridge = {
@@ -2661,7 +2667,16 @@ const registry: RegistryBridge = {
   checklist: (id) => ipcRenderer.invoke(REG('checklist'), { id }) as Promise<RegistryIpcResultView<unknown>>,
   setManualCheck: (id, checkId, value) => ipcRenderer.invoke(REG('set-manual-check'), { id, checkId, value }) as Promise<RegistryIpcResultView<unknown>>,
   setListing: (id, listing) => ipcRenderer.invoke(REG('set-listing'), { id, listing }) as Promise<RegistryIpcResultView<unknown>>,
-  openWindow: () => ipcRenderer.invoke(REG('open-window')) as Promise<RegistryIpcResultView<unknown>>,
+  openWindow: (opts) => ipcRenderer.invoke(REG('open-window'), opts ?? {}) as Promise<RegistryIpcResultView<unknown>>,
+  onFocus: (cb) => {
+    ipcRenderer.on(REG('focus'), (_e, p: { agentId?: unknown }) => {
+      if (typeof p?.agentId === 'string') cb({ agentId: p.agentId });
+    });
+  },
+  admissionGet: (id) => ipcRenderer.invoke(REG('admission-get'), { id }) as Promise<RegistryIpcResultView<unknown>>,
+  admissionSave: (id, patch) => ipcRenderer.invoke(REG('admission-save'), { id, patch }) as Promise<RegistryIpcResultView<unknown>>,
+  admissionAnalyze: (id) => ipcRenderer.invoke(REG('admission-analyze'), { id }) as Promise<RegistryIpcResultView<unknown>>,
+  openExternal: (url) => ipcRenderer.invoke(REG('open-external'), { url }) as Promise<RegistryIpcResultView<unknown>>,
 };
 
 const aiRunTimes: AiRunTimesBridge = {

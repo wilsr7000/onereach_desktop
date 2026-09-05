@@ -3,10 +3,10 @@
  * the IPC surface (one envelope shape, the permission decision in the
  * Cypher), and the window.
  */
-import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
+import { ipcMain, shell, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
 import { RegistryApi, RegistryError, configureRegistryApi, getRegistryApi } from './api.js';
 import { openRegistryWindow, closeRegistryWindow } from './window.js';
-import type { RegistryManagerApi } from './api.js';
+import type { AdmissionPatch, RegistryManagerApi } from './api.js';
 import type { RegistryAgentPatch, RegistryListing, RegistryReach, RegistrySearchInput } from './types.js';
 
 export const REGISTRY_IPC = {
@@ -29,6 +29,13 @@ export const REGISTRY_IPC = {
   SET_MANUAL_CHECK: 'lite:registry:set-manual-check',
   SET_LISTING: 'lite:registry:set-listing',
   OPEN_WINDOW: 'lite:registry:open-window',
+  // ADR-088 — admission checklist
+  ADMISSION_GET: 'lite:registry:admission-get',
+  ADMISSION_SAVE: 'lite:registry:admission-save',
+  ADMISSION_ANALYZE: 'lite:registry:admission-analyze',
+  OPEN_EXTERNAL: 'lite:registry:open-external',
+  /** main → renderer: select this agent (opened from a Space's agent detail). */
+  FOCUS: 'lite:registry:focus',
 } as const;
 
 export interface RegistryIpcResult<T> {
@@ -44,6 +51,9 @@ export interface InitRegistryOptions {
   htmlPath: string;
   preloadPath: string;
   logger?: { info: (msg: string, data?: unknown) => void; warn: (msg: string, data?: unknown) => void };
+  /** ADR-088 — the shared admission document (KV) and the grading model. */
+  kv?: { get(collection: string, key: string): Promise<unknown | null>; set(collection: string, key: string, value: unknown): Promise<void> };
+  ai?: { chat(input: { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; maxTokens?: number }): Promise<{ content: string; model?: string }> };
 }
 
 export interface RegistryHandle {
@@ -68,7 +78,7 @@ function envelope<T>(fn: () => Promise<T>): Promise<RegistryIpcResult<T>> {
 const s = (v: unknown): string => (typeof v === 'string' ? v : '');
 
 export function initRegistry(opts: InitRegistryOptions): RegistryHandle {
-  const built = new RegistryApi({ query: opts.query, viewerId: opts.viewerId });
+  const built = new RegistryApi({ query: opts.query, viewerId: opts.viewerId, ...(opts.kv !== undefined ? { kv: opts.kv } : {}), ...(opts.ai !== undefined ? { ai: opts.ai } : {}) });
   configureRegistryApi(() => built);
   const api = getRegistryApi();
   void api.ensureAnnotations();
@@ -112,19 +122,43 @@ export function initRegistry(opts: InitRegistryOptions): RegistryHandle {
     [REGISTRY_IPC.CHECKLIST, (_e, p) => envelope(() => api.checklist(s(p?.['id'])))],
     [REGISTRY_IPC.SET_MANUAL_CHECK, (_e, p) => envelope(() => api.setManualCheck(s(p?.['id']), s(p?.['checkId']), p?.['value'] === true))],
     [REGISTRY_IPC.SET_LISTING, (_e, p) => envelope(() => api.setListing(s(p?.['id']), s(p?.['listing']) as RegistryListing))],
+    [REGISTRY_IPC.ADMISSION_GET, (_e, p) => envelope(() => api.admissionGet(s(p?.['id'])))],
+    [REGISTRY_IPC.ADMISSION_SAVE, (_e, p) => envelope(() => api.admissionSave(s(p?.['id']), (p?.['patch'] ?? {}) as AdmissionPatch))],
+    [REGISTRY_IPC.ADMISSION_ANALYZE, (_e, p) => envelope(() => api.admissionAnalyze(s(p?.['id'])))],
+    [
+      REGISTRY_IPC.OPEN_EXTERNAL,
+      (_e, p) =>
+        envelope(async () => {
+          // Only OneReach-hosted pages (the checklist lives on Edison files).
+          const url = new URL(s(p?.['url']));
+          if (url.protocol !== 'https:' || !/(^|\.)onereach\.ai$/i.test(url.hostname)) {
+            throw new RegistryError('REGISTRY_INVALID_INPUT', 'Only https://…onereach.ai pages can be opened from the registry.');
+          }
+          await shell.openExternal(url.toString());
+          return { ok: true as const };
+        }),
+    ],
     [
       REGISTRY_IPC.OPEN_WINDOW,
-      () =>
+      (_e, p) =>
         envelope(async () => {
-          open();
+          const agentId = typeof p?.['agentId'] === 'string' ? (p['agentId'] as string) : '';
+          open(agentId.length > 0 ? agentId : undefined);
           return { ok: true as const };
         }),
     ],
   ];
   for (const [channel, handler] of handlers) ipcMain.handle(channel, handler);
 
-  const open = (): void => {
-    openRegistryWindow({ parent: opts.getMainWindow(), htmlPath: opts.htmlPath, preloadPath: opts.preloadPath });
+  const open = (agentId?: string): void => {
+    const win = openRegistryWindow({ parent: opts.getMainWindow(), htmlPath: opts.htmlPath, preloadPath: opts.preloadPath });
+    if (agentId === undefined) return;
+    // ADR-088: opened from a Space's agent detail — land on that agent.
+    const send = (): void => {
+      if (!win.isDestroyed()) win.webContents.send(REGISTRY_IPC.FOCUS, { agentId });
+    };
+    if (win.webContents.isLoading()) win.webContents.once('did-finish-load', send);
+    else send();
   };
 
   return {

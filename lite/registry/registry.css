@@ -148,3 +148,46 @@ body {
 .reg-check input { margin: 2px 0 0; }
 
 .reg-toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 999px; font-size: 12.5px; color: var(--or-on-bright); background: rgba(var(--or-raise-rgb), 0.98); border: 1px solid var(--or-border-strong); box-shadow: 0 6px 20px rgba(var(--or-ink-rgb), 0.18); }
+
+/* ── ADR-088: admission checklist ───────────────────────────────── */
+.reg-adm { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--or-rule); }
+.reg-adm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
+.reg-adm-status { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+.reg-adm-cell { padding: 8px 10px; border: 1px solid var(--or-rule); border-radius: 8px; background: var(--or-tile); min-width: 0; }
+.reg-adm-cell-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--or-ink-3); }
+.reg-adm-cell-value { font-size: 12.5px; font-weight: 600; color: var(--or-ink); margin-top: 2px; overflow-wrap: normal; hyphens: none; }
+.reg-adm-grade-c .reg-adm-cell-value, .reg-adm-bad .reg-adm-cell-value { color: var(--or-danger, #b3261e); }
+.reg-adm-grade-h .reg-adm-cell-value { color: var(--or-warn, #b26a00); }
+.reg-adm-grade-l .reg-adm-cell-value, .reg-adm-ok .reg-adm-cell-value { color: var(--or-ok, #2e7d32); }
+.reg-adm-why { margin: 8px 0 12px; font-size: 12.5px; color: var(--or-ink-2); line-height: 1.45; }
+.reg-adm-controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 12px; }
+.reg-adm-field { display: flex; flex-direction: column; gap: 4px; min-width: 200px; flex: 1 1 220px; }
+.reg-adm-field-label { font-size: 11px; color: var(--or-ink-3); }
+.reg-adm-analysis { padding: 10px 12px; border-radius: 8px; background: var(--or-tile); border: 1px solid var(--or-rule); margin-bottom: 12px; }
+.reg-adm-analysis-head { font-size: 11.5px; color: var(--or-ink-3); }
+.reg-adm-analysis-summary { margin: 4px 0 0; font-size: 12.5px; line-height: 1.45; color: var(--or-ink); }
+.reg-adm-sec { border: 1px solid var(--or-rule); border-radius: 8px; margin-bottom: 8px; background: var(--or-tile); }
+.reg-adm-sec > summary { cursor: pointer; padding: 8px 12px; display: flex; align-items: center; gap: 10px; font-weight: 600; color: var(--or-ink); list-style: none; }
+.reg-adm-sec > summary::-webkit-details-marker { display: none; }
+.reg-adm-sec-title { flex: 1; }
+.reg-adm-sec-count { font-size: 11.5px; color: var(--or-ink-3); font-weight: 500; }
+.reg-adm-earns { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--or-accent); border: 1px solid var(--or-accent); border-radius: 999px; padding: 1px 7px; }
+.reg-adm-line { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 10px; padding: 10px 12px; border-top: 1px solid var(--or-rule); }
+.reg-adm-line.is-blocked { opacity: 0.62; }
+.reg-adm-check { margin-top: 2px; }
+.reg-adm-title-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.reg-adm-title { font-weight: 600; color: var(--or-ink); cursor: pointer; }
+.reg-adm-mq { font-size: 10px; color: var(--or-ink-3); border: 1px solid var(--or-rule); border-radius: 4px; padding: 0 5px; }
+.reg-adm-badge { font-size: 10px; border-radius: 999px; padding: 1px 7px; background: var(--or-rule); color: var(--or-ink-2); }
+.reg-adm-badge.is-pass, .reg-adm-badge.is-met { background: rgba(46, 125, 50, 0.14); color: var(--or-ok, #2e7d32); }
+.reg-adm-badge.is-fail, .reg-adm-badge.is-unmet { background: rgba(179, 38, 30, 0.12); color: var(--or-danger, #b3261e); }
+.reg-adm-owner { font-size: 12.5px; color: var(--or-ink-2); line-height: 1.45; margin-top: 3px; }
+.reg-adm-test { font-size: 12px; color: var(--or-ink-3); font-style: italic; line-height: 1.4; margin-top: 2px; }
+.reg-adm-blocked { font-size: 12px; color: var(--or-warn, #b26a00); margin-top: 3px; }
+.reg-adm-federated { font-size: 12px; color: var(--or-accent); margin-top: 3px; }
+.reg-adm-evidence, .reg-adm-ai { font-size: 12px; color: var(--or-ink-2); margin-top: 3px; padding-left: 8px; border-left: 2px solid var(--or-rule); }
+.reg-adm-more { margin-top: 4px; font-size: 12px; color: var(--or-ink-2); }
+.reg-adm-more > summary { cursor: pointer; color: var(--or-ink-3); font-size: 11.5px; }
+.reg-adm-more p { margin: 4px 0; line-height: 1.45; }
+.reg-adm-g { padding: 10px 12px; border: 1px dashed var(--or-rule); border-radius: 8px; margin-bottom: 12px; font-size: 12.5px; color: var(--or-ink-2); }
+.reg-adm-g p { margin: 4px 0 0; line-height: 1.45; }

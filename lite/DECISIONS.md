@@ -1957,3 +1957,15 @@ carry `latest.yml` + the `.exe` + `.blockmap`, which the mac-only
 the vaults, first-run sign-in wall, IDW auto-login, and the tray/menu
 look. Code signing for Windows is unconfigured (unsigned installer →
 SmartScreen warning).
+
+## ADR-088: The registry admission checklist is the Gartner one, shared with the hosted page (2026-09-04)
+
+**Decision.** Adding or listing an agent uses the admission checklist robb wrote for the Gartner AMP work (`~/Gartner/mq-docs/REGISTRY-ADMISSION-CHECKLIST.md`, hosted at files.edison…/amp/registry-admission-checklist.html), not a checklist of Lite's own. `lite/registry/admission.ts` carries the page's 27 lines (A1–F2), its platform matrix (ceilings, structurally blocked lines with reasons, federated identity), its grade map and consequences, verbatim, and `computeAdmission()` is a port of the page's `compute()`: the same ticks give the same rung (L1 Registered … L4 Managed), grade (worst unmet non-F line; B4+E3 together), and admission (Critical is never admitted; F1+F2 sign off). Lite reads and writes the page's ONE KV document (`amp:rfi` / `registry:checklist`, agents keyed by the page's name slug) with a fresh-read merge, so the page and the app never disagree and neither clobbers the other's agents; Lite adds `agentId` (the NEON :Agent) and a namespaced `lite.analysis` to its entries.
+
+**"The system analyzes the agent."** `admissionAnalyze` ticks only what the graph proves (A1 card complete, A4 roster reported, D5 every endpoint on a GSX host with an MCP endpoint, E2 version set) and records the evidence; a Claude pass grades the remaining lines (`met | unmet | unknown` with a note) from the agent record and the checklist's own words, recorded but never auto-ticked. Missing key or model failure: the graph checks still land and the error is recorded.
+
+**Gates.** Submit for listing needs a grade above Critical; List on the platform needs the F1 + F2 sign-offs (`setListing` enforces it; the panel greys the buttons with the reason). Writes to the checklist: registry admin or the agent's creator. Each line shows its Gartner MQ answer homes (Q9, Q10, Q14–16, Q18, Q19, Q24–26) so the MQ boxes can be ticked from the same screen.
+
+**Spaces.** An agent asset carries `representsAgentId` (GET_ITEM); its detail pane shows the admission standing with a Share publicly toggle (share → listed for an admin, submitted otherwise; unshare → unlisted; a refusal explains itself in place) and opens the registry window focused on that agent (`openWindow({ agentId })` → `lite:registry:focus`).
+
+**Rejected.** A Lite-only derived checklist as the gate (kept as quick checks; it no longer decides); copying the page's rules into the graph (one source: the page's constants, extracted by script, regenerated when the page changes); auto-ticking the model's verdicts (the model advises; a person or the graph ticks).

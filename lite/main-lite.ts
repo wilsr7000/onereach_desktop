@@ -64,6 +64,8 @@ import { initUniversity, type UniversityHandle } from './university/main.js';
 // Bringing TTS back is a separate chunk that re-introduces lite/ai/.
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
 import { initRegistry, type RegistryHandle } from './registry/main.js';
+import { getKVApi } from './kv/api.js';
+import { getAiApi } from './ai/api.js';
 import { resolveViewerId as resolveSpacesViewerId } from './spaces/main.js';
 import { getNeonApi } from './neon/api.js';
 import { initOnboarding, type OnboardingHandle } from './onboarding/main.js';
@@ -1148,6 +1150,9 @@ app
         getMainWindow: () => mainWindow,
         htmlPath: path.join(__dirname, 'registry.html'),
         preloadPath,
+        // ADR-088 — the admission checklist document + the grading model.
+        kv: { get: (c, k) => getKVApi().get(c, k), set: (c, k, v) => getKVApi().set(c, k, v) },
+        ai: { chat: (input) => getAiApi().chat(input) },
       });
     } catch (err) {
       getLoggingApi().error('registry', 'initRegistry threw', { error: (err as Error).message });

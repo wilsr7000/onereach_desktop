@@ -51,3 +51,13 @@ list refuse until every required check passes.
 - `window.ts`, `registry.html`, `registry.css`, `renderer.ts`.
 
 Tests: `test/unit/registry-contract.test.ts`, `test/unit/registry-ui.test.ts`.
+
+## Admission checklist (ADR-088)
+
+`admission.ts` is the Gartner-project admission checklist (A1–F2, the platform matrix, the grade map) extracted from the hosted page verbatim, with `computeAdmission()` a port of the page's `compute()`. The registry API reads and writes the page's shared KV document (`amp:rfi` / `registry:checklist`):
+
+- `admissionGet(id)` — the agent's entry + status (progress, rung, ceiling, grade, admission, per-line met/blocked/federated) and whether the viewer may write.
+- `admissionSave(id, { platform?, ownerEmail?, items? })` — merged into the shared document (fresh read, own entry replaced, everyone else's untouched), stamped `updatedAt`/`by`/`agentId`.
+- `admissionAnalyze(id)` — graph-proven lines ticked with evidence (A1, A4, D5, E2); a Claude grading pass over the rest, recorded under `lite.analysis`, never auto-ticked.
+- `setListing` is gated by admission: submit needs a grade above Critical; list needs F1 + F2.
+- `openWindow({ agentId })` opens the registry on that agent (from a Space's agent detail).

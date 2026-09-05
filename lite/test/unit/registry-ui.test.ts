@@ -3,7 +3,9 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect } from 'vitest';
-import { buildAgentRow, buildChecklistPanel, formatAgo, listingBadge } from '../../registry/renderer.js';
+import { buildAdmissionPanel, buildAgentRow, buildChecklistPanel, formatAgo, listingBadge } from '../../registry/renderer.js';
+import { vi } from 'vitest';
+import { ADMISSION_LINE_IDS, computeAdmission, type AdmissionEntry } from '../../registry/admission.js';
 
 const summary = (over: Partial<LiteRegistryAgentSummary> = {}): LiteRegistryAgentSummary => ({
   id: 'agent-1', name: 'Slack Share', description: 'Post to Slack channel', type: 'gsx', category: 'social', enabled: true, deleted: false,
@@ -66,5 +68,87 @@ describe('helpers', () => {
     expect(formatAgo(now - 3 * 86_400_000, now)).toBe('3d ago');
     expect(formatAgo(0, now)).toBe('');
     expect(listingBadge('rejected').className).toContain('is-rejected');
+  });
+});
+
+// ── ADR-088: the admission checklist panel ──────────────────────────
+describe('buildAdmissionPanel (ADR-088)', () => {
+  const agent: LiteRegistryAgentDetail = {
+    ...summary({ listing: 'unlisted' }), status: 'active', version: '', keywords: [], capabilities: [], executionType: '', gsxEndpoint: '', createdMs: 0,
+    endpoints: [], idws: [], knowledgeModels: [], capabilityNodes: [], usedInSpaces: [], representedBy: [], contributedPlaybooks: 0, enabledBy: 0, library: '', manualChecks: {}, listedAt: null,
+  };
+  const view = (entry: AdmissionEntry | null) => ({ key: 'slack-share', entry, status: computeAdmission(entry), pageUrl: 'https://files.edison.api.onereach.ai/x.html', canWrite: true });
+  const handlers = () => ({ isAdmin: true, canWrite: true, onToggle: vi.fn(), onPlatform: vi.fn(), onOwnerEmail: vi.fn(), onAnalyze: vi.fn(), onOpenPage: vi.fn(), onListing: vi.fn() });
+  const all = ADMISSION_LINE_IDS.filter((l) => l[0] !== 'f');
+  const tick = (ids: readonly string[]) => Object.fromEntries(ids.map((i) => [i, true]));
+
+  it('renders the 27 lines with the page words, the status strip, and greys platform-blocked lines with the reason', () => {
+    const panel = buildAdmissionPanel(agent, view({ name: 'Slack Share', platform: 'copilot', items: { a1: true, a2: true } }), handlers());
+    document.body.replaceChildren(panel);
+    expect(panel.querySelectorAll('.reg-adm-check').length).toBe(ADMISSION_LINE_IDS.length);
+    expect(panel.textContent).toContain('A1 · The card');
+    expect(panel.textContent).toContain('We test:');
+    expect(panel.textContent).toContain('L3 · Governed'); // the Copilot ceiling
+    expect(panel.textContent).toContain('Critical'); // A5 unmet grades High, A1 met… the incomplete A still leaves a critical line? no: A3/A5 are High — see below
+    expect(panel.querySelector<HTMLInputElement>('#reg-adm-d1')?.disabled).toBe(true);
+    expect(panel.querySelector('[data-line="d1"]')?.textContent).toContain('Not possible on this platform');
+    expect(panel.querySelector('[data-line="a3"]')?.textContent).toContain('Federated: Entra Agent ID');
+    expect(panel.querySelector('[data-line="c1"] .reg-adm-mq')?.textContent).toBe('Q16');
+    expect((panel.querySelector('#reg-adm-platform') as HTMLSelectElement).value).toBe('copilot');
+  });
+
+  it('ticking a line, changing the platform, the owner contact, Analyze and the page link all reach their handlers', () => {
+    const h = handlers();
+    const panel = buildAdmissionPanel(agent, view({ name: 'Slack Share', platform: 'gsx', items: {} }), h);
+    document.body.replaceChildren(panel);
+    const a1 = panel.querySelector<HTMLInputElement>('#reg-adm-a1')!;
+    a1.checked = true;
+    a1.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(h.onToggle).toHaveBeenCalledWith('a1', true);
+    const plat = panel.querySelector<HTMLSelectElement>('#reg-adm-platform')!;
+    plat.value = 'a2a';
+    plat.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(h.onPlatform).toHaveBeenCalledWith('a2a');
+    const owner = panel.querySelector<HTMLInputElement>('#reg-adm-owner')!;
+    owner.value = ' owner@x.com ';
+    owner.dispatchEvent(new Event('change', { bubbles: true }));
+    expect(h.onOwnerEmail).toHaveBeenCalledWith('owner@x.com');
+    (panel.querySelector('#reg-adm-analyze') as HTMLButtonElement).click();
+    expect(h.onAnalyze).toHaveBeenCalledTimes(1);
+    (panel.querySelector('.reg-adm-head button') as HTMLButtonElement).click();
+    expect(h.onOpenPage).toHaveBeenCalledTimes(1);
+  });
+
+  it('listing is gated by admission: Submit needs a non-Critical grade, List needs the sign-offs', () => {
+    const critical = buildAdmissionPanel(agent, view({ name: 'x', platform: 'gsx', items: tick(all.filter((l) => l !== 'a1')) }), handlers());
+    expect(critical.querySelector<HTMLButtonElement>('[data-listing="submitted"]')?.disabled).toBe(true);
+    expect(critical.querySelector<HTMLButtonElement>('[data-listing="listed"]')?.disabled).toBe(true);
+    const graded = buildAdmissionPanel(agent, view({ name: 'x', platform: 'gsx', items: tick(all) }), handlers());
+    expect(graded.querySelector<HTMLButtonElement>('[data-listing="submitted"]')?.disabled).toBe(false);
+    expect(graded.querySelector<HTMLButtonElement>('[data-listing="listed"]')?.disabled).toBe(true);
+    const signed = buildAdmissionPanel(agent, view({ name: 'x', platform: 'gsx', items: tick([...all, 'f1', 'f2']) }), handlers());
+    expect(signed.querySelector<HTMLButtonElement>('[data-listing="listed"]')?.disabled).toBe(false);
+    expect(signed.textContent).toContain('admitted, signed off');
+  });
+
+  it('a read-only viewer sees the checklist but cannot tick; a missing document shows the reason', () => {
+    const ro = buildAdmissionPanel(agent, { ...view({ name: 'x', platform: 'gsx', items: {} }), canWrite: false }, { ...handlers(), canWrite: false, isAdmin: false });
+    expect(ro.querySelector<HTMLInputElement>('#reg-adm-a1')?.disabled).toBe(true);
+    expect(ro.querySelector('#reg-adm-analyze')).toBeNull();
+    const missing = buildAdmissionPanel(agent, null, { ...handlers(), loadError: 'KV unreachable' });
+    expect(missing.textContent).toContain('KV unreachable');
+  });
+
+  it('shows the last analysis: proven lines carry evidence, the model verdicts carry notes', () => {
+    const entry: AdmissionEntry = {
+      name: 'x', platform: 'gsx', items: { a1: true },
+      lite: { analysis: { at: new Date().toISOString(), by: 'robb@onereach.com', auto: [{ line: 'a1', passed: true, evidence: 'card: name, owner robb@onereach.com, purpose (61 chars)' }], ai: { summary: 'Registered; no observability shown.', lines: [{ id: 'c2', verdict: 'unmet', note: 'no heartbeat in the record' }] } } },
+    };
+    const panel = buildAdmissionPanel(agent, view(entry), handlers());
+    expect(panel.textContent).toContain('Registered; no observability shown.');
+    expect(panel.querySelector('[data-line="a1"] .reg-adm-badge')?.textContent).toBe('proven');
+    expect(panel.querySelector('[data-line="a1"] .reg-adm-evidence')?.textContent).toContain('purpose (61 chars)');
+    expect(panel.querySelector('[data-line="c2"] .reg-adm-badge')?.textContent).toBe('model: unmet');
+    expect(panel.querySelector('[data-line="c2"] .reg-adm-ai')?.textContent).toBe('no heartbeat in the record');
   });
 });
