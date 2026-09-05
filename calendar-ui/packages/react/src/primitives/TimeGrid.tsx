@@ -1,6 +1,6 @@
 import { dayRangeOf, instantMs, type CalendarItem, type TimedPlacement } from '@calendar/core';
 import { toTimeZone, type CalendarDate } from '@internationalized/date';
-import { useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { useTimedDrag, type DragState } from '../hooks/useDrag.js';
 import { isoOf } from '../hooks/useGridKeyboard.js';
 import type { Density, Registry } from '../registry.js';
@@ -52,11 +52,11 @@ export function TimeGrid(props: TimeGridProps): JSX.Element {
     return () => ro.disconnect();
   }, [days.length]);
   const { drag, start } = useTimedDrag(onItemChange, { hourHeight: metrics.hourHeight, columnWidth: metrics.columnWidth, slotMinutes, columns: days.length });
-  const prevDrag = useRef<DragState | null>(null);
-  if (prevDrag.current !== drag) {
-    prevDrag.current = drag;
-    props.onDragStateChange?.(drag);
-  }
+  // Report drag state to the parent from an effect, never during render.
+  const onDragStateChange = props.onDragStateChange;
+  useEffect(() => {
+    onDragStateChange?.(drag);
+  }, [drag, onDragStateChange]);
   const visibleHours = h1 - h0;
   const gridHeight = visibleHours * metrics.hourHeight;
   const hourLabels = (date: CalendarDate): string[] => {
