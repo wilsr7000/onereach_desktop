@@ -1,0 +1,26 @@
+{
+  "name": "calendar-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A headless, renderer-agnostic calendar: the grid is a layout engine that knows nothing about what it displays.",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "typecheck": "tsc -b packages/core packages/react apps/demo",
+    "test": "vitest run",
+    "test:core": "vitest run --project core",
+    "test:react": "vitest run --project react",
+    "dev": "npm --workspace apps/demo run dev",
+    "build": "npm --workspace apps/demo run build"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.0",
+    "@types/react": "^18.3.20",
+    "@types/react-dom": "^18.3.6",
+    "@vitejs/plugin-react": "^4.4.1",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5",
+    "vitest": "^3.1.3"
+  }
+}

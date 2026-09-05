@@ -1,0 +1,21 @@
+:root { color-scheme: light dark; }
+body { margin: 0; font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; background: #f5f6f8; color: #1b1b1f; }
+.demo { display: flex; flex-direction: column; height: 100vh; }
+.demo[data-theme='dark'] { background: #0f1013; color: #e8e9ee; }
+.demo[data-theme='dark'] .cal { --cal-bg: #16171b; --cal-fg: #e8e9ee; --cal-fg-muted: #9a9fab; --cal-border: #2b2e36; --cal-item-bg: #22252d; --cal-skeleton-base: #23262e; --cal-skeleton-sheen: #2e323c; }
+.demo[data-theme='light'] .cal { --cal-bg: #ffffff; --cal-fg: #1b1b1f; --cal-fg-muted: #6b6f78; --cal-border: #e3e5ea; --cal-item-bg: #f3f6fb; --cal-skeleton-base: #eceef2; --cal-skeleton-sheen: #f8f9fb; }
+.demo-bar { display: flex; flex-wrap: wrap; gap: 14px; align-items: center; padding: 10px 14px; border-bottom: 1px solid rgba(127, 127, 127, 0.25); }
+.demo-group { display: flex; gap: 6px; align-items: center; }
+.demo-group label { display: inline-flex; gap: 4px; align-items: center; font-size: 12px; }
+.demo-bar button, .demo-bar select { font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(127, 127, 127, 0.4); background: transparent; color: inherit; cursor: pointer; }
+.demo-bar button.is-on { background: #3f78c0; color: #fff; border-color: #3f78c0; }
+.demo-title { min-width: 180px; }
+.demo-counter { margin-left: auto; font-size: 12px; opacity: 0.8; }
+.demo-main { flex: 1; min-height: 0; padding: 12px 14px; display: flex; }
+.demo-cal { flex: 1; min-height: 0; }
+.demo-foot { padding: 8px 14px; font-size: 12px; opacity: 0.75; border-top: 1px solid rgba(127, 127, 127, 0.25); }
+.demo-progress { display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 11px; }
+.demo-progress__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demo-progress__track { flex: 1; height: 6px; border-radius: 3px; background: rgba(127, 127, 127, 0.25); overflow: hidden; }
+.demo-progress__fill { display: block; height: 100%; background: #b26a00; transition: width 300ms; }
+.demo-progress__pct { font-variant-numeric: tabular-nums; }

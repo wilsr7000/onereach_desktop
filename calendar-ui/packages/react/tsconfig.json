@@ -1,0 +1,1 @@
+{ "extends": "../../tsconfig.base.json", "compilerOptions": { "rootDir": "src", "outDir": "dist", "emitDeclarationOnly": true, "types": ["vitest/globals"] }, "include": ["src"], "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test-setup.ts"], "references": [{ "path": "../core" }] }

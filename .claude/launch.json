@@ -57,6 +57,17 @@
         "--silent"
       ],
       "port": 4173
+    },
+    {
+      "name": "calendar-demo",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "/Users/richardwilson/Onereach_app/calendar-ui",
+        "run",
+        "dev"
+      ],
+      "port": 5174
     }
   ]
 }
