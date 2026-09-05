@@ -72,7 +72,12 @@ export function openNeonExplorerWindow(): void {
     height,
     title: NEON_EXPLORER_TITLE,
     backgroundColor: windowBackgroundColor(),
-    show: false,
+    // Shown at once, never hidden-until-ready: the explorer lays its
+    // graph out with animation frames, which Chromium freezes for a
+    // hidden window, and that boot-while-hidden phase is where its
+    // canvas came up empty (3 of 6 scripted opens, 2026-09-04). The
+    // themed background colour covers the moment before first paint.
+    show: true,
     webPreferences: {
       // No preload of any kind: the hosted app reaches NEON directly
       // and needs nothing from Lite — not the bridge, not a narrow one.

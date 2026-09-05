@@ -200,12 +200,15 @@ describe('the window it opens', () => {
     expect(tiny?.ctor['height']).toBe(600);
   });
 
-  it('shows only once the page is ready — no white flash', () => {
+  it('is shown at once, on a themed background — never hidden while the page boots', () => {
+    // The explorer lays its graph out with animation frames, which
+    // Chromium freezes for a hidden window; booting hidden is where its
+    // canvas came up empty. The themed backgroundColor covers the
+    // moment before first paint, so there is no white flash to hide.
     mod.openNeonExplorerWindow();
-    expect(only().ctor['show']).toBe(false);
-    expect(only().shown).toBe(false);
-    only().emit('ready-to-show');
-    expect(only().shown).toBe(true);
+    expect(only().ctor['show']).toBe(true);
+    expect(typeof only().ctor['backgroundColor']).toBe('string');
+    expect(only().ctor['backgroundColor']).toMatch(/^#[0-9a-f]{6}$/i);
   });
 
   it('warns instead of throwing when the explorer cannot be reached', async () => {
