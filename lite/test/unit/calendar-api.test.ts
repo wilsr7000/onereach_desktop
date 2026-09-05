@@ -57,11 +57,17 @@ function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: str
     }
     if (url.includes('/bots?')) return reply(200, { items: [{ id: 'b1', data: { label: 'Reporting' } }, { botId: 'b2', data: { label: 'Ops' } }] });
     if (url.includes('/deployments?')) return opts.deploymentsFail === true ? reply(500, 'nope') : reply(200, deployments);
+    if (/\/flows\/[A-Za-z0-9_-]+$/.test(url)) {
+      const id = url.split('/').pop() ?? '';
+      if (id === 'f-legs') return reply(200, { id, botId: 'b2', version: 'v', data: { label: 'Two legs', trees: { main: { steps: {} }, leg: { steps: { s9: { type: SCHEDULE_STEP_TEMPLATE_ID, label: 'Schedule execution', data: { scheduleEvents: [EVENT] } } } } } } });
+      return reply(404, 'no flow');
+    }
     if (url.includes('/flows?')) {
       const q = JSON.parse(decodeURIComponent(url.split('query=')[1]?.split('&')[0] ?? '{}')) as { botId: string };
       if (q.botId === opts.failBot) return reply(500, 'bot exploded');
       if (q.botId === 'b1') return reply(200, { items: [scheduledFlow('f-armed', 'b1', 'Armed report'), scheduledFlow('f-active-noschedule', 'b1', 'Active no trigger'), plainFlow('f-plain', 'b1')] });
-      return reply(200, { items: [scheduledFlow('f-authored', 'b2', 'Authored only', null)] });
+      // Projected listing: a flow whose schedule sits on a non-main tree shows only tree names here.
+      return reply(200, { items: [scheduledFlow('f-authored', 'b2', 'Authored only', null), { id: 'f-legs', botId: 'b2', version: 'v', data: { label: 'Two legs', trees: { main: { steps: {} }, leg: {} } } }] });
     }
     return reply(404, 'nope');
   });
@@ -81,12 +87,16 @@ describe('CalendarService — snapshot over the datahub', () => {
     const gsx = fakeGsx();
     const { svc } = service(gsx);
     const snap = await svc.snapshot();
-    expect(snap).toMatchObject({ env: 'edison', accountId: ACCOUNT, botCount: 2, flowCount: 4, activeDeployments: 2, errors: [] });
+    expect(snap).toMatchObject({ env: 'edison', accountId: ACCOUNT, botCount: 2, flowCount: 5, activeDeployments: 2, errors: [] });
     expect(snap.scheduled.map((f) => [f.flowLabel, f.active, f.armed, f.deployed])).toEqual([
       ['Authored only', false, false, false],
+      ['Two legs', false, false, true],
       ['Active no trigger', true, false, true],
       ['Armed report', true, true, true],
     ]);
+    // The listing is projected (small bodies); the legs flow was fetched whole to find its schedule.
+    expect(gsx.calls.filter((u) => u.includes('/flows?')).every((u) => u.includes('projection='))).toBe(true);
+    expect(gsx.calls.filter((u) => /\/flows\/f-legs$/.test(u))).toHaveLength(1);
     const armed = snap.scheduled.find((f) => f.flowId === 'f-armed')!;
     expect(armed.nextFireMs).toBe(4102444800000);
     expect(armed.activatedMs).toBe(1700000000000);
@@ -116,6 +126,7 @@ describe('CalendarService — snapshot over the datahub', () => {
     const snap = await svc.snapshot();
     expect(snap.errors).toEqual([{ botId: 'b2', botLabel: 'Ops', message: expect.stringContaining('500') }]);
     expect(snap.scheduled.map((f) => f.flowLabel)).toEqual(['Active no trigger', 'Armed report']);
+    expect(snap.flowCount).toBe(3);
     expect(snap.scheduled.every((f) => !f.active && !f.armed)).toBe(true);
     expect(snap.activeDeployments).toBe(0);
   });
@@ -137,8 +148,8 @@ describe('CalendarService — snapshot over the datahub', () => {
     const toMs = Date.UTC(2026, 8, 8) - 1;
     const res = await svc.occurrences({ fromMs, toMs });
     expect(res.truncated).toBe(false);
-    // three scheduled flows × two runs (09:00, 09:30)
-    expect(res.occurrences).toHaveLength(6);
+    // four scheduled flows × two runs (09:00, 09:30)
+    expect(res.occurrences).toHaveLength(8);
     expect(res.occurrences.map((o) => o.atMs)).toEqual([...res.occurrences.map((o) => o.atMs)].sort((a, b) => a - b));
     expect(res.occurrences[0]).toMatchObject({ atMs: Date.UTC(2026, 8, 7, 9, 0), eventName: 'Morning', timeZone: 'UTC' });
   });

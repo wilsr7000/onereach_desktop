@@ -16,9 +16,19 @@ import { CalendarError } from './errors.js';
 import type { ActiveDeployment } from './types.js';
 
 export interface DatahubDeps {
-  fetch: (url: string, init?: { method?: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+  fetch: (url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
   now?: () => number;
+  /** Per-request timeout (default 8 s): one slow space must not stall the account. */
+  timeoutMs?: number;
 }
+
+/**
+ * What a flow listing must carry for the Calendar: the label, the tree
+ * names, and the main tree's steps. Full bodies carry every step
+ * template's code (a space with 347 flows answers 500 for them); this
+ * projection is ~40× smaller and lists that space fine.
+ */
+export const FLOW_LIST_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label', 'data.trees', 'data.trees.main.steps'] as const;
 
 export interface BotRecord {
   id: string;
@@ -49,7 +59,7 @@ export class DatahubClient {
   private async getJson(url: string, auth: string | null): Promise<unknown> {
     let res: { ok: boolean; status: number; text(): Promise<string> };
     try {
-      res = await this.deps.fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json;charset=UTF-8', ...(auth !== null ? { Authorization: auth } : {}) } });
+      res = await this.deps.fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json;charset=UTF-8', ...(auth !== null ? { Authorization: auth } : {}) }, signal: AbortSignal.timeout(this.deps.timeoutMs ?? 8000) });
     } catch (err) {
       throw new CalendarError('CALENDAR_HTTP_FAILED', `Could not reach ${new URL(url).host}: ${err instanceof Error ? err.message : String(err)}`, 'Check the network, then refresh.');
     }
@@ -137,8 +147,9 @@ export class DatahubClient {
       .map((b) => ({ id: b.id, label: b.label.length > 0 ? b.label : b.id }));
   }
 
+  /** A space's flows, projected to what the Calendar reads (see {@link FLOW_LIST_PROJECTION}). */
   async listFlows(botId: string): Promise<Array<Record<string, unknown>>> {
-    return DatahubClient.items(await this.authed(`/flows?query=${encodeURIComponent(JSON.stringify({ botId, isDeleted: false }))}`));
+    return DatahubClient.items(await this.authed(`/flows?query=${encodeURIComponent(JSON.stringify({ botId, isDeleted: false }))}&projection=${encodeURIComponent(JSON.stringify(FLOW_LIST_PROJECTION))}`));
   }
 
   /**

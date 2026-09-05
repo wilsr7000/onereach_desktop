@@ -62,7 +62,7 @@ export class CalendarService implements CalendarApi {
   constructor(private readonly deps: CalendarServiceDeps) {
     this.now = deps.now ?? (() => Date.now());
     this.ttl = deps.cacheTtlMs ?? 5 * 60 * 1000;
-    this.concurrency = Math.max(1, deps.concurrency ?? 4);
+    this.concurrency = Math.max(1, deps.concurrency ?? 6);
   }
 
   private session(): { env: string; accountId: string } {
@@ -118,7 +118,17 @@ export class CalendarService implements CalendarApi {
             const flows = await client.listFlows(bot.id);
             flowCount += flows.length;
             for (const raw of flows) {
-              const sf = scheduledFlowFrom({ ...(raw as unknown as FlowRecord), botId: String(raw['botId'] ?? bot.id) }, bot.label);
+              let record = { ...(raw as unknown as FlowRecord), botId: String(raw['botId'] ?? bot.id) };
+              let sf = scheduledFlowFrom(record, bot.label);
+              // The listing is projected to the main tree; a flow with other
+              // trees and no schedule on main is fetched whole (rare: ~6%).
+              if (sf === null && Object.keys(record.data?.trees ?? {}).some((t) => t !== 'main')) {
+                const full = await client.getFlow(record.id).catch(() => null);
+                if (full !== null) {
+                  record = { ...(full as unknown as FlowRecord), botId: record.botId };
+                  sf = scheduledFlowFrom(record, bot.label);
+                }
+              }
               if (sf === null) continue;
               const dep = byFlow.get(sf.flowId);
               if (dep !== undefined) {
