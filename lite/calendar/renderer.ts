@@ -397,7 +397,9 @@ function boot(): void {
       );
       if (status !== null) {
         const age = Math.max(0, Math.round((Date.now() - res.value.snapshot.fetchedAtMs) / 60000));
-        status.textContent = `${res.value.snapshot.env} · ${res.value.snapshot.botCount} bots · ${res.value.snapshot.flowCount} flows · ${res.value.snapshot.activeDeployments} active · ${age === 0 ? 'just now' : `${age} min ago`}`;
+        const scan = res.value.snapshot.scan;
+        const read = scan === undefined ? '' : ` · ${scan.fetched + scan.bulk} read, ${scan.reused} from index`;
+        status.textContent = `${res.value.snapshot.env} · ${res.value.snapshot.botCount} bots · ${res.value.snapshot.flowCount} flows · ${res.value.snapshot.activeDeployments} active${read} · ${age === 0 ? 'just now' : `${age} min ago`}`;
       }
       render();
     } finally {

@@ -77,6 +77,8 @@ export interface CalendarSnapshot {
   flowCount: number;
   /** Active deployments in the account (all flows, scheduled or not). */
   activeDeployments: number;
+  /** How the scan got its answers (schedule index): bodies read vs answered from the index. */
+  scan: { indexed: number; reused: number; fetched: number; bulk: number; dropped: number };
   scheduled: ScheduledFlow[];
   /** Per-bot listing failures (the rest of the snapshot is still good). */
   errors: Array<{ botId: string; botLabel: string; message: string }>;

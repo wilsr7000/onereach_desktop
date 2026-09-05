@@ -1996,4 +1996,6 @@ SmartScreen warning).
 
 **Account on 2026-09-05.** 12 bots, 67 flows, 121 active deployments; two authored schedules (both "5min" in _ReportingAdapters, Europe/Kiev), one of them armed.
 
+**The schedule index (same day).** Measured: full bodies for the account are ~30 MB / 18 s and the 347-flow space answers 500 for them; projected listings are ~12.7 MB / 2 s. To re-read only what changed, `index.ts` keeps, per flow id, the version and modified time last examined and what it showed (no schedule, or the parsed events). Cold space → one bulk projected listing; warm space → heads only (id, version, modified, label) and a body fetch only for a new version; vanished flows drop; a failed listing keeps its entries. Stored locally (userData) and mirrored to the account's KV (`calendar` / `schedule-index:<accountId>`) so the platform-side feed regenerator, when built, shares the same answers. Steady state: bots + heads, zero bodies.
+
 **Rejected.** Keeping the hosted link (dead); bundling `@or-sdk/*` into the kernel (asar guard, supply-chain caution after the August scope hit, and the current base rejects the token anyway); inferring schedules from flow names or logs (the step data is the authored truth, the deployment the armed truth).

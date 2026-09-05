@@ -2145,6 +2145,7 @@ interface LiteCalendarScheduledFlow {
 }
 interface LiteCalendarSnapshot {
   env: string; accountId: string; fetchedAtMs: number; botCount: number; flowCount: number; activeDeployments: number;
+  scan?: { indexed: number; reused: number; fetched: number; bulk: number; dropped: number };
   scheduled: LiteCalendarScheduledFlow[]; errors: Array<{ botId: string; botLabel: string; message: string }>;
 }
 interface LiteCalendarOccurrence { atMs: number; flowId: string; botId: string; botLabel: string; flowLabel: string; eventId: string; eventName: string; color: string; timeZone: string }

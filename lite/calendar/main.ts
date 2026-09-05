@@ -3,7 +3,7 @@
  * the window itself, and the door the GSX menu opens.
  */
 import { ipcMain, type BrowserWindow, type IpcMainInvokeEvent } from 'electron';
-import { CalendarError, CalendarService, configureCalendarApi, getCalendarApi, type CalendarApi } from './api.js';
+import { CalendarError, CalendarService, configureCalendarApi, getCalendarApi, type CalendarApi, type IndexStore } from './api.js';
 import { openCalendarWindow, closeCalendarWindow } from './window.js';
 import type { CalendarOccurrencesInput } from './types.js';
 import type { DatahubDeps } from './datahub.js';
@@ -30,6 +30,8 @@ export interface InitCalendarOptions {
   preloadPath: string;
   /** Injectable for tests; defaults to the global fetch. */
   fetch?: DatahubDeps['fetch'];
+  /** The schedule index store (local file + account KV in the app). */
+  indexStore?: IndexStore;
 }
 
 export interface CalendarHandle {
@@ -58,7 +60,7 @@ export function initCalendar(opts: InitCalendarOptions): CalendarHandle {
     openCalendarWindow({ parent: opts.getMainWindow(), htmlPath: opts.htmlPath, preloadPath: opts.preloadPath });
   };
   const fetchImpl: DatahubDeps['fetch'] = opts.fetch ?? ((url, init) => fetch(url, init));
-  const built = new CalendarService({ getSession: opts.getSession, fetch: fetchImpl, openGsxWindow: opts.openGsxWindow, openCalendarWindow: open });
+  const built = new CalendarService({ getSession: opts.getSession, fetch: fetchImpl, openGsxWindow: opts.openGsxWindow, openCalendarWindow: open, ...(opts.indexStore !== undefined ? { indexStore: opts.indexStore } : {}) });
   configureCalendarApi(() => built);
   const api = getCalendarApi();
 

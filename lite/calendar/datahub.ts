@@ -14,6 +14,7 @@
  */
 import { CalendarError } from './errors.js';
 import type { ActiveDeployment } from './types.js';
+import type { FlowHead } from './index.js';
 
 export interface DatahubDeps {
   fetch: (url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
@@ -29,6 +30,17 @@ export interface DatahubDeps {
  * projection is ~40× smaller and lists that space fine.
  */
 export const FLOW_LIST_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label', 'data.trees', 'data.trees.main.steps'] as const;
+/** A warm scan lists only heads: the schedule index answers for versions it has seen. */
+export const FLOW_HEAD_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label'] as const;
+
+/** The head of a flow row (what the index is keyed on). */
+export function flowHeadOf(raw: Record<string, unknown>, botId: string): FlowHead {
+  const data = typeof raw['data'] === 'object' && raw['data'] !== null ? (raw['data'] as Record<string, unknown>) : {};
+  const mod = raw['dateModified'];
+  const modifiedMs = typeof mod === 'number' ? mod : Number.parseInt(String(mod ?? ''), 10) || 0;
+  const id = String(raw['id'] ?? '');
+  return { id, botId: String(raw['botId'] ?? botId), version: typeof raw['version'] === 'string' ? raw['version'] : '', modifiedMs, label: String(data['label'] ?? id) };
+}
 
 export interface BotRecord {
   id: string;
@@ -179,6 +191,12 @@ export class DatahubClient {
       out.push({ id: String(d['id'] ?? ''), flowId, botId: String(d['botId'] ?? ''), activatedMs: typeof created === 'number' ? created : Number.parseInt(String(created ?? ''), 10) || 0, flowVersion: String(data['flowVersion'] ?? ''), scheduleTriggers });
     }
     return out;
+  }
+
+  /** Flow heads only (id, version, modified, label): a few KB per space. */
+  async listFlowHeads(botId: string): Promise<FlowHead[]> {
+    const rows = DatahubClient.items(await this.authed(`/flows?query=${encodeURIComponent(JSON.stringify({ botId, isDeleted: false }))}&projection=${encodeURIComponent(JSON.stringify(FLOW_HEAD_PROJECTION))}`));
+    return rows.map((r) => flowHeadOf(r, botId)).filter((h) => h.id.length > 0);
   }
 
   async getFlow(flowId: string): Promise<Record<string, unknown> | null> {

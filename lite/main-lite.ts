@@ -65,6 +65,7 @@ import { initUniversity, type UniversityHandle } from './university/main.js';
 import { initAiRunTimes, type AiRunTimesHandle } from './ai-run-times/main.js';
 import { initRegistry, type RegistryHandle } from './registry/main.js';
 import { initCalendar, type CalendarHandle } from './calendar/main.js';
+import { compositeIndexStore, fileIndexStore, kvIndexStore } from './calendar/index-store.js';
 import { getGsxApi } from './gsx/api.js';
 import { getKVApi } from './kv/api.js';
 import { getAiApi } from './ai/api.js';
@@ -1174,6 +1175,11 @@ app
         getMainWindow: () => mainWindow,
         htmlPath: path.join(__dirname, 'calendar.html'),
         preloadPath,
+        // The schedule index: which flow versions carry a schedule — local for warm starts, KV so the platform can share it.
+        indexStore: compositeIndexStore(
+          [fileIndexStore(app.getPath('userData')), kvIndexStore({ get: (c, k) => getKVApi().get(c, k), set: (c, k, v) => getKVApi().set(c, k, v) })],
+          (message, data) => getLoggingApi().warn('calendar', message, data)
+        ),
       });
     } catch (err) {
       getLoggingApi().error('calendar', 'initCalendar threw', { error: (err as Error).message });

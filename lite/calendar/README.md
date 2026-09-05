@@ -17,3 +17,7 @@ The GSX menu's **Calendar** opens this window: the signed-in account's scheduled
 - `openWindow()` — open or focus the Calendar.
 
 Events (`events.ts`): `calendar.snapshot.*` span, `calendar.open-window`, `calendar.open-flow`.
+
+## The schedule index
+
+`index.ts` remembers, per flow id, the version (and modified time) last examined and what it showed: no schedule, or the parsed events. A cold space is read once with the bulk projection (main-tree steps); afterwards a scan lists only flow heads (`FLOW_HEAD_PROJECTION`, a few KB per space) and fetches a body only when a version is new. Flows that vanish from a space that listed fine are dropped; a space that fails to list keeps its entries. The index lives in a local file under userData and is mirrored to the account's KV (`calendar` / `schedule-index:<accountId>`) so a platform-side feed regenerator can share it (`index-store.ts`). Steady state: bots + heads, zero bodies.

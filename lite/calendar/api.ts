@@ -17,7 +17,8 @@
 import { getLoggingApi } from '../logging/api.js';
 import { CALENDAR_EVENTS } from './events.js';
 import { CalendarError } from './errors.js';
-import { DatahubClient, type DatahubDeps } from './datahub.js';
+import { DatahubClient, flowHeadOf, type DatahubDeps } from './datahub.js';
+import { dropFlows, emptyIndex, indexStats, parseIndex, planScan, recordFlow, scheduledFromIndex, type FlowHead, type ScheduleIndex } from './index.js';
 import { expandOccurrences, scheduledFlowFrom, type FlowRecord } from './schedule.js';
 import type { CalendarOccurrencesInput, CalendarOccurrencesResult, CalendarSnapshot, CalendarStatus, ScheduledFlow } from './types.js';
 
@@ -36,8 +37,16 @@ export interface CalendarApi {
   openWindow(): Promise<void>;
 }
 
+/** Where the schedule index lives (local file, the account's KV, or both). */
+export interface IndexStore {
+  load(accountId: string): Promise<unknown | null>;
+  save(accountId: string, index: ScheduleIndex): Promise<void>;
+}
+
 export interface CalendarServiceDeps {
   getSession: () => { env: string; accountId: string } | null;
+  /** The schedule index: which flow versions do and do not carry a schedule. Memory-only when absent. */
+  indexStore?: IndexStore;
   fetch: DatahubDeps['fetch'];
   openGsxWindow: (opts: { env: string; url: string; title: string }) => Promise<unknown>;
   openCalendarWindow: () => void;
@@ -52,6 +61,7 @@ const MAX_WINDOW_MS = 400 * 24 * 3600 * 1000;
 
 export class CalendarService implements CalendarApi {
   private client: DatahubClient | null = null;
+  private index: ScheduleIndex | null = null;
   private cache: CalendarSnapshot | null = null;
   private inflight: Promise<CalendarSnapshot> | null = null;
   private lastError: string | null = null;
@@ -77,6 +87,7 @@ export class CalendarService implements CalendarApi {
     if (this.client === null || this.client.account !== s.accountId) {
       this.client = new DatahubClient(s.env, s.accountId, { fetch: this.deps.fetch, now: this.now });
       this.cache = null;
+      this.index = null;
     }
     return this.client;
   }
@@ -106,8 +117,13 @@ export class CalendarService implements CalendarApi {
   private async read(s: { env: string; accountId: string }, client: DatahubClient): Promise<CalendarSnapshot> {
     const span = getLoggingApi().start('calendar.snapshot', { env: s.env });
     try {
+      const index = await this.loadIndex(s.accountId);
       const [bots, deployments] = await Promise.all([client.listBots(), client.listActiveDeployments().catch((err: unknown) => { getLoggingApi().warn('calendar', 'active deployments unavailable; activation state unknown', { error: err instanceof Error ? err.message : String(err) }); return null; })]);
       const byFlow = new Map((deployments ?? []).map((d) => [d.flowId, d] as const));
+      const scan = { indexed: 0, reused: 0, fetched: 0, bulk: 0, dropped: 0 };
+      let indexChanged = false;
+      const listedBots = new Set<string>();
+      const heads: FlowHead[] = [];
       const scheduled: ScheduledFlow[] = [];
       const errors: CalendarSnapshot['errors'] = [];
       let flowCount = 0;
@@ -115,45 +131,103 @@ export class CalendarService implements CalendarApi {
       const worker = async (): Promise<void> => {
         for (let bot = queue.shift(); bot !== undefined; bot = queue.shift()) {
           try {
-            const flows = await client.listFlows(bot.id);
-            flowCount += flows.length;
-            for (const raw of flows) {
-              let record = { ...(raw as unknown as FlowRecord), botId: String(raw['botId'] ?? bot.id) };
-              let sf = scheduledFlowFrom(record, bot.label);
-              // The listing is projected to the main tree; a flow with other
-              // trees and no schedule on main is fetched whole (rare: ~6%).
-              if (sf === null && Object.keys(record.data?.trees ?? {}).some((t) => t !== 'main')) {
-                const full = await client.getFlow(record.id).catch(() => null);
-                if (full !== null) {
-                  record = { ...(full as unknown as FlowRecord), botId: record.botId };
-                  sf = scheduledFlowFrom(record, bot.label);
-                }
+            const known = Object.values(index.flows).some((e) => e.botId === bot.id);
+            if (!known) {
+              // Cold space: one bulk listing (main-tree steps projected) fills the index.
+              const flows = await client.listFlows(bot.id);
+              flowCount += flows.length;
+              for (const raw of flows) {
+                const head = flowHeadOf(raw, bot.id);
+                const sf = await this.examine(client, raw, head, bot.label);
+                scan.bulk += 1;
+                if (recordFlow(index, head, sf, this.now())) indexChanged = true;
+                heads.push(head);
+                if (sf !== null) scheduled.push(sf);
               }
-              if (sf === null) continue;
-              const dep = byFlow.get(sf.flowId);
-              if (dep !== undefined) {
-                const nowMs = this.now();
-                const next = dep.scheduleTriggers.map((t) => t.timeoutMs).filter((t) => t > nowMs).sort((a, b) => a - b)[0];
-                scheduled.push({ ...sf, active: true, armed: dep.scheduleTriggers.length > 0, activatedMs: dep.activatedMs, nextFireMs: next ?? null });
-              } else scheduled.push(sf);
+            } else {
+              // Warm space: heads only; the index answers for versions it has seen.
+              const list = await client.listFlowHeads(bot.id);
+              flowCount += list.length;
+              const plan = planScan(index, list, new Set([bot.id]));
+              heads.push(...list);
+              for (const h of plan.reuse) {
+                scan.reused += 1;
+                const e = index.flows[h.id];
+                if (e === undefined) continue;
+                const sf = scheduledFromIndex(h.id, e, bot.label);
+                if (sf !== null) scheduled.push(sf);
+              }
+              for (const h of plan.fetch) {
+                const full = await client.getFlow(h.id);
+                scan.fetched += 1;
+                const sf = full === null ? null : scheduledFlowFrom({ ...(full as unknown as FlowRecord), botId: h.botId }, bot.label);
+                if (recordFlow(index, h, sf, this.now())) indexChanged = true;
+                if (sf !== null) scheduled.push(sf);
+              }
             }
+            listedBots.add(bot.id);
           } catch (err) {
             errors.push({ botId: bot.id, botLabel: bot.label, message: err instanceof Error ? err.message : String(err) });
           }
         }
       };
       await Promise.all(Array.from({ length: Math.min(this.concurrency, Math.max(1, queue.length)) }, () => worker()));
+      // Flows gone from a space that listed fine are gone from the index too.
+      const drop = planScan(index, heads, listedBots).drop;
+      if (dropFlows(index, drop, this.now())) indexChanged = true;
+      scan.dropped = drop.length;
+      scan.indexed = indexStats(index).flows;
+      if (indexChanged && this.deps.indexStore !== undefined) {
+        await this.deps.indexStore.save(s.accountId, index).catch((err: unknown) => getLoggingApi().warn('calendar', 'schedule index not saved', { error: err instanceof Error ? err.message : String(err) }));
+      }
+      // Activation state from the deployments.
+      for (let i = 0; i < scheduled.length; i += 1) {
+        const sf = scheduled[i];
+        if (sf === undefined) continue;
+        const dep = byFlow.get(sf.flowId);
+        if (dep === undefined) continue;
+        const nowMs = this.now();
+        const next = dep.scheduleTriggers.map((t) => t.timeoutMs).filter((t) => t > nowMs).sort((a, b) => a - b)[0];
+        scheduled[i] = { ...sf, active: true, armed: dep.scheduleTriggers.length > 0, activatedMs: dep.activatedMs, nextFireMs: next ?? null };
+      }
       scheduled.sort((a, b) => a.botLabel.localeCompare(b.botLabel) || a.flowLabel.localeCompare(b.flowLabel));
-      const snapshot: CalendarSnapshot = { env: s.env, accountId: s.accountId, fetchedAtMs: this.now(), botCount: bots.length, flowCount, activeDeployments: deployments?.length ?? 0, scheduled, errors };
+      const snapshot: CalendarSnapshot = { env: s.env, accountId: s.accountId, fetchedAtMs: this.now(), botCount: bots.length, flowCount, activeDeployments: deployments?.length ?? 0, scan, scheduled, errors };
       this.cache = snapshot;
       this.lastError = null;
-      span.finish({ bots: bots.length, flows: flowCount, scheduled: scheduled.length, armed: scheduled.filter((f) => f.armed).length, events: scheduled.reduce((n, f) => n + f.events.length, 0), botErrors: errors.length });
+      span.finish({ bots: bots.length, flows: flowCount, scheduled: scheduled.length, armed: scheduled.filter((f) => f.armed).length, events: scheduled.reduce((n, f) => n + f.events.length, 0), botErrors: errors.length, ...scan });
       return snapshot;
     } catch (err) {
       this.lastError = err instanceof Error ? err.message : String(err);
       span.fail(err);
       throw err;
     }
+  }
+
+  /** The account's schedule index: memory, else the store, else empty. */
+  private async loadIndex(accountId: string): Promise<ScheduleIndex> {
+    if (this.index !== null && this.index.accountId === accountId) return this.index;
+    let loaded: ScheduleIndex | null = null;
+    if (this.deps.indexStore !== undefined) {
+      try {
+        loaded = parseIndex(await this.deps.indexStore.load(accountId), accountId);
+      } catch (err) {
+        getLoggingApi().warn('calendar', 'schedule index not loaded; starting cold', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    this.index = loaded ?? emptyIndex(accountId, this.now());
+    return this.index;
+  }
+
+  /**
+   * A bulk-listed flow is projected to its main tree; when that shows no
+   * schedule but the flow has other trees (~6%), the body is fetched whole.
+   */
+  private async examine(client: DatahubClient, raw: Record<string, unknown>, head: FlowHead, botLabel: string): Promise<ScheduledFlow | null> {
+    const record: FlowRecord = { ...(raw as unknown as FlowRecord), botId: head.botId };
+    const sf = scheduledFlowFrom(record, botLabel);
+    if (sf !== null || !Object.keys(record.data?.trees ?? {}).some((t) => t !== 'main')) return sf;
+    const full = await client.getFlow(head.id).catch(() => null);
+    return full === null ? null : scheduledFlowFrom({ ...(full as unknown as FlowRecord), botId: head.botId }, botLabel);
   }
 
   async occurrences(input: CalendarOccurrencesInput): Promise<CalendarOccurrencesResult> {

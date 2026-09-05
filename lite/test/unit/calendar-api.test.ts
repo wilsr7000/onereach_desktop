@@ -31,10 +31,17 @@ const EVENT = { scheduleEventData: { id: 'ev-1', eventName: 'Morning', color: '#
 const scheduledFlow = (id: string, botId: string, label: string, version: string | null = 'v1') => ({
   id, botId, version, dateModified: 1, data: { label, trees: { main: { steps: { s1: { type: SCHEDULE_STEP_TEMPLATE_ID, label: 'Schedule execution', data: { scheduleEvents: [EVENT] } } } } } },
 });
-const plainFlow = (id: string, botId: string) => ({ id, botId, version: 'v', data: { label: 'plain', trees: { main: { steps: { s: { type: 'other', label: 'Wait for HTTP Request', data: {} } } } } } });
+const plainFlow = (id: string, botId: string) => ({ id, botId, version: 'v', dateModified: 1, data: { label: 'plain', trees: { main: { steps: { s: { type: 'other', label: 'Wait for HTTP Request', data: {} } } } } } });
 
 function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: string; deploymentsFail?: boolean } = {}) {
   const calls: string[] = [];
+  // The account's flows, mutable so tests can save a new version or delete one.
+  const flowsByBot: Record<string, Array<Record<string, unknown>>> = {
+    b1: [scheduledFlow('f-armed', 'b1', 'Armed report'), scheduledFlow('f-active-noschedule', 'b1', 'Active no trigger'), plainFlow('f-plain', 'b1')],
+    b2: [scheduledFlow('f-authored', 'b2', 'Authored only', null), { id: 'f-legs', botId: 'b2', version: 'v', dateModified: 1, data: { label: 'Two legs', trees: { main: { steps: {} }, leg: { steps: { s9: { type: SCHEDULE_STEP_TEMPLATE_ID, label: 'Schedule execution', data: { scheduleEvents: [EVENT] } } } } } } }],
+  };
+  const headOf = (f: Record<string, unknown>) => ({ id: f['id'], botId: f['botId'], version: f['version'], dateModified: f['dateModified'], data: { label: (f['data'] as { label: string }).label } });
+  const bulkOf = (f: Record<string, unknown>) => { const d = f['data'] as { label: string; trees: Record<string, unknown> }; return { id: f['id'], botId: f['botId'], version: f['version'], dateModified: f['dateModified'], data: { label: d.label, trees: Object.fromEntries(Object.entries(d.trees).map(([k, v]) => [k, k === 'main' ? v : {}])) } }; };
   let minted = 0;
   let rejected = false;
   const deployments = [
@@ -59,19 +66,27 @@ function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: str
     if (url.includes('/deployments?')) return opts.deploymentsFail === true ? reply(500, 'nope') : reply(200, deployments);
     if (/\/flows\/[A-Za-z0-9_-]+$/.test(url)) {
       const id = url.split('/').pop() ?? '';
-      if (id === 'f-legs') return reply(200, { id, botId: 'b2', version: 'v', data: { label: 'Two legs', trees: { main: { steps: {} }, leg: { steps: { s9: { type: SCHEDULE_STEP_TEMPLATE_ID, label: 'Schedule execution', data: { scheduleEvents: [EVENT] } } } } } } });
-      return reply(404, 'no flow');
+      const f = Object.values(flowsByBot).flat().find((x) => x['id'] === id);
+      return f === undefined ? reply(404, 'no flow') : reply(200, f);
     }
     if (url.includes('/flows?')) {
       const q = JSON.parse(decodeURIComponent(url.split('query=')[1]?.split('&')[0] ?? '{}')) as { botId: string };
+      const projection = decodeURIComponent(url.split('projection=')[1] ?? '');
       if (q.botId === opts.failBot) return reply(500, 'bot exploded');
-      if (q.botId === 'b1') return reply(200, { items: [scheduledFlow('f-armed', 'b1', 'Armed report'), scheduledFlow('f-active-noschedule', 'b1', 'Active no trigger'), plainFlow('f-plain', 'b1')] });
-      // Projected listing: a flow whose schedule sits on a non-main tree shows only tree names here.
-      return reply(200, { items: [scheduledFlow('f-authored', 'b2', 'Authored only', null), { id: 'f-legs', botId: 'b2', version: 'v', data: { label: 'Two legs', trees: { main: { steps: {} }, leg: {} } } }] });
+      const list = flowsByBot[q.botId] ?? [];
+      // Heads projection (no steps) vs the bulk projection (main-tree steps).
+      return reply(200, { items: list.map((f) => (projection.includes('steps') ? bulkOf(f) : headOf(f))) });
     }
     return reply(404, 'nope');
   });
-  return { fetch, calls, mintedCount: () => minted };
+  return { fetch, calls, mintedCount: () => minted, flowsByBot };
+}
+
+/** An in-memory schedule-index store. */
+function memoryStore(initial: unknown = null) {
+  let value: unknown = initial;
+  let saves = 0;
+  return { load: vi.fn(async () => value), save: vi.fn(async (_a: string, index: unknown) => { value = JSON.parse(JSON.stringify(index)); saves += 1; }), saves: () => saves, value: () => value };
 }
 
 function service(gsx: ReturnType<typeof fakeGsx>, over: Partial<ConstructorParameters<typeof CalendarService>[0]> = {}) {
@@ -94,9 +109,10 @@ describe('CalendarService — snapshot over the datahub', () => {
       ['Active no trigger', true, false, true],
       ['Armed report', true, true, true],
     ]);
-    // The listing is projected (small bodies); the legs flow was fetched whole to find its schedule.
-    expect(gsx.calls.filter((u) => u.includes('/flows?')).every((u) => u.includes('projection='))).toBe(true);
+    // Cold start: bulk projected listings; the legs flow was fetched whole to find its schedule.
+    expect(gsx.calls.filter((u) => u.includes('/flows?')).every((u) => u.includes('projection=') && u.includes('steps'))).toBe(true);
     expect(gsx.calls.filter((u) => /\/flows\/f-legs$/.test(u))).toHaveLength(1);
+    expect(snap.scan).toEqual({ indexed: 5, reused: 0, fetched: 0, bulk: 5, dropped: 0 });
     const armed = snap.scheduled.find((f) => f.flowId === 'f-armed')!;
     expect(armed.nextFireMs).toBe(4102444800000);
     expect(armed.activatedMs).toBe(1700000000000);
@@ -161,5 +177,56 @@ describe('CalendarService — snapshot over the datahub', () => {
     await expect(svc.openFlow({ flowId: '../x', botId: 'b1' })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
     await svc.openWindow();
     expect(openCalendarWindow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('CalendarService — the schedule index', () => {
+  it('a warm scan lists heads only and reads no bodies when nothing changed; a saved version is read once; a deleted flow drops', async () => {
+    const gsx = fakeGsx();
+    const store = memoryStore();
+    const { svc, tick } = service(gsx, { indexStore: store });
+    const cold = await svc.snapshot();
+    expect(cold.scan).toMatchObject({ bulk: 5, fetched: 0, reused: 0, indexed: 5 });
+    expect(store.saves()).toBe(1);
+    // Warm: same versions.
+    tick(6 * 60 * 1000);
+    const before = gsx.calls.length;
+    const warm = await svc.snapshot();
+    const since = gsx.calls.slice(before);
+    expect(warm.scan).toEqual({ indexed: 5, reused: 5, fetched: 0, bulk: 0, dropped: 0 });
+    expect(since.filter((u) => u.includes('/flows?')).every((u) => !u.includes('steps'))).toBe(true); // heads only
+    expect(since.some((u) => /\/flows\/[A-Za-z0-9_-]+$/.test(u))).toBe(false); // no bodies
+    expect(warm.scheduled.map((f) => f.flowLabel)).toEqual(cold.scheduled.map((f) => f.flowLabel));
+    expect(warm.scheduled.find((f) => f.flowId === 'f-armed')?.armed).toBe(true); // activation still applied
+    expect(store.saves()).toBe(1); // unchanged index is not rewritten
+    // The author saves a new version of one flow, and deletes another.
+    const armed = gsx.flowsByBot['b1']!.find((f) => f['id'] === 'f-armed')!;
+    armed['version'] = 'v2';
+    armed['dateModified'] = 2;
+    gsx.flowsByBot['b1'] = gsx.flowsByBot['b1']!.filter((f) => f['id'] !== 'f-plain');
+    tick(6 * 60 * 1000);
+    const mark = gsx.calls.length;
+    const changed = await svc.snapshot();
+    expect(changed.scan).toEqual({ indexed: 4, reused: 3, fetched: 1, bulk: 0, dropped: 1 });
+    expect(gsx.calls.slice(mark).filter((u) => /\/flows\/f-armed$/.test(u))).toHaveLength(1);
+    expect(store.saves()).toBe(2);
+    expect(Object.keys((store.value() as { flows: Record<string, unknown> }).flows).sort()).toEqual(['f-active-noschedule', 'f-armed', 'f-authored', 'f-legs']);
+  });
+  it('a space that fails to list keeps its index entries; a stored index for another account is ignored', async () => {
+    const gsx = fakeGsx();
+    const store = memoryStore();
+    const { svc, tick } = service(gsx, { indexStore: store });
+    await svc.snapshot();
+    const failing = fakeGsx({ failBot: 'b2' });
+    const { svc: svc2, tick: tick2 } = service(failing, { indexStore: store });
+    tick(1); tick2(1);
+    const snap = await svc2.snapshot();
+    expect(snap.errors.map((e) => e.botId)).toEqual(['b2']);
+    expect(snap.scan).toMatchObject({ dropped: 0, reused: 3 });
+    expect(Object.keys((store.value() as { flows: Record<string, unknown> }).flows)).toHaveLength(5); // b2 entries kept
+    const foreign = memoryStore({ v: 1, accountId: 'someone-else', updatedAt: 1, flows: { x: { version: 'v', schedule: null } } });
+    const { svc: svc3 } = service(fakeGsx(), { indexStore: foreign });
+    const s3 = await svc3.snapshot();
+    expect(s3.scan.bulk).toBe(5); // started cold
   });
 });
