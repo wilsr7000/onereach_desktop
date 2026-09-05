@@ -35,6 +35,7 @@ import * as fs from 'node:fs';
 import { initMenu } from './menu/build-menu.js';
 import { seedKernelMenu } from './menu/seed.js';
 import { openJourneyMapWindow } from './journey-map-window.js';
+import { openNeonExplorerWindow } from './neon-explorer-window.js';
 import { pendingKeychainCalls, drainKeychain, armKeychainFuse } from './keychain/api.js';
 import { openWiserPlaybooksWindow } from './wiser-playbooks-window.js';
 import { registry as menuRegistry } from './menu/registry.js';
@@ -1256,6 +1257,7 @@ app
       onOpenAllDevTools: () => openAllWindowDevTools(),
       onOpenWiserPlaybooks: () => openWiserPlaybooksWindow(),
       onOpenJourneyMapBuilder: () => openJourneyMapWindow(),
+      onOpenNeonExplorer: () => openNeonExplorerWindow(),
       // ADR-072 — journey maps live in Spaces (they're assets), so the
       // menu opens Spaces and asks the renderer to start the composer.
       onNewJourneyMap: () => {

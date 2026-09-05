@@ -52,6 +52,8 @@ export interface SeedHandlers {
   onNewJourneyMap?: () => void;
   /** ADR-072 phase 2 — open the deployed Journey Map Builder app. */
   onOpenJourneyMapBuilder?: () => void;
+  /** 2026-09-04 — open the NEON Graph Explorer (Graphtester's deployed graph UI). */
+  onOpenNeonExplorer?: () => void;
   /**
    * Called when the user clicks "Sign In / Account…". Signed out →
    * starts the sign-in flow; signed in → opens Settings (account).
@@ -380,6 +382,28 @@ export function seedKernelMenu(
       label: 'New Journey Map…  (quick)',
       order: 10,
       click: openJourney,
+    });
+  }
+
+  // 2026-09-04 — the NEON graph UI from the Graphtester project (the
+  // deployed "GSX Digital Twin" explorer), opened like the Journey Map
+  // Builder (see lite/neon-explorer-window.ts). Order 20 keeps the
+  // journey pair together above it.
+  if (handlers.onOpenNeonExplorer !== undefined) {
+    const openExplorer = handlers.onOpenNeonExplorer;
+    registry.upsert({
+      id: 'top:planning',
+      type: 'top-level',
+      label: 'Planning',
+      order: 85,
+    });
+    registry.upsert({
+      id: 'planning:neon-graph-explorer',
+      type: 'item',
+      parentId: 'top:planning',
+      label: 'NEON Graph Explorer',
+      order: 20,
+      click: openExplorer,
     });
   }
 

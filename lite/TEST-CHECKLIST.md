@@ -76,8 +76,9 @@
       entries open the agent browser; empty state points to Manage Agents.
 - [ ] **Tools menu** — curated tools open in browser windows; `Spaces…` entry;
       `Manage Tools…` opens the manager.
-- [ ] **Planning menu** — three entries in order: WISER Playbooks, Journey Map
-      Builder, New Journey Map… (quick). Each opens its own surface.
+- [ ] **Planning menu** — four entries in order: WISER Playbooks, Journey Map
+      Builder, New Journey Map… (quick), NEON Graph Explorer. Each opens its
+      own surface.
 - [ ] **Agentic University menu** — Open LMS, Quick Starts, View All
       Tutorials, AI Run Times, Wiser Method each open their surface.
 - [ ] **Help menu** — help window opens (three-pane docs).
@@ -286,6 +287,15 @@ and `test/live/journey-map-ai.test.ts` (real model). What still needs eyes:
 - [ ] **Containment** — external links from the Builder open in the OS
       browser; the window never navigates off the Builder origin, and
       `window.lite` is undefined inside it (only `window.journeySpaces`).
+
+### NEON Graph Explorer (2026-09-04, v0.0.86)
+- [ ] **Opens** — Planning → NEON Graph Explorer loads Graphtester's
+      deployed explorer (the page calls itself "GSX Digital Twin") in a
+      window titled "NEON Graph Explorer"; the graph renders from NEON
+      without any sign-in step. A second click focuses that window.
+- [ ] **Containment** — docs/external links open in the OS browser; the
+      window never navigates off the `ioa-explorer/` deployment; both
+      `window.lite` and `window.journeySpaces` are undefined inside it.
 
 ### Session expiry handling (2026-08-11 — the "login broken AGAIN" fix)
 - [ ] ☠ **Server-dead session never re-injects** — with a stale session,

@@ -308,26 +308,54 @@ describe('seedKernelMenu', () => {
     expect(item?.click).toBeDefined();
   });
 
+  // 2026-09-04 — the NEON Graph Explorer (Graphtester's deployed graph
+  // UI) joins Planning, gated on its own handler like the others.
+  it('registers the NEON Graph Explorer under Planning when its handler is provided', () => {
+    seedKernelMenu({ ...handlers, onOpenNeonExplorer: noop });
+    expect(registry.get('top:planning')?.label).toBe('Planning');
+    const item = registry.get('planning:neon-graph-explorer');
+    expect(item?.label).toBe('NEON Graph Explorer');
+    expect(item?.parentId).toBe('top:planning');
+    expect(item?.click).toBeDefined();
+    expect(item?.role).toBeUndefined();
+    expect(item?.accelerator).toBeUndefined();
+  });
+
+  it('NEON Graph Explorer click invokes the provided handler', () => {
+    let count = 0;
+    seedKernelMenu({
+      ...handlers,
+      onOpenNeonExplorer: () => {
+        count += 1;
+      },
+    });
+    registry.get('planning:neon-graph-explorer')?.click?.();
+    expect(count).toBe(1);
+  });
+
   it('leaves Planning unregistered when no planning handler is wired', () => {
     seedKernelMenu(handlers);
     expect(registry.has('top:planning')).toBe(false);
     expect(registry.has('planning:journey-map-builder')).toBe(false);
     expect(registry.has('planning:journey-map')).toBe(false);
+    expect(registry.has('planning:neon-graph-explorer')).toBe(false);
   });
 
-  it('all three planning entries coexist, Builder before the quick composer', () => {
+  it('all four planning entries coexist: Playbooks, Builder, quick composer, then the explorer', () => {
     seedKernelMenu({
       ...handlers,
       onOpenWiserPlaybooks: noop,
       onOpenJourneyMapBuilder: noop,
       onNewJourneyMap: noop,
+      onOpenNeonExplorer: noop,
     });
-    // Three upserts of top:planning must still leave ONE menu.
+    // Four upserts of top:planning must still leave ONE menu.
     expect(registry.getChildren().filter((e) => e.id === 'top:planning')).toHaveLength(1);
     expect(registry.getChildren('top:planning').map((e) => e.id)).toEqual([
       'planning:wiser-playbooks',
       'planning:journey-map-builder',
       'planning:journey-map',
+      'planning:neon-graph-explorer',
     ]);
   });
 
