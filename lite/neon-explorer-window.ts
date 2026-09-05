@@ -17,9 +17,31 @@
  * @internal — invoked from the Planning menu via `main-lite.ts`.
  */
 
-import { BrowserWindow, screen, shell } from 'electron';
+import { BrowserWindow, nativeTheme, screen, shell } from 'electron';
 import { getLoggingApi } from './logging/api.js';
 import { windowBackgroundColor } from './theme/main.js';
+
+export type ExplorerTheme = 'light' | 'dark';
+
+/**
+ * The explorer has a light theme (Lite's paper palette) and its original
+ * dark one, and takes the choice from the URL (`?theme=`) — it does not
+ * consult `prefers-color-scheme` (2026-09-04: its light default must hold
+ * on a dark desktop too). So Lite passes its own Appearance along, and
+ * the window matches the rest of the app in either mode.
+ */
+export function neonExplorerUrl(theme: ExplorerTheme): string {
+  return `${NEON_EXPLORER_URL}?theme=${theme}`;
+}
+
+/** Lite's resolved appearance right now (its Appearance setting via nativeTheme). */
+export function currentExplorerTheme(): ExplorerTheme {
+  try {
+    return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
 
 /**
  * The deployed explorer. Graphtester's `deploy/deploy.js` uploads its
@@ -123,20 +145,38 @@ export function openNeonExplorerWindow(): void {
     event.preventDefault();
   });
 
+  // Follow the app's Appearance while open. The explorer reads its theme
+  // from the URL once per load, so a flip means a reload — rare and
+  // deliberate, and the window must not stay the odd one out.
+  let loadedTheme = currentExplorerTheme();
+  const created = win;
+  const onThemeUpdated = (): void => {
+    const next = currentExplorerTheme();
+    if (next === loadedTheme || created.isDestroyed()) return;
+    loadedTheme = next;
+    getLoggingApi().event('neon-explorer.theme', { theme: next });
+    void created.loadURL(neonExplorerUrl(next)).catch(() => {
+      /* the load failure path below already reports */
+    });
+  };
+  nativeTheme.on('updated', onThemeUpdated);
+
   win.on('closed', () => {
+    nativeTheme.removeListener('updated', onThemeUpdated);
     win = null;
   });
   win.once('ready-to-show', () => {
     win?.show();
   });
 
-  void win.loadURL(NEON_EXPLORER_URL).catch((err: unknown) => {
+  const url = neonExplorerUrl(loadedTheme);
+  void win.loadURL(url).catch((err: unknown) => {
     getLoggingApi().warn('neon-explorer', 'explorer failed to load', {
-      url: NEON_EXPLORER_URL,
+      url,
       error: err instanceof Error ? err.message : String(err),
     });
   });
-  getLoggingApi().event('neon-explorer.open', { url: NEON_EXPLORER_URL });
+  getLoggingApi().event('neon-explorer.open', { url, theme: loadedTheme });
 }
 
 /** @internal — test seam / teardown. */

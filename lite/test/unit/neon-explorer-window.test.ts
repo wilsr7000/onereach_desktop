@@ -90,9 +90,29 @@ const h = vi.hoisted(() => {
     workArea: { width: 3000, height: 2000 },
     opened: [] as string[],
     logged: [] as Array<{ kind: string; name: string; data?: unknown }>,
+    dark: false,
+    themeListeners: [] as Array<() => void>,
   };
 
-  return { FakeBrowserWindow, state };
+  // Lite's resolved appearance, as Electron reports it.
+  const nativeTheme = {
+    get shouldUseDarkColors(): boolean {
+      return state.dark;
+    },
+    on: (_event: string, fn: () => void): void => {
+      state.themeListeners.push(fn);
+    },
+    removeListener: (_event: string, fn: () => void): void => {
+      state.themeListeners = state.themeListeners.filter((l) => l !== fn);
+    },
+    /** Test seam: flip the appearance and fire 'updated' like Electron does. */
+    flip(dark: boolean): void {
+      state.dark = dark;
+      for (const l of [...state.themeListeners]) l();
+    },
+  };
+
+  return { FakeBrowserWindow, state, nativeTheme };
 });
 
 vi.mock('electron', () => ({
@@ -105,6 +125,7 @@ vi.mock('electron', () => ({
     },
   },
   ipcMain: { handle: (): void => undefined },
+  nativeTheme: h.nativeTheme,
 }));
 
 vi.mock('../../logging/api.js', () => ({
@@ -127,6 +148,8 @@ async function load(): Promise<WindowModule> {
   h.state.workArea = { width: 3000, height: 2000 };
   h.state.opened = [];
   h.state.logged = [];
+  h.state.dark = false;
+  h.state.themeListeners = [];
   return import('../../neon-explorer-window.js');
 }
 
@@ -145,12 +168,52 @@ beforeEach(async () => {
 describe('the window it opens', () => {
   it('loads the deployed explorer over https, from the ioa-explorer public folder', () => {
     mod.openNeonExplorerWindow();
-    expect(only().loadedUrl).toBe(mod.NEON_EXPLORER_URL);
+    expect(only().loadedUrl).toBe(mod.neonExplorerUrl('light'));
     const url = new URL(mod.NEON_EXPLORER_URL);
     expect(url.protocol).toBe('https:');
     expect(url.hostname).toBe('files.edison.api.onereach.ai');
     expect(url.pathname.endsWith('/ioa-explorer/index.html')).toBe(true);
     expect(mod.NEON_EXPLORER_ORIGIN.endsWith('/ioa-explorer/')).toBe(true);
+  });
+
+  // The explorer takes its theme from the URL and ignores the system
+  // appearance, so Lite hands its own Appearance over — the window must
+  // match the rest of the app in either mode.
+  it('passes Lite’s appearance as ?theme=light|dark', () => {
+    mod.openNeonExplorerWindow();
+    expect(only().loadedUrl).toBe(mod.NEON_EXPLORER_URL + '?theme=light');
+    expect(mod.neonExplorerUrl('dark')).toBe(mod.NEON_EXPLORER_URL + '?theme=dark');
+
+    h.state.dark = true;
+    mod.closeNeonExplorerWindow();
+    mod.openNeonExplorerWindow();
+    expect(windows()[1]?.loadedUrl).toBe(mod.NEON_EXPLORER_URL + '?theme=dark');
+    expect(h.state.logged).toContainEqual({
+      kind: 'event',
+      name: 'neon-explorer.open',
+      data: { url: mod.NEON_EXPLORER_URL + '?theme=dark', theme: 'dark' },
+    });
+  });
+
+  it('follows an appearance flip while open, and stops listening once closed', () => {
+    mod.openNeonExplorerWindow();
+    expect(h.state.themeListeners).toHaveLength(1);
+    h.nativeTheme.flip(true);
+    expect(only().loadedUrl).toBe(mod.NEON_EXPLORER_URL + '?theme=dark');
+    expect(h.state.logged).toContainEqual({ kind: 'event', name: 'neon-explorer.theme', data: { theme: 'dark' } });
+
+    // Same appearance again: no pointless reload.
+    const loads = h.state.logged.filter((l) => l.name === 'neon-explorer.theme').length;
+    h.nativeTheme.flip(true);
+    expect(h.state.logged.filter((l) => l.name === 'neon-explorer.theme')).toHaveLength(loads);
+
+    only().close();
+    expect(h.state.themeListeners).toHaveLength(0);
+  });
+
+  it('the themed URL stays inside the deployment the will-navigate guard trusts', () => {
+    expect(mod.neonExplorerUrl('light').startsWith(mod.NEON_EXPLORER_ORIGIN)).toBe(true);
+    expect(mod.neonExplorerUrl('dark').startsWith(mod.NEON_EXPLORER_ORIGIN)).toBe(true);
   });
 
   it('is sandboxed, context-isolated, and carries NO preload at all', () => {
@@ -224,7 +287,7 @@ describe('the window it opens', () => {
     expect(h.state.logged).toContainEqual({
       kind: 'event',
       name: 'neon-explorer.open',
-      data: { url: mod.NEON_EXPLORER_URL },
+      data: { url: mod.neonExplorerUrl('light'), theme: 'light' },
     });
   });
 });

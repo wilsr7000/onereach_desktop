@@ -293,6 +293,10 @@ and `test/live/journey-map-ai.test.ts` (real model). What still needs eyes:
       deployed explorer (the page calls itself "GSX Digital Twin") in a
       window titled "NEON Graph Explorer"; the graph renders from NEON
       without any sign-in step. A second click focuses that window.
+- [ ] **Matches Appearance** — with Lite light the explorer opens in its
+      paper theme; with Lite dark, in its dark theme (Lite passes
+      `?theme=`); flipping Appearance while the window is open reloads
+      it in the other theme.
 - [ ] **Containment** — docs/external links open in the OS browser; the
       window never navigates off the `ioa-explorer/` deployment; both
       `window.lite` and `window.journeySpaces` are undefined inside it.
