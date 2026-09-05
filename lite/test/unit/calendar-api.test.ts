@@ -56,8 +56,13 @@ function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: str
       minted += 1;
       return opts.tokenOk === false ? reply(500, 'boom') : reply(200, { token: `FLOW tok-${minted}` });
     }
-    if (url.includes('discovery.')) return reply(200, { url: 'https://datahub.edison.api.onereach.ai/' });
+    if (url.includes('discovery.')) return reply(200, { url: url.includes('serviceName=deployer') ? 'https://deployer.edison.api.onereach.ai/' : 'https://datahub.edison.api.onereach.ai/' });
     if (!auth.startsWith('FLOW ')) return reply(401, 'no auth');
+    if (/\/flows\/[A-Za-z0-9_-]+\/logs\?/.test(url)) {
+      const page = /[?&]next=/.test(url) ? 2 : 1;
+      const rep = (rid: string, t: number) => [{ requestId: rid, timestamp: t, message: { type: 'json', parsed: { type: 'START', message: 'Version: 1' } } }, { requestId: rid, timestamp: t + 200, message: { type: 'json', parsed: { type: 'END' } } }, { requestId: rid, timestamp: t + 210, message: { type: 'json', parsed: { type: 'REPORT', message: 'Duration: 100 ms Billed Duration: 100 ms Memory Size: 1024 MB Max Memory Used: 90 MB' } } }];
+      return page === 1 ? reply(200, { events: rep('r1', 1_700_000_000_000), nextToken: 'p2', startTime: 1 }) : reply(200, { events: rep('r2', 1_700_000_060_000), startTime: 1 });
+    }
     if (opts.rejectFirst === true && auth === 'FLOW tok-1' && !rejected) {
       rejected = true;
       return reply(401, 'auth fail: wrong keyId');
@@ -228,5 +233,42 @@ describe('CalendarService — the schedule index', () => {
     const { svc: svc3 } = service(fakeGsx(), { indexStore: foreign });
     const s3 = await svc3.snapshot();
     expect(s3.scan.bulk).toBe(5); // started cold
+  });
+});
+
+describe('CalendarService — flow log summaries (on demand)', () => {
+  it('fetches the deployer logs for the run window across pages, summarises them, adds the model narrative, and caches', async () => {
+    const gsx = fakeGsx();
+    const chat = vi.fn(async () => ({ content: 'Two runs completed cleanly in about 100 ms each.' }));
+    const { svc, tick } = service(gsx, { ai: { chat } });
+    await svc.snapshot();
+    const r = await svc.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 1_699_999_940_000, toMs: 1_700_000_900_000 });
+    expect(r.summary.executions.map((e) => [e.requestId, e.completed, e.billedMs])).toEqual([['r1', true, 100], ['r2', true, 100]]);
+    expect(r.narrative).toBe('2 executions, 6 log lines, averaging 100 ms, peak memory 90 MB, no errors.');
+    expect(r.aiNarrative).toBe('Two runs completed cleanly in about 100 ms each.');
+    expect(r.truncated).toBe(false);
+    expect(gsx.calls.filter((u) => u.includes('/logs?'))).toHaveLength(2); // paged with next
+    expect(gsx.calls.some((u) => u.includes('serviceName=deployer'))).toBe(true);
+    const prompt = (chat.mock.calls[0] as unknown as [{ messages: Array<{ content: string }> }])[0].messages[0]?.content ?? '';
+    expect(prompt).toContain('Flow: Armed report');
+    expect(prompt).not.toContain('[vital]');
+    await svc.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 1_699_999_940_000, toMs: 1_700_000_900_000 });
+    expect(chat).toHaveBeenCalledTimes(1); // cached
+    tick(6 * 60_000);
+    await svc.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 1_699_999_940_000, toMs: 1_700_000_900_000 });
+    expect(chat).toHaveBeenCalledTimes(2);
+  });
+  it('without a model the deterministic narrative stands; a failing model is reported, never fatal; bad windows are refused', async () => {
+    const { svc } = service(fakeGsx());
+    const r = await svc.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 0, toMs: 1000 });
+    expect(r.aiNarrative).toBeNull();
+    expect(r.aiError).toBeUndefined();
+    const { svc: failing } = service(fakeGsx(), { ai: { chat: async () => { throw new Error('no key'); } } });
+    const f = await failing.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 0, toMs: 1000 });
+    expect(f.aiNarrative).toBeNull();
+    expect(f.aiError).toBe('no key');
+    expect(f.narrative).toContain('2 executions');
+    await expect(svc.flowLogSummary({ flowId: '../x', botId: 'b1', fromMs: 0, toMs: 1 })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
+    await expect(svc.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 0, toMs: 8 * 24 * 3600 * 1000 })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
   });
 });

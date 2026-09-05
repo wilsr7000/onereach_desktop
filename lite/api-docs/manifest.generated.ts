@@ -1190,12 +1190,26 @@ export const MANIFEST: Manifest = {
             "description": "Open (or focus) the Calendar window.",
             "tags": [],
             "examples": []
+          },
+          {
+            "name": "spaceEvents",
+            "signature": "spaceEvents(input: SpaceEventsInput): Promise<SpaceEventsResult>",
+            "description": "Space events (activity commits the viewer may see) in a window, grouped per local day and per Space.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "flowLogSummary",
+            "signature": "flowLogSummary(input: FlowLogSummaryInput): Promise<FlowLogSummaryResult>",
+            "description": "Log summary for one past run window, fetched from the deployer only when asked (a button), with an optional model narrative.",
+            "tags": [],
+            "examples": []
           }
         ]
       },
       "events": {
         "constantName": "CALENDAR_EVENTS",
-        "count": 5,
+        "count": 11,
         "entries": [
           {
             "constantKey": "SNAPSHOT_START",
@@ -1221,10 +1235,40 @@ export const MANIFEST: Manifest = {
             "constantKey": "OPEN_FLOW",
             "name": "calendar.open-flow",
             "description": ""
+          },
+          {
+            "constantKey": "SPACE_EVENTS_START",
+            "name": "calendar.space-events.start",
+            "description": ""
+          },
+          {
+            "constantKey": "SPACE_EVENTS_FINISH",
+            "name": "calendar.space-events.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "SPACE_EVENTS_FAIL",
+            "name": "calendar.space-events.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "FLOW_LOGS_START",
+            "name": "calendar.flow-logs.start",
+            "description": ""
+          },
+          {
+            "constantKey": "FLOW_LOGS_FINISH",
+            "name": "calendar.flow-logs.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "FLOW_LOGS_FAIL",
+            "name": "calendar.flow-logs.fail",
+            "description": ""
           }
         ]
       },
-      "readme": "# Calendar — scheduled flows (ADR-090)\n\nThe GSX menu's **Calendar** opens this window: the signed-in account's scheduled flows on a month grid, with a day pane and a detail pane that opens the flow in GSX Designer. It replaced a link to `calendar.<env>.onereach.ai`, a host that does not exist.\n\n**What \"scheduled\" means.** A flow is scheduled when its canvas carries the platform's **Schedule execution** step (template `5d352cdd-…`). At activation the step hands the Event Manager its schedule events — Quartz cron expressions (`expressions`), a time zone, a start and an end, recurring or once — and the Event Manager fires the flow. The Event Manager publishes no listing, so the Calendar reads the flow definitions, the same data the step registers.\n\n**How it reads GSX** (`datahub.ts`, plain fetch, no SDK dependency): the account token from `em.<env>.api.onereach.ai/http/<account>/refresh_token` (the source the full app and the podscan tools use), the `data-hub-pg` service from discovery, then `/bots` and `/flows?query={\"botId\":…}`. `schedule.ts` finds the step and its events; `cron.ts` evaluates the expressions in their time zone (5–7 Quartz fields, lists, ranges, steps, names, `L`, `n#k`).\n\n## API\n\n`export interface CalendarApi`\n\n- `snapshot({ refresh? })` — every scheduled flow (bots, flows, events, per-bot errors), cached 5 minutes.\n- `occurrences({ fromMs, toMs, refresh? })` — runs within the window (≤ 400 days), ascending, capped at 20,000.\n- `status()` — signed-in state, cache age, last error; no network.\n- `openFlow({ flowId, botId })` — the flow in Lite's GSX window (`studio.<env>.onereach.ai/flows/<bot>/<flow>`).\n- `openWindow()` — open or focus the Calendar.\n\nEvents (`events.ts`): `calendar.snapshot.*` span, `calendar.open-window`, `calendar.open-flow`.\n\n## The schedule index\n\n`index.ts` remembers, per flow id, the version (and modified time) last examined and what it showed: no schedule, or the parsed events. A cold space is read once with the bulk projection (main-tree steps); afterwards a scan lists only flow heads (`FLOW_HEAD_PROJECTION`, a few KB per space) and fetches a body only when a version is new. Flows that vanish from a space that listed fine are dropped; a space that fails to list keeps its entries. The index lives in a local file under userData and is mirrored to the account's KV (`calendar` / `schedule-index:<accountId>`) so a platform-side feed regenerator can share it (`index-store.ts`). Steady state: bots + heads, zero bodies.\n"
+      "readme": "# Calendar — scheduled flows (ADR-090)\n\nThe GSX menu's **Calendar** opens this window: the signed-in account's scheduled flows on a month grid, with a day pane and a detail pane that opens the flow in GSX Designer. It replaced a link to `calendar.<env>.onereach.ai`, a host that does not exist.\n\n**What \"scheduled\" means.** A flow is scheduled when its canvas carries the platform's **Schedule execution** step (template `5d352cdd-…`). At activation the step hands the Event Manager its schedule events — Quartz cron expressions (`expressions`), a time zone, a start and an end, recurring or once — and the Event Manager fires the flow. The Event Manager publishes no listing, so the Calendar reads the flow definitions, the same data the step registers.\n\n**How it reads GSX** (`datahub.ts`, plain fetch, no SDK dependency): the account token from `em.<env>.api.onereach.ai/http/<account>/refresh_token` (the source the full app and the podscan tools use), the `data-hub-pg` service from discovery, then `/bots` and `/flows?query={\"botId\":…}`. `schedule.ts` finds the step and its events; `cron.ts` evaluates the expressions in their time zone (5–7 Quartz fields, lists, ranges, steps, names, `L`, `n#k`).\n\n## API\n\n`export interface CalendarApi`\n\n- `snapshot({ refresh? })` — every scheduled flow (bots, flows, events, per-bot errors), cached 5 minutes.\n- `occurrences({ fromMs, toMs, refresh? })` — runs within the window (≤ 400 days), ascending, capped at 20,000.\n- `status()` — signed-in state, cache age, last error; no network.\n- `openFlow({ flowId, botId })` — the flow in Lite's GSX window (`studio.<env>.onereach.ai/flows/<bot>/<flow>`).\n- `openWindow()` — open or focus the Calendar.\n\nEvents (`events.ts`): `calendar.snapshot.*` span, `calendar.open-window`, `calendar.open-flow`.\n\n## The schedule index\n\n`index.ts` remembers, per flow id, the version (and modified time) last examined and what it showed: no schedule, or the parsed events. A cold space is read once with the bulk projection (main-tree steps); afterwards a scan lists only flow heads (`FLOW_HEAD_PROJECTION`, a few KB per space) and fetches a body only when a version is new. Flows that vanish from a space that listed fine are dropped; a space that fails to list keeps its entries. The index lives in a local file under userData and is mirrored to the account's KV (`calendar` / `schedule-index:<accountId>`) so a platform-side feed regenerator can share it (`index-store.ts`). Steady state: bots + heads, zero bodies.\n\n## Space events and log summaries\n\n- `spaceEvents({ fromMs, toMs, timeZone, refresh? })` — activity commits the viewer may see (sight-filtered like the Home tab), grouped per local day and per Space; the day link and the events modal read it. Unavailable without NEON; the calendar still shows flows.\n- `flowLogSummary({ flowId, botId, fromMs, toMs, refresh? })` — on demand only: the deployer's log events for the run window, summarised (executions by request id, billed duration and peak memory from REPORT lines, END seen, steps, errors) plus a model narrative when configured. Cached five minutes.\n- Flow descriptions ride along in both projections and the schedule index and show in the detail and day panes.\n"
     },
     {
       "slug": "discovery",
@@ -4959,5 +5003,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-09-05T02:24:16.905Z"
+  "generatedAt": "2026-09-05T03:19:15.199Z"
 } as const;

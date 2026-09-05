@@ -21,3 +21,9 @@ Events (`events.ts`): `calendar.snapshot.*` span, `calendar.open-window`, `calen
 ## The schedule index
 
 `index.ts` remembers, per flow id, the version (and modified time) last examined and what it showed: no schedule, or the parsed events. A cold space is read once with the bulk projection (main-tree steps); afterwards a scan lists only flow heads (`FLOW_HEAD_PROJECTION`, a few KB per space) and fetches a body only when a version is new. Flows that vanish from a space that listed fine are dropped; a space that fails to list keeps its entries. The index lives in a local file under userData and is mirrored to the account's KV (`calendar` / `schedule-index:<accountId>`) so a platform-side feed regenerator can share it (`index-store.ts`). Steady state: bots + heads, zero bodies.
+
+## Space events and log summaries
+
+- `spaceEvents({ fromMs, toMs, timeZone, refresh? })` — activity commits the viewer may see (sight-filtered like the Home tab), grouped per local day and per Space; the day link and the events modal read it. Unavailable without NEON; the calendar still shows flows.
+- `flowLogSummary({ flowId, botId, fromMs, toMs, refresh? })` — on demand only: the deployer's log events for the run window, summarised (executions by request id, billed duration and peak memory from REPORT lines, END seen, steps, errors) plus a model narrative when configured. Cached five minutes.
+- Flow descriptions ride along in both projections and the schedule index and show in the detail and day panes.

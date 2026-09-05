@@ -1176,6 +1176,11 @@ app
         getMainWindow: () => mainWindow,
         htmlPath: path.join(__dirname, 'calendar.html'),
         preloadPath,
+        // Space events: NEON activity commits, sight-filtered like the Home tab.
+        query: (cypher, parameters) => getNeonApi().query(cypher, parameters),
+        // Log narratives for past runs (on demand).
+        ai: { chat: (input) => getAiApi().chat(input) },
+        viewerId: () => resolveSpacesViewerId(),
         // The schedule index: which flow versions carry a schedule — local for warm starts, KV so the platform can share it.
         indexStore: compositeIndexStore(
           [fileIndexStore(app.getPath('userData')), kvIndexStore({ get: (c, k) => getKVApi().get(c, k), set: (c, k, v) => getKVApi().set(c, k, v) })],

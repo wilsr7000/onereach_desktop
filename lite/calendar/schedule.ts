@@ -19,6 +19,7 @@ export interface FlowRecord {
   dateModified?: number | string;
   data?: {
     label?: string;
+    description?: string;
     trees?: Record<string, { steps?: Record<string, StepRecord> }>;
   };
 }
@@ -115,6 +116,7 @@ export function scheduledFlowFrom(flow: FlowRecord, botLabel: string): Scheduled
     botId: flow.botId ?? '',
     botLabel,
     flowLabel: flow.data?.label ?? flow.id,
+    description: typeof flow.data?.description === 'string' ? flow.data.description : '',
     deployed: typeof flow.version === 'string' && flow.version.length > 0,
     stepLabel,
     events,
@@ -137,7 +139,7 @@ export function expandOccurrences(flows: ScheduledFlow[], fromMs: number, toMs: 
       const lo = Math.max(fromMs, startMs ?? fromMs);
       const hi = Math.min(toMs, endMs ?? toMs);
       if (lo > hi) continue;
-      const base = { flowId: f.flowId, botId: f.botId, botLabel: f.botLabel, flowLabel: f.flowLabel, eventId: ev.id, eventName: ev.name, color: ev.color, timeZone: ev.timeZone };
+      const base = { flowId: f.flowId, botId: f.botId, botLabel: f.botLabel, flowLabel: f.flowLabel, description: f.description, eventId: ev.id, eventName: ev.name, color: ev.color, timeZone: ev.timeZone };
       if (!ev.recurring || ev.cron.length === 0) {
         if (startMs !== null && startMs >= lo && startMs <= hi) out.push({ atMs: startMs, ...base });
         continue;

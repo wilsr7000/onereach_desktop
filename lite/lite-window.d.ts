@@ -2140,7 +2140,7 @@ interface LiteCalendarScheduleEvent {
   start: { date: string; time: string } | null; end: { date: string; time: string } | null; preview: string; runAtActivation: boolean;
 }
 interface LiteCalendarScheduledFlow {
-  flowId: string; botId: string; botLabel: string; flowLabel: string; deployed: boolean; stepLabel: string; events: LiteCalendarScheduleEvent[]; modifiedMs: number;
+  flowId: string; botId: string; botLabel: string; flowLabel: string; description: string; deployed: boolean; stepLabel: string; events: LiteCalendarScheduleEvent[]; modifiedMs: number;
   active: boolean; armed: boolean; activatedMs: number; nextFireMs: number | null;
 }
 interface LiteCalendarSnapshot {
@@ -2148,7 +2148,7 @@ interface LiteCalendarSnapshot {
   scan?: { indexed: number; reused: number; fetched: number; bulk: number; dropped: number };
   scheduled: LiteCalendarScheduledFlow[]; errors: Array<{ botId: string; botLabel: string; message: string }>;
 }
-interface LiteCalendarOccurrence { atMs: number; flowId: string; botId: string; botLabel: string; flowLabel: string; eventId: string; eventName: string; color: string; timeZone: string }
+interface LiteCalendarOccurrence { atMs: number; flowId: string; botId: string; botLabel: string; flowLabel: string; description: string; eventId: string; eventName: string; color: string; timeZone: string }
 interface LiteCalendarOccurrences { snapshot: LiteCalendarSnapshot; occurrences: LiteCalendarOccurrence[]; truncated: boolean }
 interface LiteCalendarStatus { signedIn: boolean; env: string | null; accountId: string | null; snapshotAgeMs: number | null; lastError: string | null }
 interface LiteCalendarBridge {
@@ -2157,4 +2157,16 @@ interface LiteCalendarBridge {
   status(): Promise<LiteCalendarResult<LiteCalendarStatus>>;
   openFlow(input: { flowId: string; botId: string }): Promise<LiteCalendarResult<{ ok: true }>>;
   openWindow(): Promise<LiteCalendarResult<{ ok: true }>>;
+  /** Space events (activity commits the viewer may see) in a window, grouped per local day and per Space. */
+  spaceEvents(input: { fromMs: number; toMs: number; timeZone: string; refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarSpaceEvents>>;
+  /** Log summary for one past run window, fetched only when asked. */
+  flowLogSummary(input: { flowId: string; botId: string; fromMs: number; toMs: number; refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarFlowLogSummary>>;
 }
+interface LiteCalendarFlowExecution { requestId: string; startMs: number; endMs: number; durationMs: number; lines: number; steps: string[]; errors: string[]; completed: boolean; billedMs: number | null; memoryMb: number | null }
+interface LiteCalendarFlowLogSummary {
+  flowId: string; fromMs: number; toMs: number; narrative: string; aiNarrative: string | null; aiError?: string; truncated: boolean; fetchedAtMs: number;
+  summary: { lines: number; executions: LiteCalendarFlowExecution[]; firstMs: number | null; lastMs: number | null; errorCount: number; types: Record<string, number>; steps: string[]; messages: string[] };
+}
+interface LiteCalendarSpaceEvent { id: string; atMs: number; kind: string; author: string; spaceId: string; spaceName: string; itemId: string; itemTitle: string; itemKind: string }
+interface LiteCalendarSpaceEventDay { date: string; total: number; spaces: Array<{ spaceId: string; spaceName: string; count: number }> }
+interface LiteCalendarSpaceEvents { events: LiteCalendarSpaceEvent[]; days: LiteCalendarSpaceEventDay[]; total: number; truncated: boolean; fetchedAtMs: number; unavailable: boolean }

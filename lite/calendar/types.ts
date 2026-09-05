@@ -41,6 +41,8 @@ export interface ScheduledFlow {
   botId: string;
   botLabel: string;
   flowLabel: string;
+  /** The flow's description as authored in Designer ('' when none). */
+  description: string;
   /** The flow has a deployed version. */
   deployed: boolean;
   /** Label of the scheduling step ("Schedule execution"). */
@@ -90,6 +92,7 @@ export interface Occurrence {
   botId: string;
   botLabel: string;
   flowLabel: string;
+  description: string;
   eventId: string;
   eventName: string;
   color: string;
@@ -116,6 +119,29 @@ export interface CalendarStatus {
   /** Age of the cached snapshot in ms, or null when none. */
   snapshotAgeMs: number | null;
   lastError: string | null;
+}
+
+export interface FlowLogSummaryInput {
+  flowId: string;
+  botId: string;
+  /** The run's window (ms). */
+  fromMs: number;
+  toMs: number;
+  refresh?: boolean;
+}
+
+export interface FlowLogSummaryResult {
+  flowId: string;
+  fromMs: number;
+  toMs: number;
+  summary: import('./logs.js').FlowLogSummary;
+  /** Deterministic narrative, always present. */
+  narrative: string;
+  /** The model's narrative when a key is configured and the call worked. */
+  aiNarrative: string | null;
+  aiError?: string;
+  truncated: boolean;
+  fetchedAtMs: number;
 }
 
 export type CalendarErrorCode =

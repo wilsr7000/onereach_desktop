@@ -3127,6 +3127,8 @@ interface CalendarBridge {
   status(): Promise<RegistryIpcResultView<unknown>>;
   openFlow(input: { flowId: string; botId: string }): Promise<RegistryIpcResultView<unknown>>;
   openWindow(): Promise<RegistryIpcResultView<unknown>>;
+  spaceEvents(input: { fromMs: number; toMs: number; timeZone: string; refresh?: boolean }): Promise<RegistryIpcResultView<unknown>>;
+  flowLogSummary(input: { flowId: string; botId: string; fromMs: number; toMs: number; refresh?: boolean }): Promise<RegistryIpcResultView<unknown>>;
 }
 const CAL = (op: string): string => `lite:calendar:${op}`;
 const calendar: CalendarBridge = {
@@ -3135,6 +3137,8 @@ const calendar: CalendarBridge = {
   status: () => ipcRenderer.invoke(CAL('status')) as Promise<RegistryIpcResultView<unknown>>,
   openFlow: (input) => ipcRenderer.invoke(CAL('open-flow'), { flowId: input.flowId, botId: input.botId }) as Promise<RegistryIpcResultView<unknown>>,
   openWindow: () => ipcRenderer.invoke(CAL('open-window')) as Promise<RegistryIpcResultView<unknown>>,
+  spaceEvents: (input) => ipcRenderer.invoke(CAL('space-events'), { fromMs: input.fromMs, toMs: input.toMs, timeZone: input.timeZone, refresh: input.refresh === true }) as Promise<RegistryIpcResultView<unknown>>,
+  flowLogSummary: (input) => ipcRenderer.invoke(CAL('flow-log-summary'), { flowId: input.flowId, botId: input.botId, fromMs: input.fromMs, toMs: input.toMs, refresh: input.refresh === true }) as Promise<RegistryIpcResultView<unknown>>,
 };
 
 contextBridge.exposeInMainWorld('lite', {

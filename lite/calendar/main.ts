@@ -14,6 +14,8 @@ export const CALENDAR_IPC = {
   STATUS: 'lite:calendar:status',
   OPEN_FLOW: 'lite:calendar:open-flow',
   OPEN_WINDOW: 'lite:calendar:open-window',
+  SPACE_EVENTS: 'lite:calendar:space-events',
+  FLOW_LOG_SUMMARY: 'lite:calendar:flow-log-summary',
 } as const;
 
 export interface CalendarIpcResult<T> {
@@ -32,6 +34,11 @@ export interface InitCalendarOptions {
   fetch?: DatahubDeps['fetch'];
   /** The schedule index store (local file + account KV in the app). */
   indexStore?: IndexStore;
+  /** NEON for Space events (the Home tab's activity commits, sight-filtered). */
+  query?: (cypher: string, parameters: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
+  viewerId?: () => string | null;
+  /** A chat completion for log narratives (optional). */
+  ai?: { chat(input: { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; maxTokens?: number }): Promise<{ content: string }> };
 }
 
 export interface CalendarHandle {
@@ -60,7 +67,7 @@ export function initCalendar(opts: InitCalendarOptions): CalendarHandle {
     openCalendarWindow({ parent: opts.getMainWindow(), htmlPath: opts.htmlPath, preloadPath: opts.preloadPath });
   };
   const fetchImpl: DatahubDeps['fetch'] = opts.fetch ?? ((url, init) => fetch(url, init));
-  const built = new CalendarService({ getSession: opts.getSession, fetch: fetchImpl, openGsxWindow: opts.openGsxWindow, openCalendarWindow: open, ...(opts.indexStore !== undefined ? { indexStore: opts.indexStore } : {}) });
+  const built = new CalendarService({ getSession: opts.getSession, fetch: fetchImpl, openGsxWindow: opts.openGsxWindow, openCalendarWindow: open, ...(opts.indexStore !== undefined ? { indexStore: opts.indexStore } : {}), ...(opts.query !== undefined ? { query: opts.query } : {}), ...(opts.viewerId !== undefined ? { viewerId: opts.viewerId } : {}), ...(opts.ai !== undefined ? { ai: opts.ai } : {}) });
   configureCalendarApi(() => built);
   const api = getCalendarApi();
 
@@ -70,6 +77,8 @@ export function initCalendar(opts: InitCalendarOptions): CalendarHandle {
     [CALENDAR_IPC.STATUS, () => envelope(() => api.status())],
     [CALENDAR_IPC.OPEN_FLOW, (_e, p) => envelope(async () => { await api.openFlow({ flowId: s(p?.['flowId']), botId: s(p?.['botId']) }); return { ok: true as const }; })],
     [CALENDAR_IPC.OPEN_WINDOW, () => envelope(async () => { await api.openWindow(); return { ok: true as const }; })],
+    [CALENDAR_IPC.SPACE_EVENTS, (_e, p) => envelope(() => api.spaceEvents({ fromMs: Number(p?.['fromMs']), toMs: Number(p?.['toMs']), timeZone: s(p?.['timeZone']), refresh: p?.['refresh'] === true }))],
+    [CALENDAR_IPC.FLOW_LOG_SUMMARY, (_e, p) => envelope(() => api.flowLogSummary({ flowId: s(p?.['flowId']), botId: s(p?.['botId']), fromMs: Number(p?.['fromMs']), toMs: Number(p?.['toMs']), refresh: p?.['refresh'] === true }))],
   ];
   for (const [channel, handler] of handlers) ipcMain.handle(channel, handler);
 

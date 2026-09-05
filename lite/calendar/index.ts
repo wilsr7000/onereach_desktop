@@ -22,6 +22,7 @@ export interface FlowHead {
   version: string;
   modifiedMs: number;
   label: string;
+  description: string;
 }
 
 export interface IndexEntry {
@@ -29,6 +30,7 @@ export interface IndexEntry {
   modifiedMs: number;
   botId: string;
   label: string;
+  description: string;
   /** When this version was examined (ms). */
   checkedAt: number;
   /** null = no schedule on this version; else the parsed events. */
@@ -69,6 +71,7 @@ export function parseIndex(raw: unknown, accountId: string): ScheduleIndex | nul
       modifiedMs: typeof x['modifiedMs'] === 'number' ? x['modifiedMs'] : 0,
       botId: typeof x['botId'] === 'string' ? x['botId'] : '',
       label: typeof x['label'] === 'string' ? x['label'] : id,
+      description: typeof x['description'] === 'string' ? x['description'] : '',
       checkedAt: typeof x['checkedAt'] === 'number' ? x['checkedAt'] : 0,
       schedule:
         typeof sched === 'object' && sched !== null && Array.isArray((sched as Record<string, unknown>)['events'])
@@ -118,6 +121,7 @@ export function scheduledFromIndex(id: string, e: IndexEntry, botLabel: string):
     botId: e.botId,
     botLabel,
     flowLabel: e.label,
+    description: e.description,
     deployed: e.version.length > 0,
     stepLabel: e.schedule.stepLabel,
     events: e.schedule.events,
@@ -136,11 +140,12 @@ export function recordFlow(index: ScheduleIndex, head: FlowHead, scheduled: Sche
     modifiedMs: head.modifiedMs,
     botId: head.botId,
     label: head.label,
+    description: head.description,
     checkedAt: now,
     schedule: scheduled === null ? null : { stepLabel: scheduled.stepLabel, events: scheduled.events },
   };
   const prev = index.flows[head.id];
-  const same = prev !== undefined && prev.version === next.version && prev.modifiedMs === next.modifiedMs && prev.botId === next.botId && prev.label === next.label && JSON.stringify(prev.schedule) === JSON.stringify(next.schedule);
+  const same = prev !== undefined && prev.version === next.version && prev.modifiedMs === next.modifiedMs && prev.botId === next.botId && prev.label === next.label && prev.description === next.description && JSON.stringify(prev.schedule) === JSON.stringify(next.schedule);
   index.flows[head.id] = same ? { ...prev, checkedAt: now } : next;
   if (!same) index.updatedAt = now;
   return !same;

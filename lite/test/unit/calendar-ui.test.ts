@@ -6,10 +6,10 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildDayPane, buildDetail, buildMonthGrid, describeSeries, groupRuns, keyOf, summaryText } from '../../calendar/renderer.js';
 
-const occ = (atMs: number, over: Partial<LiteCalendarOccurrence> = {}): LiteCalendarOccurrence => ({ atMs, flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', eventId: 'e1', eventName: 'Nightly', color: '#FFC107', timeZone: 'UTC', ...over });
+const occ = (atMs: number, over: Partial<LiteCalendarOccurrence> = {}): LiteCalendarOccurrence => ({ atMs, flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', description: 'Nightly reporting run', eventId: 'e1', eventName: 'Nightly', color: '#FFC107', timeZone: 'UTC', ...over });
 const day = (y: number, m: number, d: number, h = 0, mi = 0): number => new Date(y, m - 1, d, h, mi).getTime();
 const flow = (over: Partial<LiteCalendarScheduledFlow> = {}): LiteCalendarScheduledFlow => ({
-  flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', deployed: true, stepLabel: 'Schedule execution', modifiedMs: 0, active: true, armed: true, activatedMs: day(2026, 9, 1, 8), nextFireMs: day(2026, 9, 6, 2),
+  flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', description: 'Nightly reporting run', deployed: true, stepLabel: 'Schedule execution', modifiedMs: 0, active: true, armed: true, activatedMs: day(2026, 9, 1, 8), nextFireMs: day(2026, 9, 6, 2),
   events: [{ id: 'e1', name: 'Nightly', color: '#FFC107', timeZone: 'Europe/Kiev', cron: ['0 2 1/1 * ? *'], recurring: true, start: { date: '2026-01-01', time: '00:00' }, end: null, preview: 'Every 1st day', runAtActivation: true }],
   ...over,
 });
@@ -75,6 +75,28 @@ describe('calendar UI — panes', () => {
     const idle = buildDetail(flow({ active: false, armed: false, activatedMs: 0, nextFireMs: null }), { nowMs: now, upcoming: [], onOpen, onBack: vi.fn() });
     expect(idle.querySelector('.cal-badge')?.textContent).toBe('not active');
     expect(idle.textContent).toContain('nothing will fire until the flow is activated');
+  });
+  it('past runs get a "Get log summary" button that fetches only on click and renders the narrative; future runs do not', async () => {
+    const now = day(2026, 9, 5, 12);
+    const upcoming = [occ(day(2026, 9, 4, 2)), occ(day(2026, 9, 3, 2)), occ(day(2026, 9, 6, 2))];
+    const onLogSummary = vi.fn(async () => ({ flowId: 'f1', fromMs: 0, toMs: 1, narrative: '1 execution, 3 log lines, billed 216 ms, no errors.', aiNarrative: 'It ran once and finished cleanly.', truncated: false, fetchedAtMs: 1, summary: { lines: 3, executions: [{ requestId: 'r', startMs: day(2026, 9, 4, 2), endMs: day(2026, 9, 4, 2) + 200, durationMs: 200, lines: 3, steps: [], errors: [], completed: true, billedMs: 216, memoryMb: 142 }], firstMs: 1, lastMs: 2, errorCount: 0, types: {}, steps: [], messages: ['Version: 1'] } }));
+    const pane = buildDetail(flow(), { nowMs: now, upcoming, onOpen: vi.fn(), onBack: vi.fn(), onLogSummary });
+    document.body.replaceChildren(pane);
+    const buttons = pane.querySelectorAll<HTMLButtonElement>('.cal-logsum-btn');
+    expect(buttons).toHaveLength(2); // Sep 4 and Sep 3, most recent first
+    expect(pane.querySelectorAll('.cal-run-row__when')[0]?.textContent).toContain('Sep 4');
+    expect(onLogSummary).not.toHaveBeenCalled();
+    buttons[0]!.click();
+    expect(onLogSummary).toHaveBeenCalledWith({ fromMs: day(2026, 9, 4, 2) - 60_000, toMs: day(2026, 9, 4, 2) + 15 * 60_000 });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(pane.querySelector('.cal-logsum__narrative')?.textContent).toContain('billed 216 ms');
+    expect(pane.querySelector('.cal-logsum__ai')?.textContent).toBe('It ran once and finished cleanly.');
+    expect(pane.querySelector('.cal-logsum__runs li')?.textContent).toContain('finished · 216 ms billed');
+    expect(buttons[0]!.textContent).toBe('Refresh log summary');
+    // With no past runs, a "latest logs" button covers the last 24 hours.
+    const none = buildDetail(flow(), { nowMs: now, upcoming: [occ(day(2026, 9, 6, 2))], onOpen: vi.fn(), onBack: vi.fn(), onLogSummary });
+    expect(none.querySelector('.cal-run-row__when')?.textContent).toBe('Latest logs (last 24 h)');
   });
   it('the summary counts flows, armed flows and runs; keyOf uses the local day', () => {
     const snap: LiteCalendarSnapshot = { env: 'edison', accountId: 'a', fetchedAtMs: 0, botCount: 1, flowCount: 2, activeDeployments: 1, scheduled: [flow(), flow({ flowId: 'f2', armed: false })], errors: [] };

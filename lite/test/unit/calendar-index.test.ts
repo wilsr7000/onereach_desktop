@@ -6,8 +6,8 @@ import { describe, it, expect } from 'vitest';
 import { dropFlows, emptyIndex, indexStats, parseIndex, planScan, recordFlow, scheduledFromIndex, type FlowHead } from '../../calendar/index.js';
 import type { ScheduledFlow } from '../../calendar/types.js';
 
-const head = (id: string, version: string, botId = 'b1', modifiedMs = 10): FlowHead => ({ id, botId, version, modifiedMs, label: `Flow ${id}` });
-const sched = (id: string): ScheduledFlow => ({ flowId: id, botId: 'b1', botLabel: 'B', flowLabel: `Flow ${id}`, deployed: true, stepLabel: 'Schedule execution', modifiedMs: 10, active: false, armed: false, activatedMs: 0, nextFireMs: null, events: [{ id: 'e', name: 'n', color: '', timeZone: 'UTC', cron: ['0 9 * * ? *'], recurring: true, start: null, end: null, preview: '', runAtActivation: false }] });
+const head = (id: string, version: string, botId = 'b1', modifiedMs = 10): FlowHead => ({ id, botId, version, modifiedMs, label: `Flow ${id}`, description: '' });
+const sched = (id: string): ScheduledFlow => ({ flowId: id, botId: 'b1', botLabel: 'B', flowLabel: `Flow ${id}`, description: '', deployed: true, stepLabel: 'Schedule execution', modifiedMs: 10, active: false, armed: false, activatedMs: 0, nextFireMs: null, events: [{ id: 'e', name: 'n', color: '', timeZone: 'UTC', cron: ['0 9 * * ? *'], recurring: true, start: null, end: null, preview: '', runAtActivation: false }] });
 
 describe('schedule index', () => {
   it('records what each version showed and reports whether anything changed', () => {
@@ -46,6 +46,6 @@ describe('schedule index', () => {
     expect(parseIndex(JSON.stringify(idx), 'other')).toBeNull();
     expect(parseIndex({ ...idx, v: 99 }, 'acct')).toBeNull();
     expect(parseIndex('not json', 'acct')).toBeNull();
-    expect(parseIndex({ v: 1, accountId: 'acct', flows: { bad: 'x', f: { version: 'v' } } }, 'acct')!.flows).toEqual({ f: { version: 'v', modifiedMs: 0, botId: '', label: 'f', checkedAt: 0, schedule: null } });
+    expect(parseIndex({ v: 1, accountId: 'acct', flows: { bad: 'x', f: { version: 'v' } } }, 'acct')!.flows).toEqual({ f: { version: 'v', modifiedMs: 0, botId: '', label: 'f', description: '', checkedAt: 0, schedule: null } });
   });
 });

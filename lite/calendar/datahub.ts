@@ -29,9 +29,9 @@ export interface DatahubDeps {
  * template's code (a space with 347 flows answers 500 for them); this
  * projection is ~40× smaller and lists that space fine.
  */
-export const FLOW_LIST_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label', 'data.trees', 'data.trees.main.steps'] as const;
+export const FLOW_LIST_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label', 'data.description', 'data.trees', 'data.trees.main.steps'] as const;
 /** A warm scan lists only heads: the schedule index answers for versions it has seen. */
-export const FLOW_HEAD_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label'] as const;
+export const FLOW_HEAD_PROJECTION = ['id', 'botId', 'version', 'dateModified', 'data.label', 'data.description'] as const;
 
 /** The head of a flow row (what the index is keyed on). */
 export function flowHeadOf(raw: Record<string, unknown>, botId: string): FlowHead {
@@ -39,7 +39,7 @@ export function flowHeadOf(raw: Record<string, unknown>, botId: string): FlowHea
   const mod = raw['dateModified'];
   const modifiedMs = typeof mod === 'number' ? mod : Number.parseInt(String(mod ?? ''), 10) || 0;
   const id = String(raw['id'] ?? '');
-  return { id, botId: String(raw['botId'] ?? botId), version: typeof raw['version'] === 'string' ? raw['version'] : '', modifiedMs, label: String(data['label'] ?? id) };
+  return { id, botId: String(raw['botId'] ?? botId), version: typeof raw['version'] === 'string' ? raw['version'] : '', modifiedMs, label: String(data['label'] ?? id), description: typeof data['description'] === 'string' ? data['description'] : '' };
 }
 
 export interface BotRecord {
@@ -54,6 +54,7 @@ export class DatahubClient {
   private minting: Promise<string> | null = null;
   private serviceUrl: string | null = null;
   private discovering: Promise<string> | null = null;
+  private readonly serviceUrls = new Map<string, string>();
   private readonly now: () => number;
 
   constructor(
@@ -197,6 +198,52 @@ export class DatahubClient {
   async listFlowHeads(botId: string): Promise<FlowHead[]> {
     const rows = DatahubClient.items(await this.authed(`/flows?query=${encodeURIComponent(JSON.stringify({ botId, isDeleted: false }))}&projection=${encodeURIComponent(JSON.stringify(FLOW_HEAD_PROJECTION))}`));
     return rows.map((r) => flowHeadOf(r, botId)).filter((h) => h.id.length > 0);
+  }
+
+  /** Any platform service by discovery name (cached per name). */
+  async discoverService(serviceName: string): Promise<string> {
+    const cached = this.serviceUrls.get(serviceName);
+    if (cached !== undefined) return cached;
+    let body: unknown;
+    try {
+      body = await this.getJson(`https://discovery.${this.env}.api.onereach.ai/api/v2?serviceName=${encodeURIComponent(serviceName)}`, null);
+    } catch (err) {
+      throw new CalendarError('CALENDAR_DISCOVERY_FAILED', `Service discovery failed for ${serviceName}: ${err instanceof Error ? err.message : String(err)}`, 'Check the network, then try again.');
+    }
+    const url = typeof body === 'object' && body !== null ? (body as Record<string, unknown>)['url'] : undefined;
+    if (typeof url !== 'string' || url.length === 0) throw new CalendarError('CALENDAR_DISCOVERY_FAILED', `Service discovery answered without a URL for ${serviceName}.`, 'Try again in a moment.');
+    const clean = url.replace(/\/$/, '');
+    this.serviceUrls.set(serviceName, clean);
+    return clean;
+  }
+
+  /**
+   * A flow's log events in [startMs, endMs] from the deployer, paged
+   * with `next` tokens, capped at `maxEvents`. Returns raw events; the
+   * summariser parses them.
+   */
+  async fetchFlowLogs(flowId: string, startMs: number, endMs: number, maxEvents = 2000): Promise<{ events: unknown[]; truncated: boolean }> {
+    const base = await this.discoverService('deployer');
+    const events: unknown[] = [];
+    let next: string | null = null;
+    for (let page = 0; page < 20; page += 1) {
+      const url = `${base}/flows/${encodeURIComponent(flowId)}/logs?limit=500&skipOriginal=true&start=${Math.floor(startMs)}&end=${Math.floor(endMs)}${next !== null ? `&next=${encodeURIComponent(next)}` : ''}`;
+      let body: unknown;
+      try {
+        body = await this.getJson(url, await this.mintToken());
+      } catch (err) {
+        if (err instanceof CalendarError && (err.status === 401 || err.status === 403)) body = await this.getJson(url, await this.mintToken(true));
+        else throw err;
+      }
+      const o = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
+      const page = Array.isArray(o['events']) ? (o['events'] as unknown[]) : [];
+      events.push(...page);
+      const token = o['nextToken'];
+      if (typeof token !== 'string' || token.length === 0 || page.length === 0) return { events, truncated: false };
+      if (events.length >= maxEvents) return { events: events.slice(0, maxEvents), truncated: true };
+      next = token;
+    }
+    return { events, truncated: true };
   }
 
   async getFlow(flowId: string): Promise<Record<string, unknown> | null> {

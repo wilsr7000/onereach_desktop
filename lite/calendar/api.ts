@@ -20,7 +20,9 @@ import { CalendarError } from './errors.js';
 import { DatahubClient, flowHeadOf, type DatahubDeps } from './datahub.js';
 import { dropFlows, emptyIndex, indexStats, parseIndex, planScan, recordFlow, scheduledFromIndex, type FlowHead, type ScheduleIndex } from './index.js';
 import { expandOccurrences, scheduledFlowFrom, type FlowRecord } from './schedule.js';
-import type { CalendarOccurrencesInput, CalendarOccurrencesResult, CalendarSnapshot, CalendarStatus, ScheduledFlow } from './types.js';
+import { logExcerpt, narrativeOf, parseLogEvent, summarizeFlowLogs, type FlowLogLine } from './logs.js';
+import { SPACE_EVENTS_CYPHER, SPACE_EVENTS_LIMIT, groupSpaceEventsByDay, rowToSpaceEvent, type SpaceEvent, type SpaceEventsInput, type SpaceEventsResult } from './space-events.js';
+import type { CalendarOccurrencesInput, CalendarOccurrencesResult, CalendarSnapshot, CalendarStatus, FlowLogSummaryInput, FlowLogSummaryResult, ScheduledFlow } from './types.js';
 
 export { CalendarError } from './errors.js';
 
@@ -35,6 +37,10 @@ export interface CalendarApi {
   openFlow(input: { flowId: string; botId: string }): Promise<void>;
   /** Open (or focus) the Calendar window. */
   openWindow(): Promise<void>;
+  /** Space events (activity commits the viewer may see) in a window, grouped per local day and per Space. */
+  spaceEvents(input: SpaceEventsInput): Promise<SpaceEventsResult>;
+  /** Log summary for one past run window, fetched from the deployer only when asked (a button), with an optional model narrative. */
+  flowLogSummary(input: FlowLogSummaryInput): Promise<FlowLogSummaryResult>;
 }
 
 /** Where the schedule index lives (local file, the account's KV, or both). */
@@ -47,6 +53,9 @@ export interface CalendarServiceDeps {
   getSession: () => { env: string; accountId: string } | null;
   /** The schedule index: which flow versions do and do not carry a schedule. Memory-only when absent. */
   indexStore?: IndexStore;
+  /** NEON, for Space events; absent = the calendar shows flows only. `$viewerId` / `$nowMs` are injected here. */
+  query?: (cypher: string, parameters: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
+  viewerId?: () => string | null;
   fetch: DatahubDeps['fetch'];
   openGsxWindow: (opts: { env: string; url: string; title: string }) => Promise<unknown>;
   openCalendarWindow: () => void;
@@ -55,6 +64,8 @@ export interface CalendarServiceDeps {
   cacheTtlMs?: number;
   /** Bots listed in parallel (default 4). */
   concurrency?: number;
+  /** A chat completion for log narratives; absent = deterministic narrative only. */
+  ai?: { chat(input: { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; maxTokens?: number }): Promise<{ content: string }> };
 }
 
 const MAX_WINDOW_MS = 400 * 24 * 3600 * 1000;
@@ -63,6 +74,8 @@ export class CalendarService implements CalendarApi {
   private client: DatahubClient | null = null;
   private index: ScheduleIndex | null = null;
   private cache: CalendarSnapshot | null = null;
+  private eventsCache: { key: string; result: SpaceEventsResult } | null = null;
+  private readonly logCache = new Map<string, FlowLogSummaryResult>();
   private inflight: Promise<CalendarSnapshot> | null = null;
   private lastError: string | null = null;
   private readonly now: () => number;
@@ -255,10 +268,86 @@ export class CalendarService implements CalendarApi {
     getLoggingApi().event(CALENDAR_EVENTS.OPEN_WINDOW);
     this.deps.openCalendarWindow();
   }
+
+  async flowLogSummary(input: FlowLogSummaryInput): Promise<FlowLogSummaryResult> {
+    const s = this.session();
+    const client = this.clientFor(s);
+    const flowId = String(input.flowId ?? '').trim();
+    const fromMs = Number(input.fromMs);
+    const toMs = Number(input.toMs);
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(flowId)) throw new CalendarError('CALENDAR_INVALID_INPUT', 'A flow id is needed for a log summary.');
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) throw new CalendarError('CALENDAR_INVALID_INPUT', 'The run window needs fromMs ≤ toMs.');
+    if (toMs - fromMs > 7 * 24 * 3600 * 1000) throw new CalendarError('CALENDAR_INVALID_INPUT', 'A log window is capped at 7 days.');
+    const key = `${flowId}:${fromMs}:${toMs}`;
+    const cached = this.logCache.get(key);
+    if (input.refresh !== true && cached !== undefined && this.now() - cached.fetchedAtMs < 5 * 60_000) return cached;
+    const span = getLoggingApi().start('calendar.flow-logs', { flowId, fromMs, toMs });
+    try {
+      const { events, truncated } = await client.fetchFlowLogs(flowId, fromMs, toMs);
+      const lines: FlowLogLine[] = [];
+      for (const e of events) {
+        const l = parseLogEvent(e);
+        if (l !== null) lines.push(l);
+      }
+      const summary = summarizeFlowLogs(lines);
+      const narrative = narrativeOf(summary);
+      let aiNarrative: string | null = null;
+      let aiError: string | undefined;
+      if (this.deps.ai !== undefined && summary.lines > 0) {
+        try {
+          const label = this.cache?.scheduled.find((f) => f.flowId === flowId)?.flowLabel ?? flowId;
+          const res = await this.deps.ai.chat({
+            system: 'You summarise the logs of one scheduled automation run for its owner. Three sentences at most, plain language, no markdown: what ran, whether it succeeded, and anything that needs attention. If the logs show errors, name the first one. Do not invent details that are not in the logs.',
+            messages: [{ role: 'user', content: `Flow: ${label}\nWindow: ${new Date(fromMs).toISOString()} to ${new Date(toMs).toISOString()}\nDeterministic summary: ${narrative}\n\nLog excerpt (vitals omitted):\n${logExcerpt(lines)}` }],
+            maxTokens: 300,
+          });
+          aiNarrative = res.content.trim().slice(0, 1200) || null;
+        } catch (err) {
+          aiError = err instanceof Error ? err.message : String(err);
+        }
+      }
+      const result: FlowLogSummaryResult = { flowId, fromMs, toMs, summary, narrative, aiNarrative, ...(aiError !== undefined ? { aiError } : {}), truncated, fetchedAtMs: this.now() };
+      this.logCache.set(key, result);
+      span.finish({ lines: summary.lines, executions: summary.executions.length, errors: summary.errorCount, ai: aiNarrative !== null });
+      return result;
+    } catch (err) {
+      span.fail(err);
+      throw err;
+    }
+  }
+
+  async spaceEvents(input: SpaceEventsInput): Promise<SpaceEventsResult> {
+    const fromMs = Number(input.fromMs);
+    const toMs = Number(input.toMs);
+    const timeZone = typeof input.timeZone === 'string' && input.timeZone.length > 0 ? input.timeZone : 'UTC';
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs < fromMs) throw new CalendarError('CALENDAR_INVALID_INPUT', 'The window needs fromMs ≤ toMs.');
+    if (toMs - fromMs > MAX_WINDOW_MS) throw new CalendarError('CALENDAR_INVALID_INPUT', 'The window is capped at 400 days.');
+    const key = `${fromMs}:${toMs}:${timeZone}`;
+    if (input.refresh !== true && this.eventsCache !== null && this.eventsCache.key === key && this.now() - this.eventsCache.result.fetchedAtMs < 60_000) return this.eventsCache.result;
+    const empty = (unavailable: boolean): SpaceEventsResult => ({ events: [], days: [], total: 0, truncated: false, fetchedAtMs: this.now(), unavailable });
+    if (this.deps.query === undefined) return empty(true);
+    const span = getLoggingApi().start('calendar.space-events', { fromMs, toMs });
+    try {
+      const rows = await this.deps.query(SPACE_EVENTS_CYPHER, { fromMs, toMs, limit: SPACE_EVENTS_LIMIT, viewerId: (this.deps.viewerId?.() ?? '').trim().toLowerCase(), nowMs: this.now() });
+      const events: SpaceEvent[] = [];
+      for (const r of rows) {
+        const e = rowToSpaceEvent(r);
+        if (e !== null) events.push(e);
+      }
+      const result: SpaceEventsResult = { events, days: groupSpaceEventsByDay(events, timeZone), total: events.length, truncated: rows.length >= SPACE_EVENTS_LIMIT, fetchedAtMs: this.now(), unavailable: false };
+      this.eventsCache = { key, result };
+      span.finish({ events: events.length, days: result.days.length });
+      return result;
+    } catch (err) {
+      span.fail(err);
+      getLoggingApi().warn('calendar', 'space events unavailable', { error: err instanceof Error ? err.message : String(err) });
+      return empty(true);
+    }
+  }
 }
 
 // ── Singleton accessors (Rule 12 module contract) ─────────────────────
-const METHODS: ReadonlyArray<keyof CalendarApi> = ['snapshot', 'occurrences', 'status', 'openFlow', 'openWindow'];
+const METHODS: ReadonlyArray<keyof CalendarApi> = ['snapshot', 'occurrences', 'status', 'openFlow', 'openWindow', 'spaceEvents', 'flowLogSummary'];
 
 function notInitializedApi(): CalendarApi {
   const refuse = (name: string) => (): Promise<never> =>
@@ -269,6 +358,8 @@ function notInitializedApi(): CalendarApi {
     status: () => ({ signedIn: false, env: null, accountId: null, snapshotAgeMs: null, lastError: 'Calendar API not initialized.' }),
     openFlow: refuse('openFlow'),
     openWindow: refuse('openWindow'),
+    spaceEvents: refuse('spaceEvents'),
+    flowLogSummary: refuse('flowLogSummary'),
   };
 }
 

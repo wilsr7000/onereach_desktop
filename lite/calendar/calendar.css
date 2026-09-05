@@ -60,3 +60,38 @@ body { background: var(--or-bg-canvas); color: var(--or-text-primary); font: 13p
 .cal-badge.is-off { border-color: var(--or-amber); color: var(--or-amber); }
 .cal-toast { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); padding: 8px 14px; border-radius: 8px; background: var(--or-bg-raised); border: 1px solid var(--or-border-strong); box-shadow: var(--or-shadow-md); font-size: 12.5px; }
 @media (max-width: 1000px) { .cal-body { grid-template-columns: minmax(0, 1fr); } .cal-side { border-left: 0; border-top: 1px solid var(--or-border-subtle); } }
+
+/* ── Space events (ADR-090 addendum): the day link and the modal ─── */
+.cal-day-events { margin-top: auto; align-self: flex-start; font: inherit; font-size: 11px; color: var(--or-accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; text-decoration-color: transparent; transition: text-decoration-color var(--or-motion-fast, 120ms); }
+.cal-day-events:hover, .cal-day-events:focus-visible { text-decoration-color: currentColor; outline: none; }
+.cal-modal-backdrop { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.32); }
+.cal-modal { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; padding: 16px 18px 18px; border-radius: 12px; background: var(--or-bg-surface); color: var(--or-text-primary); border: 1px solid var(--or-border-strong); box-shadow: var(--or-shadow-lg); }
+.cal-modal__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cal-modal__title { margin: 0; font-size: 16px; font-weight: 600; }
+.cal-modal__close { font: inherit; font-size: 20px; line-height: 1; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--or-border-solid); background: var(--or-bg-raised); color: var(--or-text-primary); cursor: pointer; }
+.cal-modal__close:hover { border-color: var(--or-accent); }
+.cal-modal__summary { margin: 4px 0 12px; color: var(--or-text-muted); }
+.cal-modal__space { padding: 10px 0; border-top: 1px solid var(--or-border-subtle); }
+.cal-modal__space-head { display: flex; align-items: center; gap: 10px; }
+.cal-modal__space-name { font-weight: 600; }
+.cal-modal__space-count { color: var(--or-text-muted); font-size: 12px; flex: 1; }
+.cal-modal__events { list-style: none; margin: 6px 0 0; padding: 0; }
+.cal-modal__event { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; gap: 10px; padding: 4px 0; font-size: 12.5px; }
+.cal-modal__time { font-family: var(--or-font-mono); color: var(--or-text-secondary-solid); }
+.cal-modal__what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-modal__who { color: var(--or-text-muted); white-space: nowrap; }
+.cal-btn-quiet { font: inherit; font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--or-border-solid); background: transparent; color: var(--or-accent); cursor: pointer; }
+
+.cal-description { margin: 6px 0 2px; font-size: 12.5px; line-height: 1.45; color: var(--or-text-secondary-solid); }
+.cal-run-desc { font-size: 11.5px; color: var(--or-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── past runs + log summaries ───────────────────────────────────── */
+.cal-runs { display: flex; flex-direction: column; gap: 4px; }
+.cal-run-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0; border-top: 1px solid var(--or-border-subtle); }
+.cal-run-row__when { font-size: 12.5px; color: var(--or-text-secondary-solid); }
+.cal-logsum { padding: 8px 10px; border-radius: 8px; background: var(--or-bg-raised); border: 1px solid var(--or-border-subtle); font-size: 12.5px; line-height: 1.45; }
+.cal-logsum__narrative { margin: 0 0 4px; font-weight: 600; }
+.cal-logsum__ai { margin: 0 0 6px; color: var(--or-text-primary); }
+.cal-logsum__runs { list-style: none; margin: 0; padding: 0; font-family: var(--or-font-mono); font-size: 11px; color: var(--or-text-secondary-solid); }
+.cal-logsum__runs li.has-errors { color: var(--or-danger); }
+.cal-logsum__messages { margin: 6px 0 0; font-size: 11.5px; color: var(--or-text-muted); }
