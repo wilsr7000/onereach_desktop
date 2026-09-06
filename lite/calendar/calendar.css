@@ -39,7 +39,7 @@ body { background: var(--or-bg-canvas); color: var(--or-text-primary); font: 13p
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 0 6px; }
 .cal-weekdays[hidden] { display: none; }
 .cal-weekdays span { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--or-text-muted); padding-left: 8px; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(96px, 1fr); gap: 6px; flex: 1; min-height: 0; overflow-y: auto; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(118px, 1fr); gap: 6px; flex: 1; min-height: 0; overflow-y: auto; }
 .cal-day { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 6px 8px; border: 1px solid var(--or-border-subtle); border-radius: 8px; background: var(--or-bg-surface); cursor: pointer; text-align: left; font: inherit; color: inherit; }
 .cal-day:hover { border-color: var(--or-border-strong); }
 .cal-day.is-outside { opacity: 0.55; }
@@ -49,8 +49,8 @@ body { background: var(--or-bg-canvas); color: var(--or-text-primary); font: 13p
 .cal-chip { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11.5px; line-height: 1.3; padding: 2px 6px; border-radius: 4px; background: var(--or-bg-raised); border-left: 3px solid var(--or-accent); color: var(--or-text-primary); }
 .cal-chip-time { font-family: var(--or-font-mono); font-size: 10.5px; color: var(--or-text-muted); flex: none; }
 .cal-chip-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cal-chip-count { flex: none; font-size: 10px; color: var(--or-text-muted); }
-.cal-more { font-size: 11px; color: var(--or-text-muted); padding-left: 6px; }
+.cal-chip-count { flex: none; margin-left: auto; font-size: 10.5px; color: var(--or-text-muted); font-variant-numeric: tabular-nums; }
+.cal-more { font-size: 11px; color: var(--or-text-muted); padding-left: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-side { border-left: 1px solid var(--or-border-subtle); background: var(--or-bg-surface); overflow-y: auto; padding: 14px 16px; min-height: 0; }
 .cal-side h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
 .cal-side h4 { margin: 14px 0 6px; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--or-text-muted); }
@@ -112,7 +112,9 @@ body { background: var(--or-bg-canvas); color: var(--or-text-primary); font: 13p
 .cal-logsum__messages { margin: 6px 0 0; font-size: 11.5px; color: var(--or-text-muted); }
 
 /* ── armed / not armed ───────────────────────────────────────────── */
-.cal-chip.is-unarmed { opacity: 0.55; border-left-style: dashed; }
+/* Grey = will not fire (the flow is not armed); colour = armed. */
+.cal-chip.is-unarmed { border-left-color: var(--or-border-strong); background: transparent; color: var(--or-text-muted); }
+.cal-chip.is-unarmed .cal-chip-time, .cal-chip.is-unarmed .cal-chip-count, .cal-chip.is-unarmed .cal-chip-when { color: var(--or-text-muted); }
 .cal-run.is-unarmed .cal-run-flow { color: var(--or-text-muted); }
 .cal-flows { list-style: none; margin: 4px 0 0; padding: 0; }
 .cal-flows__row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 8px; align-items: center; padding: 5px 0; border-top: 1px solid var(--or-border-subtle); cursor: pointer; font-size: 12.5px; }

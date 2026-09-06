@@ -57,17 +57,21 @@ describe('calendar schedule — extraction', () => {
 });
 
 describe('calendar schedule — occurrences', () => {
-  it('expands a recurring event within its start/end bounds only, in its zone', () => {
+  it('expands a recurring event from its start, in its zone; runs past the authored end are produced and flagged (the platform fires them)', () => {
     const sf = scheduledFlowFrom(flow(), 'Reporting')!;
     const from = zonedTimeToUtc(2019, 10, 8, 0, 0, 0, 'Europe/Kiev') ?? 0; // a day before the start
     const to = zonedTimeToUtc(2019, 10, 9, 0, 30, 0, 'Europe/Kiev') ?? 0;
     const { occurrences, truncated } = expandOccurrences([sf], from, to);
     expect(truncated).toBe(false);
     expect(occurrences.map((o) => o.atMs)).toEqual([0, 5, 10, 15, 20, 25, 30].map((m) => zonedTimeToUtc(2019, 10, 9, 0, m, 0, 'Europe/Kiev')));
-    expect(occurrences[0]).toMatchObject({ flowId: sf.flowId, eventName: '5min', botLabel: 'Reporting', timeZone: 'Europe/Kiev', color: '#FFC107' });
-    // After the end bound: nothing.
+    expect(occurrences[0]).toMatchObject({ flowId: sf.flowId, eventName: '5min', botLabel: 'Reporting', timeZone: 'Europe/Kiev', color: '#FFC107', pastWindow: false });
+    // After the end bound (2020-02-01): the series continues, every run flagged — an armed flow keeps firing past its window.
     const later = expandOccurrences([sf], zonedTimeToUtc(2026, 9, 5, 0, 0, 0, 'UTC') ?? 0, zonedTimeToUtc(2026, 9, 6, 0, 0, 0, 'UTC') ?? 0);
-    expect(later.occurrences).toHaveLength(0);
+    expect(later.occurrences).toHaveLength(289); // the window's end instant is inclusive, as the 00:30 case above shows
+    expect(later.occurrences.every((o) => o.pastWindow)).toBe(true);
+    // Before the start bound: nothing (the platform records the first fire at the start).
+    const before = expandOccurrences([sf], zonedTimeToUtc(2019, 10, 1, 0, 0, 0, 'UTC') ?? 0, zonedTimeToUtc(2019, 10, 2, 0, 0, 0, 'UTC') ?? 0);
+    expect(before.occurrences).toHaveLength(0);
   });
   it('a one-shot event fires once at its start; the cap marks truncation', () => {
     const once = scheduledFlowFrom(flow({}, [{ scheduleEventData: { id: 'once', eventName: 'Launch', timeZone: { value: 'UTC' }, expressions: ['0 12 * * ? *'], isReccuring: false, startExpression: { date: '2026-09-10', time: '12:00' } } }]), 'b')!;

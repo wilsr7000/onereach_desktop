@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { buildDayPane, buildDayView, buildDetail, buildMonthGrid, buildWeekView, describeSeries, groupRuns, keyOf, rangeFor, summaryText, titleFor, weekStartOf } from '../../calendar/renderer.js';
 
-const occ = (atMs: number, over: Partial<LiteCalendarOccurrence> = {}): LiteCalendarOccurrence => ({ atMs, flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', description: 'Nightly reporting run', eventId: 'e1', eventName: 'Nightly', color: '#FFC107', timeZone: 'UTC', ...over });
+const occ = (atMs: number, over: Partial<LiteCalendarOccurrence> = {}): LiteCalendarOccurrence => ({ atMs, flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', description: 'Nightly reporting run', eventId: 'e1', eventName: 'Nightly', color: '#FFC107', timeZone: 'UTC', pastWindow: false, ...over });
 const day = (y: number, m: number, d: number, h = 0, mi = 0): number => new Date(y, m - 1, d, h, mi).getTime();
 const flow = (over: Partial<LiteCalendarScheduledFlow> = {}): LiteCalendarScheduledFlow => ({
   flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', description: 'Nightly reporting run', deployed: true, stepLabel: 'Schedule execution', modifiedMs: 0, active: true, armed: true, activatedMs: day(2026, 9, 1, 8), nextFireMs: day(2026, 9, 6, 2),
@@ -30,7 +30,7 @@ describe('calendar UI — grid', () => {
     expect(fifth.querySelector('.cal-chip')?.getAttribute('title')).toContain('every 5 min');
     const twelfth = grid.querySelector('[data-day="2026-09-12"]')!;
     expect(twelfth.classList.contains('is-selected')).toBe(true);
-    expect(twelfth.querySelector('.cal-chip-text')?.textContent).toBe('Weekly · Weekly digest');
+    expect(twelfth.querySelector('.cal-chip-text')?.textContent).toBe('Weekly digest');
     (twelfth as HTMLButtonElement).click();
     expect(onSelect).toHaveBeenCalledWith('2026-09-12');
     expect(grid.querySelector('[data-day="2026-08-30"]')?.classList.contains('is-outside')).toBe(true);
@@ -101,6 +101,7 @@ describe('calendar UI — panes', () => {
   it('the summary counts flows, armed flows and runs; keyOf uses the local day', () => {
     const snap: LiteCalendarSnapshot = { env: 'edison', accountId: 'a', fetchedAtMs: 0, botCount: 1, flowCount: 2, activeDeployments: 1, scheduled: [flow(), flow({ flowId: 'f2', armed: false })], errors: [] };
     expect(summaryText(snap, 30)).toBe('2 scheduled flows · 1 armed · 30 runs this month');
+    expect(summaryText(snap, 8661, 2, 8640)).toBe('2 scheduled flows · 1 armed · 8,661 runs this month · 8,640 grey (will not fire) · 2 Space events');
     expect(summaryText(null, 0)).toBe('scheduled flows');
     expect(keyOf(day(2026, 9, 5, 23, 59))).toBe('2026-09-05');
   });
@@ -226,5 +227,21 @@ describe('calendar UI — week and day views', () => {
     expect(rangeFor('day', 2026, 9, '2026-09-05')).toEqual({ fromMs: day(2026, 9, 5), toMs: day(2026, 9, 6) });
     expect(rangeFor('week', 2026, 9, '2026-09-05')).toEqual({ fromMs: day(2026, 8, 30), toMs: day(2026, 9, 6) });
     expect(rangeFor('month', 2026, 9, null)).toEqual({ fromMs: day(2026, 9, 1), toMs: day(2026, 10, 1) });
+  });
+});
+
+describe('calendar UI — grey means it will not fire', () => {
+  it('a not-armed run is grey (no series colour), an armed one keeps its colour; past-window runs say so in the tooltip', () => {
+    const base = day(2026, 9, 5, 9);
+    const grid = buildMonthGrid([occ(base, { pastWindow: true }), occ(base, { flowId: 'f2', flowLabel: 'Idle', eventId: 'e2', pastWindow: true })], { year: 2026, month: 9, selected: null, today: '2026-09-05', onSelect: vi.fn(), armedById: new Map([['f1', true], ['f2', false]]) });
+    const chips = Array.from(grid.querySelectorAll<HTMLElement>('.cal-chip'));
+    const armed = chips.find((c) => !c.classList.contains('is-unarmed'))!;
+    const grey = chips.find((c) => c.classList.contains('is-unarmed'))!;
+    expect(armed.style.borderLeftColor).not.toBe('');
+    expect(armed.title).toContain('Past its schedule window: the platform still holds the trigger');
+    expect(grey.style.borderLeftColor).toBe('');
+    expect(grey.title).toContain('Grey: the flow is not armed');
+    const groups = groupRuns([occ(base), occ(base + 60_000, { pastWindow: true })]);
+    expect(groups[0]?.pastWindow).toBe(true);
   });
 });

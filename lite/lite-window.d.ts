@@ -2158,7 +2158,7 @@ interface LiteCalendarSnapshot {
   scan?: { indexed: number; reused: number; fetched: number; bulk: number; dropped: number };
   scheduled: LiteCalendarScheduledFlow[]; errors: Array<{ botId: string; botLabel: string; message: string }>;
 }
-interface LiteCalendarOccurrence { atMs: number; flowId: string; botId: string; botLabel: string; flowLabel: string; description: string; eventId: string; eventName: string; color: string; timeZone: string }
+interface LiteCalendarOccurrence { atMs: number; flowId: string; botId: string; botLabel: string; flowLabel: string; description: string; eventId: string; eventName: string; color: string; timeZone: string; pastWindow: boolean }
 interface LiteCalendarOccurrences { snapshot: LiteCalendarSnapshot; occurrences: LiteCalendarOccurrence[]; truncated: boolean }
 interface LiteCalendarStatus { signedIn: boolean; env: string | null; accountId: string | null; snapshotAgeMs: number | null; lastError: string | null }
 interface LiteCalendarBridge {

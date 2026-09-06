@@ -26,6 +26,8 @@ export const keyOf = (ms: number): string => {
 };
 const fmtTime = (ms: number): string => new Date(ms).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 const fmtDateTime = (ms: number): string => new Date(ms).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+/** Flow lines a month cell shows before rolling the rest up. */
+const MONTH_CELL_LINES = 3;
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -40,8 +42,10 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: st
 export interface RunGroup {
   flowId: string;
   botId: string;
-  /** false when the flow is not armed: its runs are drawn dimmed (they would not fire). */
+  /** false when the flow is not armed: its runs are drawn grey (they will not fire). */
   armed: boolean;
+  /** Some run lies past the event's authored end (the platform fires an armed flow regardless). */
+  pastWindow: boolean;
   eventId: string;
   flowLabel: string;
   eventName: string;
@@ -58,10 +62,11 @@ export function groupRuns(occurrences: Occurrence[], armedById?: ReadonlyMap<str
     const k = `${o.flowId}|${o.eventId}`;
     let g = map.get(k);
     if (g === undefined) {
-      g = { flowId: o.flowId, botId: o.botId, armed: armedById?.get(o.flowId) ?? true, eventId: o.eventId, flowLabel: o.flowLabel, eventName: o.eventName, botLabel: o.botLabel, color: o.color, timeZone: o.timeZone, description: o.description, times: [] };
+      g = { flowId: o.flowId, botId: o.botId, armed: armedById?.get(o.flowId) ?? true, pastWindow: false, eventId: o.eventId, flowLabel: o.flowLabel, eventName: o.eventName, botLabel: o.botLabel, color: o.color, timeZone: o.timeZone, description: o.description, times: [] };
       map.set(k, g);
     }
     g.times.push(o.atMs);
+    if (o.pastWindow === true) g.pastWindow = true;
   }
   const out = [...map.values()];
   for (const g of out) g.times.sort((a, b) => a - b);
@@ -131,18 +136,27 @@ export function buildMonthGrid(occurrences: Occurrence[], opts: GridOptions): HT
     cell.setAttribute('role', 'gridcell');
     cell.appendChild(el('span', 'cal-day-num', String(d.getDate())));
     const groups = groupRuns(days.get(key) ?? [], opts.armedById);
-    const shown = groups.slice(0, 4);
+    // Rollup (robb, 2026-09-05): one line per flow — name, then the number — at most three, then "+N more · M runs".
+    const groupsPerFlow = new Map<string, number>();
+    for (const g of groups) groupsPerFlow.set(g.flowId, (groupsPerFlow.get(g.flowId) ?? 0) + 1);
+    const shown = groups.slice(0, MONTH_CELL_LINES);
     for (const g of shown) {
       const chip = el('div', `cal-chip${g.armed ? '' : ' is-unarmed'}`);
-      if (g.color.length > 0) chip.style.borderLeftColor = g.color;
-      // A single run shows its time; a series shows its count instead (the title carries the span).
-      if (g.times.length === 1) chip.appendChild(el('span', 'cal-chip-time', fmtTime(g.times[0] ?? 0)));
-      chip.appendChild(el('span', 'cal-chip-text', `${g.eventName} · ${g.flowLabel}`));
-      if (g.times.length > 1) chip.appendChild(el('span', 'cal-chip-count', `×${g.times.length}`));
-      chip.title = `${g.flowLabel} — ${g.eventName}: ${describeSeries(g.times)} (${g.botLabel})${g.armed ? '' : '\nNot armed: this run would not fire.'}${g.description.length > 0 ? `\n${g.description}` : ''}`;
+      if (g.armed && g.color.length > 0) chip.style.borderLeftColor = g.color;
+      // The event name appears only when the same flow has several series that day.
+      chip.appendChild(el('span', 'cal-chip-text', (groupsPerFlow.get(g.flowId) ?? 1) > 1 ? `${g.flowLabel} · ${g.eventName}` : g.flowLabel));
+      // A series is its number; a single run is its time.
+      chip.appendChild(el('span', 'cal-chip-count', g.times.length > 1 ? `×${g.times.length.toLocaleString()}` : fmtTime(g.times[0] ?? 0)));
+      chip.title = runTitle(g);
       cell.appendChild(chip);
     }
-    if (groups.length > shown.length) cell.appendChild(el('div', 'cal-more', `+${groups.length - shown.length} more`));
+    if (groups.length > shown.length) {
+      const rest = groups.slice(shown.length);
+      const runs = rest.reduce((n, g) => n + g.times.length, 0);
+      const more = el('div', 'cal-more', `+${rest.length} more · ${runs.toLocaleString()} run${runs === 1 ? '' : 's'}`);
+      more.title = rest.map((g) => `${g.flowLabel}: ${g.times.length.toLocaleString()} run${g.times.length === 1 ? '' : 's'}`).join('\n');
+      cell.appendChild(more);
+    }
     const eventDay = opts.eventDays?.get(key);
     if (eventDay !== undefined && eventDay.total > 0) cell.appendChild(buildDayEventsLink(eventDay, () => opts.onEvents?.(eventDay)));
     cell.setAttribute('aria-label', `${d.toDateString()}: ${groups.length === 0 ? 'no scheduled runs' : `${groups.length} scheduled flow${groups.length === 1 ? '' : 's'}`}`);
@@ -483,14 +497,18 @@ export function rangeFor(view: CalendarView, year: number, month: number, select
   return { fromMs: start.getTime(), toMs: new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7).getTime() };
 }
 
+/** Why a run is drawn the way it is: the series, the space, grey = will not fire, past-window = fires past its authored end. */
+export const runTitle = (g: RunGroup): string =>
+  `${g.flowLabel} — ${g.eventName}: ${describeSeries(g.times)} (${g.botLabel})${g.armed ? '' : '\nGrey: the flow is not armed, so this run will not fire.'}${g.pastWindow ? (g.armed ? '\nPast its schedule window: the platform still holds the trigger, so it fires anyway.' : '\nPast its schedule window.') : ''}${g.description.length > 0 ? `\n${g.description}` : ''}`;
+
 const runChip = (g: RunGroup, className: string, label: string): HTMLButtonElement => {
   const chip = el('button', `cal-chip ${className}${g.armed ? '' : ' is-unarmed'}`);
   chip.type = 'button';
-  chip.style.borderLeftColor = g.color;
+  if (g.armed) chip.style.borderLeftColor = g.color;
   chip.dataset['flowId'] = g.flowId;
   chip.appendChild(el('span', 'cal-chip-when', g.times.length > 1 ? `${fmtTime(g.times[0] ?? 0)} ×${g.times.length}` : fmtTime(g.times[0] ?? 0)));
   chip.appendChild(el('span', 'cal-chip-name', label));
-  chip.title = `${g.flowLabel} — ${g.eventName}: ${describeSeries(g.times)} (${g.botLabel})${g.armed ? '' : '\nNot armed: this run would not fire.'}${g.description.length > 0 ? `\n${g.description}` : ''}`;
+  chip.title = runTitle(g);
   return chip;
 };
 
@@ -675,16 +693,19 @@ export function buildSpaceEventsModal(opts: EventsModalOptions): HTMLElement {
 }
 
 /** The header summary line. */
-export function summaryText(snapshot: Snapshot | null, monthRuns: number, monthEvents = 0): string {
+export function summaryText(snapshot: Snapshot | null, monthRuns: number, monthEvents = 0, monthGrey = 0): string {
   if (snapshot === null) return 'scheduled flows';
   const armed = snapshot.scheduled.filter((f) => f.armed).length;
+  const n = (x: number): string => x.toLocaleString();
+  const grey = monthGrey > 0 ? ` · ${n(monthGrey)} grey (will not fire)` : '';
   const events = monthEvents > 0 ? ` · ${monthEvents} Space event${monthEvents === 1 ? '' : 's'}` : '';
-  return `${snapshot.scheduled.length} scheduled flow${snapshot.scheduled.length === 1 ? '' : 's'} · ${armed} armed · ${monthRuns} run${monthRuns === 1 ? '' : 's'} this month${events}`;
+  return `${snapshot.scheduled.length} scheduled flow${snapshot.scheduled.length === 1 ? '' : 's'} · ${armed} armed · ${n(monthRuns)} run${monthRuns === 1 ? '' : 's'} this month${grey}${events}`;
 }
 
 // ── Page ──────────────────────────────────────────────────────────────
 const $ = (id: string): HTMLElement | null => document.getElementById(id);
 const bridge = (): Bridge | null => window.lite?.calendar ?? null;
+const getLogging = (): { warn?: (scope: string, message: string, data?: unknown) => void } | undefined => (window as unknown as { logging?: { warn?: (scope: string, message: string, data?: unknown) => void } }).logging;
 
 interface PageState {
   year: number;
@@ -795,16 +816,20 @@ function boot(): void {
     const today = keyOf(Date.now());
     const monthLabel = $('cal-month');
     if (monthLabel !== null) monthLabel.textContent = titleFor(state.view, state.year, state.month, state.selected);
-    const monthRuns = state.occurrences.filter((o) => {
-      const d = new Date(o.atMs);
-      return d.getFullYear() === state.year && d.getMonth() + 1 === state.month;
-    }).length;
     const armedById = new Map((state.snapshot?.scheduled ?? []).map((f) => [f.flowId, f.armed] as const));
+    let monthRuns = 0;
+    let monthGrey = 0;
+    for (const o of state.occurrences) {
+      const d = new Date(o.atMs);
+      if (d.getFullYear() !== state.year || d.getMonth() + 1 !== state.month) continue;
+      if (armedById.get(o.flowId) ?? true) monthRuns += 1;
+      else monthGrey += 1;
+    }
     const visible = state.occurrences.filter((o) => state.filter === 'all' || (state.filter === 'armed') === (armedById.get(o.flowId) ?? true));
     const eventDays = new Map((state.spaceEvents?.days ?? []).map((d) => [d.date, d] as const));
     const monthEvents = [...eventDays.values()].filter((d) => d.date.startsWith(`${state.year}-${String(state.month).padStart(2, '0')}-`)).reduce((n, d) => n + d.total, 0);
     const sub = $('cal-subtitle');
-    if (sub !== null) sub.textContent = summaryText(state.snapshot, monthRuns, monthEvents);
+    if (sub !== null) sub.textContent = summaryText(state.snapshot, monthRuns, monthEvents, monthGrey);
     const onSelect = (key: string): void => {
       state.selected = key;
       state.detail = null;
@@ -943,8 +968,17 @@ function boot(): void {
       const to = new Date(state.year, state.month, 1);
       to.setDate(to.getDate() + 7);
       const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const [res, ev] = await Promise.all([b.occurrences({ fromMs: from.getTime(), toMs: to.getTime(), refresh }), b.spaceEvents({ fromMs: from.getTime(), toMs: to.getTime(), timeZone, refresh })]);
-      state.spaceEvents = ev.ok === true && ev.value !== undefined ? ev.value : null;
+      // Flows first; Space events paint when they arrive (a slow or failing graph never holds the grid).
+      const eventsPending = b.spaceEvents({ fromMs: from.getTime(), toMs: to.getTime(), timeZone, refresh }).then(
+        (ev) => {
+          state.spaceEvents = ev.ok === true && ev.value !== undefined ? ev.value : null;
+          if (state.spaceEvents === null) getLogging()?.warn?.('calendar', 'space events unavailable', { error: ev.error?.message ?? 'unknown' });
+          render();
+        },
+        () => undefined
+      );
+      const res = await b.occurrences({ fromMs: from.getTime(), toMs: to.getTime(), refresh });
+      void eventsPending;
       if (res.ok !== true || res.value === undefined) {
         const e = res.error;
         banner(e === undefined ? 'The calendar could not load.' : `${e.message}${e.remediation.length > 0 ? ` ${e.remediation}` : ''}`, 'is-error');

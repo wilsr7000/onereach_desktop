@@ -97,6 +97,8 @@ export interface Occurrence {
   eventName: string;
   color: string;
   timeZone: string;
+  /** After the event's authored end: the platform keeps firing an armed flow past it (observed live), so the run is drawn, flagged. */
+  pastWindow: boolean;
 }
 
 export interface CalendarOccurrencesInput {
