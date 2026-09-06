@@ -31,6 +31,7 @@ import type {
   WebContents,
 } from 'electron';
 import { isOAuthPopupUrl } from '../auth/oauth-popup.js';
+import { hidePasskeysFromGooglePopup, popupContents } from '../auth/passkey-popup.js';
 import { getDownloadsApi } from '../downloads/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
@@ -388,6 +389,8 @@ export function ensureSessionParity(ses: Session): void {
 export function attachChromeParity(contents: WebContents, opts: { partition: string; popup?: boolean }): void {
   // A tab carries the product token; a popup (Google's own pages) says plain Chrome.
   contents.setUserAgent(chromeParityUserAgent({ marker: opts.popup !== true }));
+  // A popup hides passkeys from google.com: the ceremony cannot finish in Electron (ADR-096).
+  if (opts.popup === true) void hidePasskeysFromGooglePopup(popupContents(contents), (level, message, data) => getLoggingApi()[level]('main-window', message, data));
   ensureSessionParity(contents.session);
   contents.setWindowOpenHandler(buildTabWindowOpenHandler({ partition: opts.partition }));
   contents.on('did-create-window', (child) => {

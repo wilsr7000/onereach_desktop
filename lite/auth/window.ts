@@ -29,6 +29,7 @@ import {
 import type { Environment, EnvironmentConfig } from './types.js';
 import { AUTH_EVENTS } from './events.js';
 import { buildPopupHandler, attachPopupLifecycle } from './oauth-popup.js';
+import { hidePasskeysFromGooglePopup, popupContents } from './passkey-popup.js';
 import { getLoggingApi } from '../logging/api.js';
 
 /**
@@ -388,6 +389,8 @@ export function createAuthWindow(
       const ua = chromeUserAgent({ marker: false });
       if (typeof popup.webContents?.setUserAgent === 'function') {
         popup.webContents.setUserAgent(ua);
+        // Google's passkey step cannot finish in Electron: hide WebAuthn from google.com in the popup (ADR-096).
+        void hidePasskeysFromGooglePopup(popupContents(popup.webContents), (level, message, data) => emit(AUTH_EVENTS.WINDOW_NAV_FINISH, { env, popup: true, level, message, ...(data ?? {}) }, 'info'));
       }
     } catch {
       // best-effort: a UA failure on the popup is non-fatal -- the
