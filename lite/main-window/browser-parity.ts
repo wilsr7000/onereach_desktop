@@ -32,6 +32,7 @@ import type {
 } from 'electron';
 import { isOAuthPopupUrl } from '../auth/oauth-popup.js';
 import { hidePasskeysFromGooglePopup, popupContents } from '../auth/passkey-popup.js';
+import { PRODUCT_UA_TOKEN } from '../product.js';
 import { getDownloadsApi } from '../downloads/api.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getMainWindowApi } from './api.js';
@@ -46,14 +47,34 @@ import { getMainWindowApi } from './api.js';
  * the auth window has used since ADR-041; Chromium's real version is
  * preserved so feature sniffing stays honest.
  */
+/** Re-exported for callers that only know this module (the token lives in product.ts). */
+export { PRODUCT_UA_TOKEN };
+
+/** A OneReach host: the token is meant for these pages and their servers only. */
+export function isOneReachHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    return host === 'onereach.ai' || host.endsWith('.onereach.ai');
+  } catch {
+    return false;
+  }
+}
+
 /**
- * The product token a page in a TAB sees after the Chrome UA (ADR-096).
- * The OneReach login page checks `/onereach/i` and, when it matches,
- * takes its in-app Google path: its own SSO popup, opened directly —
- * frame or not — instead of Google One Tap, which has no UI in Electron.
- * Popups never carry it: Google's own pages must see plain Chrome.
+ * Request headers as they go on the wire: the product token stays on
+ * requests to *.onereach.ai and is stripped for every other host, so a
+ * third-party site (Google's own sign-in loaded as a tab, ChatGPT,
+ * Gemini) sees exactly plain Chrome server-side. `navigator.userAgent`
+ * in the tab is unchanged; the OneReach login page reads that.
  */
-export const PRODUCT_UA_TOKEN = 'OnereachDesktop';
+export function stripProductTokenForHost(url: string, headers: Record<string, string>): Record<string, string> {
+  if (isOneReachHost(url)) return headers;
+  const key = Object.keys(headers).find((k) => k.toLowerCase() === 'user-agent');
+  if (key === undefined) return headers;
+  const ua = headers[key] ?? '';
+  if (!ua.includes(PRODUCT_UA_TOKEN)) return headers;
+  return { ...headers, [key]: ua.replace(new RegExp(`\\s*${PRODUCT_UA_TOKEN}(/\\S+)?`), '') };
+}
 
 export function chromeParityUserAgent(opts: { marker?: boolean } = {}): string {
   const chromeVersion = process.versions.chrome ?? '124.0.0.0';
@@ -165,6 +186,16 @@ export interface TabWindowOpenSeams {
   logWarn?: (message: string, data: Record<string, unknown>) => void;
 }
 
+/** The origin (or the scheme, for non-URL targets) — logs never carry a query string. */
+function originOf(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.origin === 'null' ? `${u.protocol}//` : u.origin;
+  } catch {
+    return '(unparseable)';
+  }
+}
+
 /** The `setWindowOpenHandler` for a tab (and, recursively, its popups). */
 export function buildTabWindowOpenHandler(
   seams: TabWindowOpenSeams
@@ -191,7 +222,7 @@ export function buildTabWindowOpenHandler(
       route,
       disposition: details.disposition,
       features: features.slice(0, 80),
-      url: details.url.slice(0, 120),
+      origin: originOf(details.url),
     });
     switch (route) {
       case 'popup':
@@ -210,7 +241,7 @@ export function buildTabWindowOpenHandler(
         return { action: 'deny' };
       default:
         logWarn('blocked window.open to unsupported scheme', {
-          url: details.url.slice(0, 200),
+          origin: originOf(details.url),
           disposition: details.disposition,
         });
         return { action: 'deny' };
@@ -372,7 +403,13 @@ const paritySessions = new WeakSet<Session>();
 export function ensureSessionParity(ses: Session): void {
   if (paritySessions.has(ses)) return;
   paritySessions.add(ses);
-  ses.setUserAgent(chromeParityUserAgent());
+  // The session default is plain Chrome (anything without a UA of its own:
+  // popups, workers); a tab's own contents carry the token (attachChromeParity).
+  ses.setUserAgent(chromeParityUserAgent({ marker: false }));
+  // On the wire the token reaches *.onereach.ai only (ADR-096 review, 2026-09-06).
+  ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    callback({ requestHeaders: stripProductTokenForHost(details.url, { ...details.requestHeaders }) });
+  });
   try {
     getDownloadsApi().attachToSession(ses);
   } catch (err) {
@@ -386,11 +423,11 @@ export function ensureSessionParity(ses: Session): void {
  * Full Chrome parity for one tab's webContents — and, via
  * `did-create-window`, recursively for every popup it opens.
  */
-export function attachChromeParity(contents: WebContents, opts: { partition: string; popup?: boolean }): void {
+export function attachChromeParity(contents: WebContents, opts: { partition: string; popup?: boolean; hidePasskeys?: boolean }): void {
   // A tab carries the product token; a popup (Google's own pages) says plain Chrome.
   contents.setUserAgent(chromeParityUserAgent({ marker: opts.popup !== true }));
-  // A popup hides passkeys from google.com: the ceremony cannot finish in Electron (ADR-096).
-  if (opts.popup === true) void hidePasskeysFromGooglePopup(popupContents(contents), (level, message, data) => getLoggingApi()[level]('main-window', message, data));
+  // A sign-in popup (opened from a OneReach page) hides passkeys from accounts.google.com: the ceremony cannot finish in Electron (ADR-096).
+  if (opts.popup === true && opts.hidePasskeys === true) void hidePasskeysFromGooglePopup(popupContents(contents), (level, message, data) => getLoggingApi()[level]('main-window', message, data));
   ensureSessionParity(contents.session);
   contents.setWindowOpenHandler(buildTabWindowOpenHandler({ partition: opts.partition }));
   contents.on('did-create-window', (child) => {
@@ -407,7 +444,14 @@ export function attachChromeParity(contents: WebContents, opts: { partition: str
     } catch {
       /* diagnostics only */
     }
-    attachChromeParity(child.webContents, { ...opts, popup: true });
+    // Only a popup opened FROM a OneReach page is a sign-in popup; any other popup keeps WebAuthn.
+    let openerIsOneReach = false;
+    try {
+      openerIsOneReach = isOneReachHost(contents.getURL());
+    } catch {
+      /* a destroyed opener: no hiding */
+    }
+    attachChromeParity(child.webContents, { partition: opts.partition, popup: true, hidePasskeys: openerIsOneReach });
   });
   contents.on('context-menu', (_event, params) => {
     try {

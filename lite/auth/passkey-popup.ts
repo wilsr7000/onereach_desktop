@@ -8,23 +8,28 @@
  * passkey, but it does not work"). The app's own Touch ID authenticator
  * (ADR-066) only knows passkeys enrolled inside the app.
  *
- * So a popup hides WebAuthn from google.com documents before any page
- * script runs, and Google goes straight to its other methods. The script
+ * So a sign-in popup (opened from a OneReach page) hides WebAuthn from
+ * accounts.google.com documents before any page script runs, and Google
+ * goes straight to its other methods. A hint, not a boundary: page code
+ * could still reach the prototype; Google's does not. The script
  * runs in the page's own world through the DevTools channel
  * (`Page.addScriptToEvaluateOnNewDocument`); a preload cannot do this
  * under contextIsolation, and `executeJavaScript` is too late. Nothing
- * is exposed to the page; only two globals are removed, only on google.com.
+ * is exposed to the page; only two globals are removed, only on
+ * accounts.google.com. Known race: a popup whose FIRST document is already
+ * accounts.google.com can commit before the script registers; the worst
+ * case is the old passkey prompt once.
  */
 import type { WebContents } from 'electron';
 
 /** The script every new document in the popup runs first. */
 export const HIDE_PASSKEYS_SCRIPT = `(() => {
-  if (!/(^|\\.)google\\.com$/.test(location.hostname)) return;
+  if (location.hostname !== 'accounts.google.com') return;
   try { Object.defineProperty(window, 'PublicKeyCredential', { value: undefined, configurable: true, writable: true }); } catch {}
   try {
     const c = navigator.credentials;
     if (c) {
-      const nope = () => Promise.reject(new DOMException('Passkeys are not available in this window.', 'NotSupportedError'));
+      const nope = () => Promise.reject(new DOMException('The operation is not supported.', 'NotSupportedError'));
       Object.defineProperty(c, 'get', { value: nope, configurable: true });
       Object.defineProperty(c, 'create', { value: nope, configurable: true });
     }
@@ -66,7 +71,7 @@ export async function hidePasskeysFromGooglePopup(
         /* already gone */
       }
     });
-    log('info', 'popup: passkeys hidden from google.com documents', {});
+    log('info', 'popup: passkeys hidden from accounts.google.com documents', {});
     return true;
   } catch (err) {
     log('warn', 'popup: could not hide passkeys (popup still works, passkey step may appear)', { error: err instanceof Error ? err.message : String(err) });

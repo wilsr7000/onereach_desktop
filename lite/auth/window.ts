@@ -30,6 +30,7 @@ import type { Environment, EnvironmentConfig } from './types.js';
 import { AUTH_EVENTS } from './events.js';
 import { buildPopupHandler, attachPopupLifecycle } from './oauth-popup.js';
 import { hidePasskeysFromGooglePopup, popupContents } from './passkey-popup.js';
+import { PRODUCT_UA_TOKEN } from '../product.js';
 import { getLoggingApi } from '../logging/api.js';
 
 /**
@@ -45,7 +46,7 @@ function chromeUserAgent(opts: { marker?: boolean } = {}): string {
   // ADR-096: the sign-in window carries the product token so the OneReach
   // login page takes its in-app Google path (its own SSO popup); the popup
   // itself says plain Chrome, which is what Google's pages must see.
-  const marker = opts.marker === false ? '' : ' OnereachDesktop';
+  const marker = opts.marker === false ? '' : ` ${PRODUCT_UA_TOKEN}`;
   if (process.platform === 'darwin') {
     return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
   }
@@ -251,12 +252,18 @@ export function createAuthWindow(
     // the BrowserWindow constructor returns. Apply the header
     // rewriter to it so XHR / OAuth subrequests also carry the
     // Chrome UA -- not just the top-frame navigations.
+    // The header rewriter covers EVERY request in this partition — the SSO
+    // popup's included — so it writes plain Chrome (ADR-096 review: the
+    // popup carried the token on the wire while its page said Chrome).
+    // The window's own navigator.userAgent keeps the token above: the
+    // login page's /onereach/i check is client-side.
+    const wireUa = chromeUserAgent({ marker: false });
     if (typeof win.webContents?.session === 'object' && win.webContents.session !== null) {
-      disguiseSession(win.webContents.session, ua);
+      disguiseSession(win.webContents.session, wireUa);
     } else {
       // Fallback: look up the partition session via the global
       // electron `session.fromPartition` API. Same effect.
-      disguiseSession(electronSession.fromPartition(partition), ua);
+      disguiseSession(electronSession.fromPartition(partition), wireUa);
     }
   } catch {
     // best-effort: a UA-rewrite failure here is non-fatal -- the

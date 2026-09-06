@@ -107,3 +107,23 @@ describe('createAuthWindow - Chrome user-agent disguise', () => {
     expect(createdWindows[0]?.webContents.ua ?? '').toMatch(/^Mozilla\/5\.0/);
   });
 });
+
+describe('createAuthWindow - wire user agent (ADR-096 review)', () => {
+  it('the window presents the product token to the login page, and the partition rewriter sends plain Chrome on every request', () => {
+    let captured: ((details: { url: string; requestHeaders: Record<string, string> }, cb: (r: { requestHeaders: Record<string, string> }) => void) => void) | null = null;
+    const session = { webRequest: { onBeforeSendHeaders: (cb: typeof captured) => { captured = cb; } }, on: vi.fn(), setUserAgent: vi.fn(), cookies: { on: vi.fn() } };
+    const { ctor, createdWindows } = makeStubBrowserWindowCtor();
+    class WithSession extends (ctor as unknown as new (o: unknown) => FakeWindow) {
+      constructor(o: unknown) { super(o); (this as FakeWindow).webContents.session = session; }
+    }
+    createAuthWindow('edison', ENVIRONMENT_CONFIGS.edison!, { windowCtor: WithSession as unknown as typeof import('electron').BrowserWindow });
+    const win = createdWindows[0]!;
+    expect(win.webContents.ua ?? '').toMatch(/onereach/i);
+    expect(captured).not.toBeNull();
+    let out: Record<string, string> = {};
+    captured!({ url: 'https://accounts.google.com/v3/signin/identifier', requestHeaders: { 'User-Agent': 'Mozilla/5.0 Electron/41', 'Sec-CH-UA': '"Electron";v="41"' } }, (r) => { out = r.requestHeaders; });
+    expect(out['User-Agent']).toMatch(/Chrome\/\d+/);
+    expect(out['User-Agent']).not.toMatch(/electron|onereach/i);
+    expect(out['Sec-CH-UA']).toBeUndefined();
+  });
+});

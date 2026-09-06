@@ -47,8 +47,8 @@ describe('auth passkey-popup', () => {
     expect(log).toHaveBeenCalledWith('warn', expect.stringContaining('could not hide passkeys'), { error: 'Another debugger is already attached' });
   });
 
-  it('the script touches google.com documents only and removes exactly WebAuthn', () => {
-    expect(HIDE_PASSKEYS_SCRIPT).toContain("google\\.com$");
+  it('the script touches accounts.google.com documents only and removes exactly WebAuthn', () => {
+    expect(HIDE_PASSKEYS_SCRIPT).toContain("location.hostname !== 'accounts.google.com'");
     expect(HIDE_PASSKEYS_SCRIPT).toContain("'PublicKeyCredential'");
     expect(HIDE_PASSKEYS_SCRIPT).toContain('NotSupportedError');
     expect(HIDE_PASSKEYS_SCRIPT).not.toMatch(/lite|ipcRenderer|require\(/);

@@ -28,6 +28,16 @@ export const PRODUCT_DISPLAY_NAME = 'Onereach Desktop';
 export const INTERNAL_APP_NAME = 'Onereach.ai Lite';
 
 /**
+ * The product token a OneReach page sees after the Chrome user agent
+ * (ADR-096). The OneReach login page checks `/onereach/i` and, when it
+ * matches, opens its own SSO popup directly — frame or not — instead of
+ * Google One Tap, which has no UI in Electron. Tabs and the sign-in
+ * window present it; on the wire it reaches *.onereach.ai only, and
+ * popups say plain Chrome (what Google's pages must see).
+ */
+export const PRODUCT_UA_TOKEN = 'OnereachDesktop';
+
+/**
  * The bundle folder — and the executable inside it — keep the INTERNAL
  * name (electron-builder `productName`). Not cosmetic caution: on macOS
  * the update is applied by a bash helper packaged inside the app that is

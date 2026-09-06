@@ -12,6 +12,9 @@ import {
   buildContextMenuTemplate,
   buildTabWindowOpenHandler,
   chromeParityUserAgent,
+  isOneReachHost,
+  stripProductTokenForHost,
+  PRODUCT_UA_TOKEN,
   classifyWindowOpen,
   parsePopupSize,
   popupWindowOptions,
@@ -65,8 +68,23 @@ describe('chromeParityUserAgent', () => {
     expect(ua).toContain('Chrome/');
     expect(ua).toContain('Safari/537.36');
     expect(ua).not.toMatch(/Electron/i);
-    expect(ua.endsWith(' OnereachDesktop')).toBe(true);
+    expect(ua.endsWith(` ${PRODUCT_UA_TOKEN}`)).toBe(true);
     expect(ua).toMatch(/onereach/i);
+  });
+  it('on the wire the token reaches *.onereach.ai only; every other host gets plain Chrome', () => {
+    const ua = chromeParityUserAgent();
+    const h = { 'User-Agent': ua, Accept: '*/*' };
+    expect(isOneReachHost('https://auth.edison.onereach.ai/login')).toBe(true);
+    expect(isOneReachHost('https://onereach.ai/')).toBe(true);
+    expect(isOneReachHost('https://accounts.google.com/')).toBe(false);
+    expect(isOneReachHost('https://evil-onereach.ai/')).toBe(false);
+    expect(isOneReachHost('not a url')).toBe(false);
+    expect(stripProductTokenForHost('https://idw.edison.onereach.ai/x', h)['User-Agent']).toBe(ua);
+    const stripped = stripProductTokenForHost('https://accounts.google.com/signin', h);
+    expect(stripped['User-Agent']).toBe(chromeParityUserAgent({ marker: false }));
+    expect(stripped['Accept']).toBe('*/*');
+    expect(stripProductTokenForHost('https://gemini.google.com/', { 'user-agent': ua })['user-agent']).not.toMatch(/onereach/i);
+    expect(stripProductTokenForHost('https://example.com/', { Accept: '*/*' })).toEqual({ Accept: '*/*' });
   });
   it('a popup says plain Chrome: no product token, no Electron (Google\'s pages see this one)', () => {
     const ua = chromeParityUserAgent({ marker: false });

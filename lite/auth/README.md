@@ -292,4 +292,4 @@ The OneReach login page's "Sign in with Google" is Google One Tap, which uses Fe
 
 The sign-in window's UA ends in ` OnereachDesktop`: the login page checks `/onereach/i` and then opens its own SSO popup directly, frame or not, instead of Google One Tap. Popups (`did-create-window`) are set to plain Chrome, the string Google's pages must see.
 
-`passkey-popup.ts` (ADR-096, cause 5): sign-in popups hide WebAuthn from google.com documents before their scripts run, because Google's passkey ceremony cannot finish in Electron (the passkey lives in iCloud Keychain, which Electron cannot reach); Google then offers its other methods directly.
+`passkey-popup.ts` (ADR-096, cause 5): a popup opened from a OneReach page hides WebAuthn from `accounts.google.com` documents before their scripts run, because Google's passkey ceremony cannot finish in Electron (the passkey lives in iCloud Keychain, which Electron cannot reach); Google then offers its other methods directly. The sign-in window's own header rewriter sends plain Chrome for every request in its partition; only the window's page-side UA carries the product token.
