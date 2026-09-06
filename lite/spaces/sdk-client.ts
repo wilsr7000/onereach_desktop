@@ -547,6 +547,7 @@ export const CYPHER = {
            coalesce(s.iconKey, s.icon, '') AS iconKey,
            coalesce(s.kind, 'user') AS kind,
            coalesce(s.visibility, 'open') AS visibility,
+           coalesce(s.gsxBotId, '') AS gsxBotId,
            itemCount AS itemCount,
            coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
            coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt,
@@ -6662,6 +6663,11 @@ function toSpace(row: Record<string, unknown>): Space {
   else if (visibility === 'private') space.visibility = 'restricted';
   // ADR-069 — viewer's pin mark (only ever true from the graph edge).
   if (row['pinned'] === true) space.pinned = true;
+  // ADR-091/092 — the Designer bot this Space is (a sync mirror, or a
+  // Lite-made Space the mirror stamped). Found missing by the 2026-09-06
+  // live pass: the create result carried it, the list never did.
+  const gsxBotId = optString(row, 'gsxBotId');
+  if (gsxBotId !== undefined && gsxBotId.length > 0) space.gsxBotId = gsxBotId;
   return space;
 }
 

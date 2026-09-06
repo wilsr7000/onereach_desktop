@@ -257,6 +257,24 @@ describe('CYPHER source strings', () => {
 
 // ─── listSpaces() ────────────────────────────────────────────────────────
 
+describe('listSpaces carries the Designer bot a Space is (ADR-091/092)', () => {
+  // Found by the 2026-09-06 live pass: the create result carried
+  // gsxBotId, the list never did — so the window could not tell a GSX
+  // space from any other.
+  it('projects s.gsxBotId and maps it only when the graph has one', async () => {
+    expect(CYPHER.LIST_SPACES).toMatch(/coalesce\(s\.gsxBotId, ''\) AS gsxBotId/);
+    const stub = buildStubQuery();
+    stub.setResponse("coalesce(s.gsxBotId, '') AS gsxBotId", [
+      { id: 'space-gsxbot-b1-ef36a1a2', name: 'AI Build Tools', gsxBotId: 'b1', itemCount: 3 },
+      { id: 'space-plain', name: 'Plain', gsxBotId: '', itemCount: 0 },
+    ]);
+    const client = new SdkSpacesClient({ query: stub.fn });
+    const spaces = await client.listSpaces();
+    expect(spaces.find((s) => s.id === 'space-gsxbot-b1-ef36a1a2')?.gsxBotId).toBe('b1');
+    expect('gsxBotId' in (spaces.find((s) => s.id === 'space-plain') ?? {})).toBe(false);
+  });
+});
+
 describe('deleting a Space must not strand its assets', () => {
   // Verified live 2026-08-06: soft-deleting a Space left its assets
   // alive in the graph but reachable from NOWHERE — not the Space

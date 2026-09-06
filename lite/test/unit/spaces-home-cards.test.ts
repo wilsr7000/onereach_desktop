@@ -28,6 +28,8 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type HomeFilter = 'all' | 'people' | 'agents' | '24h' | '7d';
 
@@ -512,6 +514,20 @@ describe('buildFilterChips', () => {
     const el = renderer.buildFilterChips('all');
     expect(el.getAttribute('role')).toBe('tablist');
     expect(el.getAttribute('aria-label')).toBe('Filter timeline');
+  });
+
+  // The row is built for Home AND for every Space's assets toolbar
+  // (2026-09-01 organization pass). Found by the 2026-09-06 live pass
+  // in the real renderer: a chip clicked on a Space repainted the hidden
+  // Home region and the grid never moved. The click must re-render the
+  // view it is on. (Source pin: the active scope is module state the
+  // jsdom API does not expose.)
+  it('a chip re-renders the view it sits on — Home, or the Space grid', () => {
+    const src = readFileSync(join(__dirname, '..', '..', 'spaces', 'spaces.ts'), 'utf8');
+    const start = src.indexOf('export function buildFilterChips(');
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    expect(body).toContain('state.homeFilter = id;');
+    expect(body).toMatch(/if \(state\.activeScopeId === HOME_SCOPE_ID\) renderHome\(\);\s*\n\s*else renderItemList\(\{\}\);/);
   });
 });
 

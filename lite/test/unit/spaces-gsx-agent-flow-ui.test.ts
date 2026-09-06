@@ -24,7 +24,12 @@ interface Item {
 }
 
 interface RendererTestApi {
-  buildDetailPane(item: Item, onClose: () => void): HTMLElement;
+  buildDetailPane(
+    item: Item,
+    onClose: () => void,
+    mode?: 'rendered',
+    edit?: { onTypeChange: (next: string) => Promise<void> }
+  ): HTMLElement;
 }
 
 let renderer: RendererTestApi;
@@ -106,6 +111,17 @@ describe('the detail pane for a GSX agent flow', () => {
     expect(openWindow).toHaveBeenCalledTimes(2);
     expect(openWindow).toHaveBeenNthCalledWith(1, { env: 'edison', url: DESIGNER, title: 'Open in Designer — Create a Ticket' });
     expect(openWindow).toHaveBeenNthCalledWith(2, { env: 'edison', url: VIEW, title: 'Open view — Create a Ticket' });
+  });
+
+  it('stays labelled "GSX agent flow" in the editable pane — Designer owns its kind, so no reclassify dropdown', () => {
+    const el = renderer.buildDetailPane(agent(), () => undefined, 'rendered', { onTypeChange: async () => undefined });
+    expect(el.querySelector('.spaces-detail-head .spaces-card-kind')?.textContent).toBe('GSX agent flow');
+    expect(el.querySelector('.spaces-detail-reclassify')).toBeNull();
+    // An ordinary agent keeps the dropdown.
+    const { sourceUrl: _s, ...plain } = agent({ metadata: { source: 'lite' } });
+    void _s;
+    const plainEl = renderer.buildDetailPane(plain as Item, () => undefined, 'rendered', { onTypeChange: async () => undefined });
+    expect(plainEl.querySelector('.spaces-detail-reclassify')).not.toBeNull();
   });
 
   it('a flow without a view offers Designer only', () => {

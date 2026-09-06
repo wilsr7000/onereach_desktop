@@ -8449,6 +8449,24 @@ export function buildItemCard(
     if (ev.key === 'Enter' || ev.key === ' ') {
       ev.preventDefault();
       void loadItemDetail(item.id);
+      return;
+    }
+    // Arrow keys walk the grid (2026-09-06 live pass: Tab was the only
+    // way between tiles). Left/Right by order; Up/Down by one row, the
+    // row width read from the tiles' own layout.
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      const grid = card.closest('.spaces-card-grid');
+      if (grid === null) return;
+      const cards = Array.from(grid.querySelectorAll<HTMLElement>('.spaces-card'));
+      const index = cards.indexOf(card);
+      const first = cards[0];
+      if (index === -1 || first === undefined) return;
+      const columns = Math.max(1, cards.filter((c) => c.offsetTop === first.offsetTop).length);
+      const delta = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : ev.key === 'ArrowDown' ? columns : -columns;
+      const target = cards[index + delta];
+      if (target === undefined) return;
+      ev.preventDefault();
+      target.focus();
     }
   });
 
@@ -10353,6 +10371,34 @@ interface RenderDetailOpts {
   item?: RendererItem;
 }
 
+// Escape closes the detail rail like every other Lite surface (2026-09-06
+// live pass: only the × did). One listener at a time; it stands down when
+// the rail closes, and defers to a field being edited or the New Space
+// dialog, which own their Escape.
+let detailEscapeHandler: ((event: KeyboardEvent) => void) | null = null;
+
+function disarmDetailEscape(): void {
+  if (detailEscapeHandler === null) return;
+  document.removeEventListener('keydown', detailEscapeHandler);
+  detailEscapeHandler = null;
+}
+
+function armDetailEscape(onClose: () => void): void {
+  disarmDetailEscape();
+  const handler = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    if (state.activeItemId === null) return;
+    const target = event.target instanceof HTMLElement ? event.target : null;
+    const tag = target?.tagName ?? '';
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable === true) return;
+    const dialog = document.getElementById('spaces-new-dialog');
+    if (dialog !== null && !dialog.hidden && dialog.offsetParent !== null) return;
+    onClose();
+  };
+  detailEscapeHandler = handler;
+  document.addEventListener('keydown', handler);
+}
+
 function renderDetail(opts: RenderDetailOpts): void {
   const aside = document.getElementById('spaces-detail');
   if (aside === null) return;
@@ -10368,11 +10414,13 @@ function renderDetail(opts: RenderDetailOpts): void {
   if (opts.item === undefined) return;
   const item = opts.item;
   const onClose = (): void => {
+    disarmDetailEscape();
     state.activeItemId = null;
     const grid = document.getElementById('spaces-card-grid');
     if (grid !== null) applyActiveCard(grid, null);
     showDetailRail(false);
   };
+  armDetailEscape(onClose);
   // Phase 3b edit callbacks. Each routes through the bridge and
   // re-fetches the item so the renderer state reflects the updated
   // server-side projection (timestamps, lastEditedBy, tags).
@@ -11487,13 +11535,17 @@ export function buildDetailPane(
   const header = document.createElement('div');
   header.className = 'spaces-detail-head';
 
-  if (edit?.onTypeChange !== undefined) {
+  // A flow synced from GSX Designer says what it is (2026-09-05) — and
+  // is never reclassified here: Designer owns its kind, and the next sync
+  // would put it back (2026-09-06 live pass: the editable pane showed the
+  // reclassify dropdown reading "Agent" instead of the label).
+  const gsxFlow = gsxAgentFlowLinks(item);
+  if (edit?.onTypeChange !== undefined && gsxFlow === null) {
     header.appendChild(buildKindReclassify(item, edit.onTypeChange));
   } else {
     const kind = document.createElement('span');
     kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
-    // A flow synced from GSX Designer says what it is (2026-09-05).
-    kind.textContent = gsxAgentFlowLinks(item) !== null ? 'GSX agent flow' : kindLabel(item.kind);
+    kind.textContent = gsxFlow !== null ? 'GSX agent flow' : kindLabel(item.kind);
     header.appendChild(kind);
   }
 
@@ -14907,7 +14959,12 @@ export function buildFilterChips(active?: HomeFilter): HTMLElement {
     btn.addEventListener('click', () => {
       if (state.homeFilter === id) return;
       state.homeFilter = id;
-      renderHome();
+      // The row lives on Home AND on every Space's assets toolbar (2026-09-01
+      // organization pass); re-render the view the chip is actually on.
+      // Found by the 2026-09-06 live pass: on a Space the click repainted
+      // the hidden Home region and the grid never moved.
+      if (state.activeScopeId === HOME_SCOPE_ID) renderHome();
+      else renderItemList({});
     });
     row.appendChild(btn);
   }
