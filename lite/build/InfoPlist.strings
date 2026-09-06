@@ -1,0 +1,9 @@
+/* The name macOS shows for the app (ADR-095). Shipped as
+   Contents/Resources/en.lproj/InfoPlist.strings by electron-builder's
+   extraResources. AppKit reads the LOCALIZED CFBundleName for the
+   menu-bar title; Electron finds its helper apps ("<name> Helper.app")
+   through the raw Info.plist CFBundleName, which must therefore stay
+   "Onereach.ai Lite" — overriding it there makes the app fail to launch
+   ("Unable to find helper app"). */
+CFBundleName = "Onereach Desktop";
+CFBundleDisplayName = "Onereach Desktop";

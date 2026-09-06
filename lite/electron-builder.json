@@ -106,6 +106,10 @@
     {
       "from": "scripts/install-update.sh",
       "to": "install-update.sh"
+    },
+    {
+      "from": "lite/build/InfoPlist.strings",
+      "to": "en.lproj/InfoPlist.strings"
     }
   ],
   "npmRebuild": false,
@@ -125,7 +129,6 @@
     "entitlementsInherit": "lite/build/entitlements.mac.inherit.plist",
     "notarize": false,
     "extendInfo": {
-      "CFBundleName": "Onereach Desktop",
       "CFBundleDisplayName": "Onereach Desktop",
       "NSMicrophoneUsageDescription": "Onereach Desktop uses the microphone for meetings and voice features in the pages you open.",
       "NSCameraUsageDescription": "Onereach Desktop uses the camera for meetings and recording features in the pages you open.",

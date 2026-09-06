@@ -39,8 +39,17 @@ describe('the display name reaches every surface', () => {
     // finds the update inside the zip by the installed folder's basename
     // (ADR-095 amendment). The visible name rides on the two plist keys.
     expect(cfg.productName).toBe(INTERNAL_APP_NAME);
-    expect(cfg.mac.extendInfo['CFBundleName']).toBe(PRODUCT_DISPLAY_NAME);
     expect(cfg.mac.extendInfo['CFBundleDisplayName']).toBe(PRODUCT_DISPLAY_NAME);
+    // The raw CFBundleName must NOT be overridden: Electron finds its
+    // helper apps as "<CFBundleName> Helper.app", and the override made
+    // the packaged app die at launch ("Unable to find helper app").
+    // The menu-bar title comes from the LOCALIZED name instead.
+    expect(cfg.mac.extendInfo['CFBundleName']).toBeUndefined();
+    const extra = (cfg as unknown as { extraResources: Array<{ from: string; to: string }> }).extraResources;
+    expect(extra).toContainEqual({ from: 'lite/build/InfoPlist.strings', to: 'en.lproj/InfoPlist.strings' });
+    const strings = read('build/InfoPlist.strings');
+    expect(strings).toContain(`CFBundleName = "${PRODUCT_DISPLAY_NAME}";`);
+    expect(strings).toContain(`CFBundleDisplayName = "${PRODUCT_DISPLAY_NAME}";`);
     // The sentence macOS shows under "<app> would like to access the
     // microphone" — it names the product, not a codename.
     for (const key of ['NSMicrophoneUsageDescription', 'NSCameraUsageDescription']) {

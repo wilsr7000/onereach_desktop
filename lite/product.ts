@@ -35,10 +35,13 @@ export const INTERNAL_APP_NAME = 'Onereach.ai Lite';
  * new bundle inside the downloaded zip by the installed folder's own
  * basename. A zip whose root is "Onereach Desktop.app" fails every one of
  * those installs at find_bundle (verified against the built zip,
- * 2026-09-06 review). The name people see comes from CFBundleName (the
- * menu-bar title) and CFBundleDisplayName (Dock, About), both set to
- * PRODUCT_DISPLAY_NAME in electron-builder.json; only Finder still shows
- * the folder's file name.
+ * 2026-09-06 review). The name people see comes from CFBundleDisplayName
+ * (Dock, About; electron-builder.json extendInfo) and from the LOCALIZED
+ * CFBundleName in lite/build/InfoPlist.strings (the menu-bar title —
+ * AppKit reads the localized name). The raw Info.plist CFBundleName must
+ * stay the internal name: Electron finds its helper apps as
+ * "<CFBundleName> Helper.app", and overriding it made the packaged app
+ * die at launch. Only Finder still shows the folder's file name.
  *
  * Renaming the folder later needs a sequence: first ship a helper that
  * accepts a lone `*.app` at the zip root (scripts/install-update.sh does
