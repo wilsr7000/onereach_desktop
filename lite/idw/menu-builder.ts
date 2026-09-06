@@ -67,8 +67,6 @@ export interface MenuBuilderConfig {
   onOpenEntry: (entry: IdwEntry) => void;
   /** Called when the "Manage Agents..." item is clicked. */
   onOpenSettings: () => void;
-  /** ADR-086 — opens the Agent Registry window (search + registry manager). */
-  onOpenRegistry?: () => void;
   /** Optional override for the IDW API (for tests). */
   api?: IdwApi;
 }
@@ -112,17 +110,6 @@ export function initMenuBuilder(config: MenuBuilderConfig): void {
     order: TAIL_BASE + 1,
     click: () => config.onOpenSettings(),
   });
-  if (config.onOpenRegistry !== undefined) {
-    const onOpenRegistry = config.onOpenRegistry;
-    registry.upsert({
-      id: 'idw.agent-registry',
-      type: 'item',
-      parentId: TOP_LEVEL_ID,
-      label: 'Agent Library...',
-      order: TAIL_BASE + 2,
-      click: () => onOpenRegistry(),
-    });
-  }
 
   // ── 3. Subscribe to entries + initial render ────────────────────────
   const api = config.api ?? getIdwApi();

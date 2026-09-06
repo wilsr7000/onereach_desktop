@@ -997,7 +997,6 @@ app
     // window.lite.neon.queryNamed('idw.oagi-catalog') in the catalog renderer.
     try {
       idwHandle = initIdw({
-        onOpenRegistry: () => registryHandle?.open(),
         preloadPath,
         catalogHtmlPath: path.join(__dirname, 'idw-store.html'),
         getParentWindow: () => mainWindow,
@@ -1063,6 +1062,8 @@ app
         userDataDir: app.getPath('userData'),
         // ADR-090 — GSX → Calendar opens Lite's scheduled-flows window (late-bound).
         openCalendar: () => calendarHandle?.open(),
+        // GSX → Agent Library… opens the registry window (late-bound; it initializes below).
+        openAgentLibrary: () => registryHandle?.open(),
       });
     } catch (err) {
       getLoggingApi().error('gsx', 'initGsx threw', {
@@ -1149,7 +1150,8 @@ app
     }
 
     // ADR-086 — Agent Registry: the account's :Agent catalog from NEON,
-    // with admin management. Opened from IDW → Agent Library… (shown as the Agent Library since ADR-089)
+    // with admin management. Opened from GSX → Agent Library… (shown as the Agent Library since
+    // ADR-089; moved from the IDW menu to the GSX menu on 2026-09-05).
     try {
       registryHandle = initRegistry({
         query: (cypher, parameters) => getNeonApi().query(cypher, parameters),

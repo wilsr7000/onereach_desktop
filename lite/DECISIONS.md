@@ -1972,7 +1972,7 @@ SmartScreen warning).
 
 ## ADR-089: The Agent Library — where an agent lives: Spaces (sight-filtered), hosting and account, Skills (2026-09-04)
 
-**Decision.** The registry window is shown as the **Agent Library** (menu item IDW → Agent Library…, window title, Settings door, the Space detail block); code identifiers and IPC channels keep `registry`. Every row and the detail's "Belongs to" now answer three questions from the record: **which Spaces** hold the agent, **where it is hosted**, and **whether it is a Skill**.
+**Decision.** The registry window is shown as the **Agent Library** (menu item GSX → Agent Library… — under IDW until 2026-09-05, when it moved to the GSX menu that now exists —, window title, Settings door, the Space detail block); code identifiers and IPC channels keep `registry`. Every row and the detail's "Belongs to" now answer three questions from the record: **which Spaces** hold the agent, **where it is hosted**, and **whether it is a Skill**.
 
 **Spaces.** An agent belongs to a Space through an asset in that Space that `[:REPRESENTS]` it (Lite's "Add agent" paths write `BELONGS_TO` + `REPRESENTS`), or through the full app's `[:USED_IN]` usage edge. Both are read, deduplicated, and shown with their route. The list is **sight-filtered with the ADR-084 predicate verbatim** (`SPACE_VISIBLE_FOR('sp')`, now exported from the Spaces client: creator or live HAS_ACCESS grant, nested opt-in per ADR-085, nothing inferred, `[:OWNS]` never), so the Library never names a Space the viewer cannot open. A Space facet lists the viewer's visible Spaces that hold agents. The graph on 2026-09-04 held one agent asset and six usage edges, so most rows show no Space yet; the column fills as agents are added to Spaces.
 

@@ -51,6 +51,8 @@ export const GSX_EVENTS = {
   // The GSX menu (2026-09-02): a click on Open GSX Studio / a surface link.
   MENU_OPEN_STUDIO: 'gsx.menu.open-studio',
   MENU_OPEN_LINK: 'gsx.menu.open-link',
+  // 2026-09-05: GSX → Agent Library… (moved here from the IDW menu).
+  MENU_OPEN_AGENT_LIBRARY: 'gsx.menu.open-agent-library',
   // IPC entry events (per ADR-030).
   IPC_OPEN_WINDOW: 'gsx.ipc.open-window',
   IPC_CLOSE_WINDOW: 'gsx.ipc.close-window',
@@ -116,6 +118,10 @@ export interface GsxMenuOpenLinkEvent extends GsxEventBase {
   name: typeof GSX_EVENTS.MENU_OPEN_LINK;
   level: 'info';
   data: { env: string; link: string };
+}
+export interface GsxMenuOpenAgentLibraryEvent extends GsxEventBase {
+  name: typeof GSX_EVENTS.MENU_OPEN_AGENT_LIBRARY;
+  level: 'info';
 }
 export interface GsxRunScriptStartEvent extends GsxSpanBase {
   name: typeof GSX_EVENTS.RUN_SCRIPT_START;
@@ -371,7 +377,8 @@ export type GsxEvent =
   | GsxIpcGetAgentEvent
   | GsxIpcDeleteAgentEvent
   | GsxMenuOpenStudioEvent
-  | GsxMenuOpenLinkEvent;
+  | GsxMenuOpenLinkEvent
+  | GsxMenuOpenAgentLibraryEvent;
 
 const GSX_EVENT_NAMES: ReadonlySet<string> = new Set(Object.values(GSX_EVENTS));
 

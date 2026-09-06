@@ -3,7 +3,7 @@
 Public surface: `RegistryApi` (implements `RegistryManagerApi`) from
 `./api.ts`, constructed by `initRegistry()` in `./main.ts` over the NEON
 transport. Renderer surface: `window.lite.registry`. Opened from the
-IDW menu ("Agent Registry...") into its own window (`registry.html`).
+GSX menu ("Agent Library…"; it sat under IDW until 2026-09-05) into its own window (`registry.html`).
 
 A search and registry manager over the account's `:Agent` catalog in
 NEON: facets (source, type, category, availability, listing,

@@ -105,6 +105,8 @@ export interface InitGsxOptions {
   userDataDir: string;
   /** ADR-090 — opens Lite's Calendar from the GSX menu (late-bound; the calendar initializes after GSX). */
   openCalendar?: (env: Environment) => void;
+  /** GSX → Agent Library… opens the registry window (late-bound; the registry initializes after GSX). */
+  openAgentLibrary?: () => void;
 }
 
 let registered = false;
@@ -128,7 +130,10 @@ export function initGsx(opts: InitGsxOptions): GsxHandle {
   // surfaces, every entry opening in the signed-in GSX window. A menu
   // failure must never take the IPC surface down with it.
   try {
-    initGsxMenuBuilder(opts.openCalendar !== undefined ? { openCalendar: opts.openCalendar } : {});
+    initGsxMenuBuilder({
+      ...(opts.openCalendar !== undefined ? { openCalendar: opts.openCalendar } : {}),
+      ...(opts.openAgentLibrary !== undefined ? { openAgentLibrary: opts.openAgentLibrary } : {}),
+    });
   } catch (err) {
     log.warn('gsx', 'menu builder failed to initialize', {
       error: err instanceof Error ? err.message : String(err),

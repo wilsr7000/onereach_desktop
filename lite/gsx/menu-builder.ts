@@ -7,7 +7,9 @@
  * surfaces per OneReach environment — HITL, Action Desk, Designer,
  * Agents, Tickets, Calendar, Developer — each carrying the account id
  * of the signed-in session as `?accountId=`. Plus "Open GSX Studio"
- * at the top.
+ * at the top, and — Lite's own — "Agent Library…" right under it
+ * (2026-09-05: moved here from the IDW menu; the library is the GSX
+ * account's agent catalog, so this is where people look for it).
  *
  * What differs from full, deliberately:
  *  - Environments come from the AUTH SESSIONS (whoever is signed in,
@@ -38,6 +40,7 @@ import { GSX_EVENTS } from './events.js';
 
 export const TOP_LEVEL_ID = 'top:gsx';
 export const OPEN_STUDIO_ID = 'gsx:open-studio';
+export const AGENT_LIBRARY_ID = 'gsx:agent-library';
 export const SEPARATOR_ID = 'gsx:sep-links';
 /** Order 65: between IDW (60) and Tools (70), matching the full app. */
 export const TOP_LEVEL_ORDER = 65;
@@ -76,6 +79,12 @@ export interface GsxMenuDeps {
   environments: readonly Environment[];
   /** ADR-090 — the Calendar link opens Lite's own Calendar (scheduled flows), not a hosted page. */
   openCalendar: (env: Environment) => void;
+  /**
+   * Opens the Agent Library (the registry window, ADR-086/089). Optional:
+   * the host wires it once the registry exists; without it the menu
+   * simply has no library item.
+   */
+  openAgentLibrary?: () => void;
 }
 
 let initialized = false;
@@ -112,6 +121,16 @@ export function initGsxMenuBuilder(overrides: Partial<GsxMenuDeps> = {}): void {
     order: 0,
     click: () => openStudio(),
   });
+  if (deps.openAgentLibrary !== undefined) {
+    registry.upsert({
+      id: AGENT_LIBRARY_ID,
+      type: 'item',
+      parentId: TOP_LEVEL_ID,
+      label: 'Agent Library…',
+      order: 5,
+      click: () => openAgentLibrary(),
+    });
+  }
   registry.upsert({ id: SEPARATOR_ID, type: 'separator', parentId: TOP_LEVEL_ID, order: 10 });
 
   rebuild();
@@ -130,6 +149,7 @@ export function teardownGsxMenuBuilder(): void {
   for (const id of dynamicIds) registry.unregister(id);
   dynamicIds.clear();
   registry.unregister(SEPARATOR_ID);
+  registry.unregister(AGENT_LIBRARY_ID);
   registry.unregister(OPEN_STUDIO_ID);
   registry.unregister(TOP_LEVEL_ID);
   depsRef = null;
@@ -200,6 +220,20 @@ function openStudio(): void {
       error: err instanceof Error ? err.message : String(err),
     });
   });
+}
+
+/** GSX → Agent Library…: the registry window (search + admission), never a hosted page. */
+function openAgentLibrary(): void {
+  const deps = depsRef;
+  if (deps === null || deps.openAgentLibrary === undefined) return;
+  getLoggingApi().event(GSX_EVENTS.MENU_OPEN_AGENT_LIBRARY);
+  try {
+    deps.openAgentLibrary();
+  } catch (err) {
+    getLoggingApi().warn('gsx', 'menu: open Agent Library failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /** ADR-090 — Calendar: Lite's scheduled-flows window (calendar.<env>.onereach.ai does not exist). */

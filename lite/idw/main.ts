@@ -70,8 +70,6 @@ export const IDW_IPC = {
 // ---------------------------------------------------------------------------
 
 export interface InitIdwOptions {
-  /** ADR-086 — opens the Agent Registry window from the IDW menu. */
-  onOpenRegistry?: () => void;
   /** Path to the bundled preload-lite.js (used by the catalog window). */
   preloadPath: string;
   /** Path to the bundled idw-store.html (catalog window). */
@@ -272,7 +270,6 @@ export function initIdw(opts: InitIdwOptions): IdwHandle {
     onOpenEntry: (entry) => {
       void openEntryAsTab(entry);
     },
-    onOpenRegistry: () => opts.onOpenRegistry?.(),
     onOpenSettings: () => {
       // Open Settings to the IDWs section. The renderer reads
       // ?section=idws on load and activates that section.

@@ -25,6 +25,7 @@ import {
   GSX_LINKS,
   TOP_LEVEL_ID,
   OPEN_STUDIO_ID,
+  AGENT_LIBRARY_ID,
   SEPARATOR_ID,
   TOP_LEVEL_ORDER,
   type GsxMenuDeps,
@@ -35,6 +36,7 @@ function makeDeps(sessions: Partial<Record<Environment, { accountId: string }>>)
   fire: () => void;
   openWindow: ReturnType<typeof vi.fn>;
   openCalendar: ReturnType<typeof vi.fn>;
+  openAgentLibrary: ReturnType<typeof vi.fn>;
   sessions: Partial<Record<Environment, { accountId: string }>>;
 } {
   const listeners: Array<() => void> = [];
@@ -50,6 +52,7 @@ function makeDeps(sessions: Partial<Record<Environment, { accountId: string }>>)
     },
     openWindow: vi.fn(async () => ({})),
     openCalendar: vi.fn(),
+    openAgentLibrary: vi.fn(),
     environments: ['edison', 'staging', 'production'] as readonly Environment[],
     fire: () => {
       for (const l of [...listeners]) l();
@@ -79,7 +82,7 @@ describe('GSX menu-builder', () => {
     expect(() => gsxLinkUrl('nope', 'edison', null)).toThrow(/unknown GSX link/);
   });
 
-  it('registers top:gsx at order 65 with Open GSX Studio first, then a separator', () => {
+  it('registers top:gsx at order 65: Open GSX Studio, Agent Library…, then a separator', () => {
     const deps = makeDeps({ edison: { accountId: 'acct-1' } });
     initGsxMenuBuilder(deps);
     const top = registry.get(TOP_LEVEL_ID);
@@ -88,7 +91,28 @@ describe('GSX menu-builder', () => {
     expect(TOP_LEVEL_ORDER).toBe(65);
     const children = ids(TOP_LEVEL_ID);
     expect(children[0]).toBe(OPEN_STUDIO_ID);
-    expect(children[1]).toBe(SEPARATOR_ID);
+    expect(children[1]).toBe(AGENT_LIBRARY_ID);
+    expect(children[2]).toBe(SEPARATOR_ID);
+    expect(registry.get(AGENT_LIBRARY_ID)?.label).toBe('Agent Library…');
+  });
+
+  // 2026-09-05: "I don't see the library in the GSX menu" — the Agent
+  // Library moved from IDW to GSX. It opens the registry window through
+  // the injected opener, never a hosted page; hosts without a registry
+  // simply get no item.
+  it('Agent Library… opens the registry window; absent when the host has none', () => {
+    const deps = makeDeps({ edison: { accountId: 'acct-1' } });
+    initGsxMenuBuilder(deps);
+    registry.get(AGENT_LIBRARY_ID)?.click?.();
+    expect(deps.openAgentLibrary).toHaveBeenCalledTimes(1);
+    expect(deps.openWindow).not.toHaveBeenCalled();
+    teardownGsxMenuBuilder();
+    expect(registry.has(AGENT_LIBRARY_ID)).toBe(false);
+
+    const { openAgentLibrary: _omit, ...without } = deps;
+    initGsxMenuBuilder(without);
+    expect(registry.has(AGENT_LIBRARY_ID)).toBe(false);
+    expect(ids(TOP_LEVEL_ID)[1]).toBe(SEPARATOR_ID);
   });
 
   it('one signed-in environment: the seven surfaces sit flat, carrying that session’s account id', () => {
@@ -103,7 +127,7 @@ describe('GSX menu-builder', () => {
   it('several signed-in environments: a submenu per environment', () => {
     const deps = makeDeps({ edison: { accountId: 'a' }, staging: { accountId: 'b' } });
     initGsxMenuBuilder(deps);
-    expect(ids(TOP_LEVEL_ID)).toEqual([OPEN_STUDIO_ID, SEPARATOR_ID, 'gsx:env:edison', 'gsx:env:staging']);
+    expect(ids(TOP_LEVEL_ID)).toEqual([OPEN_STUDIO_ID, AGENT_LIBRARY_ID, SEPARATOR_ID, 'gsx:env:edison', 'gsx:env:staging']);
     expect(registry.get('gsx:env:staging')?.label).toBe('Staging');
     expect(ids('gsx:env:staging')).toEqual(GSX_LINKS.map((l) => `gsx:link:staging:${l.key}`));
   });

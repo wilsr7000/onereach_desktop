@@ -76,6 +76,10 @@
       entries open the agent browser; empty state points to Manage Agents.
 - [ ] **Tools menu** — curated tools open in browser windows; `Spaces…` entry;
       `Manage Tools…` opens the manager.
+- [ ] **GSX menu** — Open GSX Studio, Agent Library… (the registry window;
+      no longer under IDW), then HITL, Action Desk, Designer, Agents,
+      Tickets, Calendar, Developer per signed-in environment, each in the
+      signed-in GSX window (Calendar opens Lite's own Calendar).
 - [ ] **Planning menu** — four entries in order: WISER Playbooks, Journey Map
       Builder, New Journey Map… (quick), NEON Graph Explorer. Each opens its
       own surface.
