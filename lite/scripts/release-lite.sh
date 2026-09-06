@@ -567,7 +567,28 @@ ${COMMITS}
 
 # ---------------------------------------------------------------------------
 # Step 8: Publish to public repo
+#
+# SKIP_PUBLISH=1 stops here: everything above (build, sign, gate, boot
+# smoke, e2e, manifest sanity) has run and the artifacts are on disk, but
+# nothing reaches the feed. The publish is a person's call (2026-09-06:
+# the credentialed publish is robb-run); the exact command is printed so
+# it can be run verbatim, or the script re-run without the flag.
 # ---------------------------------------------------------------------------
+if [ "${SKIP_PUBLISH:-0}" = "1" ]; then
+    NOTES_FILE="dist-lite/release-notes-${LITE_TAG}.md"
+    printf '%s\n' "$PUBLIC_NOTES" > "$NOTES_FILE"
+    echo ""
+    echo -e "${YELLOW}SKIP_PUBLISH=1 — ${LITE_TAG} is built and verified but NOT published.${NC}"
+    echo -e "${BLUE}Artifacts:${NC}"
+    for f in "${FILES[@]}"; do echo "  $f"; done
+    echo -e "${BLUE}Notes:${NC} $NOTES_FILE"
+    echo -e "${BLUE}To publish:${NC}"
+    PUBLISH_CMD="gh release create ${LITE_TAG}"
+    for f in "${FILES[@]}"; do PUBLISH_CMD="${PUBLISH_CMD} $(printf '%q' "$f")"; done
+    echo "  ${PUBLISH_CMD} --repo ${PUBLIC_REPO} --title ${LITE_TAG} --notes-file ${NOTES_FILE}"
+    exit 0
+fi
+
 echo -e "${YELLOW}Step 8: Publishing ${LITE_TAG} to ${PUBLIC_REPO}...${NC}"
 
 gh release create "${LITE_TAG}" \
