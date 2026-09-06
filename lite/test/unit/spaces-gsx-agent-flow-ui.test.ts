@@ -96,7 +96,7 @@ describe('the detail pane for a GSX agent flow', () => {
   it('is labelled "GSX agent flow" and offers Open in Designer + Open view, both through the GSX window', async () => {
     const el = renderer.buildDetailPane(agent(), () => undefined);
     expect(el.querySelector('.spaces-card-kind')?.textContent).toBe('GSX agent flow');
-    const buttons = [...el.querySelectorAll<HTMLButtonElement>('.spaces-detail-gsx-flow button')];
+    const buttons = Array.from(el.querySelectorAll<HTMLButtonElement>('.spaces-detail-gsx-flow button'));
     expect(buttons.map((b) => b.textContent)).toEqual(['Open in Designer', 'Open view']);
     expect(buttons[1]?.title).toContain('Create a Ticket v2');
 
@@ -113,15 +113,14 @@ describe('the detail pane for a GSX agent flow', () => {
       agent({ metadata: { source: 'gsx-designer', gsxBotLabel: 'Tickets', gsxDesignerUrl: DESIGNER } }),
       () => undefined
     );
-    const buttons = [...el.querySelectorAll<HTMLButtonElement>('.spaces-detail-gsx-flow button')];
+    const buttons = Array.from(el.querySelectorAll<HTMLButtonElement>('.spaces-detail-gsx-flow button'));
     expect(buttons.map((b) => b.textContent)).toEqual(['Open in Designer']);
   });
 
   it('an ordinary agent keeps its label and gets no GSX row', () => {
-    const el = renderer.buildDetailPane(
-      agent({ sourceUrl: undefined, metadata: { source: 'lite' } }),
-      () => undefined
-    );
+    const { sourceUrl: _noSource, ...plain } = agent({ metadata: { source: 'lite' } });
+    void _noSource;
+    const el = renderer.buildDetailPane(plain as Item, () => undefined);
     expect(el.querySelector('.spaces-card-kind')?.textContent).not.toBe('GSX agent flow');
     expect(el.querySelector('.spaces-detail-gsx-flow')).toBeNull();
   });
