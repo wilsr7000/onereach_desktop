@@ -33,8 +33,10 @@ const scheduledFlow = (id: string, botId: string, label: string, version: string
 });
 const plainFlow = (id: string, botId: string) => ({ id, botId, version: 'v', dateModified: 1, data: { label: 'plain', trees: { main: { steps: { s: { type: 'other', label: 'Wait for HTTP Request', data: {} } } } } } });
 
-function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: string; deploymentsFail?: boolean } = {}) {
+function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: string; deploymentsFail?: boolean; deployFails?: boolean } = {}) {
   const calls: string[] = [];
+  const deployCalls: string[] = [];
+  let pendingDeploy: { flowId: string; armed: boolean; polls: number } | null = null;
   // The account's flows, mutable so tests can save a new version or delete one.
   const flowsByBot: Record<string, Array<Record<string, unknown>>> = {
     b1: [scheduledFlow('f-armed', 'b1', 'Armed report'), scheduledFlow('f-active-noschedule', 'b1', 'Active no trigger'), plainFlow('f-plain', 'b1')],
@@ -48,7 +50,7 @@ function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: str
     { id: 'dep-1', flowId: 'f-armed', botId: 'b1', dateCreated: 1700000000000, data: { flowVersion: 'v1', triggers: [{ name: 'trigger/processed', params: { name: 'timer/f-armed/s1/next', type: 'on', hasSchedule: true, timeoutTime: 4102444800000 } }] } },
     { id: 'dep-2', flowId: 'f-active-noschedule', botId: 'b1', dateCreated: 1700000000000, data: { flowVersion: 'v1', triggers: [{ name: 'trigger/processed', params: { name: 'http/post/x', type: 'on', params: { path: 'x', method: 'post' }, timeoutTime: 0 } }] } },
   ];
-  const fetch = vi.fn(async (url: string, init?: { headers?: Record<string, string> }) => {
+  const fetch = vi.fn(async (url: string, init?: { headers?: Record<string, string>; method?: string; body?: string }) => {
     calls.push(url);
     const auth = init?.headers?.['Authorization'] ?? '';
     const reply = (status: number, body: unknown) => ({ ok: status < 400, status, text: async () => (typeof body === 'string' ? body : JSON.stringify(body)) });
@@ -67,6 +69,28 @@ function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: str
       rejected = true;
       return reply(401, 'auth fail: wrong keyId');
     }
+    if (/\/flows\/deploy$/.test(url)) {
+      const method = init?.method ?? 'GET';
+      // The deployer's own shapes: POST { flowId, flowAlias, interactiveDebug, role }; DELETE { flow: { id }, role }.
+      const body = JSON.parse(init?.body ?? '{}') as { flowId?: string; flowAlias?: string; interactiveDebug?: boolean; flow?: { id: string }; role?: string };
+      if (method === 'POST' && (typeof body.flowId !== 'string' || !/^v-\d+$/.test(body.flowAlias ?? '') || body.interactiveDebug !== false)) return reply(400, '"flowId" and "flowAlias" are required');
+      if (method === 'DELETE' && typeof body.flow?.id !== 'string') return reply(400, 'ValidationError: "flow" is required');
+      const flowId = method === 'POST' ? body.flowId! : body.flow!.id;
+      deployCalls.push(`${method} ${flowId} ${body.role ?? ''}`);
+      pendingDeploy = { flowId, armed: method === 'POST', polls: 0 };
+      return reply(200, { requestId: 'req-1' });
+    }
+    if (/\/flows\/check\//.test(url)) {
+      if (pendingDeploy === null) return reply(404, 'nothing pending');
+      pendingDeploy.polls += 1;
+      if (pendingDeploy.polls < 2) return reply(200, { status: 'pending' });
+      if (opts.deployFails === true) return reply(200, { status: 'failed', errorData: { message: 'deploy exploded' } });
+      const target = pendingDeploy.flowId;
+      const idx = deployments.findIndex((d) => d.flowId === target);
+      if (pendingDeploy.armed && idx < 0) deployments.push({ id: 'dep-new', flowId: target, botId: 'b2', dateCreated: 1700000001000, data: { flowVersion: 'v1', triggers: [{ name: 'trigger/processed', params: { name: `timer/${target}/s1/next`, type: 'on', hasSchedule: true, timeoutTime: 4102444800000 } }] } });
+      if (!pendingDeploy.armed && idx >= 0) deployments.splice(idx, 1);
+      return reply(200, { status: 'done' });
+    }
     if (url.includes('/bots?')) return reply(200, { items: [{ id: 'b1', data: { label: 'Reporting' } }, { botId: 'b2', data: { label: 'Ops' } }] });
     if (url.includes('/deployments?')) return opts.deploymentsFail === true ? reply(500, 'nope') : reply(200, deployments);
     if (/\/flows\/[A-Za-z0-9_-]+$/.test(url)) {
@@ -84,7 +108,7 @@ function fakeGsx(opts: { tokenOk?: boolean; rejectFirst?: boolean; failBot?: str
     }
     return reply(404, 'nope');
   });
-  return { fetch, calls, mintedCount: () => minted, flowsByBot };
+  return { fetch, calls, deployCalls, mintedCount: () => minted, flowsByBot };
 }
 
 /** An in-memory schedule-index store. */
@@ -270,5 +294,93 @@ describe('CalendarService — flow log summaries (on demand)', () => {
     expect(f.narrative).toContain('2 executions');
     await expect(svc.flowLogSummary({ flowId: '../x', botId: 'b1', fromMs: 0, toMs: 1 })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
     await expect(svc.flowLogSummary({ flowId: 'f-armed', botId: 'b1', fromMs: 0, toMs: 8 * 24 * 3600 * 1000 })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
+  });
+});
+
+describe('CalendarService — arm / disarm through the deployer', () => {
+  it('activates with the flow role, polls the check until done, refreshes, and reports the flow armed; disarms the same way', async () => {
+    const gsx = fakeGsx();
+    const { svc } = service(gsx, { sleep: async () => undefined });
+    const on = await svc.setArmed({ flowId: 'f-authored', botId: 'b2', armed: true });
+    expect(on).toMatchObject({ flowId: 'f-authored', armed: true, requestId: 'req-1', polls: 2 });
+    expect(on.flow?.armed).toBe(true);
+    expect(gsx.deployCalls).toEqual(['POST f-authored USER']);
+    expect((await svc.snapshot()).scheduled.find((f) => f.flowId === 'f-authored')?.armed).toBe(true);
+    const off = await svc.setArmed({ flowId: 'f-authored', botId: 'b2', armed: false });
+    expect(off.armed).toBe(false);
+    expect(off.flow?.armed).toBe(false);
+    expect(off.flow?.active).toBe(false);
+    expect(gsx.deployCalls).toEqual(['POST f-authored USER', 'DELETE f-authored USER']);
+  });
+
+  it('a failed deploy is CALENDAR_DEPLOY_FAILED; a malformed or unknown flow id is refused before the deployer is asked', async () => {
+    const gsx = fakeGsx({ deployFails: true });
+    const { svc } = service(gsx, { sleep: async () => undefined });
+    await expect(svc.setArmed({ flowId: 'f-authored', botId: 'b2', armed: true })).rejects.toMatchObject({ code: 'CALENDAR_DEPLOY_FAILED' });
+    await expect(svc.setArmed({ flowId: 'bad id!', botId: 'b2', armed: true })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
+    await expect(svc.setArmed({ flowId: 'f-missing', botId: 'b2', armed: true })).rejects.toMatchObject({ code: expect.stringMatching(/^CALENDAR_(INVALID_INPUT|HTTP_FAILED)$/) as unknown as string });
+    expect(gsx.deployCalls).toEqual(['POST f-authored USER']);
+  });
+});
+
+describe('CalendarService — flow links (Space, playbook, journey map)', () => {
+  const slots: Record<string, Record<string, unknown>> = {
+    'flow-build-queue-archive': {
+      'req-1': { playbookId: 'pb-1', flowId: 'f-armed', status: 'completed', finishedAt: '2026-08-17T11:30:36.342Z' },
+      'req-2': { playbookId: 'pb-kv', flowId: 'f-armed', status: 'completed-with-failures', finishedAt: '2026-08-18T11:30:36.342Z' },
+      junk: { nope: true },
+    },
+    'flow-build-queue': {},
+  };
+  const fakeKv = () => {
+    const listKeys = vi.fn(async (c: string) => Object.keys(slots[c] ?? {}));
+    const get = vi.fn(async (c: string, k: string): Promise<unknown> => (c === 'riff:sheets' ? (k === 'pb-kv' ? JSON.stringify({ title: 'KV-only playbook' }) : null) : (slots[c]?.[k] ?? null)));
+    return { listKeys, get };
+  };
+  const rows = [
+    {
+      flowSpaces: [{ id: 'sp-1', name: 'Omni Data', assetId: 'as-1', assetTitle: 'HTTP toolkit' }],
+      playbooks: [{ id: 'pb-1', title: 'HTTP toolkit playbook', spaceId: 'sp-2', spaceName: 'Ops' }],
+      spaces: [{ id: 'sp-1', name: 'Omni Data', via: 'asset' }, { id: 'sp-2', name: 'Ops', via: 'playbook' }],
+      journeys: [{ id: 'j-1', title: 'Onboarding', spaceId: 'sp-1', spaceName: 'Omni Data', via: 'asset' }],
+    },
+  ];
+
+  it('lists queue keys once per TTL and reads each slot body once; asks NEON with the flow, its playbooks and the GSX space name; caches per flow', async () => {
+    const gsx = fakeGsx();
+    const kv = fakeKv();
+    const query = vi.fn(async (_cypher: string, _params: Record<string, unknown>) => rows);
+    const { svc } = service(gsx, { kv, query, viewerId: () => ' Robb@onereach.com ' });
+    const r = await svc.flowLinks({ flowId: 'f-armed', botLabel: 'Omni Data' });
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0]?.[1]).toMatchObject({ flowId: 'f-armed', playbookIds: ['pb-kv', 'pb-1'], botLabel: 'omni data', viewerId: 'robb@onereach.com' });
+    expect(r.spaces.map((sp) => [sp.id, sp.via, sp.assetTitle])).toEqual([['sp-1', 'asset', 'HTTP toolkit'], ['sp-2', 'playbook', null]]);
+    expect(r.playbooks.map((p) => [p.id, p.title, p.status])).toEqual([['pb-1', 'HTTP toolkit playbook', 'completed'], ['pb-kv', 'KV-only playbook', 'completed-with-failures']]);
+    expect(r.journeys[0]).toMatchObject({ id: 'j-1', via: 'asset' });
+    expect(r.unavailable).toBe(false);
+    expect(kv.listKeys).toHaveBeenCalledTimes(2);
+    const slotReads = () => kv.get.mock.calls.filter((c) => c[0] !== 'riff:sheets').length;
+    expect(slotReads()).toBe(3);
+    expect(await svc.flowLinks({ flowId: 'f-armed', botLabel: 'Omni Data' })).toBe(r);
+    expect(query).toHaveBeenCalledTimes(1);
+    const other = await svc.flowLinks({ flowId: 'f-plain', botLabel: 'Ops' });
+    expect(slotReads()).toBe(3);
+    expect(kv.listKeys).toHaveBeenCalledTimes(2);
+    expect(query.mock.calls[1]?.[1]).toMatchObject({ flowId: 'f-plain', playbookIds: [], botLabel: 'ops' });
+    expect(other.flowId).toBe('f-plain');
+  });
+
+  it('no KV → no queue leg; NEON down → KV-titled playbooks still listed and unavailable with the reason; a bad id is refused', async () => {
+    const gsx = fakeGsx();
+    const noKv = service(gsx, { query: vi.fn(async () => rows) }).svc;
+    const r1 = await noKv.flowLinks({ flowId: 'f-armed', botLabel: 'Omni Data' });
+    expect(r1.playbooks.map((p) => [p.id, p.builtAtMs])).toEqual([['pb-1', null]]);
+    const failing = service(gsx, { kv: fakeKv(), query: vi.fn(async () => { throw new Error('neon down'); }) }).svc;
+    const r2 = await failing.flowLinks({ flowId: 'f-armed', botLabel: 'Omni Data' });
+    expect(r2.unavailable).toBe(true);
+    expect(r2.reason).toContain('neon down');
+    expect(r2.spaces).toEqual([]);
+    expect(r2.playbooks.map((p) => p.id)).toEqual(['pb-kv']);
+    await expect(failing.flowLinks({ flowId: '' })).rejects.toMatchObject({ code: 'CALENDAR_INVALID_INPUT' });
   });
 });

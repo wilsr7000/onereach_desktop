@@ -1184,6 +1184,7 @@ app
         ai: { chat: (input) => getAiApi().chat(input) },
         viewerId: () => resolveSpacesViewerId(),
         // The schedule index: which flow versions carry a schedule — local for warm starts, KV so the platform can share it.
+        kv: { listKeys: (c) => getKVApi().listKeys(c), get: (c, k) => getKVApi().get(c, k) },
         indexStore: compositeIndexStore(
           [fileIndexStore(app.getPath('userData')), kvIndexStore({ get: (c, k) => getKVApi().get(c, k), set: (c, k, v) => getKVApi().set(c, k, v) })],
           (message, data) => getLoggingApi().warn('calendar', message, data)

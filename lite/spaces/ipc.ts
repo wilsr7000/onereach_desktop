@@ -70,6 +70,8 @@ import type { DiscoveryResults } from './discovery-format.js';
 
 export const SPACES_IPC = {
   OPEN: 'lite:spaces:open',
+  /** Calendar → Spaces deep link (ADR-090): the renderer takes the Space it should land on, once. */
+  FOCUS_SPACE_TAKE: 'lite:spaces:focusSpace:take',
   /** Spaces↔WISER bridge: open the Playbooks window, optionally at a riff. */
   OPEN_WISER: 'lite:spaces:openWiser',
   /**
@@ -204,8 +206,10 @@ export type SpacesIpcResult<T> =
     };
 
 interface RegisterOpts {
-  /** Called for `OPEN` -- the menu wiring boils down to this. */
-  onOpen: () => void;
+  /** Called for `OPEN` -- the menu wiring boils down to this; a deep link names the Space to land on. */
+  onOpen: (spaceId?: string | null) => void;
+  /** Hands the renderer the Space a deep link asked for before it booted (once). */
+  takePendingFocus?: () => string | null;
 }
 
 let registered = false;
@@ -239,10 +243,13 @@ function handleSpacesIpc(channel: string, handler: SpacesIpcHandler): void {
 export function registerSpacesIpc(opts: RegisterOpts): void {
   if (registered) return;
 
-  handleSpacesIpc(SPACES_IPC.OPEN, (_event: IpcMainInvokeEvent): { ok: true } => {
-    opts.onOpen();
+  handleSpacesIpc(SPACES_IPC.OPEN, (_event: IpcMainInvokeEvent, payload?: { spaceId?: unknown }): { ok: true } => {
+    const spaceId = typeof payload?.spaceId === 'string' && payload.spaceId.trim().length > 0 ? payload.spaceId.trim() : null;
+    opts.onOpen(spaceId);
     return { ok: true };
   });
+
+  handleSpacesIpc(SPACES_IPC.FOCUS_SPACE_TAKE, (_event: IpcMainInvokeEvent): { ok: true; spaceId: string | null } => ({ ok: true, spaceId: opts.takePendingFocus?.() ?? null }));
 
   handleSpacesIpc(
     SPACES_IPC.OPEN_WISER,

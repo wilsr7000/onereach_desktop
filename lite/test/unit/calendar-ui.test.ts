@@ -4,7 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildDayPane, buildDetail, buildMonthGrid, describeSeries, groupRuns, keyOf, summaryText } from '../../calendar/renderer.js';
+import { buildDayPane, buildDayView, buildDetail, buildMonthGrid, buildWeekView, describeSeries, groupRuns, keyOf, rangeFor, summaryText, titleFor, weekStartOf } from '../../calendar/renderer.js';
 
 const occ = (atMs: number, over: Partial<LiteCalendarOccurrence> = {}): LiteCalendarOccurrence => ({ atMs, flowId: 'f1', botId: 'b1', botLabel: 'Reporting', flowLabel: 'Nightly report', description: 'Nightly reporting run', eventId: 'e1', eventName: 'Nightly', color: '#FFC107', timeZone: 'UTC', ...over });
 const day = (y: number, m: number, d: number, h = 0, mi = 0): number => new Date(y, m - 1, d, h, mi).getTime();
@@ -103,5 +103,128 @@ describe('calendar UI — panes', () => {
     expect(summaryText(snap, 30)).toBe('2 scheduled flows · 1 armed · 30 runs this month');
     expect(summaryText(null, 0)).toBe('scheduled flows');
     expect(keyOf(day(2026, 9, 5, 23, 59))).toBe('2026-09-05');
+  });
+});
+
+const NOW = day(2026, 9, 5, 12);
+const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+describe('calendar UI — armed and not armed', () => {
+  it('unarmed runs are dimmed in the grid and badged in the day pane; the account list counts and badges every scheduled flow', () => {
+    const base = day(2026, 9, 5, 9);
+    const armedById = new Map([['f1', true], ['f2', false]]);
+    const grid = buildMonthGrid([occ(base), occ(base, { flowId: 'f2', flowLabel: 'Idle', eventId: 'e2' })], { year: 2026, month: 9, selected: null, today: '2026-09-05', onSelect: vi.fn(), armedById });
+    const chips = Array.from(grid.querySelectorAll('.cal-chip'));
+    expect(chips).toHaveLength(2);
+    expect(chips.filter((c) => c.classList.contains('is-unarmed')).map((c) => c.textContent)).toEqual([expect.stringContaining('Idle')]);
+    const onPickFlow = vi.fn();
+    const pane = buildDayPane([occ(base, { flowId: 'f2', flowLabel: 'Idle', eventId: 'e2' })], { key: '2026-09-05', onPick: vi.fn(), armedById, flows: [flow(), flow({ flowId: 'f2', flowLabel: 'Idle', active: false, armed: false })], onPickFlow });
+    expect(pane.querySelector('.cal-run.is-unarmed .cal-badge')?.textContent).toBe('not armed');
+    expect(pane.textContent).toContain('In this account · 2 scheduled, 1 armed, 1 not armed');
+    const rows = Array.from(pane.querySelectorAll<HTMLElement>('.cal-flows__row'));
+    expect(rows.map((r) => r.querySelector('.cal-badge')?.textContent)).toEqual(['armed', 'not armed']);
+    rows[1]!.click();
+    expect(onPickFlow).toHaveBeenCalledWith(expect.objectContaining({ flowId: 'f2' }));
+  });
+
+  it('Arm/Disarm asks inline, cancels, confirms through onSetArmed, and is inert without a handler; an ended window is noted', () => {
+    const onSetArmed = vi.fn(async () => null);
+    const pane = buildDetail(flow(), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn(), onSetArmed });
+    const arm = pane.querySelector<HTMLButtonElement>('#cal-arm')!;
+    const confirm = pane.querySelector<HTMLElement>('.cal-arm__confirm')!;
+    expect(arm.textContent).toBe('Disarm');
+    expect(confirm.hidden).toBe(true);
+    arm.click();
+    expect(confirm.hidden).toBe(false);
+    confirm.querySelectorAll('button')[1]!.click();
+    expect(confirm.hidden).toBe(true);
+    expect(onSetArmed).not.toHaveBeenCalled();
+    arm.click();
+    pane.querySelector<HTMLButtonElement>('#cal-arm-confirm')!.click();
+    expect(onSetArmed).toHaveBeenCalledWith(expect.objectContaining({ flowId: 'f1' }), false);
+    expect(arm.disabled).toBe(true);
+    const idle = buildDetail(flow({ active: false, armed: false }), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn() });
+    expect(idle.querySelector<HTMLButtonElement>('#cal-arm')?.textContent).toBe('Arm');
+    expect(idle.querySelector<HTMLButtonElement>('#cal-arm')?.disabled).toBe(true);
+    expect(idle.querySelector('.cal-note')).toBeNull();
+    const ended = buildDetail(flow({ events: [{ ...flow().events[0]!, end: { date: '2020-02-01', time: '' } }] }), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn() });
+    expect(ended.querySelector('.cal-note')?.textContent).toContain('Every schedule window ended');
+    expect(ended.querySelector('.cal-note')?.classList.contains('is-warn')).toBe(true);
+  });
+
+  it('the links block lists Space, playbook and journey-map buttons and opens each; none → a plain line; failure → unavailable', async () => {
+    const links: LiteCalendarFlowLinks = {
+      flowId: 'f1',
+      spaces: [{ id: 'sp-1', name: 'Omni Data', via: 'asset', assetId: 'as-1', assetTitle: 'HTTP toolkit' }, { id: 'sp-2', name: 'Ops', via: 'name', assetId: null, assetTitle: null }],
+      playbooks: [{ id: 'pb-1', title: 'HTTP toolkit playbook', spaceId: null, spaceName: null, via: 'build', builtAtMs: null, status: 'completed' }],
+      journeys: [{ id: 'j-1', title: 'Onboarding', spaceId: 'sp-1', spaceName: 'Omni Data', via: 'asset' }],
+      unavailable: false,
+      fetchedAtMs: 0,
+    };
+    const onOpenSpace = vi.fn();
+    const onOpenPlaybook = vi.fn();
+    const onOpenJourney = vi.fn();
+    const pane = buildDetail(flow(), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn(), onLinks: async () => links, onOpenSpace, onOpenPlaybook, onOpenJourney });
+    expect(pane.querySelector('#cal-links')?.textContent).toContain('Looking for');
+    await tick();
+    const btns = Array.from(pane.querySelectorAll<HTMLButtonElement>('.cal-links__btn'));
+    expect(btns.map((b) => b.textContent)).toEqual(['In Space · Omni Data', 'Near Space · Ops', 'Open playbook · HTTP toolkit playbook', 'Open journey map · Onboarding']);
+    expect(btns[0]!.title).toContain('“HTTP toolkit”');
+    btns[0]!.click();
+    btns[2]!.click();
+    btns[3]!.click();
+    expect(onOpenSpace).toHaveBeenCalledWith('sp-1');
+    expect(onOpenPlaybook).toHaveBeenCalledWith('pb-1');
+    expect(onOpenJourney).toHaveBeenCalledWith('j-1');
+    const none = buildDetail(flow(), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn(), onLinks: async () => ({ ...links, spaces: [], playbooks: [], journeys: [] }) });
+    await tick();
+    expect(none.querySelector('#cal-links')?.textContent).toContain('in no Space');
+    const failed = buildDetail(flow(), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn(), onLinks: async () => { throw new Error('x'); } });
+    await tick();
+    expect(failed.querySelector('#cal-links')?.textContent).toContain('unavailable');
+    expect(buildDetail(flow(), { nowMs: NOW, upcoming: [], onOpen: vi.fn(), onBack: vi.fn() }).querySelector('#cal-links')).toBeNull();
+  });
+});
+
+describe('calendar UI — week and day views', () => {
+  it('the week view has seven Sunday-first columns with runs in time order; a chip selects its day and picks the flow', () => {
+    const onSelect = vi.fn();
+    const onPick = vi.fn();
+    const base = day(2026, 9, 3, 9);
+    const week = buildWeekView([occ(base + 3600_000, { flowId: 'f2', flowLabel: 'Idle', eventId: 'e2' }), occ(base)], { anchorKey: '2026-09-05', selected: '2026-09-05', today: '2026-09-05', onSelect, onPick, armedById: new Map([['f2', false]]) });
+    const cols = Array.from(week.querySelectorAll<HTMLElement>('.cal-week__day'));
+    expect(cols.map((c) => c.dataset['key'])).toEqual(['2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05']);
+    expect(cols[6]!.classList.contains('is-selected')).toBe(true);
+    expect(cols[6]!.classList.contains('is-today')).toBe(true);
+    const chips = Array.from(cols[4]!.querySelectorAll<HTMLButtonElement>('.cal-week__chip'));
+    expect(chips.map((c) => c.querySelector('.cal-chip-name')?.textContent)).toEqual(['Nightly report', 'Idle']);
+    expect(chips[1]!.classList.contains('is-unarmed')).toBe(true);
+    expect(cols[0]!.querySelector('.cal-week__none')).not.toBeNull();
+    chips[0]!.click();
+    expect(onSelect).toHaveBeenCalledWith('2026-09-03');
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ flowId: 'f1' }));
+    cols[1]!.querySelector<HTMLButtonElement>('.cal-week__head')!.click();
+    expect(onSelect).toHaveBeenLastCalledWith('2026-08-31');
+  });
+
+  it('the day view has 24 hour rows with each run in its hour; titles and ranges follow the view', () => {
+    const base = day(2026, 9, 5, 14, 30);
+    const onPick = vi.fn();
+    const view = buildDayView([occ(base), occ(base + 5 * 60_000)], { key: '2026-09-05', today: '2026-09-05', onPick });
+    const rows = Array.from(view.querySelectorAll<HTMLElement>('.cal-dayview__hour'));
+    expect(rows).toHaveLength(24);
+    expect(rows.filter((r) => r.classList.contains('has-runs')).map((r) => r.dataset['hour'])).toEqual(['14']);
+    const chip = rows[14]!.querySelector<HTMLButtonElement>('.cal-dayview__chip')!;
+    expect(chip.querySelector('.cal-chip-when')?.textContent).toMatch(/×2$/);
+    chip.click();
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ flowId: 'f1', times: [base, base + 5 * 60_000] }));
+    expect(buildDayView([], { key: '2026-09-06', today: '2026-09-05', onPick }).textContent).toContain('No scheduled runs');
+    expect(weekStartOf('2026-09-05').getDay()).toBe(0);
+    expect(titleFor('month', 2026, 9, null)).toBe('September 2026');
+    expect(titleFor('week', 2026, 9, '2026-09-05')).toBe('Aug 30 – Sep 5, 2026');
+    expect(titleFor('day', 2026, 9, '2026-09-05')).toContain('September 5, 2026');
+    expect(rangeFor('day', 2026, 9, '2026-09-05')).toEqual({ fromMs: day(2026, 9, 5), toMs: day(2026, 9, 6) });
+    expect(rangeFor('week', 2026, 9, '2026-09-05')).toEqual({ fromMs: day(2026, 8, 30), toMs: day(2026, 9, 6) });
+    expect(rangeFor('month', 2026, 9, null)).toEqual({ fromMs: day(2026, 9, 1), toMs: day(2026, 10, 1) });
   });
 });

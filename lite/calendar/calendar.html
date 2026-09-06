@@ -10,20 +10,34 @@
   <body>
     <div class="cal-app">
       <header class="cal-top">
-        <div class="cal-brand">
-          <span class="cal-brand-mark" aria-hidden="true">◷</span>
-          <h1 class="cal-title">Calendar</h1>
-          <span class="cal-subtitle" id="cal-subtitle">scheduled flows</span>
+        <div class="cal-titlebar">
+          <div class="cal-brand">
+            <span class="cal-brand-mark" aria-hidden="true">◷</span>
+            <h1 class="cal-title">Calendar</h1>
+            <span class="cal-subtitle" id="cal-subtitle">scheduled flows</span>
+          </div>
+          <div class="cal-actions">
+            <span class="cal-status" id="cal-status" aria-live="polite"></span>
+            <button type="button" class="cal-btn" id="cal-export" title="Save the runs in view as an .ics file for Apple Calendar, Google Calendar or Outlook">Export .ics</button>
+            <button type="button" class="cal-btn" id="cal-refresh" title="Refresh from GSX (⌘R)">Refresh</button>
+          </div>
         </div>
-        <nav class="cal-nav" aria-label="Month">
-          <button type="button" class="cal-btn" id="cal-prev" title="Previous month (←)">‹</button>
-          <button type="button" class="cal-btn" id="cal-today">Today</button>
-          <button type="button" class="cal-btn" id="cal-next" title="Next month (→)">›</button>
-          <h2 class="cal-month" id="cal-month" aria-live="polite"></h2>
-        </nav>
-        <div class="cal-actions">
-          <span class="cal-status" id="cal-status" aria-live="polite"></span>
-          <button type="button" class="cal-btn" id="cal-refresh" title="Refresh from GSX (⌘R)">Refresh</button>
+        <div class="cal-toolbar">
+          <nav class="cal-nav" aria-label="Period">
+            <div class="cal-seg" role="group" aria-label="Move">
+              <button type="button" class="cal-btn" id="cal-prev" title="Previous month (←)" aria-label="Previous">‹</button>
+              <button type="button" class="cal-btn" id="cal-today">Today</button>
+              <button type="button" class="cal-btn" id="cal-next" title="Next month (→)" aria-label="Next">›</button>
+            </div>
+            <h2 class="cal-month" id="cal-month" aria-live="polite"></h2>
+          </nav>
+          <div class="cal-toolbar__controls">
+            <div class="cal-seg" id="cal-view" role="group" aria-label="View"></div>
+            <div class="cal-toolbar__filter">
+              <span class="cal-toolbar__label" aria-hidden="true">Show</span>
+              <div class="cal-seg" id="cal-filter" role="group" aria-label="Show runs of"></div>
+            </div>
+          </div>
         </div>
       </header>
       <div class="cal-banner" id="cal-banner" role="status" aria-live="polite" hidden></div>

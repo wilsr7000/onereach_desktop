@@ -40,6 +40,8 @@ export function el<K extends keyof HTMLElementTagNameMap>(tag: K, className?: st
 export interface RunGroup {
   flowId: string;
   botId: string;
+  /** false when the flow is not armed: its runs are drawn dimmed (they would not fire). */
+  armed: boolean;
   eventId: string;
   flowLabel: string;
   eventName: string;
@@ -50,13 +52,13 @@ export interface RunGroup {
   times: number[];
 }
 
-export function groupRuns(occurrences: Occurrence[]): RunGroup[] {
+export function groupRuns(occurrences: Occurrence[], armedById?: ReadonlyMap<string, boolean>): RunGroup[] {
   const map = new Map<string, RunGroup>();
   for (const o of occurrences) {
     const k = `${o.flowId}|${o.eventId}`;
     let g = map.get(k);
     if (g === undefined) {
-      g = { flowId: o.flowId, botId: o.botId, eventId: o.eventId, flowLabel: o.flowLabel, eventName: o.eventName, botLabel: o.botLabel, color: o.color, timeZone: o.timeZone, description: o.description, times: [] };
+      g = { flowId: o.flowId, botId: o.botId, armed: armedById?.get(o.flowId) ?? true, eventId: o.eventId, flowLabel: o.flowLabel, eventName: o.eventName, botLabel: o.botLabel, color: o.color, timeZone: o.timeZone, description: o.description, times: [] };
       map.set(k, g);
     }
     g.times.push(o.atMs);
@@ -106,6 +108,8 @@ export interface GridOptions {
   /** Space events per day (ADR-090 addendum); a day with events gets a link that opens the events modal. */
   eventDays?: ReadonlyMap<string, SpaceEventDay> | undefined;
   onEvents?: ((day: SpaceEventDay) => void) | undefined;
+  /** flowId → armed; unarmed runs are drawn dimmed. */
+  armedById?: ReadonlyMap<string, boolean> | undefined;
 }
 
 /** The 6×7 month grid; each cell lists its runs collapsed per (flow, event). */
@@ -126,16 +130,16 @@ export function buildMonthGrid(occurrences: Occurrence[], opts: GridOptions): HT
     cell.dataset['day'] = key;
     cell.setAttribute('role', 'gridcell');
     cell.appendChild(el('span', 'cal-day-num', String(d.getDate())));
-    const groups = groupRuns(days.get(key) ?? []);
+    const groups = groupRuns(days.get(key) ?? [], opts.armedById);
     const shown = groups.slice(0, 4);
     for (const g of shown) {
-      const chip = el('div', 'cal-chip');
+      const chip = el('div', `cal-chip${g.armed ? '' : ' is-unarmed'}`);
       if (g.color.length > 0) chip.style.borderLeftColor = g.color;
       // A single run shows its time; a series shows its count instead (the title carries the span).
       if (g.times.length === 1) chip.appendChild(el('span', 'cal-chip-time', fmtTime(g.times[0] ?? 0)));
       chip.appendChild(el('span', 'cal-chip-text', `${g.eventName} · ${g.flowLabel}`));
       if (g.times.length > 1) chip.appendChild(el('span', 'cal-chip-count', `×${g.times.length}`));
-      chip.title = `${g.flowLabel} — ${g.eventName}: ${describeSeries(g.times)} (${g.botLabel})${g.description.length > 0 ? `\n${g.description}` : ''}`;
+      chip.title = `${g.flowLabel} — ${g.eventName}: ${describeSeries(g.times)} (${g.botLabel})${g.armed ? '' : '\nNot armed: this run would not fire.'}${g.description.length > 0 ? `\n${g.description}` : ''}`;
       cell.appendChild(chip);
     }
     if (groups.length > shown.length) cell.appendChild(el('div', 'cal-more', `+${groups.length - shown.length} more`));
@@ -151,6 +155,10 @@ export function buildMonthGrid(occurrences: Occurrence[], opts: GridOptions): HT
 export interface DayPaneOptions {
   key: string;
   onPick: (group: RunGroup) => void;
+  armedById?: ReadonlyMap<string, boolean> | undefined;
+  /** Every scheduled flow in the account, for the "in this account" list under the day. */
+  flows?: readonly Scheduled[] | undefined;
+  onPickFlow?: ((flow: Scheduled) => void) | undefined;
 }
 
 /** The selected day's runs, collapsed per (flow, event). */
@@ -158,24 +166,45 @@ export function buildDayPane(occurrences: Occurrence[], opts: DayPaneOptions): H
   const pane = el('div', 'cal-day-pane');
   const [y, m, d] = opts.key.split('-').map((v) => Number.parseInt(v, 10)) as [number, number, number];
   pane.appendChild(el('h3', undefined, new Date(y, m - 1, d).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })));
-  const groups = groupRuns(occurrences);
+  const groups = groupRuns(occurrences, opts.armedById);
+  const flowsList = (): void => {
+    const flows = opts.flows ?? [];
+    if (flows.length === 0) return;
+    const armed = flows.filter((f) => f.armed).length;
+    pane.appendChild(el('h4', undefined, `In this account · ${flows.length} scheduled, ${armed} armed, ${flows.length - armed} not armed`));
+    const ul = el('ul', 'cal-flows');
+    for (const f of [...flows].sort((a, b) => Number(b.armed) - Number(a.armed) || a.flowLabel.localeCompare(b.flowLabel))) {
+      const li = el('li', `cal-flows__row${f.armed ? '' : ' is-unarmed'}`);
+      li.dataset['flowId'] = f.flowId;
+      li.appendChild(el('span', 'cal-flows__name', f.flowLabel));
+      li.appendChild(el('span', `cal-badge ${f.armed ? 'is-on' : 'is-off'}`, f.armed ? 'armed' : f.active ? 'active · no trigger' : 'not armed'));
+      li.appendChild(el('span', 'cal-flows__bot', f.botLabel));
+      li.addEventListener('click', () => opts.onPickFlow?.(f));
+      ul.appendChild(li);
+    }
+    pane.appendChild(ul);
+  };
   if (groups.length === 0) {
     pane.appendChild(el('div', 'cal-empty', 'No scheduled runs this day.'));
+    flowsList();
     return pane;
   }
   pane.appendChild(el('h4', undefined, `${groups.length} scheduled flow${groups.length === 1 ? '' : 's'}`));
   for (const g of groups) {
-    const row = el('div', 'cal-run');
+    const row = el('div', `cal-run${g.armed ? '' : ' is-unarmed'}`);
     row.dataset['flowId'] = g.flowId;
     row.appendChild(el('div', 'cal-run-time', fmtTime(g.times[0] ?? 0)));
     const body = el('div');
-    body.appendChild(el('div', 'cal-run-flow', g.flowLabel));
+    const name = el('div', 'cal-run-flow', g.flowLabel);
+    if (!g.armed) name.appendChild(el('span', 'cal-badge is-off', 'not armed'));
+    body.appendChild(name);
     body.appendChild(el('div', 'cal-run-meta', `${g.eventName} · ${describeSeries(g.times)} · ${g.botLabel}`));
     if (g.description.length > 0) body.appendChild(el('div', 'cal-run-desc', g.description));
     row.appendChild(body);
     row.addEventListener('click', () => opts.onPick(g));
     pane.appendChild(row);
   }
+  flowsList();
   return pane;
 }
 
@@ -184,6 +213,13 @@ export interface DetailOptions {
   upcoming: Occurrence[];
   onOpen: (flow: Scheduled) => void;
   onBack: () => void;
+  /** Arm or disarm through the deployer; resolves with the refreshed flow (null when it vanished). */
+  onSetArmed?: ((flow: Scheduled, armed: boolean) => Promise<Scheduled | null>) | undefined;
+  /** Space, playbook and journey-map links, fetched when the pane opens; buttons open each. */
+  onLinks?: ((flow: Scheduled) => Promise<LiteCalendarFlowLinks | null>) | undefined;
+  onOpenSpace?: ((spaceId: string) => void) | undefined;
+  onOpenPlaybook?: ((playbookId: string) => void) | undefined;
+  onOpenJourney?: ((journeyId: string) => void) | undefined;
   /** Fetch a past run's log summary when its button is clicked (never before). */
   onLogSummary?: ((run: { fromMs: number; toMs: number }) => Promise<LogSummary | null>) | undefined;
 }
@@ -217,6 +253,47 @@ export function buildDetail(flow: Scheduled, opts: DetailOptions): HTMLElement {
   row('State', flow.armed ? 'Active; the Event Manager holds its schedule trigger.' : flow.active ? 'Active, but the deployment carries no schedule trigger.' : 'Not active: the schedule is authored but nothing will fire until the flow is activated.');
   if (flow.activatedMs > 0) row('Activated', fmtDateTime(flow.activatedMs));
   if (flow.nextFireMs !== null) row('Next fire (recorded)', fmtDateTime(flow.nextFireMs));
+  const ends = flow.events.map((ev) => (ev.end === null ? null : Date.parse(`${ev.end.date}T${ev.end.time.length > 0 ? ev.end.time : '23:59:59'}`)));
+  const allEnded = ends.length > 0 && ends.every((e) => e !== null && Number.isFinite(e) && e < opts.nowMs);
+  if (allEnded) {
+    const last = Math.max(...ends.map((e) => e ?? 0));
+    pane.appendChild(el('p', `cal-note ${flow.armed ? 'is-warn' : ''}`, flow.armed ? `Every schedule window ended (last on ${new Date(last).toLocaleDateString()}), yet the platform still holds a trigger for this flow. Check its logs below; it may be firing regardless.` : `Every schedule window ended (last on ${new Date(last).toLocaleDateString()}). Extend the window in Designer before arming.`));
+  }
+  // Arm / disarm, with an inline confirmation: this changes the account.
+  const armRow = el('div', 'cal-arm');
+  const armBtn = el('button', `cal-btn ${flow.active ? 'cal-btn-quiet' : 'cal-btn-primary'}`, flow.active ? 'Disarm' : 'Arm');
+  armBtn.type = 'button';
+  armBtn.id = 'cal-arm';
+  armBtn.disabled = opts.onSetArmed === undefined;
+  armBtn.title = flow.active ? 'Deactivate this flow: it stops firing until armed again.' : 'Activate this flow so its schedule fires.';
+  const confirm = el('div', 'cal-arm__confirm');
+  confirm.hidden = true;
+  const question = el('span', undefined, flow.active ? `Disarm ${flow.flowLabel}? It stops firing until you arm it again.` : `Arm ${flow.flowLabel}? Its schedule will start firing.`);
+  const yes = el('button', 'cal-btn cal-btn-primary', flow.active ? 'Yes, disarm' : 'Yes, arm');
+  yes.type = 'button';
+  yes.id = 'cal-arm-confirm';
+  const no = el('button', 'cal-btn cal-btn-quiet', 'Cancel');
+  no.type = 'button';
+  confirm.append(question, yes, no);
+  armBtn.addEventListener('click', () => {
+    confirm.hidden = !confirm.hidden;
+    if (!confirm.hidden) yes.focus();
+  });
+  no.addEventListener('click', () => {
+    confirm.hidden = true;
+    armBtn.focus();
+  });
+  yes.addEventListener('click', () => {
+    const run = opts.onSetArmed;
+    if (run === undefined) return;
+    yes.disabled = true;
+    no.disabled = true;
+    armBtn.disabled = true;
+    question.textContent = flow.active ? 'Disarming… the platform confirms in a few seconds.' : 'Arming… the platform confirms in a few seconds.';
+    void run(flow, !flow.active).catch(() => null);
+  });
+  armRow.append(armBtn, confirm);
+  pane.appendChild(armRow);
   pane.appendChild(el('h4', undefined, `Schedule${flow.events.length === 1 ? '' : 's'}`));
   for (const ev of flow.events) {
     const box = el('div', 'cal-event');
@@ -326,10 +403,189 @@ export function buildDetail(flow: Scheduled, opts: DetailOptions): HTMLElement {
   open.addEventListener('click', () => opts.onOpen(flow));
   actions.appendChild(open);
   pane.appendChild(actions);
+  if (opts.onLinks !== undefined) {
+    const links = el('section', 'cal-links');
+    links.id = 'cal-links';
+    links.setAttribute('aria-live', 'polite');
+    links.appendChild(el('div', 'cal-links__pending', 'Looking for its Space, playbook and journey map…'));
+    pane.appendChild(links);
+    const unavailable = (): void => links.replaceChildren(el('div', 'cal-links__none', 'Space, playbook and journey-map links are unavailable right now.'));
+    const button = (label: string, title: string, data: Record<string, string>, onClick: () => void): HTMLButtonElement => {
+      const btn = el('button', 'cal-btn cal-links__btn', label);
+      btn.type = 'button';
+      btn.title = title;
+      for (const [k, v] of Object.entries(data)) btn.dataset[k] = v;
+      btn.addEventListener('click', onClick);
+      return btn;
+    };
+    opts
+      .onLinks(flow)
+      .then((r) => {
+        if (r === null) {
+          unavailable();
+          return;
+        }
+        links.replaceChildren();
+        const total = r.spaces.length + r.playbooks.length + r.journeys.length;
+        if (total === 0) {
+          links.appendChild(el('div', 'cal-links__none', r.unavailable ? `No Space, playbook or journey map found (${r.reason ?? 'a source could not be read'}).` : 'This flow is in no Space, and no playbook or journey map is linked to it.'));
+          return;
+        }
+        links.appendChild(el('h4', undefined, 'Space, playbook & journey map'));
+        for (const sp of r.spaces) {
+          const why = sp.via === 'asset' ? `This flow is an item in the ${sp.name} Space${sp.assetTitle !== null && sp.assetTitle.length > 0 ? ` (“${sp.assetTitle}”)` : ''}.` : sp.via === 'playbook' ? `The playbook that built this flow lives in the ${sp.name} Space.` : `The ${sp.name} Space is named like this flow's GSX space.`;
+          links.appendChild(button(`${sp.via === 'asset' ? 'In Space' : 'Near Space'} · ${sp.name}`, why, { spaceId: sp.id, via: sp.via }, () => opts.onOpenSpace?.(sp.id)));
+        }
+        for (const p of r.playbooks) {
+          links.appendChild(button(`Open playbook · ${p.title}`, `Built this flow${p.builtAtMs !== null ? ` on ${new Date(p.builtAtMs).toLocaleDateString()}` : ''}${p.spaceName !== null && p.spaceName.length > 0 ? ` · in the ${p.spaceName} Space` : ''}.`, { playbookId: p.id }, () => opts.onOpenPlaybook?.(p.id)));
+        }
+        for (const j of r.journeys) {
+          const why = j.via === 'asset' ? `In the ${j.spaceName} Space, where this flow is an item.` : j.via === 'playbook' ? `In the ${j.spaceName} Space, beside the playbook that built this flow.` : `In the ${j.spaceName} Space, named like this flow's GSX space.`;
+          links.appendChild(button(`Open journey map · ${j.title}`, why, { journeyId: j.id, via: j.via }, () => opts.onOpenJourney?.(j.id)));
+        }
+        if (r.unavailable && r.reason !== undefined) links.appendChild(el('div', 'cal-links__note', `Some sources could not be read: ${r.reason}`));
+      })
+      .catch(unavailable);
+  }
   return pane;
 }
 
 /** "3 events · 2 Spaces": the day's Space-events link. Its own button, so it never selects the day. */
+/** Sunday-first start of the week holding a day key. */
+export function weekStartOf(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  date.setDate(date.getDate() - date.getDay());
+  return date;
+}
+
+export type CalendarView = 'month' | 'week' | 'day';
+
+/** The heading for a view. */
+export function titleFor(view: CalendarView, year: number, month: number, selected: string | null): string {
+  if (view === 'month') return `${MONTHS[month - 1] ?? ''} ${year}`;
+  const key = selected ?? dayKey({ year, month, day: 1 });
+  const [y, m, d] = key.split('-').map(Number);
+  if (view === 'day') return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const start = weekStartOf(key);
+  const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6);
+  const f = (x: Date, withYear: boolean): string => x.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(withYear ? { year: 'numeric' } : {}) });
+  return `${f(start, start.getFullYear() !== end.getFullYear())} – ${f(end, true)}`;
+}
+
+/** [from, to) of what a view shows. */
+export function rangeFor(view: CalendarView, year: number, month: number, selected: string | null): { fromMs: number; toMs: number } {
+  if (view === 'month') return { fromMs: new Date(year, month - 1, 1).getTime(), toMs: new Date(year, month, 1).getTime() };
+  const key = selected ?? dayKey({ year, month, day: 1 });
+  const [y, m, d] = key.split('-').map(Number);
+  if (view === 'day') return { fromMs: new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1).getTime(), toMs: new Date(y ?? 1970, (m ?? 1) - 1, (d ?? 1) + 1).getTime() };
+  const start = weekStartOf(key);
+  return { fromMs: start.getTime(), toMs: new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7).getTime() };
+}
+
+const runChip = (g: RunGroup, className: string, label: string): HTMLButtonElement => {
+  const chip = el('button', `cal-chip ${className}${g.armed ? '' : ' is-unarmed'}`);
+  chip.type = 'button';
+  chip.style.borderLeftColor = g.color;
+  chip.dataset['flowId'] = g.flowId;
+  chip.appendChild(el('span', 'cal-chip-when', g.times.length > 1 ? `${fmtTime(g.times[0] ?? 0)} ×${g.times.length}` : fmtTime(g.times[0] ?? 0)));
+  chip.appendChild(el('span', 'cal-chip-name', label));
+  chip.title = `${g.flowLabel} — ${g.eventName}: ${describeSeries(g.times)} (${g.botLabel})${g.armed ? '' : '\nNot armed: this run would not fire.'}${g.description.length > 0 ? `\n${g.description}` : ''}`;
+  return chip;
+};
+
+export interface WeekViewOptions {
+  anchorKey: string;
+  selected: string | null;
+  today: string;
+  onSelect: (key: string) => void;
+  onPick: (group: RunGroup) => void;
+  eventDays?: ReadonlyMap<string, SpaceEventDay> | undefined;
+  onEvents?: ((day: SpaceEventDay) => void) | undefined;
+  armedById?: ReadonlyMap<string, boolean> | undefined;
+}
+
+/** Seven columns for the week of the anchor day; every run of each day, in time order. */
+export function buildWeekView(occurrences: Occurrence[], opts: WeekViewOptions): HTMLElement {
+  const grid = el('div', 'cal-week');
+  grid.setAttribute('role', 'grid');
+  grid.setAttribute('aria-label', 'Scheduled runs by day this week');
+  const days = byDay(occurrences);
+  const start = weekStartOf(opts.anchorKey);
+  for (let i = 0; i < 7; i += 1) {
+    const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const key = keyOf(date.getTime());
+    const col = el('div', `cal-week__day${key === opts.today ? ' is-today' : ''}${key === opts.selected ? ' is-selected' : ''}`);
+    col.setAttribute('role', 'gridcell');
+    col.dataset['key'] = key;
+    const head = el('button', 'cal-week__head');
+    head.type = 'button';
+    head.appendChild(el('span', 'cal-week__weekday', WEEKDAYS[date.getDay()] ?? ''));
+    head.appendChild(el('span', 'cal-week__date', String(date.getDate())));
+    head.setAttribute('aria-label', date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }));
+    head.addEventListener('click', () => opts.onSelect(key));
+    col.appendChild(head);
+    const eventDay = opts.eventDays?.get(key);
+    if (eventDay !== undefined && eventDay.total > 0) col.appendChild(buildDayEventsLink(eventDay, () => opts.onEvents?.(eventDay)));
+    const groups = groupRuns(days.get(key) ?? [], opts.armedById);
+    if (groups.length === 0) col.appendChild(el('div', 'cal-week__none', '—'));
+    for (const g of groups) {
+      const chip = runChip(g, 'cal-week__chip', g.flowLabel);
+      chip.addEventListener('click', () => {
+        opts.onSelect(key);
+        opts.onPick(g);
+      });
+      col.appendChild(chip);
+    }
+    grid.appendChild(col);
+  }
+  return grid;
+}
+
+export interface DayViewOptions {
+  key: string;
+  today: string;
+  onPick: (group: RunGroup) => void;
+  eventDays?: ReadonlyMap<string, SpaceEventDay> | undefined;
+  onEvents?: ((day: SpaceEventDay) => void) | undefined;
+  armedById?: ReadonlyMap<string, boolean> | undefined;
+}
+
+/** One day by the hour; runs grouped per hour and per (flow, event). */
+export function buildDayView(occurrences: Occurrence[], opts: DayViewOptions): HTMLElement {
+  const view = el('div', `cal-dayview${opts.key === opts.today ? ' is-today' : ''}`);
+  view.setAttribute('role', 'grid');
+  view.setAttribute('aria-label', 'Scheduled runs by hour');
+  const eventDay = opts.eventDays?.get(opts.key);
+  if (eventDay !== undefined && eventDay.total > 0) view.appendChild(buildDayEventsLink(eventDay, () => opts.onEvents?.(eventDay)));
+  const mine = occurrences.filter((o) => keyOf(o.atMs) === opts.key);
+  const byHour = new Map<number, Occurrence[]>();
+  for (const o of mine) {
+    const h = new Date(o.atMs).getHours();
+    const list = byHour.get(h);
+    if (list === undefined) byHour.set(h, [o]);
+    else list.push(o);
+  }
+  if (mine.length === 0) view.appendChild(el('div', 'cal-empty', 'No scheduled runs this day.'));
+  for (let h = 0; h < 24; h += 1) {
+    const runs = byHour.get(h) ?? [];
+    const row = el('div', `cal-dayview__hour${runs.length > 0 ? ' has-runs' : ''}`);
+    row.setAttribute('role', 'row');
+    row.dataset['hour'] = String(h);
+    row.appendChild(el('div', 'cal-dayview__label', `${String(h).padStart(2, '0')}:00`));
+    const cell = el('div', 'cal-dayview__cell');
+    cell.setAttribute('role', 'gridcell');
+    for (const g of groupRuns(runs, opts.armedById)) {
+      const chip = runChip(g, 'cal-dayview__chip', `${g.flowLabel} · ${g.eventName}`);
+      chip.addEventListener('click', () => opts.onPick(g));
+      cell.appendChild(chip);
+    }
+    row.appendChild(cell);
+    view.appendChild(row);
+  }
+  return view;
+}
+
 export function buildDayEventsLink(day: SpaceEventDay, onClick: () => void): HTMLElement {
   const link = el('button', 'cal-day-events', `${day.total} event${day.total === 1 ? '' : 's'} · ${day.spaces.length} Space${day.spaces.length === 1 ? '' : 's'}`);
   link.type = 'button';
@@ -384,9 +640,9 @@ export function buildSpaceEventsModal(opts: EventsModalOptions): HTMLElement {
     gh.appendChild(el('span', 'cal-modal__space-name', s.spaceName));
     gh.appendChild(el('span', 'cal-modal__space-count', `${s.count} event${s.count === 1 ? '' : 's'}`));
     if (opts.onOpenSpace !== undefined && s.spaceId.length > 0) {
-      const open = el('button', 'cal-btn cal-btn-quiet', 'Open Spaces');
+      const open = el('button', 'cal-btn cal-btn-quiet', 'Open Space');
       open.type = 'button';
-      open.title = 'Opens the Spaces window (this Space is listed there).';
+      open.title = 'Opens the Spaces window on this Space.';
       open.addEventListener('click', () => opts.onOpenSpace?.(s.spaceId));
       gh.appendChild(open);
     }
@@ -433,6 +689,9 @@ const bridge = (): Bridge | null => window.lite?.calendar ?? null;
 interface PageState {
   year: number;
   month: number;
+  /** Which flows' runs the grid shows. */
+  filter: 'all' | 'armed' | 'unarmed';
+  view: 'month' | 'week' | 'day';
   selected: string | null;
   snapshot: Snapshot | null;
   occurrences: Occurrence[];
@@ -445,7 +704,7 @@ interface PageState {
 function boot(): void {
   if ($('cal-grid') === null) return;
   const now = new Date();
-  const state: PageState = { year: now.getFullYear(), month: now.getMonth() + 1, selected: keyOf(now.getTime()), snapshot: null, occurrences: [], detail: null, busy: false, spaceEvents: null };
+  const state: PageState = { year: now.getFullYear(), month: now.getMonth() + 1, filter: 'all', view: 'month', selected: keyOf(now.getTime()), snapshot: null, occurrences: [], detail: null, busy: false, spaceEvents: null };
   const weekdays = $('cal-weekdays');
   if (weekdays !== null) weekdays.replaceChildren(...WEEKDAYS.map((w) => el('span', undefined, w)));
 
@@ -476,43 +735,97 @@ function boot(): void {
         modal.remove();
         opener?.focus();
       },
-      onOpenSpace: (spaceId) => {
-        // The Spaces bridge opens the window; landing on a given Space is a follow-up (no deep link today).
-        const spaces = window.lite?.spaces as { open?: () => Promise<unknown> } | undefined;
-        void spaceId;
-        if (spaces?.open !== undefined) void spaces.open().catch(() => toast('Could not open Spaces.'));
-        else toast('Open Spaces from the main window to see this Space.');
-      },
+      onOpenSpace: (spaceId) => openSpace(spaceId),
     });
     document.body.appendChild(modal);
     modal.querySelector<HTMLElement>('.cal-modal__close')?.focus();
   };
 
+  const openSpace = (spaceId: string): void => {
+    const spaces = window.lite?.spaces;
+    if (spaces?.open === undefined) {
+      toast('Open Spaces from the main window to see this Space.');
+      return;
+    }
+    void spaces.open({ spaceId }).catch(() => toast('Could not open Spaces.'));
+  };
+
+  const renderViewToggle = (): void => {
+    const box = $('cal-view');
+    if (box === null) return;
+    box.replaceChildren(
+      ...(['month', 'week', 'day'] as const).map((v) => {
+        const b = el('button', `cal-btn cal-view__btn${state.view === v ? ' is-on' : ''}`, v === 'month' ? 'Month' : v === 'week' ? 'Week' : 'Day');
+        b.type = 'button';
+        b.dataset['view'] = v;
+        b.setAttribute('aria-pressed', String(state.view === v));
+        b.addEventListener('click', () => {
+          state.view = v;
+          render();
+        });
+        return b;
+      })
+    );
+    const prev = $('cal-prev');
+    const next = $('cal-next');
+    const unit = state.view === 'month' ? 'month' : state.view === 'week' ? 'week' : 'day';
+    if (prev !== null) prev.title = `Previous ${unit} (←)`;
+    if (next !== null) next.title = `Next ${unit} (→)`;
+  };
+
+  const renderFilter = (): void => {
+    const box = $('cal-filter');
+    if (box === null) return;
+    box.replaceChildren(
+      ...(['all', 'armed', 'unarmed'] as const).map((f) => {
+        const b = el('button', `cal-btn cal-filter__btn${state.filter === f ? ' is-on' : ''}`, f === 'all' ? 'All' : f === 'armed' ? 'Armed' : 'Not armed');
+        b.type = 'button';
+        b.dataset['filter'] = f;
+        b.setAttribute('aria-pressed', String(state.filter === f));
+        b.addEventListener('click', () => {
+          state.filter = f;
+          render();
+        });
+        return b;
+      })
+    );
+  };
+
   const render = (): void => {
     const today = keyOf(Date.now());
     const monthLabel = $('cal-month');
-    if (monthLabel !== null) monthLabel.textContent = `${MONTHS[state.month - 1] ?? ''} ${state.year}`;
+    if (monthLabel !== null) monthLabel.textContent = titleFor(state.view, state.year, state.month, state.selected);
     const monthRuns = state.occurrences.filter((o) => {
       const d = new Date(o.atMs);
       return d.getFullYear() === state.year && d.getMonth() + 1 === state.month;
     }).length;
+    const armedById = new Map((state.snapshot?.scheduled ?? []).map((f) => [f.flowId, f.armed] as const));
+    const visible = state.occurrences.filter((o) => state.filter === 'all' || (state.filter === 'armed') === (armedById.get(o.flowId) ?? true));
     const eventDays = new Map((state.spaceEvents?.days ?? []).map((d) => [d.date, d] as const));
     const monthEvents = [...eventDays.values()].filter((d) => d.date.startsWith(`${state.year}-${String(state.month).padStart(2, '0')}-`)).reduce((n, d) => n + d.total, 0);
     const sub = $('cal-subtitle');
     if (sub !== null) sub.textContent = summaryText(state.snapshot, monthRuns, monthEvents);
-    const g = buildMonthGrid(state.occurrences, {
-      year: state.year,
-      month: state.month,
-      selected: state.selected,
-      today,
-      onSelect: (key) => {
-        state.selected = key;
-        state.detail = null;
-        render();
-      },
-      eventDays,
-      onEvents: (day) => openEventsModal(day),
-    });
+    const onSelect = (key: string): void => {
+      state.selected = key;
+      state.detail = null;
+      render();
+    };
+    const onPick = (group: RunGroup): void => {
+      state.detail = state.snapshot?.scheduled.find((f) => f.flowId === group.flowId) ?? null;
+      render();
+    };
+    const shared = { today, eventDays, onEvents: (day: SpaceEventDay) => openEventsModal(day), armedById };
+    const anchor = state.selected ?? keyOf(Date.now());
+    const g =
+      state.view === 'month'
+        ? buildMonthGrid(visible, { year: state.year, month: state.month, selected: state.selected, onSelect, ...shared })
+        : state.view === 'week'
+          ? buildWeekView(visible, { anchorKey: anchor, selected: state.selected, onSelect, onPick, ...shared })
+          : buildDayView(visible, { key: anchor, onPick, ...shared });
+    renderFilter();
+    renderViewToggle();
+    const weekdayRow = $('cal-weekdays');
+    if (weekdayRow !== null) weekdayRow.hidden = state.view !== 'month';
     // Look the grid up fresh: the node is replaced on every render.
     const current = $('cal-grid');
     if (current === null) return;
@@ -536,6 +849,44 @@ function boot(): void {
               if (r.ok !== true) toast(r.error?.message ?? 'Could not open the flow.');
             });
           },
+          onSetArmed: async (flow, armed) => {
+            const b = bridge();
+            if (b === null) return null;
+            const r = await b.setArmed({ flowId: flow.flowId, botId: flow.botId, armed });
+            if (r.ok !== true || r.value === undefined) {
+              toast(r.error?.message ?? 'The platform refused the change.');
+              render();
+              return null;
+            }
+            toast(armed ? `${flow.flowLabel} is armed.` : `${flow.flowLabel} is disarmed.`);
+            await load(true);
+            state.detail = state.snapshot?.scheduled.find((f) => f.flowId === flow.flowId) ?? r.value.flow;
+            render();
+            return r.value.flow;
+          },
+          onLinks: async (flow) => {
+            const b = bridge();
+            if (b === null) return null;
+            const r = await b.flowLinks({ flowId: flow.flowId, botLabel: flow.botLabel });
+            return r.ok === true && r.value !== undefined ? r.value : null;
+          },
+          onOpenSpace: (spaceId) => openSpace(spaceId),
+          onOpenPlaybook: (id) => {
+            const spaces = window.lite?.spaces;
+            if (spaces?.openWiser === undefined) {
+              toast('Open WISER Playbooks from the main window to see this playbook.');
+              return;
+            }
+            void spaces.openWiser(id).catch(() => toast('Could not open the playbook.'));
+          },
+          onOpenJourney: (id) => {
+            const spaces = window.lite?.spaces;
+            if (spaces?.openJourneyMap === undefined) {
+              toast('Open the Journey Map Builder from the main window to see this journey map.');
+              return;
+            }
+            void spaces.openJourneyMap(id).catch(() => toast('Could not open the journey map.'));
+          },
           onLogSummary: async (run) => {
             const b = bridge();
             const flow = state.detail;
@@ -556,12 +907,18 @@ function boot(): void {
       return;
     }
     const sel = state.selected;
-    const dayOccs = state.occurrences.filter((o) => keyOf(o.atMs) === sel);
+    const dayOccs = visible.filter((o) => keyOf(o.atMs) === sel);
     side.replaceChildren(
       buildDayPane(dayOccs, {
         key: sel,
         onPick: (group) => {
           state.detail = state.snapshot?.scheduled.find((f) => f.flowId === group.flowId) ?? null;
+          render();
+        },
+        armedById,
+        flows: state.snapshot?.scheduled ?? [],
+        onPickFlow: (flow) => {
+          state.detail = flow;
           render();
         },
       })
@@ -606,6 +963,7 @@ function boot(): void {
         const scan = res.value.snapshot.scan;
         const read = scan === undefined ? '' : ` · ${scan.fetched + scan.bulk} read, ${scan.reused} from index`;
         status.textContent = `${res.value.snapshot.env} · ${res.value.snapshot.botCount} bots · ${res.value.snapshot.flowCount} flows · ${res.value.snapshot.activeDeployments} active${read} · ${age === 0 ? 'just now' : `${age} min ago`}`;
+        status.title = status.textContent;
       }
       render();
     } finally {
@@ -614,6 +972,19 @@ function boot(): void {
   };
 
   const shift = (delta: number): void => {
+    if (state.view !== 'month') {
+      const key = state.selected ?? keyOf(Date.now());
+      const [y, m0, d0] = key.split('-').map(Number);
+      const next = new Date(y ?? 1970, (m0 ?? 1) - 1, (d0 ?? 1) + delta * (state.view === 'week' ? 7 : 1));
+      const monthChanged = next.getFullYear() !== state.year || next.getMonth() + 1 !== state.month;
+      state.selected = keyOf(next.getTime());
+      state.year = next.getFullYear();
+      state.month = next.getMonth() + 1;
+      state.detail = null;
+      render();
+      if (monthChanged) void load();
+      return;
+    }
     let m = state.month + delta;
     let y = state.year;
     if (m < 1) {
@@ -641,6 +1012,16 @@ function boot(): void {
     void load();
   });
   $('cal-refresh')?.addEventListener('click', () => void load(true));
+  $('cal-export')?.addEventListener('click', () => {
+    const b = bridge();
+    if (b === null) return;
+    const { fromMs, toMs } = rangeFor(state.view, state.year, state.month, state.selected);
+    const label = titleFor(state.view, state.year, state.month, state.selected);
+    void b.exportIcs({ fromMs, toMs, armed: state.filter, name: `Scheduled flows · ${label}` }).then((r) => {
+      if (r.ok !== true || r.value === undefined) toast(r.error?.message ?? 'The export failed.');
+      else if (r.value.saved) toast(`Saved ${r.value.events} event${r.value.events === 1 ? '' : 's'} to ${r.value.path ?? 'the file'}.`);
+    });
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowLeft' && !e.metaKey && !e.ctrlKey) shift(-1);
     else if (e.key === 'ArrowRight' && !e.metaKey && !e.ctrlKey) shift(1);

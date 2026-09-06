@@ -19622,6 +19622,15 @@ bootRenderer({
     window.lite?.spaces?.journeys?.onNewJourney?.(() => {
       void openJourneyComposer();
     });
-    return init();
+    // Calendar → Spaces deep link (ADR-090): land on the Space asked for.
+    window.lite?.spaces?.onFocusSpace?.((p) => setActiveScope(p.spaceId));
+    const booted = init();
+    void Promise.resolve(booted)
+      .then(async () => {
+        const pending = await window.lite?.spaces?.takePendingFocus?.();
+        if (typeof pending?.spaceId === 'string' && pending.spaceId.length > 0) setActiveScope(pending.spaceId);
+      })
+      .catch(() => undefined);
+    return booted;
   },
 });

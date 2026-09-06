@@ -22,7 +22,8 @@ import { dropFlows, emptyIndex, indexStats, parseIndex, planScan, recordFlow, sc
 import { expandOccurrences, scheduledFlowFrom, type FlowRecord } from './schedule.js';
 import { logExcerpt, narrativeOf, parseLogEvent, summarizeFlowLogs, type FlowLogLine } from './logs.js';
 import { SPACE_EVENTS_CYPHER, SPACE_EVENTS_LIMIT, groupSpaceEventsByDay, rowToSpaceEvent, type SpaceEvent, type SpaceEventsInput, type SpaceEventsResult } from './space-events.js';
-import type { CalendarOccurrencesInput, CalendarOccurrencesResult, CalendarSnapshot, CalendarStatus, FlowLogSummaryInput, FlowLogSummaryResult, ScheduledFlow } from './types.js';
+import { BUILD_QUEUE_COLLECTIONS, FLOW_LINKS_CYPHER, PLAYBOOK_KV_COLLECTION, buildsForFlow, linksFromRows, slotFrom, type BuildSlot, type FlowLinkJourney, type FlowLinkPlaybook, type FlowLinkSpace, type FlowLinksInput, type FlowLinksResult } from './links.js';
+import type { CalendarOccurrencesInput, CalendarOccurrencesResult, CalendarSnapshot, CalendarStatus, FlowLogSummaryInput, FlowLogSummaryResult, ScheduledFlow, SetArmedInput, SetArmedResult } from './types.js';
 
 export { CalendarError } from './errors.js';
 
@@ -41,6 +42,10 @@ export interface CalendarApi {
   spaceEvents(input: SpaceEventsInput): Promise<SpaceEventsResult>;
   /** Log summary for one past run window, fetched from the deployer only when asked (a button), with an optional model narrative. */
   flowLogSummary(input: FlowLogSummaryInput): Promise<FlowLogSummaryResult>;
+  /** Arm (activate) or disarm (deactivate) a scheduled flow through the deployer; resolves when the platform reports the deploy done. */
+  setArmed(input: SetArmedInput): Promise<SetArmedResult>;
+  /** The playbook that built a flow (watcher queue) and the journey maps in reach (sight-filtered). */
+  flowLinks(input: FlowLinksInput): Promise<FlowLinksResult>;
 }
 
 /** Where the schedule index lives (local file, the account's KV, or both). */
@@ -56,6 +61,8 @@ export interface CalendarServiceDeps {
   /** NEON, for Space events; absent = the calendar shows flows only. `$viewerId` / `$nowMs` are injected here. */
   query?: (cypher: string, parameters: Record<string, unknown>) => Promise<Array<Record<string, unknown>>>;
   viewerId?: () => string | null;
+  /** The account's KV, for the flow-build queue (flow ↔ playbook) and playbook titles; absent = no playbook links. */
+  kv?: { listKeys(collection: string): Promise<string[]>; get(collection: string, key: string): Promise<unknown | null> };
   fetch: DatahubDeps['fetch'];
   openGsxWindow: (opts: { env: string; url: string; title: string }) => Promise<unknown>;
   openCalendarWindow: () => void;
@@ -66,9 +73,15 @@ export interface CalendarServiceDeps {
   concurrency?: number;
   /** A chat completion for log narratives; absent = deterministic narrative only. */
   ai?: { chat(input: { system?: string; messages: Array<{ role: 'user' | 'assistant'; content: string }>; maxTokens?: number }): Promise<{ content: string }> };
+  /** Wait between deploy polls (default 2 s real time; tests inject). */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const MAX_WINDOW_MS = 400 * 24 * 3600 * 1000;
+
+/** Flow links are cheap to recompute but the queue list is not: slots every 30 min, per-flow answers 5 min. */
+const SLOTS_TTL_MS = 30 * 60_000;
+const LINKS_TTL_MS = 5 * 60_000;
 
 export class CalendarService implements CalendarApi {
   private client: DatahubClient | null = null;
@@ -76,6 +89,10 @@ export class CalendarService implements CalendarApi {
   private cache: CalendarSnapshot | null = null;
   private eventsCache: { key: string; result: SpaceEventsResult } | null = null;
   private readonly logCache = new Map<string, FlowLogSummaryResult>();
+  /** Queue slots by KV key; null = read, not a link. Keys are listed per TTL, bodies read once per session. */
+  private readonly slotByKey = new Map<string, BuildSlot | null>();
+  private slotsListedAtMs = 0;
+  private readonly linksCache = new Map<string, FlowLinksResult>();
   private inflight: Promise<CalendarSnapshot> | null = null;
   private lastError: string | null = null;
   private readonly now: () => number;
@@ -316,6 +333,144 @@ export class CalendarService implements CalendarApi {
     }
   }
 
+  async setArmed(input: SetArmedInput): Promise<SetArmedResult> {
+    const s = this.session();
+    const client = this.clientFor(s);
+    const flowId = String(input.flowId ?? '').trim();
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(flowId)) throw new CalendarError('CALENDAR_INVALID_INPUT', 'A flow id is needed to arm or disarm.');
+    const armed = input.armed === true;
+    const span = getLoggingApi().start('calendar.set-armed', { flowId, armed });
+    try {
+      const flow = await client.getFlow(flowId);
+      if (flow === null) throw new CalendarError('CALENDAR_INVALID_INPUT', `Flow ${flowId} was not found.`);
+      const data = typeof flow['data'] === 'object' && flow['data'] !== null ? (flow['data'] as Record<string, unknown>) : {};
+      const deploy = typeof data['deploy'] === 'object' && data['deploy'] !== null ? (data['deploy'] as Record<string, unknown>) : {};
+      const role = typeof deploy['role'] === 'string' && deploy['role'].length > 0 ? deploy['role'] : 'USER';
+      const { requestId } = armed ? await client.activateFlow(flowId, role) : await client.deactivateFlow(flowId, role);
+      const sleep = this.deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+      let polls = 0;
+      for (;;) {
+        polls += 1;
+        const result = await client.checkDeploy(flowId, requestId);
+        if (result['status'] === 'pending') {
+          if (polls >= 100) throw new CalendarError('CALENDAR_DEPLOY_FAILED', `The platform is still ${armed ? 'activating' : 'deactivating'} the flow after ${polls} checks.`, 'Check the flow in Designer; the request may still complete.');
+          await sleep(2000);
+          continue;
+        }
+        const errorData = result['errorData'];
+        if (errorData !== undefined && errorData !== null && errorData !== false) {
+          const message = typeof errorData === 'string' ? errorData : JSON.stringify(errorData).slice(0, 300);
+          throw new CalendarError('CALENDAR_DEPLOY_FAILED', `The platform refused to ${armed ? 'activate' : 'deactivate'} the flow: ${message}`, 'Open the flow in Designer for the full error.');
+        }
+        break;
+      }
+      // The deployments changed: re-read them with the next snapshot.
+      this.cache = null;
+      const snap = await this.snapshot({ refresh: true });
+      const next = snap.scheduled.find((f) => f.flowId === flowId) ?? null;
+      getLoggingApi().event(armed ? CALENDAR_EVENTS.ARMED : CALENDAR_EVENTS.DISARMED, { flowId, polls, nowArmed: next?.armed ?? false });
+      span.finish({ polls, nowArmed: next?.armed ?? false });
+      return { flowId, armed, flow: next, requestId, polls };
+    } catch (err) {
+      span.fail(err);
+      throw err;
+    }
+  }
+
+  /** Where a flow came from and what sits beside it: the build slot that names its playbook, then NEON for titles, Spaces and journey maps. */
+  async flowLinks(input: FlowLinksInput): Promise<FlowLinksResult> {
+    this.session();
+    const flowId = String(input.flowId ?? '').trim();
+    if (!/^[A-Za-z0-9_.-]{1,128}$/.test(flowId)) throw new CalendarError('CALENDAR_INVALID_INPUT', 'A flow id is needed to look up its links.');
+    const botLabel = String(input.botLabel ?? '').trim().toLowerCase();
+    const key = `${flowId}|${botLabel}`;
+    const hit = this.linksCache.get(key);
+    if (hit !== undefined && input.refresh !== true && this.now() - hit.fetchedAtMs < LINKS_TTL_MS) return hit;
+    const span = getLoggingApi().start('calendar.flow-links', { flowId });
+    try {
+      let unavailable = false;
+      let reason: string | undefined;
+      let builds: BuildSlot[] = [];
+      try {
+        builds = buildsForFlow(await this.buildSlots(input.refresh === true), flowId);
+      } catch (err) {
+        unavailable = true;
+        reason = `The flow-build queue could not be read: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      let spaces: FlowLinkSpace[] = [];
+      let playbooks: FlowLinkPlaybook[] = [];
+      let journeys: FlowLinkJourney[] = [];
+      if (this.deps.query !== undefined) {
+        try {
+          const rows = await this.deps.query(FLOW_LINKS_CYPHER, { flowId, playbookIds: builds.map((b) => b.playbookId), botLabel, viewerId: (this.deps.viewerId?.() ?? '').trim().toLowerCase(), nowMs: this.now() });
+          ({ spaces, playbooks, journeys } = linksFromRows(rows, builds));
+        } catch (err) {
+          unavailable = true;
+          reason = reason ?? `NEON could not be read: ${err instanceof Error ? err.message : String(err)}`;
+        }
+      }
+      // A playbook the graph does not know (older WISER records live only in KV): its title from the record, no Space.
+      const known = new Set(playbooks.map((p) => p.id));
+      for (const b of builds.filter((x) => !known.has(x.playbookId)).slice(0, 5)) {
+        const title = await this.playbookTitle(b.playbookId);
+        if (title !== null) playbooks.push({ id: b.playbookId, title, spaceId: null, spaceName: null, via: 'build', builtAtMs: b.finishedAtMs, status: b.status });
+      }
+      const result: FlowLinksResult = { flowId, spaces, playbooks, journeys, unavailable, ...(reason !== undefined ? { reason } : {}), fetchedAtMs: this.now() };
+      this.linksCache.set(key, result);
+      span.finish({ builds: builds.length, spaces: spaces.length, playbooks: playbooks.length, journeys: journeys.length, unavailable });
+      return result;
+    } catch (err) {
+      span.fail(err);
+      throw err;
+    }
+  }
+
+  /**
+   * Every queue slot that names a playbook/flow pair. Keys are listed
+   * per TTL; a slot body is read once per session (an archived slot
+   * never changes), a few at a time — never the 15-second re-read that
+   * flooded KV in the 2026-09-04 incident.
+   */
+  private async buildSlots(refresh: boolean): Promise<BuildSlot[]> {
+    const kv = this.deps.kv;
+    if (kv === undefined) return [];
+    if (this.slotsListedAtMs === 0 || refresh || this.now() - this.slotsListedAtMs >= SLOTS_TTL_MS) {
+      const pending: Array<{ collection: string; key: string }> = [];
+      for (const collection of BUILD_QUEUE_COLLECTIONS) {
+        for (const key of await kv.listKeys(collection)) {
+          const cacheKey = `${collection}/${key}`;
+          if (!this.slotByKey.has(cacheKey) || (collection === 'flow-build-queue' && refresh)) pending.push({ collection, key });
+        }
+      }
+      let cursor = 0;
+      const worker = async (): Promise<void> => {
+        for (;;) {
+          const item = pending[cursor];
+          cursor += 1;
+          if (item === undefined) return;
+          const value = await kv.get(item.collection, item.key);
+          this.slotByKey.set(`${item.collection}/${item.key}`, slotFrom(item.key, value));
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(6, Math.max(1, pending.length)) }, () => worker()));
+      this.slotsListedAtMs = this.now();
+    }
+    return [...this.slotByKey.values()].filter((s): s is BuildSlot => s !== null);
+  }
+
+  private async playbookTitle(id: string): Promise<string | null> {
+    const kv = this.deps.kv;
+    if (kv === undefined) return null;
+    try {
+      const raw = await kv.get(PLAYBOOK_KV_COLLECTION, id);
+      const rec = typeof raw === 'string' ? (JSON.parse(raw) as unknown) : raw;
+      const title = typeof rec === 'object' && rec !== null ? (rec as Record<string, unknown>)['title'] : null;
+      return typeof title === 'string' && title.trim().length > 0 ? title.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
   async spaceEvents(input: SpaceEventsInput): Promise<SpaceEventsResult> {
     const fromMs = Number(input.fromMs);
     const toMs = Number(input.toMs);
@@ -347,7 +502,7 @@ export class CalendarService implements CalendarApi {
 }
 
 // ── Singleton accessors (Rule 12 module contract) ─────────────────────
-const METHODS: ReadonlyArray<keyof CalendarApi> = ['snapshot', 'occurrences', 'status', 'openFlow', 'openWindow', 'spaceEvents', 'flowLogSummary'];
+const METHODS: ReadonlyArray<keyof CalendarApi> = ['snapshot', 'occurrences', 'status', 'openFlow', 'openWindow', 'spaceEvents', 'flowLogSummary', 'setArmed', 'flowLinks'];
 
 function notInitializedApi(): CalendarApi {
   const refuse = (name: string) => (): Promise<never> =>
@@ -360,6 +515,8 @@ function notInitializedApi(): CalendarApi {
     openWindow: refuse('openWindow'),
     spaceEvents: refuse('spaceEvents'),
     flowLogSummary: refuse('flowLogSummary'),
+    setArmed: refuse('setArmed'),
+    flowLinks: refuse('flowLinks'),
   };
 }
 

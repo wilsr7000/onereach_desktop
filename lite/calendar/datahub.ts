@@ -17,7 +17,7 @@ import type { ActiveDeployment } from './types.js';
 import type { FlowHead } from './index.js';
 
 export interface DatahubDeps {
-  fetch: (url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
+  fetch: (url: string, init?: { method?: string; headers?: Record<string, string>; signal?: AbortSignal; body?: string }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
   now?: () => number;
   /** Per-request timeout (default 8 s): one slow space must not stall the account. */
   timeoutMs?: number;
@@ -49,6 +49,12 @@ export interface BotRecord {
 
 const TOKEN_TTL_MS = 30 * 60 * 1000;
 
+function requestIdOf(body: unknown): string {
+  const id = typeof body === 'object' && body !== null ? (body as Record<string, unknown>)['requestId'] : undefined;
+  if (typeof id !== 'string' || id.length === 0) throw new CalendarError('CALENDAR_DEPLOY_FAILED', 'The deployer answered without a request id.', 'Try again; if it persists, check the flow in Designer.');
+  return id;
+}
+
 export class DatahubClient {
   private token: { value: string; mintedAt: number } | null = null;
   private minting: Promise<string> | null = null;
@@ -69,12 +75,17 @@ export class DatahubClient {
     return this.accountId;
   }
 
-  private async getJson(url: string, auth: string | null): Promise<unknown> {
+  private getJson(url: string, auth: string | null): Promise<unknown> {
+    return this.send('GET', url, auth);
+  }
+
+  private async send(method: 'GET' | 'POST' | 'DELETE', url: string, auth: string | null, body?: unknown, timeoutMs?: number): Promise<unknown> {
     let res: { ok: boolean; status: number; text(): Promise<string> };
     try {
-      res = await this.deps.fetch(url, { method: 'GET', headers: { 'Content-Type': 'application/json;charset=UTF-8', ...(auth !== null ? { Authorization: auth } : {}) }, signal: AbortSignal.timeout(this.deps.timeoutMs ?? 8000) });
+      res = await this.deps.fetch(url, { method, headers: { 'Content-Type': 'application/json;charset=UTF-8', ...(auth !== null ? { Authorization: auth } : {}) }, signal: AbortSignal.timeout(timeoutMs ?? this.deps.timeoutMs ?? 8000), ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
     } catch (err) {
-      throw new CalendarError('CALENDAR_HTTP_FAILED', `Could not reach ${new URL(url).host}: ${err instanceof Error ? err.message : String(err)}`, 'Check the network, then refresh.');
+      const timedOut = err instanceof Error && /abort|timeout/i.test(err.message);
+      throw new CalendarError('CALENDAR_HTTP_FAILED', timedOut ? `${new URL(url).host} did not answer within ${Math.round((timeoutMs ?? this.deps.timeoutMs ?? 8000) / 1000)} s.` : `Could not reach ${new URL(url).host}: ${err instanceof Error ? err.message : String(err)}`, timedOut ? 'The platform is slow right now; try again in a moment.' : 'Check the network, then refresh.');
     }
     const text = await res.text();
     if (!res.ok) {
@@ -228,13 +239,8 @@ export class DatahubClient {
     let next: string | null = null;
     for (let page = 0; page < 20; page += 1) {
       const url = `${base}/flows/${encodeURIComponent(flowId)}/logs?limit=500&skipOriginal=true&start=${Math.floor(startMs)}&end=${Math.floor(endMs)}${next !== null ? `&next=${encodeURIComponent(next)}` : ''}`;
-      let body: unknown;
-      try {
-        body = await this.getJson(url, await this.mintToken());
-      } catch (err) {
-        if (err instanceof CalendarError && (err.status === 401 || err.status === 403)) body = await this.getJson(url, await this.mintToken(true));
-        else throw err;
-      }
+      // Log scans over a day can take well over the listing budget: 30 s per page.
+      const body = await this.serviceCall('deployer', 'GET', url.slice(base.length), undefined, 30_000);
       const o = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
       const page = Array.isArray(o['events']) ? (o['events'] as unknown[]) : [];
       events.push(...page);
@@ -244,6 +250,35 @@ export class DatahubClient {
       next = token;
     }
     return { events, truncated: true };
+  }
+
+  /** Authenticated call to a discovered service, re-minting the token once on 401/403. */
+  private async serviceCall(serviceName: string, method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, timeoutMs = 30_000): Promise<unknown> {
+    const base = await this.discoverService(serviceName);
+    const url = `${base}${path}`;
+    try {
+      return await this.send(method, url, await this.mintToken(), body, timeoutMs);
+    } catch (err) {
+      if (err instanceof CalendarError && (err.status === 401 || err.status === 403)) return this.send(method, url, await this.mintToken(true), body, timeoutMs);
+      throw err;
+    }
+  }
+
+  /** The deployer's activate call as @or-sdk/deployer sends it: a fresh alias per deploy, the flow's IAM role. */
+  async activateFlow(flowId: string, role: string): Promise<{ requestId: string }> {
+    const body = await this.serviceCall('deployer', 'POST', '/flows/deploy', { flowId, flowAlias: `v-${this.deps.now?.() ?? Date.now()}`, interactiveDebug: false, role });
+    return { requestId: requestIdOf(body) };
+  }
+
+  /** The deployer's deactivate call: the flow goes as `{ flow: { id } }`; a bare flowId is answered 400 "flow is required". */
+  async deactivateFlow(flowId: string, role: string): Promise<{ requestId: string }> {
+    const body = await this.serviceCall('deployer', 'DELETE', '/flows/deploy', { flow: { id: flowId }, role });
+    return { requestId: requestIdOf(body) };
+  }
+
+  async checkDeploy(flowId: string, requestId: string): Promise<Record<string, unknown>> {
+    const body = await this.serviceCall('deployer', 'GET', `/flows/check/${encodeURIComponent(flowId)}/${encodeURIComponent(requestId)}`);
+    return typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
   }
 
   async getFlow(flowId: string): Promise<Record<string, unknown> | null> {

@@ -20,6 +20,15 @@ export const CALENDAR_EVENTS = {
   FLOW_LOGS_START: 'calendar.flow-logs.start',
   FLOW_LOGS_FINISH: 'calendar.flow-logs.finish',
   FLOW_LOGS_FAIL: 'calendar.flow-logs.fail',
+  SET_ARMED_START: 'calendar.set-armed.start',
+  SET_ARMED_FINISH: 'calendar.set-armed.finish',
+  SET_ARMED_FAIL: 'calendar.set-armed.fail',
+  ARMED: 'calendar.armed',
+  DISARMED: 'calendar.disarmed',
+  FLOW_LINKS_START: 'calendar.flow-links.start',
+  FLOW_LINKS_FINISH: 'calendar.flow-links.finish',
+  FLOW_LINKS_FAIL: 'calendar.flow-links.fail',
+  EXPORT_ICS: 'calendar.export-ics',
 } as const;
 
 export type CalendarEventName = (typeof CALENDAR_EVENTS)[keyof typeof CALENDAR_EVENTS];

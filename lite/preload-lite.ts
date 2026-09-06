@@ -81,6 +81,9 @@ const TELEMETRY_SET_CONSENT = 'lite:telemetry:setConsent';
 // renderer-bridge addition with no main-process churn. The renderer
 // surface is bridged once Phase 1 lands real fetches.
 const SPACES_OPEN = 'lite:spaces:open';
+/** Calendar → Spaces deep link (ADR-090): main pushes the Space to land on; the renderer also asks once at boot. */
+const SPACES_FOCUS_SPACE_EVENT = 'lite:spaces:focus-space';
+const SPACES_FOCUS_SPACE_TAKE = 'lite:spaces:focusSpace:take';
 const SPACES_OPEN_WISER = 'lite:spaces:openWiser';
 const SPACES_OPEN_JOURNEY_MAP = 'lite:spaces:openJourneyMap';
 const SPACES_LIST_SPACES = 'lite:spaces:listSpaces';
@@ -982,8 +985,12 @@ interface SpacesBridge {
     suggest(spaceId: string): Promise<SpacesIpcResultView<unknown>>;
     create(spaceId: string, draft: unknown): Promise<SpacesIpcResultView<unknown>>;
   };
-  /** Open (or focus) the Spaces window. */
-  open(): Promise<{ ok: true }>;
+  /** Open (or focus) the Spaces window; with a spaceId, land on that Space. */
+  open(opts?: { spaceId?: string | null }): Promise<{ ok: true }>;
+  /** Main pushes the Space a deep link asked for (window already open). Returns the unsubscribe. */
+  onFocusSpace(cb: (p: { spaceId: string }) => void): () => void;
+  /** The Space a deep link asked for before this window booted, once. */
+  takePendingFocus(): Promise<{ ok: true; spaceId: string | null }>;
   /**
    * Open (or focus) the WISER Playbooks window; with a riffId, deep-link
    * straight to that playbook (the hosted app consumes ?riff= on load).
@@ -1694,7 +1701,22 @@ const apiDocs: ApiDocsBridge = {
 };
 
 const spaces: SpacesBridge = {
-  open: () => ipcRenderer.invoke(SPACES_OPEN) as Promise<{ ok: true }>,
+  open: (opts?: { spaceId?: string | null }) => ipcRenderer.invoke(SPACES_OPEN, { spaceId: typeof opts?.spaceId === 'string' ? opts.spaceId : null }) as Promise<{ ok: true }>,
+  onFocusSpace: (cb) => {
+    const wrapped = (_event: unknown, payload: unknown): void => {
+      const p = payload as { spaceId?: unknown } | null;
+      if (typeof p?.spaceId === 'string' && p.spaceId.length > 0) cb({ spaceId: p.spaceId });
+    };
+    ipcRenderer.on(SPACES_FOCUS_SPACE_EVENT, wrapped);
+    return () => {
+      try {
+        ipcRenderer.off(SPACES_FOCUS_SPACE_EVENT, wrapped);
+      } catch {
+        /* best-effort */
+      }
+    };
+  },
+  takePendingFocus: () => ipcRenderer.invoke(SPACES_FOCUS_SPACE_TAKE) as Promise<{ ok: true; spaceId: string | null }>,
   openWiser: (riffId: string | null) =>
     ipcRenderer.invoke(SPACES_OPEN_WISER, { riffId }) as Promise<{ ok: true }>,
   openJourneyMap: (itemId: string | null) =>
@@ -3129,6 +3151,9 @@ interface CalendarBridge {
   openWindow(): Promise<RegistryIpcResultView<unknown>>;
   spaceEvents(input: { fromMs: number; toMs: number; timeZone: string; refresh?: boolean }): Promise<RegistryIpcResultView<unknown>>;
   flowLogSummary(input: { flowId: string; botId: string; fromMs: number; toMs: number; refresh?: boolean }): Promise<RegistryIpcResultView<unknown>>;
+  setArmed(input: { flowId: string; botId: string; armed: boolean }): Promise<RegistryIpcResultView<unknown>>;
+  flowLinks(input: { flowId: string; botLabel?: string; refresh?: boolean }): Promise<RegistryIpcResultView<unknown>>;
+  exportIcs(input: { fromMs: number; toMs: number; armed?: 'all' | 'armed' | 'unarmed'; name?: string }): Promise<RegistryIpcResultView<unknown>>;
 }
 const CAL = (op: string): string => `lite:calendar:${op}`;
 const calendar: CalendarBridge = {
@@ -3139,6 +3164,9 @@ const calendar: CalendarBridge = {
   openWindow: () => ipcRenderer.invoke(CAL('open-window')) as Promise<RegistryIpcResultView<unknown>>,
   spaceEvents: (input) => ipcRenderer.invoke(CAL('space-events'), { fromMs: input.fromMs, toMs: input.toMs, timeZone: input.timeZone, refresh: input.refresh === true }) as Promise<RegistryIpcResultView<unknown>>,
   flowLogSummary: (input) => ipcRenderer.invoke(CAL('flow-log-summary'), { flowId: input.flowId, botId: input.botId, fromMs: input.fromMs, toMs: input.toMs, refresh: input.refresh === true }) as Promise<RegistryIpcResultView<unknown>>,
+  setArmed: (input) => ipcRenderer.invoke(CAL('set-armed'), { flowId: input.flowId, botId: input.botId, armed: input.armed === true }) as Promise<RegistryIpcResultView<unknown>>,
+  flowLinks: (input) => ipcRenderer.invoke(CAL('flow-links'), { flowId: input.flowId, botLabel: input.botLabel ?? '', refresh: input.refresh === true }) as Promise<RegistryIpcResultView<unknown>>,
+  exportIcs: (input) => ipcRenderer.invoke(CAL('export-ics'), { fromMs: input.fromMs, toMs: input.toMs, armed: input.armed ?? 'all', name: input.name ?? '' }) as Promise<RegistryIpcResultView<unknown>>,
 };
 
 contextBridge.exposeInMainWorld('lite', {

@@ -1154,8 +1154,16 @@ interface LiteSpacesUpdateSpaceInput {
 }
 
 interface LiteSpacesBridge {
-  /** Open (or focus) the Spaces window. */
-  open(): Promise<{ ok: true }>;
+  /** Open (or focus) the Spaces window; with a spaceId, land on that Space (ADR-090 deep link). */
+  open(opts?: { spaceId?: string | null }): Promise<{ ok: true }>;
+  /** Main pushes the Space a deep link asked for while this window is open. Returns the unsubscribe. */
+  onFocusSpace?(cb: (p: { spaceId: string }) => void): () => void;
+  /** The Space a deep link asked for before this window booted, once. */
+  takePendingFocus?(): Promise<{ ok: true; spaceId: string | null }>;
+  /** WISER Playbooks window, optionally at a playbook (riff) id. */
+  openWiser?(riffId: string | null): Promise<{ ok: true }>;
+  /** Journey Map Builder, optionally at a journey asset. */
+  openJourneyMap?(itemId: string | null): Promise<{ ok: true }>;
   listSpaces(): Promise<LiteSpacesIpcResult<LiteSpace[]>>;
   /**
    * Drop cached reads and refetch. Use when data may have been created
@@ -2161,7 +2169,17 @@ interface LiteCalendarBridge {
   spaceEvents(input: { fromMs: number; toMs: number; timeZone: string; refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarSpaceEvents>>;
   /** Log summary for one past run window, fetched only when asked. */
   flowLogSummary(input: { flowId: string; botId: string; fromMs: number; toMs: number; refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarFlowLogSummary>>;
+  /** Arm (activate) or disarm (deactivate) a scheduled flow; resolves when the platform reports the deploy done. */
+  setArmed(input: { flowId: string; botId: string; armed: boolean }): Promise<LiteCalendarResult<{ flowId: string; armed: boolean; flow: LiteCalendarScheduledFlow | null; requestId: string; polls: number }>>;
+  /** The playbook that built the flow and the journey maps in reach; buttons in the detail pane. */
+  flowLinks(input: { flowId: string; botLabel?: string; refresh?: boolean }): Promise<LiteCalendarResult<LiteCalendarFlowLinks>>;
+  /** Save the runs in a window as an .ics file (a save dialog; `saved` false when cancelled). */
+  exportIcs(input: { fromMs: number; toMs: number; armed?: 'all' | 'armed' | 'unarmed'; name?: string }): Promise<LiteCalendarResult<{ saved: boolean; path: string | null; events: number }>>;
 }
+interface LiteCalendarFlowLinkPlaybook { id: string; title: string; spaceId: string | null; spaceName: string | null; via: 'build'; builtAtMs: number | null; status: string }
+interface LiteCalendarFlowLinkJourney { id: string; title: string; spaceId: string; spaceName: string; via: 'asset' | 'playbook' | 'space' }
+interface LiteCalendarFlowLinkSpace { id: string; name: string; via: 'asset' | 'playbook' | 'name'; assetId: string | null; assetTitle: string | null }
+interface LiteCalendarFlowLinks { flowId: string; spaces: LiteCalendarFlowLinkSpace[]; playbooks: LiteCalendarFlowLinkPlaybook[]; journeys: LiteCalendarFlowLinkJourney[]; unavailable: boolean; reason?: string; fetchedAtMs: number }
 interface LiteCalendarFlowExecution { requestId: string; startMs: number; endMs: number; durationMs: number; lines: number; steps: string[]; errors: string[]; completed: boolean; billedMs: number | null; memoryMb: number | null }
 interface LiteCalendarFlowLogSummary {
   flowId: string; fromMs: number; toMs: number; narrative: string; aiNarrative: string | null; aiError?: string; truncated: boolean; fetchedAtMs: number;

@@ -428,15 +428,20 @@ export interface InitSpacesOptions {
   };
 }
 
+/** Pushed to an already-open Spaces window by a deep link (ADR-090). */
+export const SPACES_FOCUS_SPACE_EVENT = 'lite:spaces:focus-space';
+
 export interface SpacesHandle {
-  /** Open (or focus) the Spaces window. Convenience for menu wiring. */
-  open(): void;
+  /** Open (or focus) the Spaces window. Convenience for menu wiring; a string lands on that Space. */
+  open(spaceId?: string | null): void;
   /** Tear down IPC handlers + close the window. Idempotent. */
   teardown(): void;
 }
 
 let registered = false;
 let initOptions: InitSpacesOptions | null = null;
+/** The Space a deep link asked for before the window booted; taken once by the renderer. */
+let pendingFocusSpaceId: string | null = null;
 
 /**
  * Register IPC handlers, install the Spaces menu entry, and install
@@ -452,17 +457,24 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
   initOptions = opts;
 
   const handle: SpacesHandle = {
-    open: (): void => {
+    open: (spaceId?: string | null): void => {
       if (initOptions === null) {
         log.warn('open() called before init', {});
         return;
       }
+      // Menu clicks pass a MenuItem here: only a real id is a deep link.
+      const target = typeof spaceId === 'string' && spaceId.trim().length > 0 ? spaceId.trim() : null;
       try {
-        createSpacesWindow({
+        const win = createSpacesWindow({
           parent: initOptions.getParentWindow(),
           htmlPath: initOptions.htmlPath,
           preloadPath: initOptions.preloadPath,
         });
+        if (target !== null) {
+          // A window still loading takes the id at boot; a live one is told now.
+          if (win.webContents.isLoading()) pendingFocusSpaceId = target;
+          else win.webContents.send(SPACES_FOCUS_SPACE_EVENT, { spaceId: target });
+        }
         presenceBeat({ tool: 'spaces' });
         // Boot-burst consolidation (2026-08-17): the full pre-warm now
         // happens HERE, on first window open — the moment the data is
@@ -533,7 +545,14 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
 
   if (registered) return handle;
 
-  registerSpacesIpc({ onOpen: handle.open });
+  registerSpacesIpc({
+    onOpen: handle.open,
+    takePendingFocus: () => {
+      const id = pendingFocusSpaceId;
+      pendingFocusSpaceId = null;
+      return id;
+    },
+  });
   // ADR-072 — the one extra channel the Journey Map Builder's bridge
   // needs: which journey asset the user clicked to get here.
   registerJourneyMapTargetChannel();

@@ -144,10 +144,27 @@ export interface FlowLogSummaryResult {
   fetchedAtMs: number;
 }
 
+export interface SetArmedInput {
+  flowId: string;
+  botId: string;
+  /** true = activate (arm), false = deactivate (disarm). */
+  armed: boolean;
+}
+
+export interface SetArmedResult {
+  flowId: string;
+  armed: boolean;
+  /** The flow as the refreshed snapshot sees it (null when it no longer lists as scheduled). */
+  flow: ScheduledFlow | null;
+  requestId: string;
+  polls: number;
+}
+
 export type CalendarErrorCode =
   | 'CALENDAR_SIGNED_OUT'
   | 'CALENDAR_TOKEN_FAILED'
   | 'CALENDAR_DISCOVERY_FAILED'
   | 'CALENDAR_HTTP_FAILED'
   | 'CALENDAR_INVALID_INPUT'
+  | 'CALENDAR_DEPLOY_FAILED'
   | 'CALENDAR_NOT_INITIALIZED';

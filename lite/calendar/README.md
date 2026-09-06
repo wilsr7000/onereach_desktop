@@ -15,8 +15,10 @@ The GSX menu's **Calendar** opens this window: the signed-in account's scheduled
 - `status()` — signed-in state, cache age, last error; no network.
 - `openFlow({ flowId, botId })` — the flow in Lite's GSX window (`studio.<env>.onereach.ai/flows/<bot>/<flow>`).
 - `openWindow()` — open or focus the Calendar.
+- `setArmed({ flowId, botId, armed })` — arm (activate) or disarm (deactivate) a scheduled flow through the deployer, polling its check route until the platform reports done; resolves with the refreshed flow. The payloads are the deployer SDK's own: activate `POST /flows/deploy { flowId, flowAlias, interactiveDebug: false, role }`, deactivate `DELETE /flows/deploy { flow: { id }, role }` (a bare flowId is a 400), `role` from `flow.data.deploy.role`.
+- `flowLinks({ flowId, botLabel?, refresh? })` — where a flow lives and came from: Spaces it is an item in (the ADR-091 Designer mirror's agent asset with `gsxFlowId`, or any asset with `flowId` or a URL naming the flow), the playbook that built it (the flow-build watcher's KV queue names `{ playbookId, flowId }` per slot; slot bodies are read once per session), and journey maps in those Spaces or in a Space named like the GSX space. Every Space passes the ADR-084 sight rule, so a button is offered only for what the viewer may open.
 
-Events (`events.ts`): `calendar.snapshot.*` span, `calendar.open-window`, `calendar.open-flow`.
+Events (`events.ts`): `calendar.snapshot.*`, `calendar.space-events.*`, `calendar.flow-logs.*`, `calendar.set-armed.*`, `calendar.flow-links.*` spans; `calendar.open-window`, `calendar.open-flow`, `calendar.armed`, `calendar.disarmed`, `calendar.export-ics`.
 
 ## The schedule index
 
@@ -27,3 +29,13 @@ Events (`events.ts`): `calendar.snapshot.*` span, `calendar.open-window`, `calen
 - `spaceEvents({ fromMs, toMs, timeZone, refresh? })` — activity commits the viewer may see (sight-filtered like the Home tab), grouped per local day and per Space; the day link and the events modal read it. Unavailable without NEON; the calendar still shows flows.
 - `flowLogSummary({ flowId, botId, fromMs, toMs, refresh? })` — on demand only: the deployer's log events for the run window, summarised (executions by request id, billed duration and peak memory from REPORT lines, END seen, steps, errors) plus a model narrative when configured. Cached five minutes.
 - Flow descriptions ride along in both projections and the schedule index and show in the detail and day panes.
+
+## Armed and not armed, arm / disarm, views, export (2026-09-05, evening)
+
+- **Not armed is visible.** The header filter (All / Armed / Not armed) picks whose runs the grid shows; runs of a flow that is not armed are drawn dimmed with a dashed edge and say so in their tooltip. Under the day pane, "In this account" lists every scheduled flow with its state (armed / active · no trigger / not armed) and opens its detail on click.
+- **Arm / Disarm** sits in the detail pane with an inline confirmation (no `window.confirm` in renderers); while the platform works the buttons are disabled and the question says so; on success the calendar reloads and toasts, on refusal the platform's message is the toast. A flow whose every schedule window has ended is told so before arming — and warned when the platform still holds a trigger for it.
+- **Space, playbook & journey map** buttons appear in the detail pane when `flowLinks` finds any: "In Space · X" (the flow is an item there), "Near Space · X" (the playbook's Space or a Space named like the GSX space), "Open playbook · title" (WISER, `spaces.openWiser`), "Open journey map · title" (Journey Map Builder). None → one plain line.
+- **Deep link to a Space.** The events modal's "Open Space" and the Space buttons call `spaces.open({ spaceId })`; main hands the id to a Spaces window that is still booting (`takePendingFocus`) or pushes `lite:spaces:focus-space` to a live one, and the Spaces renderer lands on that Space.
+- **Week and Day views** (Month / Week / Day toggle; ← → move by the view's unit): seven Sunday-first columns with every run in time order, and a 24-hour agenda with runs grouped per hour. Both keep the Space-events link.
+- **Export .ics** saves the runs in view (respecting the filter) through a save dialog: one VEVENT per run with a stable UID (`flowId.eventId.atMs`), UTC stamps, the flow description; a (flow, event) that fires more than twelve times on one day becomes a single all-day marker ("×288, every 5 min"). Pure builder in `ics.ts`.
+- **Timeouts.** Listings keep the 8 s budget; deployer calls (logs, deploy, check) get 30 s — a day-wide log scan took 9.8 s live and used to be cut at 8.
