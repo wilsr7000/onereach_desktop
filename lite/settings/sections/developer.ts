@@ -27,7 +27,7 @@ export const mountDeveloper: SectionDescriptor['mount'] = (container) => {
   const intro = document.createElement('p');
   intro.className = 'pane-intro';
   intro.textContent =
-    'Browse every documented Lite module: public API, typed events, and full README. ' +
+    'Browse every documented Onereach Desktop module: public API, typed events, and full README. ' +
     'Content is harvested at build time from the actual source -- if a module ships, ' +
     'its docs ship with it.';
   container.appendChild(intro);

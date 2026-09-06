@@ -116,7 +116,7 @@ function renderForm(container: HTMLElement, status: LiteNeonStatus): void {
       <div class="neon-status-row">
         <span class="${readyClass}">${escapeHtml(ready)}</span>
         <span class="neon-status-help">
-          Connect Lite to your organization's data fabric.
+          Connect Onereach Desktop to your organization's data fabric.
         </span>
       </div>
       <div class="neon-source-row">

@@ -108,6 +108,12 @@ describe('the display name reaches every surface', () => {
           const t = line.trim();
           if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.startsWith('<!--')) continue;
           if (/Onereach(\.ai)? Lite\b/.test(line) || /['"`>](About |Quit )?WISER['"`<]/.test(line)) offenders.push(`${rel}:${i + 1}: ${t.slice(0, 90)}`);
+          // The brand is dropping the ".ai" (2026-09-06): copy says
+          // "Onereach". Domains (idw.edison.onereach.ai), the full app's
+          // config path, and keychain service ids are not copy.
+          if (/(^|[^a-z0-9.-])(Onereach|OneReach)\.ai(?![a-z0-9-]*\.onereach|\/)/.test(line) && !/\.config\/Onereach\.ai|-(Anthropic|OpenAI|Session|TOTP)/.test(line)) {
+            offenders.push(`${rel}:${i + 1}: ${t.slice(0, 90)}`);
+          }
         }
       }
     };

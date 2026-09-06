@@ -266,7 +266,7 @@ function toolbarHTML(snap: LiteAppHealthSnapshotView): string {
 function introHTML(): string {
   return `
     <p class="diag-intro">
-      A pull-based snapshot of "what is true right now?" across documented Lite modules.
+      A pull-based snapshot of "what is true right now?" across documented Onereach Desktop modules.
       Token values, the TOTP secret / current code, and the Neon password cannot appear here
       by type construction -- this panel shows presence booleans and metadata only.
       Full token values, when needed, live in the Account section.
@@ -541,7 +541,7 @@ async function renderUsageSharing(target: HTMLElement): Promise<void> {
       <section class="diag-section">
         <h3 class="diag-section-title">Usage sharing</h3>
         <p class="diag-usage-copy">
-          Send a short daily summary of how this copy of Lite is running —
+          Send a short daily summary of how this copy of Onereach Desktop is running —
           version, app-open minutes, error counts by area, and which
           surfaces were opened. Never anything you type, upload, or open.
         </p>

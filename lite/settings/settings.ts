@@ -163,7 +163,7 @@ function mountAbout(container: HTMLElement): (() => void) | undefined {
   const intro = document.createElement('p');
   intro.className = 'pane-intro';
   intro.textContent =
-    'Onereach Desktop is a slim, independently-shipping desktop kernel: it signs you in to Onereach.ai and gives your AIs, Spaces, tutorials, and bug reporting a single home — with everything else loaded on demand or deferred to the full app.';
+    'Onereach Desktop is a slim, independently-shipping desktop kernel: it signs you in to Onereach and gives your AIs, Spaces, tutorials, and bug reporting a single home — with everything else loaded on demand or deferred to the full app.';
   wrap.appendChild(intro);
 
   const rows: Array<[string, string]> = [

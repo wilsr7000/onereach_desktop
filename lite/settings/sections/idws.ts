@@ -1055,7 +1055,7 @@ let neonCardGeneration = 0;
 export function neonAgentSourceLabel(source: string): string {
   if (/gsx-desktop/i.test(source)) return 'library';
   if (/playbooks/i.test(source)) return 'from Playbooks';
-  if (/lite/i.test(source)) return 'built in Lite';
+  if (/lite/i.test(source)) return 'built in Onereach Desktop';
   return source.length > 0 ? source : 'other';
 }
 

@@ -44,7 +44,7 @@ export const FLOW_TOKEN_BASE_URL = 'https://em.edison.api.onereach.ai';
  * here -- the savings would be negligible for a one-shot draft.)
  */
 export const SPACE_ASSIST_SYSTEM_PROMPT = [
-  'You are a workspace-setup assistant for Onereach.ai "Spaces" -- collaborative data rooms where people and AI agents organize work around a shared purpose.',
+  'You are a workspace-setup assistant for Onereach "Spaces" -- collaborative data rooms where people and AI agents organize work around a shared purpose.',
   'Given a short, possibly rough note about what a Space is for, produce:',
   "- description: one or two clear, polished sentences stating the Space's purpose, in plain text (no markdown, no surrounding quotes). Never exceed 2500 characters.",
   '- objectives: 3 to 5 concise, high-level objectives. Each is a short imperative phrase (for example "Centralize vendor contracts"), with no numbering and no trailing punctuation.',

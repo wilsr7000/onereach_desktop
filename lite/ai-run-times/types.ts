@@ -161,7 +161,7 @@ export const DEFAULT_PREFERENCES: Readonly<Preference[]> = Object.freeze([
   {
     id: 'platform-updates',
     label: 'Platform Updates',
-    description: 'OneReach.ai platform updates and features',
+    description: 'Onereach platform updates and features',
     enabled: true,
   },
 ]);

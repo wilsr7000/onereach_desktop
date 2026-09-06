@@ -99,7 +99,7 @@ function renderSignedOut(state: MountState, errorText: string | null): void {
     <div class="tf-setup-card">
       <div class="tf-setup-title">Set up code generation for GSX</div>
       <div class="tf-setup-help">
-        No authenticator secret is saved yet. Add the OneReach setup QR or secret key to let Lite generate GSX login codes.
+        No authenticator secret is saved yet. Add the OneReach setup QR or secret key to let Onereach Desktop generate GSX login codes.
       </div>
       <div class="tf-setup-help tf-setup-warning">
         Do not enter the current six-digit login code here -- that code changes every 30 seconds and is only used on the OneReach login screen.
@@ -225,7 +225,7 @@ function renderSignedIn(state: MountState, meta: LiteTotpSecretMetadata): void {
         ${meta.issuer !== undefined ? escapeHtml(meta.issuer) + ' &middot; ' : ''}${meta.account !== undefined ? escapeHtml(meta.account) : 'OneReach'}
       </div>
     </div>
-    <div class="tf-code-source">Source: system keychain. Shared with full Onereach.ai app.</div>
+    <div class="tf-code-source">Source: system keychain. Shared with the full Onereach app.</div>
     <div id="tf-copy-hint" class="tf-copy-hint">Click the code to copy.</div>
     ${introCardsMarkup()}
     <div class="tf-config-actions">
@@ -305,7 +305,7 @@ async function copyCurrentCode(codeEl: HTMLElement, hintEl: HTMLElement): Promis
 
 async function removeFlow(state: MountState, status: HTMLElement): Promise<void> {
   const confirmed = window.confirm(
-    `Remove the saved authenticator secret? ${PRODUCT_DISPLAY_NAME} and the full Onereach.ai app use the same keychain entry, so you will need to scan the OneReach setup QR again to generate 2FA codes on this Mac.`
+    `Remove the saved authenticator secret? ${PRODUCT_DISPLAY_NAME} and the full Onereach app use the same keychain entry, so you will need to scan the OneReach setup QR again to generate 2FA codes on this Mac.`
   );
   if (!confirmed) return;
   try {
@@ -333,8 +333,8 @@ function introCardsMarkup(): string {
       </div>
       <ol class="tf-explainer-list">
         <li>Add the setup secret once.</li>
-        <li>Lite stores it in your system keychain.</li>
-        <li>Lite generates the current six-digit code.</li>
+        <li>Onereach Desktop stores it in your system keychain.</li>
+        <li>Onereach Desktop generates the current six-digit code.</li>
         <li>The code changes every 30 seconds.</li>
       </ol>
     </div>
@@ -343,9 +343,9 @@ function introCardsMarkup(): string {
       <ul class="tf-security-list">
         <li>The authenticator secret is stored in the macOS Keychain / system credential vault.</li>
         <li>The secret is not written to app settings, logs, bug reports, or KV storage.</li>
-        <li>Lite never shows the saved secret again after setup.</li>
-        <li>Lite only displays the temporary six-digit code, which expires every 30 seconds.</li>
-        <li>Lite reads the same OneReach authenticator secret used by the full Onereach.ai app, so existing full-app 2FA setup can generate codes here too.</li>
+        <li>Onereach Desktop never shows the saved secret again after setup.</li>
+        <li>Onereach Desktop only displays the temporary six-digit code, which expires every 30 seconds.</li>
+        <li>Onereach Desktop reads the same authenticator secret used by the full Onereach app, so existing full-app 2FA setup can generate codes here too.</li>
       </ul>
     </div>
   `;

@@ -518,7 +518,7 @@ export async function callOperation(
     if (/ECONNREFUSED|fetch failed|ECONNRESET/i.test(msg)) {
       throw new Error(
         `${api?.title ?? op.api} isn't reachable on port ${deps.ports[op.api]} — ` +
-          `is the Onereach.ai app running? (${msg})`
+          `is the full Onereach app running? (${msg})`
       );
     }
     throw new Error(`${op.tool} failed: ${msg}`);
@@ -576,7 +576,7 @@ export function registerTools(server: McpServer, deps: CallDeps): void {
     'list_local_apis',
     {
       description:
-        'Discover every local Onereach.ai HTTP API and its operations — the full ' +
+        'Discover every local Onereach HTTP API and its operations — the full ' +
         'catalog (ports, methods, paths, params). Start here.',
       inputSchema: {},
     },

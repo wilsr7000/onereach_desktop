@@ -369,7 +369,7 @@ export function buildAgentOkf(agent: GsxAgent, script: GsxScript): string {
     '',
     '## Behavior',
     '',
-    `Replays a taught ${script.steps.length}-step GSX walkthrough (script \`${agent.scriptId}\` v${script.version}) inside an authenticated GSX window. Runs are graded against the script's own assertions; failing runs are AI-repaired and successful repairs become the new template version. Taught with the Lite teach-mode recorder.`,
+    `Replays a taught ${script.steps.length}-step GSX walkthrough (script \`${agent.scriptId}\` v${script.version}) inside an authenticated GSX window. Runs are graded against the script's own assertions; failing runs are AI-repaired and successful repairs become the new template version. Taught with the ${PRODUCT_DISPLAY_NAME} teach-mode recorder.`,
     '',
   ].join('\n');
 }

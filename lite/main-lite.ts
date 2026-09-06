@@ -102,13 +102,15 @@ const LITE_LOG_PORT = Number(process.env['LITE_LOG_PORT']) > 0
 // INTERNAL identity — drives app.setName(), the userData path, the
 // keychain SessionVault service, and Squirrel.Mac update pathing.
 // MUST stay 'Onereach.ai Lite': changing it moves userData (users lose
-// local state + re-sign-in) and breaks auto-update for installed 0.0.67.
-// The WISER rebrand (2026-08-15) is display-only — see LITE_DISPLAY_NAME.
-const LITE_PRODUCT_NAME = 'Onereach.ai Lite';
-// USER-FACING name — window titles, About, banner. Decoupled from the
-// internal bundle identity above so the rebrand costs zero disruption
-// (macOS Dock/Finder show it via CFBundleDisplayName in electron-builder).
-export const LITE_DISPLAY_NAME = 'WISER';
+// local state + re-sign-in) and breaks auto-update for every install.
+// Both names live in lite/product.ts (ADR-095); the user-facing one is
+// free to change, this one is not.
+const LITE_PRODUCT_NAME = INTERNAL_APP_NAME;
+// USER-FACING name — window titles, About, banner, dialogs. Decoupled
+// from the internal bundle identity above so a rename costs zero
+// disruption (the bundle and DMG carry it through electron-builder's
+// productName / CFBundleDisplayName).
+export const LITE_DISPLAY_NAME = PRODUCT_DISPLAY_NAME;
 
 // ============================================================================
 // APP IDENTITY -- override the defaults that Electron picks up from its own
@@ -683,7 +685,7 @@ app
         applicationName: LITE_DISPLAY_NAME,
         applicationVersion: LITE_VERSION,
         version: LITE_VERSION,
-        copyright: 'Copyright © 2026 Onereach.ai',
+        copyright: 'Copyright © 2026 Onereach',
         credits: `${LITE_DISPLAY_NAME} — WISER method reference kernel`,
       });
     }
