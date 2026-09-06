@@ -45,15 +45,25 @@ import { getMainWindowApi } from './api.js';
  * the auth window has used since ADR-041; Chromium's real version is
  * preserved so feature sniffing stays honest.
  */
-export function chromeParityUserAgent(): string {
+/**
+ * The product token a page in a TAB sees after the Chrome UA (ADR-096).
+ * The OneReach login page checks `/onereach/i` and, when it matches,
+ * takes its in-app Google path: its own SSO popup, opened directly —
+ * frame or not — instead of Google One Tap, which has no UI in Electron.
+ * Popups never carry it: Google's own pages must see plain Chrome.
+ */
+export const PRODUCT_UA_TOKEN = 'OnereachDesktop';
+
+export function chromeParityUserAgent(opts: { marker?: boolean } = {}): string {
   const chromeVersion = process.versions.chrome ?? '124.0.0.0';
+  const marker = opts.marker === false ? '' : ` ${PRODUCT_UA_TOKEN}`;
   if (process.platform === 'darwin') {
-    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
   }
   if (process.platform === 'win32') {
-    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
   }
-  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
 }
 
 // ─── window.open routing ─────────────────────────────────────────────────
@@ -375,8 +385,9 @@ export function ensureSessionParity(ses: Session): void {
  * Full Chrome parity for one tab's webContents — and, via
  * `did-create-window`, recursively for every popup it opens.
  */
-export function attachChromeParity(contents: WebContents, opts: { partition: string }): void {
-  contents.setUserAgent(chromeParityUserAgent());
+export function attachChromeParity(contents: WebContents, opts: { partition: string; popup?: boolean }): void {
+  // A tab carries the product token; a popup (Google's own pages) says plain Chrome.
+  contents.setUserAgent(chromeParityUserAgent({ marker: opts.popup !== true }));
   ensureSessionParity(contents.session);
   contents.setWindowOpenHandler(buildTabWindowOpenHandler({ partition: opts.partition }));
   contents.on('did-create-window', (child) => {
@@ -393,7 +404,7 @@ export function attachChromeParity(contents: WebContents, opts: { partition: str
     } catch {
       /* diagnostics only */
     }
-    attachChromeParity(child.webContents, opts);
+    attachChromeParity(child.webContents, { ...opts, popup: true });
   });
   contents.on('context-menu', (_event, params) => {
     try {

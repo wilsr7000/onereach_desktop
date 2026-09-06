@@ -38,7 +38,7 @@ import {
 import type { Rectangle } from 'electron';
 import { dirname, join } from 'node:path';
 import { readHomeUrl, resolveHomeUrl , looksLikeOneReachLoginUrl, shouldShowRemoteHome } from './home-url-store.js';
-import { attachChromeParity, chromeParityUserAgent } from './browser-parity.js';
+import { attachChromeParity } from './browser-parity.js';
 import { getLoggingApi } from '../logging/api.js';
 import { getIdwApi } from '../idw/api.js';
 import { attachConversationTap } from '../idw/conversation-tap.js';
@@ -1586,30 +1586,18 @@ function attachRemoteHome(win: BrowserWindow): void {
       partition: HOME_REMOTE_PARTITION,
     },
   });
-  // 2026-08-17: Google serves OAuth a 403 (disallowed_useragent) to
-  // browsers it doesn't recognize — Electron's default UA included.
-  // Tabs (ADR-063) and the auth window (ADR-041) already present a
-  // Chrome-shaped UA; the Home view never did, so "Sign in with
-  // Google" on the Home IDW's login 403'd in place. Session-level so
-  // popups in this partition inherit it too.
-  view.webContents.session.setUserAgent(chromeParityUserAgent());
-  view.webContents.setUserAgent(chromeParityUserAgent());
-
-  // 2026-08-15: the Home surface is now an IDW (gsx-expert), and IDWs
-  // sign in via SSO. The old handler shipped EVERY https popup to the
-  // OS browser — silently, unlogged — so "Sign in with Google" opened
-  // in Chrome with no window.opener and the finished flow could never
-  // hand its token back ("sign in with google is broken", live).
-  // buildPopupHandler is the shared policy: OAuth IdP URLs open as
-  // SAME-PARTITION in-app popups (opener + cookies work); everything
-  // else still goes to the OS browser. Every decision logs.
-  view.webContents.setWindowOpenHandler(
-    buildPopupHandler({
-      partition: HOME_REMOTE_PARTITION,
-      source: 'main-window-home-remote',
-      logger: (level, message, data) => getLoggingApi()[level]('auth', message, data),
-    })
-  );
+  // ADR-096 (2026-09-06): the Home view gets the SAME Chrome parity an
+  // ordinary tab gets — window.open routing, Chrome UA with the product
+  // token, plain-Chrome popups, downloads, context menu. Before this it
+  // had its own UA lines plus the OAuth-allowlist popup handler, and the
+  // OneReach login page's "Sign in with Google" opens its SSO popup on
+  // sso.global.api.onereach.ai, which is NOT an identity-provider host:
+  // that handler sent it to the OS browser and handed the page a null
+  // window — "just spinning, no popup" (robb, live, twice). The 2026-08-15
+  // and 2026-08-17 notes above this block in history solved the UA and the
+  // accounts.google.com case; the SSO hop between them is what the tab
+  // handler already routes as a featureful popup in this partition.
+  attachChromeParity(view.webContents, { partition: HOME_REMOTE_PARTITION });
   view.webContents.on(
     'did-fail-load',
     (_e, errorCode, errorDescription, _validatedURL, isMainFrame) => {

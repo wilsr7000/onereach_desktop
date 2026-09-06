@@ -84,3 +84,5 @@ Edge cases stay covered by `test/unit/window-rescue.test.ts` (16
 tests, real observed coordinates).
 
 **Popups and the user agent (ADR-096).** A popup's first document loads before `did-create-window` can set a UA; `app.userAgentFallback` (main-lite) is the Chrome string, so popups present Chrome from their first request. `did-create-window` logs one `popup created` line with the session match and the UAs.
+
+**Home view (ADR-096).** `attachRemoteHome` uses `attachChromeParity` like a tab: featureful `window.open` → in-app popup in the Home partition. Its former OAuth-allowlist handler sent the OneReach login page's SSO popup (`sso.global.api.onereach.ai`, not an IdP host) to the OS browser, so "Sign in with Google" on the Home IDW spun with no popup. Tab and Home UAs end in ` OnereachDesktop`; popups say plain Chrome.

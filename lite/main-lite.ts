@@ -283,7 +283,7 @@ if (!app.requestSingleInstanceLock()) {
 //    the same string; nothing in Lite sniffs its UA.
 // ============================================================================
 app.commandLine.appendSwitch('disable-features', 'FedCm');
-app.userAgentFallback = chromeParityUserAgent();
+app.userAgentFallback = chromeParityUserAgent({ marker: false });
 
 // ============================================================================
 // TOUCH ID WEBAUTHN (ADR-066) — Secure Enclave platform authenticator for

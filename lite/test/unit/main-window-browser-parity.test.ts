@@ -60,10 +60,17 @@ describe('classifyWindowOpen — the Chrome behavior table', () => {
 });
 
 describe('chromeParityUserAgent', () => {
-  it('carries Chrome and never Electron or the app name', () => {
+  it('a tab carries Chrome plus the product token (the login page keys on /onereach/i), never Electron', () => {
     const ua = chromeParityUserAgent();
     expect(ua).toContain('Chrome/');
     expect(ua).toContain('Safari/537.36');
+    expect(ua).not.toMatch(/Electron/i);
+    expect(ua.endsWith(' OnereachDesktop')).toBe(true);
+    expect(ua).toMatch(/onereach/i);
+  });
+  it('a popup says plain Chrome: no product token, no Electron (Google\'s pages see this one)', () => {
+    const ua = chromeParityUserAgent({ marker: false });
+    expect(ua).toContain('Chrome/');
     expect(ua).not.toMatch(/Electron/i);
     expect(ua).not.toMatch(/onereach|gsx/i);
   });

@@ -286,6 +286,8 @@ The same helper is used by [`lite/main-window/window.ts`](../main-window/window.
 
 Allowlist matching is exact-host or subdomain (`accounts.google.com` matches; `accounts.google.com.evil.com` does NOT). Adding entries means a one-line edit to `OAUTH_POPUP_ALLOWLIST`.
 
-## Google sign-in: FedCM off, Chrome UA on popups at creation (ADR-096)
+## Google sign-in: FedCM off, plain-Chrome popups, the product token on the opener (ADR-096)
 
 The OneReach login page's "Sign in with Google" is Google One Tap, which uses FedCM when the browser exposes it. Electron exposes the API without the UI, so the prompt never resolves and the page never falls back. Lite starts Chromium with `--disable-features=FedCm`; the page then takes its SSO popup path, which reaches Google's sign-in. Popups start their first navigation before any per-contents override lands, so `app.userAgentFallback` is the Chrome string: a window.open child (the SSO popup) presents Chrome on the wire and in `navigator.userAgent` from its first request (`did-create-window` is too late for that).
+
+The sign-in window's UA ends in ` OnereachDesktop`: the login page checks `/onereach/i` and then opens its own SSO popup directly, frame or not, instead of Google One Tap. Popups (`did-create-window`) are set to plain Chrome, the string Google's pages must see.

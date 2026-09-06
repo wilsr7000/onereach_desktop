@@ -39,15 +39,19 @@ import { getLoggingApi } from '../logging/api.js';
  * markers, so the auth window has to advertise itself as plain
  * Chrome -- mirrors `main.js:12575` in the full app.
  */
-function chromeUserAgent(): string {
+function chromeUserAgent(opts: { marker?: boolean } = {}): string {
   const chromeVersion = process.versions.chrome ?? '120.0.0.0';
+  // ADR-096: the sign-in window carries the product token so the OneReach
+  // login page takes its in-app Google path (its own SSO popup); the popup
+  // itself says plain Chrome, which is what Google's pages must see.
+  const marker = opts.marker === false ? '' : ' OnereachDesktop';
   if (process.platform === 'darwin') {
-    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    return `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
   }
   if (process.platform === 'win32') {
-    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+    return `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
   }
-  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
+  return `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36${marker}`;
 }
 
 /**
@@ -381,7 +385,7 @@ export function createAuthWindow(
   // also need `setUserAgent` here.
   win.webContents.on('did-create-window', (popup) => {
     try {
-      const ua = chromeUserAgent();
+      const ua = chromeUserAgent({ marker: false });
       if (typeof popup.webContents?.setUserAgent === 'function') {
         popup.webContents.setUserAgent(ua);
       }
