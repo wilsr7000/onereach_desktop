@@ -2448,6 +2448,14 @@ export const CYPHER = {
     RETURN count(s) > 0 AS taken
   `,
   /**
+   * Graph liveness for background sweeps (ADR-091 pre-flight). Reads no
+   * data: nothing to gate. When the neon2 proxy is down this is the ONE
+   * query a sweep spends before it aborts.
+   */
+  PING: `
+    RETURN 1 AS ok
+  `,
+  /**
    * A bot's Designer flows as agent assets of its Space, one query per
    * batch (UNWIND): the same shape CREATE_AGENT writes (Asset
    * ─REPRESENTS→ Agent ─HAS_TYPE→ AgentType:Workflow), MERGEd on
@@ -6181,6 +6189,21 @@ export class SdkSpacesClient {
   async spaceNameTaken(name: string, exceptSpaceId: string): Promise<boolean> {
     const rows = await this.run(CYPHER.SPACE_NAME_TAKEN, { name, exceptSpaceId });
     return rows[0]?.['taken'] === true;
+  }
+
+  /**
+   * Is the graph answering? One `RETURN 1` round-trip; false on any
+   * failure (never throws) so a background sweep can decide to stand
+   * down without unwrapping the proxy's error.
+   */
+  async ping(): Promise<boolean> {
+    try {
+      const rows = await this.run(CYPHER.PING, {});
+      const ok = rows[0]?.['ok'];
+      return ok === 1 || ok === true;
+    } catch {
+      return false;
+    }
   }
 
   // ─── ADR-092: a Space made in Lite is a GSX space too ────────────────

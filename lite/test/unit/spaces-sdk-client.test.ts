@@ -4256,6 +4256,35 @@ describe('ADR-091 — GSX Designer → Spaces sync Cypher', () => {
     expect(q).toMatch(/a\.deletedAt = null/);
   });
 
+  // 2026-09-05 outage: the sweep's pre-flight ping must be the cheapest
+  // possible query and must never throw — it is what the sweep spends
+  // when the graph is down.
+  it('PING reads nothing (no MATCH) and ping() answers true/false without throwing', async () => {
+    expect(CYPHER.PING.trim()).toBe('RETURN 1 AS ok');
+    expect(CYPHER.PING).not.toMatch(/\bMATCH\b/);
+
+    const calls: string[] = [];
+    const alive = new SdkSpacesClient({
+      query: async (cypher: string) => {
+        calls.push(cypher);
+        return [{ ok: 1 }];
+      },
+    });
+    await expect(alive.ping()).resolves.toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('RETURN 1 AS ok');
+
+    const empty = new SdkSpacesClient({ query: async () => [] });
+    await expect(empty.ping()).resolves.toBe(false);
+
+    const down = new SdkSpacesClient({
+      query: async () => {
+        throw new Error('Neon query failed: HTTP 500 from https://em.edison.api.onereach.ai/http/a/omnidata/neon2');
+      },
+    });
+    await expect(down.ping()).resolves.toBe(false);
+  });
+
   it('RETIRE_GSX_FLOW_AGENT soft-deletes only synced agents in a writable Space', () => {
     expect(CYPHER.RETIRE_GSX_FLOW_AGENT).toMatch(/a\.gsxFlowId IS NOT NULL/);
     expect(CYPHER.RETIRE_GSX_FLOW_AGENT).toMatch(/\$viewerId <> ''/);

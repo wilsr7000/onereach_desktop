@@ -15,7 +15,14 @@
  *   - signed out / no account → aborts quietly (retried on next open),
  *   - the account has no `refresh_token` flow (404) → aborts quietly,
  *   - one bot's flow list failing (the data hub 500s on one of them
- *     today) is counted and skipped — it never stops the sweep.
+ *     today) is counted and skipped — it never stops the sweep,
+ *   - the GRAPH being down (2026-09-05: the neon2 proxy answered every
+ *     query, even `RETURN 1`, with HTTP 500 after 29 s) must cost one
+ *     cheap ping, not twelve bots × 29 s of writes that cannot land: the
+ *     sweep pings the graph before it reads Designer, and the first bot
+ *     that fails on a graph error stops the sweep (circuit-breaker).
+ *     Both abort with reason `graph-unavailable`; the trigger's cooldown
+ *     spaces the retries.
  *
  * Fully dependency-injected so tests drive it without Electron, the
  * graph, or GSX.
@@ -58,6 +65,27 @@ export interface GsxFlowSyncClient {
    * land there and no mirror Space is minted.
    */
   spaceByGsxBotId?(gsxBotId: string): Promise<{ id: string; name: string } | null>;
+  /**
+   * Cheap graph liveness check (`RETURN 1`); false or a throw means the
+   * graph is not answering and the sweep must not start. Optional so
+   * older clients and fakes still work; without it the sweep relies on
+   * the circuit-breaker alone.
+   */
+  ping?(): Promise<boolean>;
+}
+
+/**
+ * True when an error means the GRAPH is not answering (as opposed to
+ * Designer, one bot, or a permission refusal) — the case where continuing
+ * the sweep can only fail the same way for every remaining bot.
+ */
+export function isGraphOutage(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') return false;
+  const e = err as { code?: unknown; name?: unknown; message?: unknown };
+  if (e.code === 'SPACES_CYPHER') return true;
+  if (e.name === 'NeonError') return true;
+  const message = typeof e.message === 'string' ? e.message : '';
+  return /Neon query failed|omnidata\/neon/i.test(message);
 }
 
 export interface GsxFlowSyncLog {
@@ -209,6 +237,28 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
     return result;
   }
 
+  // Pre-flight: one cheap graph round-trip BEFORE Designer is read. When
+  // the graph is down every write below would wait out the proxy timeout
+  // and fail; abort here for the price of a single ping.
+  if (typeof deps.client.ping === 'function') {
+    let alive = false;
+    let pingError: string | null = null;
+    try {
+      alive = await deps.client.ping();
+    } catch (err) {
+      pingError = err instanceof Error ? err.message : String(err);
+    }
+    if (!alive) {
+      result.aborted = true;
+      result.reason = 'graph-unavailable';
+      deps.log.warn('spaces', 'gsx-flow-sync: graph unavailable; aborting before Designer is read', {
+        ...(pingError !== null ? { error: pingError } : {}),
+      });
+      span.finish({ ...result });
+      return result;
+    }
+  }
+
   let bots;
   try {
     bots = await deps.port.listBots();
@@ -346,11 +396,24 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       botSpan.finish({ flows: live.length });
     } catch (err) {
       result.botsFailed += 1;
+      botSpan.fail(err);
+      if (isGraphOutage(err)) {
+        // Circuit-breaker: the graph stopped answering mid-sweep. Every
+        // remaining bot would fail the same way after the same timeout.
+        result.aborted = true;
+        result.reason = 'graph-unavailable';
+        deps.log.warn('spaces', 'gsx-flow-sync: graph unavailable; sweep stopped', {
+          botId: bot.id,
+          botsDone: bots.indexOf(bot),
+          botsSkipped: bots.length - bots.indexOf(bot) - 1,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
       deps.log.warn('spaces', 'gsx-flow-sync: bot failed', {
         botId: bot.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      botSpan.fail(err);
     }
   }
   span.finish({ ...result });

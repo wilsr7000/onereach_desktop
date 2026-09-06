@@ -169,6 +169,13 @@ recent view per flow; `gsxDesignerUrl` / `gsxViewUrl` in the agent's
 metadata; two buttons in the detail pane that open the signed-in GSX
 window).
 
+A graph outage costs one ping (2026-09-05, after the neon2 proxy answered
+every query with a 29-second 500): the sweep runs `SdkSpacesClient.ping()`
+(`RETURN 1`) before it reads Designer and aborts `graph-unavailable` when
+that fails; mid-sweep, the first bot failing on a graph error
+(`isGraphOutage`) stops the sweep with the same reason. A Designer-side
+bot failure still skips just that bot.
+
 ## A Space made in Lite is a GSX space too (ADR-092)
 
 `gsx-space-mirror.ts`: after `createSpace` writes the Space, the same name

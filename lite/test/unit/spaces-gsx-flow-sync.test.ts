@@ -11,6 +11,7 @@ import {
   actionDeskViewUrl,
   viewsByFlow,
   flowAgentContent,
+  isGraphOutage,
   type GsxFlowSyncDeps,
   type GsxFlowSyncClient,
 } from '../../spaces/gsx-flow-sync.js';
@@ -22,6 +23,10 @@ interface Rec {
   retired: string[];
   spans: string[];
   warns: string[];
+  /** Designer reads (listBots calls) — a sweep that stood down makes none. */
+  botsListed: number;
+  /** Graph pings made. */
+  pings: number;
 }
 
 function makeDeps(over: {
@@ -35,11 +40,17 @@ function makeDeps(over: {
   views?: GsxView[] | Error;
   accountId?: string;
   ownSpaces?: Record<string, { id: string; name: string }>;
+  /** Graph liveness: omitted = no ping method (older client); boolean = answer; Error = ping throws. */
+  ping?: boolean | Error;
+  /** Bot ids whose Space upsert throws this error (graph failure injection). */
+  spaceUpsertFails?: Record<string, Error>;
 } = {}): { deps: GsxFlowSyncDeps; rec: Rec } {
-  const rec: Rec = { spaces: [], agents: [], retired: [], spans: [], warns: [] };
+  const rec: Rec = { spaces: [], agents: [], retired: [], spans: [], warns: [], botsListed: 0, pings: 0 };
   const bots = over.bots ?? [];
   const client: GsxFlowSyncClient = {
     async upsertGsxFlowSpace(input) {
+      const fail = over.spaceUpsertFails?.[input.gsxBotId];
+      if (fail !== undefined) throw fail;
       rec.spaces.push(input);
       return { id: input.id, created: !(over.createdSpaces?.has(input.id) ?? false) };
     },
@@ -60,11 +71,21 @@ function makeDeps(over: {
     ...(over.ownSpaces !== undefined
       ? { async spaceByGsxBotId(botId: string) { return over.ownSpaces?.[botId] ?? null; } }
       : {}),
+    ...(over.ping !== undefined
+      ? {
+          async ping() {
+            rec.pings += 1;
+            if (over.ping instanceof Error) throw over.ping;
+            return over.ping === true;
+          },
+        }
+      : {}),
   };
   const deps: GsxFlowSyncDeps = {
     client,
     port: {
       async listBots() {
+        rec.botsListed += 1;
         if (bots instanceof Error) throw bots;
         return bots;
       },
@@ -185,6 +206,106 @@ describe('runGsxFlowSync', () => {
     const { deps } = makeDeps({ bots: new GsxFlowsError('answered 404', 404) });
     const r = await runGsxFlowSync(deps);
     expect(r).toMatchObject({ aborted: true, reason: 'no-refresh-token-flow' });
+  });
+
+  // 2026-09-05: the neon2 proxy answered every query (even RETURN 1) with
+  // HTTP 500 after 29 s. The sweep, fired on every Spaces open, then spent
+  // 12 bots × 29 s failing writes that could never land. A graph outage
+  // must cost one ping — or, mid-sweep, one bot — and nothing more.
+  describe('graph outage', () => {
+    const outage = Object.assign(
+      new Error('Neon query failed: HTTP 500 from https://em.edison.api.onereach.ai/http/acct/omnidata/neon2'),
+      { code: 'SPACES_CYPHER' }
+    );
+
+    it('pre-flight: a dead ping aborts BEFORE Designer is read — no bots listed, nothing written', async () => {
+      const { deps, rec } = makeDeps({ bots: [bot('b1', 'Tickets')], flows: { b1: [flow('f1', 'b1', 'Triage')] }, ping: false });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: true, reason: 'graph-unavailable', bots: 0, botsFailed: 0 });
+      expect(rec.pings).toBe(1);
+      expect(rec.botsListed).toBe(0);
+      expect(rec.spaces).toEqual([]);
+      expect(rec.agents).toEqual([]);
+      expect(rec.warns.some((w) => w.includes('graph unavailable'))).toBe(true);
+      expect(rec.spans).toEqual(['spaces.gsxFlowSync.start', 'spaces.gsxFlowSync.finish']);
+    });
+
+    it('pre-flight: a ping that THROWS is the same as a dead one', async () => {
+      const { deps, rec } = makeDeps({ bots: [bot('b1', 'Tickets')], ping: new Error('timeout for event: 29000 ms') });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: true, reason: 'graph-unavailable' });
+      expect(rec.botsListed).toBe(0);
+    });
+
+    it('a live ping lets the sweep run exactly as before (one ping, then Designer)', async () => {
+      const { deps, rec } = makeDeps({ bots: [bot('b1', 'Tickets')], flows: { b1: [flow('f1', 'b1', 'Triage')] }, ping: true });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: false, bots: 1, agentsCreated: 1 });
+      expect(rec.pings).toBe(1);
+      expect(rec.botsListed).toBe(1);
+    });
+
+    it('a client without ping (older client, fakes) skips the pre-flight and still sweeps', async () => {
+      const { deps, rec } = makeDeps({ bots: [bot('b1', 'Tickets')], flows: { b1: [flow('f1', 'b1', 'Triage')] } });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: false, agentsCreated: 1 });
+      expect(rec.pings).toBe(0);
+    });
+
+    it('circuit-breaker: the first bot failing on a GRAPH error stops the sweep — later bots are not attempted', async () => {
+      const { deps, rec } = makeDeps({
+        bots: [bot('b1', 'Tickets'), bot('b2', 'Omni Data'), bot('b3', 'News Feed')],
+        flows: { b1: [flow('f1', 'b1', 'Triage')], b2: [flow('f2', 'b2', 'Ingest')], b3: [flow('f3', 'b3', 'Digest')] },
+        ping: true,
+        spaceUpsertFails: { b1: outage },
+      });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: true, reason: 'graph-unavailable', bots: 3, botsFailed: 1 });
+      expect(rec.spaces).toEqual([]); // b2 and b3 never reached the graph
+      expect(rec.agents).toEqual([]);
+      expect(rec.warns.some((w) => w.includes('sweep stopped'))).toBe(true);
+      expect(rec.spans.filter((s) => s === 'spaces.gsxFlowSync.bot.start')).toHaveLength(1);
+      expect(rec.spans).toContain('spaces.gsxFlowSync.bot.fail');
+    });
+
+    it('circuit-breaker trips on a mid-sweep outage too: bots before it keep their results', async () => {
+      const { deps, rec } = makeDeps({
+        bots: [bot('b1', 'Tickets'), bot('b2', 'Omni Data'), bot('b3', 'News Feed')],
+        flows: { b1: [flow('f1', 'b1', 'Triage')], b2: [flow('f2', 'b2', 'Ingest')], b3: [flow('f3', 'b3', 'Digest')] },
+        ping: true,
+        spaceUpsertFails: { b2: Object.assign(new Error('boom'), { name: 'NeonError' }) },
+      });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: true, reason: 'graph-unavailable', bots: 3, botsFailed: 1, agentsCreated: 1 });
+      expect(rec.spaces.map((s) => s.gsxBotId)).toEqual(['b1']);
+    });
+
+    it('a NON-graph bot failure still skips just that bot (the breaker does not trip)', async () => {
+      const { deps, rec } = makeDeps({
+        bots: [bot('b1', 'Tickets'), bot('b2', 'Omni Data')],
+        flows: { b1: [flow('f1', 'b1', 'Triage')], b2: [flow('f2', 'b2', 'Ingest')] },
+        ping: true,
+        spaceUpsertFails: { b1: Object.assign(new Error('not writable by the viewer'), { code: 'SPACES_FORBIDDEN' }) },
+      });
+      const r = await runGsxFlowSync(deps);
+      expect(r).toMatchObject({ aborted: false, bots: 2, botsFailed: 1, agentsCreated: 1 });
+      expect(rec.spaces.map((s) => s.gsxBotId)).toEqual(['b2']);
+      expect(rec.warns.some((w) => w.includes('sweep stopped'))).toBe(false);
+    });
+  });
+
+  describe('isGraphOutage', () => {
+    it('recognises the client wrap, the neon error class, and the proxy message; nothing else', () => {
+      expect(isGraphOutage(Object.assign(new Error('x'), { code: 'SPACES_CYPHER' }))).toBe(true);
+      expect(isGraphOutage(Object.assign(new Error('x'), { name: 'NeonError' }))).toBe(true);
+      expect(isGraphOutage(new Error('Neon query failed: HTTP 500 from https://em.edison.api.onereach.ai/http/a/omnidata/neon2'))).toBe(true);
+      expect(isGraphOutage(new Error('HTTP 500 from …/omnidata/neon'))).toBe(true);
+      expect(isGraphOutage(Object.assign(new Error('x'), { code: 'SPACES_FORBIDDEN' }))).toBe(false);
+      expect(isGraphOutage(new GsxFlowsError('Internal Server Error', 500))).toBe(false);
+      expect(isGraphOutage(new Error('Internal Server Error'))).toBe(false);
+      expect(isGraphOutage(null)).toBe(false);
+      expect(isGraphOutage('Neon query failed')).toBe(false);
+    });
   });
 
   it('dry run reads Designer and touches nothing', async () => {

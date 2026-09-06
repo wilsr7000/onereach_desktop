@@ -2111,6 +2111,32 @@ buttons that open the signed-in GSX window (the GSX menu's), never the OS
 browser, and labels the asset "GSX agent flow". Views unavailable never stop
 the sweep — the agents link to Designer only.
 
+**Addendum (2026-09-05, evening) — a graph outage costs one ping.** The
+first time the Spaces window opened with the sync wired in, the neon2 proxy
+was down: every query from every client — the installed app, the dev app,
+and a bare `RETURN 1` from a shell — answered HTTP 500 after 29 s
+(`timeout for 'event:…': 29000 ms`, the flow's graph worker never
+replying) while KV on the same host answered in 265 ms. The outage began
+at 04:39 UTC, before the window opened (04:58) and before the sweep ran
+(05:02), so the sweep did not cause it — but the sweep made it worse: fired
+on every open, it spent 12 bots × 29 s failing writes that could never land,
+and re-armed after each 10-minute cooldown. Honest note: the sync had been
+verified headlessly, in suites and in a signed-out boot smoke, never by
+opening the window of a running app.
+
+Two rules now, both inside `runGsxFlowSync` so the fakes pin them:
+(1) **pre-flight** — before Designer is read, one `RETURN 1 AS ok` through
+the client (`SdkSpacesClient.ping()`, never throws, reads no data so
+nothing to gate); dead or throwing → abort `graph-unavailable`, zero
+Designer requests, nothing written; (2) **circuit-breaker** — the first
+bot that fails on a graph error (`isGraphOutage`: the client's
+`SPACES_CYPHER` wrap, `NeonError`, or the proxy's message) stops the sweep
+with the same reason; a non-graph bot failure (Designer 500, a
+`SPACES_FORBIDDEN` Space) still skips just that bot. The trigger's cooldown
+spaces the retries; the on-demand `syncGsxFlows()` behaves the same.
+Proven live against the outage itself: the sweep stood down after one
+graph query and no Designer request.
+
 ## ADR-092: A Space made in Lite is a GSX space too (2026-09-05)
 
 **The ask (robb).** "When a space is created it should be created in GSX as
