@@ -26,6 +26,7 @@
  *  during boot.
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import {
   BrowserWindow,
   WebContentsView,
@@ -238,7 +239,7 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     height: DEFAULT_HEIGHT,
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
-    title: 'Onereach.ai Lite',
+    title: PRODUCT_DISPLAY_NAME,
     backgroundColor: BACKGROUND(),
     show: false,
     // macOS keeps the menu in the system menu bar, so hiding the window

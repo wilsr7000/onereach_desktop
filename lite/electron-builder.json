@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.onereach.lite",
-  "productName": "Onereach.ai Lite",
+  "productName": "Onereach Desktop",
   "copyright": "Copyright © 2026 Onereach.ai",
   "directories": {
     "output": "dist-lite",
@@ -116,7 +116,7 @@
       "dmg",
       "zip"
     ],
-    "artifactName": "Onereach.ai.Lite-${version}-${arch}-mac.${ext}",
+    "artifactName": "Onereach.Desktop-${version}-${arch}-mac.${ext}",
     "darkModeSupport": true,
     "hardenedRuntime": true,
     "gatekeeperAssess": false,
@@ -125,7 +125,7 @@
     "entitlementsInherit": "lite/build/entitlements.mac.inherit.plist",
     "notarize": false,
     "extendInfo": {
-      "CFBundleDisplayName": "WISER",
+      "CFBundleDisplayName": "Onereach Desktop",
       "NSMicrophoneUsageDescription": "WISER uses the microphone for future voice features (kernel does not access mic).",
       "NSCameraUsageDescription": "WISER uses the camera for future recording features (kernel does not access camera).",
       "CFBundleHelpBookFolder": "OnereachLite.help",
@@ -140,7 +140,7 @@
       "nsis",
       "zip"
     ],
-    "artifactName": "Onereach.ai.Lite-${version}-${arch}-win.${ext}"
+    "artifactName": "Onereach.Desktop-${version}-${arch}-win.${ext}"
   },
   "linux": {
     "icon": "assets/tray-icon.png",
@@ -153,7 +153,7 @@
   "dmg": {
     "icon": "assets/icon.icns",
     "iconSize": 128,
-    "title": "Onereach.ai Lite ${version}",
+    "title": "Onereach Desktop ${version}",
     "contents": [
       {
         "x": 130,
@@ -176,6 +176,6 @@
     "perMachine": false,
     "allowToChangeInstallationDirectory": false,
     "deleteAppDataOnUninstall": false,
-    "artifactName": "Onereach.ai.Lite-Setup-${version}.${ext}"
+    "artifactName": "Onereach.Desktop-Setup-${version}.${ext}"
   }
 }

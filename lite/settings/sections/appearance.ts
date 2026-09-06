@@ -32,7 +32,7 @@ export function mountAppearance(container: HTMLElement): (() => void) | undefine
   const intro = document.createElement('p');
   intro.className = 'pane-intro';
   intro.textContent =
-    'Choose how Onereach.ai Lite looks. The change applies to every window immediately.';
+    'Choose how Onereach Desktop looks. The change applies to every window immediately.';
   wrap.appendChild(intro);
 
   const group = document.createElement('div');

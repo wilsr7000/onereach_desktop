@@ -1,6 +1,6 @@
 # `lite/settings/` — Settings window
 
-A small Settings window opened from `Onereach.ai Lite -> Settings...`. v1 ships one section — Two-Factor — which re-hosts the existing TOTP authenticator UI inside the Settings shell. Future sections (Account, Updates, Diagnostics, About) land as additional `mount(el)` functions in `lite/settings/sections/`.
+A small Settings window opened from `Onereach Desktop -> Settings...`. v1 ships one section — Two-Factor — which re-hosts the existing TOTP authenticator UI inside the Settings shell. Future sections (Account, Updates, Diagnostics, About) land as additional `mount(el)` functions in `lite/settings/sections/`.
 
 - **Public API**: [`api.ts`](api.ts) — `SettingsApi` interface, `getSettingsApi()` singleton
 - **Internal**:
@@ -35,7 +35,7 @@ Security notes shown in the UI:
 - Lite only displays the temporary six-digit code, which expires every 30 seconds.
 - Lite reads the same OneReach authenticator secret used by the full Onereach.ai app, so existing full-app 2FA setup can generate codes here too.
 
-The window opens from `Onereach.ai Lite -> Settings...` (macOS app-menu convention), positioned between About and Quit. No accelerator is bound (`Cmd+,` is the macOS convention but per `.cursorrules` accelerators are user-named, not added speculatively).
+The window opens from `Onereach Desktop -> Settings...` (macOS app-menu convention), positioned between About and Quit. No accelerator is bound (`Cmd+,` is the macOS convention but per `.cursorrules` accelerators are user-named, not added speculatively).
 
 ```typescript
 // Main-process consumer

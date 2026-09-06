@@ -54,7 +54,7 @@ console.log(`Sandbox: ${sandbox}`);
 // ---------------------------------------------------------------------------
 
 const zipBytes = Buffer.from('lite-fixture-placeholder-' + VERSION_B);
-const zipBasename = `Onereach.ai Lite-${VERSION_B}-arm64-mac.zip`;
+const zipBasename = `Onereach Desktop-${VERSION_B}-arm64-mac.zip`;
 const zipPath = path.join(servingDir, zipBasename);
 await fs.writeFile(zipPath, zipBytes);
 const sha512 = createHash('sha512').update(zipBytes).digest('base64');

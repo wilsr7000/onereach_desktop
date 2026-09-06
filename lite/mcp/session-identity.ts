@@ -63,13 +63,13 @@ export async function resolveSessionViewer(
   for (const key of ENV_KEYS) {
     const v = opts.env[key];
     if (typeof v === 'string' && v.trim().length > 0) {
-      log(`identity: WARNING — using ${key} from env (${v.trim()}); this is a claimed identity, not the signed-in session. Start Onereach.ai Lite and sign in to bind to the real user.`);
+      log(`identity: WARNING — using ${key} from env (${v.trim()}); this is a claimed identity, not the signed-in session. Start Onereach Desktop and sign in to bind to the real user.`);
       return { viewerId: v.trim(), source: 'env' };
     }
   }
 
   // 3. Fail closed.
   throw new Error(
-    'No viewer identity: sign in to Onereach.ai Lite (so the bridge on 47294 can vouch for you), or set SPACES_VIEWER_ID for local development.'
+    'No viewer identity: sign in to Onereach Desktop (so the bridge on 47294 can vouch for you), or set SPACES_VIEWER_ID for local development.'
   );
 }

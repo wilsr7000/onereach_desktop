@@ -79,8 +79,8 @@ const _builderCfg = JSON.parse(
   await fs.readFile(path.join(liteDir, 'electron-builder.json'), 'utf-8')
 );
 const name = litePkg.name || 'onereach-lite';
-const productName = _builderCfg.productName || 'Onereach.ai Lite';
-const description = litePkg.description || 'Onereach.ai Lite';
+const productName = _builderCfg.productName || 'Onereach Desktop';
+const description = litePkg.description || 'Onereach Desktop';
 
 console.log(`[electron-builder-mac] name: ${name}`);
 console.log(`[electron-builder-mac] productName: ${productName}`);

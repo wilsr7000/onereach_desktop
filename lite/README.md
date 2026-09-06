@@ -1,4 +1,4 @@
-# Onereach Lite
+# Onereach Desktop (codename Lite)
 
 A signed, notarized, auto-updating Electron desktop kernel that ships independently from the full Onereach.ai app while sharing only the `lib/` layer. Built with the [strangler pattern](DECISIONS.md#adr-001-same-repo-strangler-over-from-scratch-rewrite): start with a minimal kernel, port one feature at a time through a hardening contract, never rewrite from scratch.
 

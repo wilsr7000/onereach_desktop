@@ -29,7 +29,7 @@
 - [ ] **Icon legibility** — **NEW** monochrome hexagon template: crisp on both
       light and dark menu bars (flip macOS appearance to verify).
 - [ ] **Version header** — **NEW** first menu row reads
-      `Onereach.ai Lite v<version>` (disabled caption).
+      `Onereach Desktop v<version>` (disabled caption).
 - [ ] **Show/Hide** — toggles the main window; left-click also toggles.
 - [ ] **Spaces… / Settings… / Help** — each opens its window.
 - [ ] **Quit** — exits cleanly.
@@ -397,7 +397,7 @@ and `test/live/journey-map-ai.test.ts` (real model). What still needs eyes:
       external SIGKILL of the smoke child (a concurrent session's
       pkill) retries once; a second kill aborts. Install snippets must
       anchor kills to `/Applications/Onereach.ai Lite.app` — never a
-      bare "Onereach.ai Lite" or "Electron" pattern.
+      bare "Onereach Desktop", "Onereach.ai Lite" or "Electron" pattern.
 - [ ] **Manifest sanity** — latest-mac.yml version + artifacts match the
       tag before anything uploads.
 

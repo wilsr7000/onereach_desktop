@@ -12,6 +12,7 @@
  * @internal -- consumers go through `getHelpApi()` / the menu callback.
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import { BrowserWindow, type Rectangle } from 'electron';
 import { windowBackgroundColor } from '../theme/main.js';
 
@@ -58,7 +59,7 @@ export function openHelpWindow(config: HelpWindowConfig): BrowserWindow {
   const win = new BrowserWindow({
     width: 1000,
     height: 720,
-    title: 'Onereach.ai Lite Help',
+    title: `${PRODUCT_DISPLAY_NAME} Help`,
     backgroundColor: windowBackgroundColor(),
     show: false,
     autoHideMenuBar: true,

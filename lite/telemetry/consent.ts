@@ -11,6 +11,7 @@
  * without Electron, KV, or a graph.
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import type { TelemetryConsent, TelemetryConsentRecord } from './types.js';
 
 /**
@@ -62,9 +63,9 @@ export function recordDecision(
  * disclosure to be updated rather than quietly drift.
  */
 export const CONSENT_DISCLOSURE = {
-  title: 'Help improve Onereach.ai Lite?',
+  title: `Help improve ${PRODUCT_DISPLAY_NAME}?`,
   body:
-    'Lite can send a short daily summary of how this copy of the app is ' +
+    PRODUCT_DISPLAY_NAME + ' can send a short daily summary of how this copy of the app is ' +
     'running, so problems get found before you have to report them.',
   sends: [
     'App version, platform, and how long the app was open',

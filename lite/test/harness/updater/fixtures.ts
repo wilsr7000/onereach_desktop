@@ -35,7 +35,7 @@ export interface YamlFixtureOptions {
   releaseDate?: string;
   /** Bytes to use for the placeholder zip. Default: a tiny static blob. */
   zipBytes?: Buffer;
-  /** Filename basename for the zip (defaults to "Onereach.ai Lite-<version>-arm64-mac.zip"). */
+  /** Filename basename for the zip (defaults to "Onereach Desktop-<version>-arm64-mac.zip"). */
   zipBasename?: string;
   /** YAML basename. Defaults to 'latest-mac.yml'. */
   yamlBasename?: string;
@@ -57,7 +57,7 @@ const DEFAULT_PLACEHOLDER = Buffer.from('lite-fixture-placeholder');
  */
 export async function buildYamlFixture(opts: YamlFixtureOptions): Promise<YamlFixtureResult> {
   await fs.mkdir(opts.outputDir, { recursive: true });
-  const zipBasename = opts.zipBasename ?? `Onereach.ai Lite-${opts.version}-arm64-mac.zip`;
+  const zipBasename = opts.zipBasename ?? `Onereach Desktop-${opts.version}-arm64-mac.zip`;
   const yamlBasename = opts.yamlBasename ?? 'latest-mac.yml';
   const zipPath = path.join(opts.outputDir, zipBasename);
   const yamlPath = path.join(opts.outputDir, yamlBasename);
@@ -107,8 +107,8 @@ export async function buildAppFixture(opts: {
   });
   const cacheDir = opts.cacheDir ?? path.join(tmpdir(), 'onereach-lite-fixture-cache');
   const versionCache = path.join(cacheDir, opts.version);
-  const cachedAppPath = path.join(versionCache, 'Onereach.ai Lite.app');
-  const cachedZipPath = path.join(versionCache, `Onereach.ai Lite-${opts.version}-arm64-mac.zip`);
+  const cachedAppPath = path.join(versionCache, 'Onereach Desktop.app');
+  const cachedZipPath = path.join(versionCache, `Onereach Desktop-${opts.version}-arm64-mac.zip`);
 
   if (opts.force !== true) {
     try {
@@ -137,8 +137,8 @@ export async function buildAppFixture(opts: {
   ].join(' ');
   execSync(cmd, { cwd: REPO_ROOT, stdio: 'inherit' });
 
-  const builtApp = path.join(REPO_ROOT, 'dist-lite', 'mac-arm64', 'Onereach.ai Lite.app');
-  const builtZip = path.join(REPO_ROOT, 'dist-lite', `Onereach.ai Lite-${opts.version}-arm64-mac.zip`);
+  const builtApp = path.join(REPO_ROOT, 'dist-lite', 'mac-arm64', 'Onereach Desktop.app');
+  const builtZip = path.join(REPO_ROOT, 'dist-lite', `Onereach Desktop-${opts.version}-arm64-mac.zip`);
 
   // Copy into cache. Recursive for the .app bundle.
   await copyRecursive(builtApp, cachedAppPath);

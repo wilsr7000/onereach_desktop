@@ -30,6 +30,7 @@
 
 /// <reference path="../../lite-window.d.ts" />
 
+import { PRODUCT_DISPLAY_NAME } from '../../product.js';
 import type { SectionDescriptor } from '../types.js';
 
 const TICK_MS = 1000;
@@ -304,7 +305,7 @@ async function copyCurrentCode(codeEl: HTMLElement, hintEl: HTMLElement): Promis
 
 async function removeFlow(state: MountState, status: HTMLElement): Promise<void> {
   const confirmed = window.confirm(
-    'Remove the saved authenticator secret? Lite and the full Onereach.ai app use the same keychain entry, so you will need to scan the OneReach setup QR again to generate 2FA codes on this Mac.'
+    `Remove the saved authenticator secret? ${PRODUCT_DISPLAY_NAME} and the full Onereach.ai app use the same keychain entry, so you will need to scan the OneReach setup QR again to generate 2FA codes on this Mac.`
   );
   if (!confirmed) return;
   try {
@@ -325,8 +326,8 @@ function introCardsMarkup(): string {
     <div class="tf-explainer-card">
       <div class="tf-card-title">GSX / OneReach two-factor codes</div>
       <div class="tf-card-body">
-        When OneReach asks for a 2FA code during GSX login, Lite can generate that code for you.
-        To do that, Lite needs the authenticator setup secret from OneReach -- the same QR code
+        When OneReach asks for a 2FA code during GSX login, ${PRODUCT_DISPLAY_NAME} can generate that code for you.
+        To do that, ${PRODUCT_DISPLAY_NAME} needs the authenticator setup secret from OneReach -- the same QR code
         or secret key you would normally add to Google Authenticator, 1Password, Authy, or another
         authenticator app.
       </div>

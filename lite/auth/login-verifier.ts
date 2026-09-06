@@ -33,6 +33,7 @@
  * @internal
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import type { WebContents } from 'electron';
 import { AUTH_EVENTS, type IdwLoginCause, type IdwLoginVerdict } from './events.js';
 import { isOneReachDomain } from './store.js';
@@ -146,17 +147,17 @@ export function instructionForLoginCause(cause: IdwLoginCause, label?: string): 
   const who = label !== undefined && label.length > 0 ? `“${label}”` : 'this agent';
   switch (cause) {
     case 'twofa-required':
-      return `${who} is asking for a 2-factor code. Save your authenticator secret in Settings → Two-Factor so Lite can fill it automatically, or type the code in the tab.`;
+      return `${who} is asking for a 2-factor code. Save your authenticator secret in Settings → Two-Factor so ${PRODUCT_DISPLAY_NAME} can fill it automatically, or type the code in the tab.`;
     case 'account-picker':
-      return `${who} is showing an account picker. Choose your account in the tab — Lite couldn’t select it automatically.`;
+      return `${who} is showing an account picker. Choose your account in the tab — ${PRODUCT_DISPLAY_NAME} couldn’t select it automatically.`;
     case 'sso-skip-missed':
       return `${who} is on the OneReach “continue with your session” screen. Click Continue / Skip in the tab to finish signing in.`;
     case 'manual-login-required':
-      return `${who} needs a manual sign-in. Sign in inside the tab and Lite will remember it next time.`;
+      return `${who} needs a manual sign-in. Sign in inside the tab and ${PRODUCT_DISPLAY_NAME} will remember it next time.`;
     case 'no-session':
       return `You may not be signed in to OneReach. Open Settings → Account to sign in, then reopen ${who}.`;
     case 'page-unreachable':
-      return `${who} couldn’t load — this looks like a connection problem, not a sign-in problem. Check your network; Lite will retry once, or reload the tab.`;
+      return `${who} couldn’t load — this looks like a connection problem, not a sign-in problem. Check your network; ${PRODUCT_DISPLAY_NAME} will retry once, or reload the tab.`;
     default:
       return `${who} didn’t finish signing in automatically. Sign in inside the tab to continue.`;
   }

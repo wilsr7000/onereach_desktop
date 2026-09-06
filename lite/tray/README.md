@@ -1,7 +1,7 @@
 # lite/tray
 
 System tray (macOS menu bar / Windows system tray / Linux notification
-area) icon for Onereach.ai Lite.
+area) icon for Onereach Desktop.
 
 ## What this module does
 
@@ -23,7 +23,7 @@ so the OS auto-adapts the icon's color for light vs dark menu bars.
 | `buildTrayMenuTemplate(opts)` | Pure menu template builder. Exposed so tests can pin the structure without constructing a real `Tray`. |
 | `resolveTrayIconPath()` | Probes the candidate icon paths (`dist-lite/build/` siblings, then `<appPath>/assets/`). |
 | `trayIconCandidates()` | Returns the list of paths probed -- used by the no-icon-found warning. |
-| `TRAY_TOOLTIP` | Hover tooltip string (`'Onereach.ai Lite'`). |
+| `TRAY_TOOLTIP` | Hover tooltip string (`'Onereach Desktop'`). |
 
 ## Icon files
 

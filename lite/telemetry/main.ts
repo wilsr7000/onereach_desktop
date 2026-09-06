@@ -16,6 +16,7 @@
  * @internal — consumers go through `./api.ts` (ADR-019).
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import { app, dialog, ipcMain, type BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -244,7 +245,7 @@ export function initTelemetry(opts: InitTelemetryOptions): TelemetryHandle {
       const created = await getSpacesApi().createSpace({
         name,
         description:
-          'Daily usage rollups from one installed copy of Onereach.ai Lite. ' +
+          `Daily usage rollups from one installed copy of ${PRODUCT_DISPLAY_NAME}. ` +
           'Each item is a per-day summary: version, platform, app-open minutes, ' +
           'error counts by area, and which surfaces were opened. Sent only with ' +
           'the user’s consent; no content, filenames, or messages are ever included.',

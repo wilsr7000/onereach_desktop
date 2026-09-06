@@ -2181,3 +2181,11 @@ the in-app path (wizard → NEON → Designer → stamp) needs a signed-in Lite
 and is checked in the user's app, from the outside, through NEON and the
 hub's bot list.
 
+
+## ADR-095: The product is "Onereach Desktop"; the identity underneath stays "Onereach.ai Lite" (2026-09-06)
+
+- **Context**: The user: "Let's not call it Onereach Lite. Let's call it Onereach Desktop." Until now the app carried three names at once — the bundle and DMG said `Onereach.ai Lite`, the app and tray menus said `WISER` (the 2026-08-15 display-only rebrand), and in-app prose said either. "Lite" was only ever the codename.
+- **Decision**: One user-facing name, **Onereach Desktop**, defined once in `lite/product.ts` (`PRODUCT_DISPLAY_NAME`) and fed to every surface: electron-builder `productName` (the `.app` and executable), `CFBundleDisplayName`, the DMG title, the artifact prefix (`Onereach.Desktop-<version>-…`), the app/tray/Help menus, window titles, About, dialogs, Settings and Learning prose, the release notes. `product-name.test.ts` pins each surface and sweeps the source for stragglers.
+- **Frozen, deliberately**: `INTERNAL_APP_NAME = 'Onereach.ai Lite'` → `app.setName()` → the userData folder, the log folder, the safeStorage keychain item, the SessionVault service, Squirrel.Mac pathing; and `appId com.onereach.lite` (auto-update, keychain access, passkeys). Renaming either silently relocates every install's data and vault — the user signs in again to an empty app. Provenance labels written to the graph (`updated_by_app_name`, presence `app`, the "Onereach.ai Lite Feedback" Space) are a cross-app contract and also stay; the Agent Library shows them as "Desktop".
+- **Existing installs**: Squirrel swaps a bundle's contents at the running app's path and never renames the folder, so an install that updates in place keeps `/Applications/Onereach.ai Lite.app` as its folder name while everything inside (menus, Dock, About) says Onereach Desktop. A fresh install from the DMG lands as `Onereach Desktop.app`. Code that needs the installed bundle resolves it from the running executable first, then `APP_BUNDLE_NAMES` in order (`updater/install.ts`), never a hard-coded folder.
+- **Codename**: `lite/`, `lite:*` scripts, `LITE_*` env, ADR prose and the internal log prefix keep saying Lite. It is a directory name, not a product.

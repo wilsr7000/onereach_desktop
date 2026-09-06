@@ -131,7 +131,7 @@ export class QrScanner {
         context: { displayId: display.id },
         cause: err,
         remediation:
-          'On macOS, grant Screen Recording permission to Onereach.ai Lite in System Settings -> Privacy & Security. Then restart the app and try again. Or paste the secret manually.',
+          'On macOS, grant Screen Recording permission to Onereach Desktop in System Settings -> Privacy & Security. Then restart the app and try again. Or paste the secret manually.',
       });
     }
 

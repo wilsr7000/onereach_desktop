@@ -1,3 +1,4 @@
+import { PRODUCT_DISPLAY_NAME } from '../../product.js';
 /**
  * Settings → Updates: version, updater status, manual check, and the
  * last install attempt's trail.
@@ -36,7 +37,7 @@ export function mountUpdates(container: HTMLElement): (() => void) | undefined {
   const intro = document.createElement('p');
   intro.className = 'pane-intro';
   intro.textContent =
-    'Lite checks for updates automatically every 6 hours and installs on your say-so. Updates are signed; install failures are tracked across restarts.';
+    `${PRODUCT_DISPLAY_NAME} checks for updates automatically every 6 hours and installs on your say-so. Updates are signed; install failures are tracked across restarts.`;
   wrap.appendChild(intro);
 
   // ── Current version ──────────────────────────────────────────────

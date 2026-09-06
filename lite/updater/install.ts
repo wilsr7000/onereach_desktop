@@ -38,6 +38,7 @@
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
+import { APP_BUNDLE_NAMES, PRODUCT_DISPLAY_NAME } from '../product.js';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { AutoUpdaterLike } from './init.js';
@@ -336,6 +337,27 @@ function findInstallHelperScript(deps: InstallDeps): string | null {
   return null;
 }
 
+/**
+ * Where the installed bundle is (ADR-095). Exported for tests.
+ */
+export function resolveInstalledAppPath(deps: Pick<InstallDeps, 'execPath' | 'fsImpl' | 'isPackaged'>): string {
+  const exec = deps.execPath ?? process.execPath;
+  const marker = exec.indexOf('.app/Contents/MacOS/');
+  if (marker !== -1 && exec.startsWith('/Applications/') && deps.isPackaged()) {
+    return exec.slice(0, marker + '.app'.length);
+  }
+  const existsSync = deps.fsImpl?.existsSync ?? fs.existsSync;
+  for (const name of APP_BUNDLE_NAMES) {
+    const candidate = `/Applications/${name}`;
+    try {
+      if (existsSync(candidate)) return candidate;
+    } catch {
+      // an fs seam that refuses is the same as "not there"
+    }
+  }
+  return `/Applications/${PRODUCT_DISPLAY_NAME}.app`;
+}
+
 function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
   // Resolve test seams. In production these all fall through to the
   // real implementations (`spawn`, `os.homedir`). Tests inject stubs
@@ -345,16 +367,14 @@ function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
   const homeDir = (deps.homedir ?? os.homedir)();
   const ts = Date.now();
   const helperLog = deps.getHelperLogPath?.() ?? `/tmp/onereach-lite-installer-${ts}.log`;
-  // Hard-code the installed `.app` path, matching the full app's
-  // `_spawnInstallHelper`. The previous approach derived it from
-  // `process.execPath` so dev runs could test the self-install path,
-  // but in practice the bypass only meaningfully runs against a real
-  // packaged install in `/Applications/` -- a dev run won't have a
-  // valid Squirrel cache or signed bundle to swap in. Hard-coding
-  // keeps the script's `basename "$APP_PATH"` derivation stable
-  // (always "Onereach.ai Lite.app") and matches the cache paths the
-  // helper script grep through.
-  const appPath = '/Applications/Onereach.ai Lite.app';
+  // The installed `.app` path the helper swaps. Since the rename
+  // (ADR-095) an install can live under either folder name — a fresh
+  // install is "<product>.app", one that auto-updated in place keeps
+  // the folder it was dragged in as (Squirrel never renames it) — so:
+  // the running bundle when it sits in /Applications, else the first
+  // of the known names that exists, else the product's own. The
+  // script's `basename "$APP_PATH"` derivation follows whichever it is.
+  const appPath = resolveInstalledAppPath(deps);
   const shipItCache = path.join(homeDir, 'Library/Caches/com.onereach.lite.ShipIt');
   const electronUpdaterCache = path.join(
     homeDir,

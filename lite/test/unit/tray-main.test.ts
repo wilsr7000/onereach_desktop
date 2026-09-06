@@ -104,8 +104,8 @@ function clickByLabel(
 }
 
 describe('TRAY_TOOLTIP', () => {
-  it('reads "WISER" verbatim', () => {
-    expect(TRAY_TOOLTIP).toBe('WISER');
+  it('reads "Onereach Desktop" verbatim', () => {
+    expect(TRAY_TOOLTIP).toBe('Onereach Desktop');
   });
 
   it('shares its value with TRAY_TOOLTIP_BASE (static base for dynamic tooltips)', () => {
@@ -130,7 +130,7 @@ describe('buildTooltip', () => {
     // non-empty>". Both are acceptable; the assertion below proves we
     // never produce an empty or malformed "v" suffix.
     if (tt !== TRAY_TOOLTIP_BASE) {
-      expect(tt).toMatch(/^WISER v\S+$/);
+      expect(tt).toMatch(/^Onereach Desktop v\S+$/);
     }
   });
 });
@@ -145,7 +145,7 @@ describe('buildTrayMenuTemplate', () => {
       .filter((l): l is string => typeof l === 'string');
     expect(labels).toContain('Show WISER');
     expect(labels).toContain('Hide WISER');
-    expect(labels).toContain('Quit WISER');
+    expect(labels).toContain('Quit Onereach Desktop');
   });
 
   // The tray is the only surface still reachable when a window won't
@@ -199,14 +199,14 @@ describe('buildTrayMenuTemplate', () => {
       .map((t) => t.label)
       .filter((l): l is string => typeof l === 'string');
     // First labeled item is the version header caption (dynamic version).
-    expect(labels[0]).toMatch(/^WISER( v\S+)?$/);
+    expect(labels[0]).toMatch(/^Onereach Desktop( v\S+)?$/);
     expect(labels.slice(1)).toEqual([
       'Show WISER',
       'Hide WISER',
       'Spaces…',
       'Settings…',
       'WISER Help',
-      'Quit WISER',
+      'Quit Onereach Desktop',
     ]);
   });
 
@@ -218,13 +218,13 @@ describe('buildTrayMenuTemplate', () => {
     // Structure: [Header, sep, Show, Hide, sep, Settings…, sep, Quit]
     expect(template).toHaveLength(8);
     expect(template[0]?.enabled).toBe(false);
-    expect(template[0]?.label).toMatch(/^WISER/);
+    expect(template[0]?.label).toMatch(/^Onereach Desktop/);
     expect(template[1]?.type).toBe('separator');
     expect(template[2]?.label).toBe('Show WISER');
     expect(template[4]?.type).toBe('separator');
     expect(template[5]?.label).toBe('Settings…');
     expect(template[6]?.type).toBe('separator');
-    expect(template[7]?.label).toBe('Quit WISER');
+    expect(template[7]?.label).toBe('Quit Onereach Desktop');
   });
 
   it('still emits both separators even when no optional entries are wired', () => {
@@ -309,7 +309,7 @@ describe('buildTrayMenuTemplate', () => {
       getMainWindow: (() => null) as GetMain as () => never,
       onQuit,
     });
-    clickByLabel(template, 'Quit WISER');
+    clickByLabel(template, 'Quit Onereach Desktop');
     expect(onQuit).toHaveBeenCalledTimes(1);
   });
 
@@ -323,7 +323,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => null) as GetMain as () => never,
     });
-    const quitItem = template.find((t) => t.label === 'Quit WISER');
+    const quitItem = template.find((t) => t.label === 'Quit Onereach Desktop');
     expect(quitItem).toBeDefined();
     expect(typeof quitItem?.click).toBe('function');
   });

@@ -20,6 +20,7 @@
 // don't collide on declaration merging).
 /// <reference path="./lite-window.d.ts" />
 
+import { PRODUCT_DISPLAY_NAME } from './product.js';
 import { bootRenderer } from './renderer-boot.js';
 
 // ---------------------------------------------------------------------------
@@ -94,7 +95,7 @@ function renderSignedOut(hint: SignedOutHint): void {
     const body = document.createElement('div');
     body.className = 'warn-banner-body';
     body.textContent =
-      'Lite has no authenticator secret saved yet. Open Settings -> Two-Factor and paste your setup secret, then try signing in again.';
+      `${PRODUCT_DISPLAY_NAME} has no authenticator secret saved yet. Open Settings -> Two-Factor and paste your setup secret, then try signing in again.`;
     banner.appendChild(body);
     const settings = window.lite?.settings;
     if (settings !== undefined) {

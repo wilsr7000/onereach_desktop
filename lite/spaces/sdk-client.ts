@@ -4701,7 +4701,7 @@ export class SdkSpacesClient {
         throw new SpacesError({
           code: 'SPACES_INVALID_INPUT',
           message: 'An agent requires OKF definition text.',
-          remediation: 'Paste a URL or text so Lite can convert it to OKF.',
+          remediation: 'Paste a URL or text so Onereach Desktop can convert it to OKF.',
           context: { op: 'createAgent' },
         });
       }

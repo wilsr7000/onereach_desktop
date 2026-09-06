@@ -115,8 +115,8 @@ describe('seedKernelMenu', () => {
 
   it('every kernel item uses an explicit label (not role-derived)', () => {
     seedKernelMenu(handlers);
-    expect(registry.get('app:about')?.label).toBe('About WISER');
-    expect(registry.get('app:quit')?.label).toBe('Quit WISER');
+    expect(registry.get('app:about')?.label).toBe('About Onereach Desktop');
+    expect(registry.get('app:quit')?.label).toBe('Quit Onereach Desktop');
     expect(registry.get('help:report-bug')?.label).toBe('Report a Bug...');
   });
 
@@ -392,12 +392,12 @@ describe('seedKernelMenu — top:app per platform (2026-09-02, Windows readiness
     seedKernelMenu(handlers, 'win32');
     const top = registry.get('top:app');
     expect(top?.role).toBeUndefined();
-    expect(top?.label).toBe('WISER');
+    expect(top?.label).toBe('Onereach Desktop');
   });
 
   it('linux: same as win32', () => {
     seedKernelMenu(handlers, 'linux');
     expect(registry.get('top:app')?.role).toBeUndefined();
-    expect(registry.get('top:app')?.label).toBe('WISER');
+    expect(registry.get('top:app')?.label).toBe('Onereach Desktop');
   });
 });

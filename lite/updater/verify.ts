@@ -13,6 +13,7 @@
  * without a real Electron dialog.
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import { clearUpdateState, readUpdateState, writeUpdateState } from './state.js';
 import {
   BROKEN_VERSION_HISTORY,
@@ -166,7 +167,7 @@ export async function verifyUpdateOnStartup(deps: VerifyDeps): Promise<VerifyRes
       ? `Automatic update to v${before.lastAttemptVersion} has failed ${failedAttempts} times`
       : `The update to v${before.lastAttemptVersion} didn't apply`;
   const detail = isBroken
-    ? `Lite has tried ${failedAttempts} times and stopped trying for this version. Download v${before.lastAttemptVersion} manually from the releases page; the next different version released will retry auto-update automatically. Your settings and data are preserved.`
+    ? `${PRODUCT_DISPLAY_NAME} has tried ${failedAttempts} times and stopped trying for this version. Download v${before.lastAttemptVersion} manually from the releases page; the next different version released will retry auto-update automatically. Your settings and data are preserved.`
     : isRepeat
       ? 'This can happen due to macOS security settings, file permissions, or unsigned builds.\n\nYou can download the latest version manually from our releases page. Your settings and data will be preserved.'
       : "The auto-updater ran but the new version didn't take effect. You can try again automatically, or download it manually.\n\nYour settings and data are safe.";

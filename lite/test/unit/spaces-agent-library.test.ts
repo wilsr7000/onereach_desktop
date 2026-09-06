@@ -87,7 +87,7 @@ describe('row + footer', () => {
     expect(chips).toEqual(expect.arrayContaining(['Library', 'MCP', 'RESTful', '×251 copies']));
     expect(row.querySelector('.spaces-agent-result-type')?.textContent).toBe('gsx');
     expect(agentSourceLabel('Playbooks')).toBe('Playbooks');
-    expect(agentSourceLabel('Onereach.ai Lite')).toBe('Lite');
+    expect(agentSourceLabel('Onereach.ai Lite')).toBe('Desktop');
   });
   it('the footer says N of M, counts collapsed copies, and Show more pages', () => {
     let more = 0;

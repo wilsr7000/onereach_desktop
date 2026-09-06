@@ -8,7 +8,7 @@
  *      the Master Playbook, the 12 AI First Principles). The site
  *      deliberately never expands the W-I-S-E-R acronym, so neither do
  *      we — inventing an expansion would be worse than omitting it.
- *   2. Master Onereach.ai Lite — hands-on missions whose completion is
+ *   2. Master Onereach Desktop — hands-on missions whose completion is
  *      AUTO-DETECTED from the user's real workspace (create a Space,
  *      add an agent, convert a transcript…). Individualized progress
  *      from actual usage, not from clicking "mark done".
@@ -232,7 +232,7 @@ const WISER_TRACK: LearnTrack = {
 
 const APP_TRACK: LearnTrack = {
   id: 'app',
-  title: 'Master Onereach.ai Lite',
+  title: 'Master Onereach Desktop',
   subtitle: 'Hands-on missions — each one checks itself off when your workspace shows the work.',
   accent: 'blue',
   roleNote: {

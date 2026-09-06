@@ -11,6 +11,7 @@
  * Every handler emits a `gsx.ipc.<verb>` entry event (ADR-030).
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import { ipcMain } from 'electron';
 import { getLoggingApi } from '../logging/api.js';
 import { getAuthApi } from '../auth/api.js';
@@ -59,7 +60,7 @@ async function publishAgentToGsxBuildSpace(input: {
     space = await spaces.createSpace({
       name: GSX_BUILD_SPACE_NAME,
       description:
-        'Taught UI-automation agents for the GSX studio -- recorded walkthroughs, callable by name through the Lite gsx API.',
+        `Taught UI-automation agents for the GSX studio -- recorded walkthroughs, callable by name through the ${PRODUCT_DISPLAY_NAME} gsx API.`,
       color: GSX_BUILD_SPACE_COLOR,
     });
   }

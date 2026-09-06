@@ -1,8 +1,8 @@
 /**
  * Phase 0a kernel smoke test -- the falsifiable exit gate per the plan.
  *
- * Launches the BUILT lite installer (dist-lite/Onereach.ai Lite.app on
- * macOS, dist-lite/Onereach.ai Lite.exe / unpacked dir on Windows) and
+ * Launches the BUILT lite installer (dist-lite/Onereach Desktop.app on
+ * macOS, dist-lite/Onereach Desktop.exe / unpacked dir on Windows) and
  * asserts:
  *
  *   1. Single window opens with placeholder content
@@ -62,7 +62,7 @@ test.afterEach(async () => {
 test('kernel: code signing on macOS passes codesign --verify --deep --strict', async ({}, testInfo) => {
   test.skip(process.platform !== 'darwin', 'codesign is macOS-only');
 
-  const appBundle = path.join(distLite, 'mac-arm64', 'Onereach.ai Lite.app');
+  const appBundle = path.join(distLite, 'mac-arm64', 'Onereach Desktop.app');
   try {
     await fs.access(appBundle);
   } catch {
@@ -96,11 +96,11 @@ test('kernel: launches with single window and exact menu structure', async ({}, 
 
   // App menu is first and carries About (first) + Quit (last).
   const appLabels = (structure[0]?.items ?? []).map((it) => it.label);
-  // WISER is the DISPLAY name (2026-08-15 rebrand, display-only); the
+  // Onereach Desktop is the DISPLAY name (ADR-095, display-only); the
   // bundle identity stays 'Onereach.ai Lite'. This assertion sat broken
   // for five days because no gate runs the e2e tier.
-  expect(appLabels[0]).toBe('About WISER');
-  expect(appLabels[appLabels.length - 1]).toBe('Quit WISER');
+  expect(appLabels[0]).toBe('About Onereach Desktop');
+  expect(appLabels[appLabels.length - 1]).toBe('Quit Onereach Desktop');
 
   // Help is present, is a plain labeled top-level (ADR-017: never
   // role:'help', which injects "Send Feedback to Apple…"), and carries

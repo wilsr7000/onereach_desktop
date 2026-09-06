@@ -1,4 +1,4 @@
-# Onereach Lite -- The Constitution
+# Onereach Desktop (codename Lite) -- The Constitution
 
 **The single rule everyone remembers: Lite imports only from `lite/` and `lib/`. Full does not import from `lite/`. `lib/` has no upward dependencies.**
 
@@ -28,7 +28,7 @@
 | Update channel | `latest` (default) | `latest` (default) |
 | Update YAML | `latest-mac.yml` | `latest-mac.yml` |
 | App ID | `com.onereach.lite` | `com.gsx.poweruser` |
-| `productName` | `Onereach.ai Lite` | `Onereach.ai` |
+| `productName` | `Onereach Desktop` (display; `app.setName` stays `Onereach.ai Lite`, ADR-095) | `Onereach.ai` |
 | `userData` | `Onereach.ai Lite/` | `Onereach.ai/` |
 | Release tag prefix | `lite-vX.Y.Z` | `vX.Y.Z` |
 

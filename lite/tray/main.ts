@@ -17,6 +17,7 @@
 import { app, Menu, Tray, nativeImage, type BrowserWindow, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 
 export interface InitTrayOptions {
   /** Resolver for the main window. Called on click to toggle visibility. */
@@ -367,7 +368,7 @@ export function buildPulseFrames(
 // ─── Pure helpers (testable without Electron Tray) ──────────────────────
 
 /** Static base portion of the tooltip; combined with the version by `buildTooltip()`. */
-export const TRAY_TOOLTIP_BASE = 'WISER' as const;
+export const TRAY_TOOLTIP_BASE: string = PRODUCT_DISPLAY_NAME;
 
 /**
  * Backwards-compatible static tooltip. Retained as a const so the
@@ -515,7 +516,7 @@ export function buildTrayMenuTemplate(
   }
   template.push({ type: 'separator' });
   template.push({
-    label: 'Quit WISER',
+    label: `Quit ${PRODUCT_DISPLAY_NAME}`,
     click: opts.onQuit ?? ((): void => app.quit()),
   });
   return template;

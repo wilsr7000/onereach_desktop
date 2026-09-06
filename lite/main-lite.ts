@@ -32,6 +32,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 
+import { INTERNAL_APP_NAME, PRODUCT_DISPLAY_NAME } from './product.js';
 import { initMenu } from './menu/build-menu.js';
 import { seedKernelMenu } from './menu/seed.js';
 import { openJourneyMapWindow } from './journey-map-window.js';
@@ -219,7 +220,7 @@ function assertNoFullAppModulesLoaded(): void {
     FORBIDDEN_MODULE_PATTERNS.some((pattern) => pattern.test(modulePath))
   );
   if (violations.length > 0) {
-    const message = `Onereach Lite boot guard: forbidden full-app modules loaded:\n${violations.join('\n')}`;
+    const message = `${LITE_DISPLAY_NAME} boot guard: forbidden full-app modules loaded:\n${violations.join('\n')}`;
     // eslint-disable-next-line no-console
     console.error(message);
     throw new Error(message);
@@ -1467,7 +1468,7 @@ app
       // eslint-disable-next-line no-console
       console.error('[lite] boot failed:', err);
     }
-    dialog.showErrorBox('Onereach.ai Lite failed to start', String(err));
+    dialog.showErrorBox(`${LITE_DISPLAY_NAME} failed to start`, String(err));
     app.quit();
   });
 

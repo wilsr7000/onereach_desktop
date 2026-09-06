@@ -81,7 +81,7 @@ console.log(`[dev-updater] fixture dir: ${fixtureDir}`);
 // tries to extract. Generate a placeholder blob and compute its real
 // hash so the verifier passes through download. The placeholder won't
 // actually install (it's not a real .app), but click/dialog flow works.
-const zipBasename = `Onereach.ai Lite-${fakeVersion}-arm64-mac.zip`;
+const zipBasename = `Onereach Desktop-${fakeVersion}-arm64-mac.zip`;
 const zipPath = path.join(fixtureDir, zipBasename);
 const zipBytes = Buffer.from(`lite-dev-updater-placeholder-v${fakeVersion}`);
 await fsp.writeFile(zipPath, zipBytes);

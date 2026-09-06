@@ -12,9 +12,10 @@
  */
 
 import { registry } from '../menu/registry.js';
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 
 export const HELP_USER_GUIDE_ID = 'help:user-guide';
-export const HELP_USER_GUIDE_LABEL = 'Onereach.ai Lite Help';
+export const HELP_USER_GUIDE_LABEL = `${PRODUCT_DISPLAY_NAME} Help`;
 
 export interface HelpMenuHandlers {
   onOpenUserGuide: () => void;

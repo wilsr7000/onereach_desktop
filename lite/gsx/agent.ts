@@ -25,6 +25,7 @@
  * @internal -- surfaced via `api.ts`.
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import type { AiChatInput } from '../ai/chat.js';
 import type { GsxAgent, GsxAgentParam, GsxScript } from './types.js';
 import type { GsxRecordedEvent } from './recorder.js';
@@ -356,7 +357,7 @@ export function buildAgentOkf(agent: GsxAgent, script: GsxScript): string {
     '',
     '## Invocation',
     '',
-    'Callable by name through the Onereach Lite GSX automation API:',
+    `Callable by name through the ${PRODUCT_DISPLAY_NAME} GSX automation API:`,
     '',
     '```js',
     `await window.lite.gsx.invokeAgent('${agent.name}', {`,

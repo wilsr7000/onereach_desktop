@@ -17,6 +17,7 @@
  * UI surface so unit tests can mock them.
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import type { AutoUpdaterLike } from './init.js';
 import type { BackupManager } from './backups.js';
 import type { CheckRunner } from './check.js';
@@ -172,7 +173,7 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
           title: 'Update Available (Manual Install Required)',
           message: `Version ${updateInfo.version} is available, but auto-install previously failed on this Mac.`,
           detail:
-            `Lite has stopped trying to install v${updateInfo.version} automatically. ` +
+            `${PRODUCT_DISPLAY_NAME} has stopped trying to install v${updateInfo.version} automatically. ` +
             `You can download it manually from the releases page. The next different version ` +
             `released will retry auto-update automatically.`,
           buttons: ['Download Manually', 'Later'],

@@ -25,12 +25,13 @@
 set -e
 
 PUBLIC_REPO="wilsr7000/Onereach_Lite_Desktop_App"
+# INTERNAL app name (app.setName; the boot-log needle) â frozen, never the product name (ADR-095).
 LITE_PRODUCT_NAME="Onereach.ai Lite"
 # artifactName in lite/electron-builder.json produces files with dots
-# instead of spaces (Onereach.ai.Lite-...) so GitHub doesn't auto-rename
+# instead of spaces (Onereach.Desktop-...) so GitHub doesn't auto-rename
 # them at upload time -- which would break the YAML's url field that
 # electron-updater uses to download. See ADR-029 / signing notes.
-LITE_ARTIFACT_PREFIX="Onereach.ai.Lite"
+LITE_ARTIFACT_PREFIX="Onereach.Desktop"
 LITE_YAML="latest-mac.yml"
 
 RED='\033[0;31m'
@@ -40,7 +41,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 echo -e "${BLUE}==============================================================${NC}"
-echo -e "${BLUE}    Onereach.ai Lite Release Automation                       ${NC}"
+echo -e "${BLUE}    Onereach Desktop Release Automation                       ${NC}"
 echo -e "${BLUE}==============================================================${NC}"
 echo ""
 
@@ -185,7 +186,7 @@ fi
 # of code lite never imports. With the excludes + npmRebuild=false, the
 # DMG drops from 283MB to ~165MB and the build is ~4x faster.
 # ---------------------------------------------------------------------------
-echo -e "${YELLOW}Step 2: Building Onereach.ai Lite v${NEW_VERSION}...${NC}"
+echo -e "${YELLOW}Step 2: Building Onereach Desktop v${NEW_VERSION}...${NC}"
 BUILD_START_TIME=$(date +%s)
 
 # Bump lite/package.json's version so main-lite.ts's readLiteVersion()
@@ -431,7 +432,7 @@ if [ "$YML_VERSION" != "$NEW_VERSION" ]; then
     echo -e "${RED}  Stale dist artifact — rebuild before publishing. Aborting.${NC}"
     exit 1
 fi
-if ! grep -q "Onereach.ai.Lite-${NEW_VERSION}-" "${LITE_YAML_PATH}"; then
+if ! grep -q "${LITE_ARTIFACT_PREFIX}-${NEW_VERSION}-" "${LITE_YAML_PATH}"; then
     echo -e "${RED}✗ ${LITE_YAML} does not reference the ${NEW_VERSION} artifacts. Aborting.${NC}"
     exit 1
 fi
@@ -524,27 +525,27 @@ be notarized at build time (likely a transient Apple notary or timestamp
 outage). To install:
 
 1. Download the .dmg above
-2. Open it and drag **Onereach.ai Lite** to /Applications
+2. Open it and drag **Onereach Desktop** to /Applications
 3. Open Terminal and paste this one-line command:
 
 \`\`\`
-xattr -dr com.apple.quarantine \"/Applications/Onereach.ai Lite.app\"
+xattr -dr com.apple.quarantine \"/Applications/Onereach Desktop.app\"
 \`\`\`
 
-4. Launch Onereach.ai Lite from /Applications. No further prompts."
+4. Launch Onereach Desktop from /Applications. No further prompts."
 else
 INSTALL_BLOCK="## Install
 
 1. Download the .dmg above
-2. Open it and drag **Onereach.ai Lite** to /Applications
-3. Launch Onereach.ai Lite from /Applications
+2. Open it and drag **Onereach Desktop** to /Applications
+3. Launch Onereach Desktop from /Applications
 
 This release is signed with Onereach's Apple Developer ID and
 notarized by Apple. macOS will not show any \"unidentified developer\"
 or \"App cannot be opened\" warnings."
 fi
 
-PUBLIC_NOTES="# Onereach.ai Lite ${LITE_TAG}
+PUBLIC_NOTES="# Onereach Desktop ${LITE_TAG}
 
 ## Download
 
@@ -562,7 +563,7 @@ to upgrade automatically. No reinstall needed.
 ${COMMITS}
 
 ---
-*Onereach.ai Lite is the slim companion to [Onereach.ai](https://github.com/wilsr7000/Onereach_Desktop_App). Source: wilsr7000/onereach_desktop (private).*"
+*Onereach Desktop is the slim companion to [Onereach.ai](https://github.com/wilsr7000/Onereach_Desktop_App). Source: wilsr7000/onereach_desktop (private).*"
 
 # ---------------------------------------------------------------------------
 # Step 8: Publish to public repo
@@ -583,7 +584,7 @@ if [ $PUBLISH_EXIT -eq 0 ]; then
     echo -e "${GREEN}                LITE RELEASE SUCCESSFUL                       ${NC}"
     echo -e "${GREEN}==============================================================${NC}"
     echo ""
-    echo -e "${GREEN}Onereach.ai Lite ${LITE_TAG} is published.${NC}"
+    echo -e "${GREEN}Onereach Desktop ${LITE_TAG} is published.${NC}"
     echo ""
     echo -e "${BLUE}Public Release URL:${NC}"
     echo -e "${YELLOW}https://github.com/${PUBLIC_REPO}/releases/tag/${LITE_TAG}${NC}"

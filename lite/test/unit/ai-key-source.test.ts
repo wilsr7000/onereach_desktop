@@ -15,6 +15,7 @@
  *   3. nothing it returns for logging contains the secret.
  */
 
+import { INTERNAL_APP_NAME } from '../../product.js';
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -99,9 +100,10 @@ describe('ai-config.json is read from the directory the app really uses', () => 
     // honest: rename the app and this fails loudly instead of silently
     // reading an empty directory.
     const src = readFileSync(resolve(__dirname, '..', '..', 'main-lite.ts'), 'utf8');
-    const m = /const LITE_PRODUCT_NAME = '([^']+)'/.exec(src);
+    const m = /const LITE_PRODUCT_NAME = (INTERNAL_APP_NAME);/.exec(src);
     expect(m?.[1], 'LITE_PRODUCT_NAME not found in main-lite.ts').toBeDefined();
-    expect(LITE_PRODUCT_NAME).toBe(m?.[1]);
+    expect(m?.[1]).toBe('INTERNAL_APP_NAME');
+    expect(LITE_PRODUCT_NAME).toBe(INTERNAL_APP_NAME);
   });
 });
 

@@ -68,7 +68,7 @@ describe('macOS-only window chrome is always platform-gated', () => {
 describe('the app menu builds on every platform', () => {
   it("top:app uses the macOS-only 'appMenu' role only on darwin", () => {
     const src = read('menu/seed.ts');
-    expect(src).toContain("platform === 'darwin' ? { role: 'appMenu' as const } : { label: 'WISER' }");
+    expect(src).toContain("platform === 'darwin' ? { role: 'appMenu' as const } : { label: PRODUCT_DISPLAY_NAME }");
   });
 });
 

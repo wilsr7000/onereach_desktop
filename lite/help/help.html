@@ -6,7 +6,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
     />
-    <title>Onereach.ai Lite Help</title>
+    <title>Onereach Desktop Help</title>
     <link rel="stylesheet" href="./signature.css" />
     <link rel="stylesheet" href="./help.css" />
   </head>
@@ -14,7 +14,7 @@
     <div class="layout">
       <aside class="toc" aria-label="Table of contents">
         <div class="toc-brand">
-          <div class="toc-brand-name">Onereach.ai Lite</div>
+          <div class="toc-brand-name">Onereach Desktop</div>
           <div class="toc-brand-version" id="version">User Guide</div>
         </div>
         <nav class="toc-nav" id="toc-nav">
@@ -40,7 +40,7 @@
 
       <main class="content">
         <section id="welcome">
-          <h1>Onereach.ai Lite</h1>
+          <h1>Onereach Desktop</h1>
           <p class="lede">
             A slim desktop kernel that signs you in to Onereach.ai once and gives you a
             single home for the AIs you actually use. Lite is intentionally small:
@@ -71,7 +71,7 @@
             </li>
             <li>
               <strong>Save a 2FA secret (optional but recommended).</strong> Open
-              <em>Onereach.ai Lite &rarr; Settings&hellip; &rarr; Two-Factor</em> and
+              <em>Onereach Desktop &rarr; Settings&hellip; &rarr; Two-Factor</em> and
               scan or paste your TOTP secret. Lite generates the 6-digit code itself
               and auto-fills it the next time OneReach asks &mdash; no copy/paste
               from your phone. See <a href="#two-factor">Two-Factor</a>.
@@ -173,7 +173,7 @@
         <section id="settings">
           <h2>Settings</h2>
           <p>
-            Open <em>Onereach.ai Lite &rarr; Settings&hellip;</em> from the menu (no
+            Open <em>Onereach Desktop &rarr; Settings&hellip;</em> from the menu (no
             shortcut by default; see <a href="#keyboard">Keyboard Input</a>). The
             window is sectioned:
           </p>
@@ -599,7 +599,7 @@
         <section id="auto-update">
           <h2>Auto-Update</h2>
           <p>
-            Lite checks for updates every 6 hours in the background and on demand
+            Onereach Desktop checks for updates every 6 hours in the background and on demand
             via <em>Help &rarr; Check for Updates&hellip;</em>. Updates are
             distributed via GitHub releases at
             <code>wilsr7000/Onereach_Lite_Desktop_App</code>.
@@ -607,7 +607,7 @@
 
           <h3>How an update flows</h3>
           <ol>
-            <li>Lite checks the GitHub release feed.</li>
+            <li>Onereach Desktop checks the GitHub release feed.</li>
             <li>If a newer version is available, you&rsquo;re asked whether to
               download. The download itself doesn&rsquo;t install &mdash; it stages
               the new version.</li>
@@ -781,7 +781,7 @@
         <section id="about">
           <h2>About</h2>
           <p>
-            Onereach.ai Lite is the slim companion to the full Onereach.ai
+            Onereach Desktop is the slim companion to the full Onereach.ai
             desktop app. It started as a strangler-pattern rewrite of the
             sign-in / settings / IDW surface as a small kernel that ships
             independently. Both apps share <code>lib/</code> and follow the

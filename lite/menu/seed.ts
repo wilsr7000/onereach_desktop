@@ -3,11 +3,11 @@
  *
  * Kernel menu structure (per ADR-016, which supersedes ADR-014):
  *
- *   WISER (top:app,  role: appMenu)
- *     |- About WISER (app:about, click)
+ *   <product> (top:app,  role: appMenu)
+ *     |- About <product> (app:about, click)
  *     |- Edit                   (top:edit,  submenu)
  *     |    |- Undo / Redo / Cut / Copy / Paste / Select All (role-driven)
- *     |- Quit WISER  (app:quit,  click)
+ *     |- Quit <product>  (app:quit,  click)
  *
  *   Help (top:help)
  *     |- Onereach.ai Lite Help  (help:user-guide,        click) -- owned by lite/help
@@ -30,6 +30,7 @@
  */
 
 import { registry } from './registry.js';
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 
 export interface SeedHandlers {
   /** Called when the user clicks Report a Bug... */
@@ -92,7 +93,7 @@ export function seedKernelMenu(
   registry.upsert({
     id: 'top:app',
     type: 'top-level',
-    ...(platform === 'darwin' ? { role: 'appMenu' as const } : { label: 'WISER' }),
+    ...(platform === 'darwin' ? { role: 'appMenu' as const } : { label: PRODUCT_DISPLAY_NAME }),
     order: 0,
   });
 
@@ -223,7 +224,7 @@ export function seedKernelMenu(
     id: 'app:about',
     type: 'item',
     parentId: 'top:app',
-    label: 'About WISER',
+    label: `About ${PRODUCT_DISPLAY_NAME}`,
     order: 0,
     click: handlers.onAbout,
   });
@@ -276,7 +277,7 @@ export function seedKernelMenu(
     id: 'app:quit',
     type: 'item',
     parentId: 'top:app',
-    label: 'Quit WISER',
+    label: `Quit ${PRODUCT_DISPLAY_NAME}`,
     order: 100,
     click: handlers.onQuit,
   });

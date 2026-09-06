@@ -45,7 +45,7 @@ describe('reconcileExpiry', () => {
   it('flags a bucket expiry that Lite never set', () => {
     const r = reconcileExpiry(null, '2026-09-01T00:00:00.000Z');
     expect(r.effective).toBe('2026-09-01T00:00:00.000Z');
-    expect(r.note).toContain('outside Onereach.ai Lite');
+    expect(r.note).toContain('outside Onereach Desktop');
   });
 
   it('flags a stamp the bucket does not honour — the file will NOT auto-delete', () => {

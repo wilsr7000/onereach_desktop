@@ -1,10 +1,10 @@
 # lite/help
 
-Single-window user guide for Onereach.ai Lite.
+Single-window user guide for Onereach Desktop.
 
 ## What this module does
 
-Provides `Help → Onereach.ai Lite Help` in the application menu. Opens a
+Provides `Help → Onereach Desktop Help` in the application menu. Opens a
 single-instance `BrowserWindow` rendering `help.html` — a TOC-sidebar +
 scrolling-content document covering every Lite feature: sign-in, 2FA,
 Settings, IDWs, Tools, AI Run Times, University, Bug Reports,

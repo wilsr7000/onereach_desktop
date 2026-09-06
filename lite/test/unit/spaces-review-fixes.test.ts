@@ -455,7 +455,7 @@ describe('review-fix wiring invariants (source-level)', () => {
     expect(src).toContain('function buildFilteredEmptyState');
     expect(src).toMatch(/scopeVisibleItems\.length > 0 && state\.homeFilter !== 'all'/);
     // Checklists library says so instead of spinning forever.
-    expect(src).toContain('Checklists need a newer build of Lite');
+    expect(src).toContain('Checklists need a newer build of ${PRODUCT_DISPLAY_NAME}');
     // Image tiles + detail get an error fallback.
     expect(src).toMatch(/img\.addEventListener\('error'/);
     // Sidebar surfaces route titles through the hash-id guard.
@@ -829,7 +829,7 @@ describe('shared-dashboard fetch loop (2026-08-17 bandwidth incident)', () => {
     expect(src).toContain('checklistLibraryCache');
     expect(src).toContain('checklistLibraryInFlight');
     const start = src.indexOf('export function buildSharedDashboardChecklists');
-    const body = src.slice(start, start + 3000);
+    const body = src.slice(start, start + 4000);
     // Serves from cache inside the TTL…
     expect(body).toContain('SHARED_DASHBOARD_TTL_MS');
     // …and mutations force a refetch rather than showing stale data.

@@ -28,6 +28,7 @@
  * the preload bridge (`window.lite.spaces.*`).
  */
 
+import { PRODUCT_DISPLAY_NAME } from '../product.js';
 import { UNCATEGORIZED_SPACE_ID } from './scope.js';
 import { riffStageLabel } from './riff-summary.js';
 import { collectDroppedFiles, expandZips, planIntake, type IntakeItem } from './intake.js';
@@ -2851,7 +2852,7 @@ export function buildHistoryRow(itemId: string, v: RendererAssetVersion): HTMLEl
 async function openVersionViewer(itemId: string, seq: number): Promise<void> {
   const vb = itemVersioningBridge();
   if (vb?.getVersion === undefined) {
-    showToast('Version history needs a newer build of Lite.');
+    showToast(`Version history needs a newer build of ${PRODUCT_DISPLAY_NAME}.`);
     return;
   }
   let version: RendererAssetVersion | null = null;
@@ -2953,7 +2954,7 @@ async function openVersionViewer(itemId: string, seq: number): Promise<void> {
 async function restoreVersion(itemId: string, seq: number): Promise<void> {
   const vb = itemVersioningBridge();
   if (vb?.restoreVersion === undefined) {
-    showToast('Version history needs a newer build of Lite.');
+    showToast(`Version history needs a newer build of ${PRODUCT_DISPLAY_NAME}.`);
     return;
   }
   const ok = await askToConfirm(
@@ -4459,7 +4460,7 @@ async function runAgenticItemsSearch(): Promise<void> {
   if (query.length === 0 || agenticRunning) return;
   const bridge = window.lite?.spaces;
   if (bridge?.items?.searchAgentic === undefined) {
-    showToast('Agentic search needs a newer build of Lite');
+    showToast(`Agentic search needs a newer build of ${PRODUCT_DISPLAY_NAME}`);
     return;
   }
   const seq = ++itemsSearchSeq;
@@ -5678,7 +5679,7 @@ export function buildClaudeKeyWalkthrough(reason: string): HTMLElement {
       label: 'Open Anthropic Console ↗',
     })
   );
-  steps.appendChild(step('Go to API keys → Create Key. Name it “Onereach Lite”. Copy the key — it starts with sk-ant- and is shown once.'));
+  steps.appendChild(step('Go to API keys → Create Key. Name it “Onereach Desktop”. Copy the key — it starts with sk-ant- and is shown once.'));
   steps.appendChild(step('Paste it below. It’s stored in this Mac’s keychain, never shown again, and sent only to Anthropic.'));
   body.appendChild(steps);
 
@@ -13550,7 +13551,7 @@ export function buildSharedDashboardChecklists(space: RendererSpace): HTMLElemen
     if (window.lite?.spaces?.checklists === undefined) {
       // The kernel lacks the checklists bridge (older/torn build) —
       // say so instead of spinning "Loading…" forever (2026-08-08).
-      host.textContent = 'Checklists need a newer build of Lite — update to enable them.';
+      host.textContent = `Checklists need a newer build of ${PRODUCT_DISPLAY_NAME} — update to enable them.`;
       return;
     }
     const cached = checklistLibraryCache.get(space.id);
@@ -13723,7 +13724,7 @@ export function openChecklistEditorPanel(opts: {
       hasLite: window.lite !== undefined,
       hasSpaces: bridge !== undefined,
     });
-    showToast('Checklists need a newer build of Lite — update to enable them.');
+    showToast(`Checklists need a newer build of ${PRODUCT_DISPLAY_NAME} — update to enable them.`);
     return;
   }
   const { existing } = opts;
@@ -18323,7 +18324,7 @@ export function reconcileExpiry(
   if (stamped === null) {
     return {
       effective: bucket,
-      note: 'This expiry was set outside Onereach.ai Lite.',
+      note: 'This expiry was set outside Onereach Desktop.',
     };
   }
   const same = Math.abs(Date.parse(bucket) - Date.parse(stamped)) < 60_000;
@@ -18640,7 +18641,9 @@ export function agentSourceLabel(source: string | undefined): string {
   if (source === undefined || source.length === 0) return '';
   if (/gsx-desktop/i.test(source)) return 'Library';
   if (/playbooks/i.test(source)) return 'Playbooks';
-  if (/lite/i.test(source)) return 'Lite';
+  // Provenance still says 'Onereach.ai Lite' / 'onereach-lite' (the
+  // frozen internal identity); the label reads as the product (ADR-095).
+  if (/lite/i.test(source)) return 'Desktop';
   return source;
 }
 
