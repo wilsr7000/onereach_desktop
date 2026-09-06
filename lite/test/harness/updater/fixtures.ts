@@ -107,7 +107,7 @@ export async function buildAppFixture(opts: {
   });
   const cacheDir = opts.cacheDir ?? path.join(tmpdir(), 'onereach-lite-fixture-cache');
   const versionCache = path.join(cacheDir, opts.version);
-  const cachedAppPath = path.join(versionCache, 'Onereach Desktop.app');
+  const cachedAppPath = path.join(versionCache, 'Onereach.ai Lite.app');
   const cachedZipPath = path.join(versionCache, `Onereach Desktop-${opts.version}-arm64-mac.zip`);
 
   if (opts.force !== true) {
@@ -137,7 +137,7 @@ export async function buildAppFixture(opts: {
   ].join(' ');
   execSync(cmd, { cwd: REPO_ROOT, stdio: 'inherit' });
 
-  const builtApp = path.join(REPO_ROOT, 'dist-lite', 'mac-arm64', 'Onereach Desktop.app');
+  const builtApp = path.join(REPO_ROOT, 'dist-lite', 'mac-arm64', 'Onereach.ai Lite.app');
   const builtZip = path.join(REPO_ROOT, 'dist-lite', `Onereach Desktop-${opts.version}-arm64-mac.zip`);
 
   // Copy into cache. Recursive for the .app bundle.

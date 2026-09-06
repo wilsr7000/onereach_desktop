@@ -195,7 +195,7 @@ describe('callOperation', () => {
         throw new Error('connect ECONNREFUSED 127.0.0.1:47291');
       }) as unknown as FetchLike,
     });
-    await expect(callOperation(op('spaces_list'), {}, d)).rejects.toThrow(/Onereach\.ai app running/);
+    await expect(callOperation(op('spaces_list'), {}, d)).rejects.toThrow(/Onereach app running/);
   });
 
   it('surfaces HTTP errors with status + body', async () => {

@@ -8,7 +8,7 @@
  *   `upgrade`   -- launch v0.0.1, monkey-patch dialogs, trigger check, wait
  *                   for downloaded, trigger install, wait for Squirrel swap,
  *                   re-launch, assert app.getVersion() === '0.0.2'
- *   `cleanup`   -- (optional) remove /Applications/Onereach Desktop.app
+ *   `cleanup`   -- (optional) remove /Applications/Onereach.ai Lite.app
  *
  * Run: node test-upgrade-flow.mjs <phase>
  *
@@ -21,7 +21,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { promises as fs, existsSync } from 'node:fs';
 import * as path from 'node:path';
 
-const PRODUCT_NAME = 'Onereach Desktop';
+const PRODUCT_NAME = 'Onereach.ai Lite'; // bundle + executable keep the internal name (ADR-095)
 const APP_NAME = `${PRODUCT_NAME}.app`;
 const APP_PATH = `/Applications/${APP_NAME}`;
 const APP_EXE = `${APP_PATH}/Contents/MacOS/${PRODUCT_NAME}`;

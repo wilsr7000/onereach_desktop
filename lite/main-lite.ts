@@ -686,7 +686,7 @@ app
         applicationVersion: LITE_VERSION,
         version: LITE_VERSION,
         copyright: 'Copyright © 2026 Onereach',
-        credits: `${LITE_DISPLAY_NAME} — WISER method reference kernel`,
+        credits: `${LITE_DISPLAY_NAME} — built on the WISER method`,
       });
     }
 

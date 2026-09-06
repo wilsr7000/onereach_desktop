@@ -81,11 +81,32 @@ export interface GsxFlowSyncClient {
  */
 export function isGraphOutage(err: unknown): boolean {
   if (err === null || typeof err !== 'object') return false;
-  const e = err as { code?: unknown; name?: unknown; message?: unknown };
+  const e = err as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown };
+  // The client's own transport code: the graph, never this query.
+  if (e.code === 'SPACES_NETWORK') return true;
+  // Look through the client's wrap to the transport error it carries.
+  // A query the graph REFUSED (bad Cypher, a constraint, a 4xx) is that
+  // bot's problem and must not stop the sweep for every bot after it
+  // (2026-09-06 review); a timeout, a network failure or a 5xx is the
+  // graph, and so is a transport error we cannot classify.
+  const neon = neonErrorIn(e);
+  if (neon !== null) {
+    if (neon.code === 'NEON_QUERY' || neon.code === 'NEON_BAD_INPUT') return false;
+    if (neon.code === 'NEON_HTTP' && typeof neon.status === 'number' && neon.status >= 400 && neon.status < 500) return false;
+    return true;
+  }
   if (e.code === 'SPACES_CYPHER') return true;
-  if (e.name === 'NeonError') return true;
   const message = typeof e.message === 'string' ? e.message : '';
   return /Neon query failed|omnidata\/neon/i.test(message);
+}
+
+function neonErrorIn(e: { name?: unknown; cause?: unknown }): { code?: unknown; status?: unknown } | null {
+  if (e.name === 'NeonError') return e as { code?: unknown; status?: unknown };
+  const cause = e.cause;
+  if (cause !== null && typeof cause === 'object' && (cause as { name?: unknown }).name === 'NeonError') {
+    return cause as { code?: unknown; status?: unknown };
+  }
+  return null;
 }
 
 export interface GsxFlowSyncLog {

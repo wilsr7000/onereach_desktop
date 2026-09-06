@@ -484,7 +484,7 @@ export function buildTrayMenuTemplate(
   template.push({ label: buildTooltip(), enabled: false });
   template.push({ type: 'separator' });
   template.push({
-    label: 'Show WISER',
+    label: `Show ${PRODUCT_DISPLAY_NAME}`,
     click: () => {
       const win = opts.getMainWindow();
       if (win === null || win.isDestroyed()) return;
@@ -494,7 +494,7 @@ export function buildTrayMenuTemplate(
     },
   });
   template.push({
-    label: 'Hide WISER',
+    label: `Hide ${PRODUCT_DISPLAY_NAME}`,
     click: () => {
       const win = opts.getMainWindow();
       if (win === null || win.isDestroyed()) return;
@@ -509,7 +509,7 @@ export function buildTrayMenuTemplate(
     template.push({ label: 'Settings…', click: opts.onOpenSettings });
   }
   if (opts.onOpenHelp !== undefined) {
-    template.push({ label: 'WISER Help', click: opts.onOpenHelp });
+    template.push({ label: `${PRODUCT_DISPLAY_NAME} Help`, click: opts.onOpenHelp });
   }
   if (opts.onReportBug !== undefined) {
     template.push({ label: 'Report a Bug…', click: opts.onReportBug });

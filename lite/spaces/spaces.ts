@@ -10378,6 +10378,18 @@ interface RenderDetailOpts {
 // dialog, which own their Escape.
 let detailEscapeHandler: ((event: KeyboardEvent) => void) | null = null;
 
+/** A confirm, picker, palette, viewer, context menu or the New Space ▾ menu is showing. */
+function overlayAboveRailOpen(): boolean {
+  if (ctxMenuEl !== null) return true;
+  const visible = (el: Element | null): boolean =>
+    el instanceof HTMLElement && !el.hidden && el.offsetParent !== null;
+  const layered = Array.from(
+    document.body.querySelectorAll<HTMLElement>('[class*="backdrop"], [id*="backdrop"], [role="menu"], [class*="popover"]')
+  );
+  if (layered.some(visible)) return true;
+  return visible(document.getElementById('spaces-new-menu'));
+}
+
 function disarmDetailEscape(): void {
   if (detailEscapeHandler === null) return;
   document.removeEventListener('keydown', detailEscapeHandler);
@@ -10394,6 +10406,13 @@ function armDetailEscape(onClose: () => void): void {
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable === true) return;
     const dialog = document.getElementById('spaces-new-dialog');
     if (dialog !== null && !dialog.hidden && dialog.offsetParent !== null) return;
+    // Anything layered above the rail owns this Escape: a confirm or
+    // picker (every one mounts a `*-backdrop` on body), the tile context
+    // menu, the New Space ▾ menu. The rail registered first, so it must
+    // step aside rather than vanish under the overlay the user is closing
+    // (2026-09-06 review).
+    if (overlayAboveRailOpen()) return;
+    event.preventDefault();
     onClose();
   };
   detailEscapeHandler = handler;
@@ -14949,7 +14968,16 @@ export function buildFilterChips(active?: HomeFilter): HTMLElement {
   row.setAttribute('role', 'tablist');
   row.setAttribute('aria-label', 'Filter timeline');
 
-  for (const { id, label } of FILTER_LABELS) {
+  // The pair filters by PRODUCER. On Home "People" / "Agents" reads
+  // fine; on a Space it sits under the header's People strip and beside
+  // tiles that ARE agents (synced GSX agent flows are produced by a
+  // person), so it says what it does (2026-09-06 review).
+  const onHome = state.activeScopeId === HOME_SCOPE_ID;
+  const labels = FILTER_LABELS.map((entry) =>
+    onHome ? entry : entry.id === 'people' ? { ...entry, label: 'By people' } : entry.id === 'agents' ? { ...entry, label: 'By agents' } : entry
+  );
+
+  for (const { id, label } of labels) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'home-filter-chip' + (id === a ? ' is-active' : '');
@@ -16958,7 +16986,7 @@ function buildWizardStepDetails(w: NewSpaceWizardState): HTMLElement {
       'spaces-wizard-hint',
       w.aiConfigured
         ? `Turns your purpose into a polished description + objectives${providerLabel !== null ? ` (via ${providerLabel})` : ''}.`
-        : 'Add a Claude or OpenAI API key in Settings → AI (or connect a OneReach flow) to enable AI drafting. You can still fill these in manually.'
+        : 'Add a Claude API key in Settings → AI (or connect a OneReach flow) to enable AI drafting. You can still fill these in manually.'
     );
     aiBox.append(aiBtn, hint);
     step.appendChild(aiBox);

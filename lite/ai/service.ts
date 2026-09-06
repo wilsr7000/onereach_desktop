@@ -57,7 +57,7 @@ import type {
 
 /** The user-facing fix for "nothing is configured" — every key path offers it. */
 export const NOT_CONFIGURED_REMEDIATION =
-  'Add a Claude or OpenAI API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.';
+  'Add a Claude API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.';
 
 export interface AiServiceDeps {
   /** Resolve the active provider config (or null when unconfigured). */

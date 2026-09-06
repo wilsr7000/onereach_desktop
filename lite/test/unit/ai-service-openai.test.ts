@@ -118,7 +118,7 @@ describe('AiService on OpenAI', () => {
     });
     await expect(svc.chat({ messages: [{ role: 'user', content: 'x' }] })).rejects.toMatchObject({
       code: 'AI_NOT_CONFIGURED',
-      remediation: expect.stringContaining('Claude or OpenAI'),
+      remediation: expect.stringContaining('Claude API key'),
     });
   });
 });

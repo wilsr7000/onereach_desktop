@@ -28,9 +28,21 @@ export const PRODUCT_DISPLAY_NAME = 'Onereach Desktop';
 export const INTERNAL_APP_NAME = 'Onereach.ai Lite';
 
 /**
- * Bundle folder names an install can live under. A fresh install lands as
- * the first; an install that auto-updated in place from before the rename
- * keeps the folder it was dragged in as — Squirrel.Mac swaps the bundle's
- * contents at the running app's path and never renames the folder.
+ * The bundle folder — and the executable inside it — keep the INTERNAL
+ * name (electron-builder `productName`). Not cosmetic caution: on macOS
+ * the update is applied by a bash helper packaged inside the app that is
+ * ALREADY installed, and every helper shipped through 0.0.90 finds the
+ * new bundle inside the downloaded zip by the installed folder's own
+ * basename. A zip whose root is "Onereach Desktop.app" fails every one of
+ * those installs at find_bundle (verified against the built zip,
+ * 2026-09-06 review). The name people see comes from CFBundleName (the
+ * menu-bar title) and CFBundleDisplayName (Dock, About), both set to
+ * PRODUCT_DISPLAY_NAME in electron-builder.json; only Finder still shows
+ * the folder's file name.
+ *
+ * Renaming the folder later needs a sequence: first ship a helper that
+ * accepts a lone `*.app` at the zip root (scripts/install-update.sh does
+ * since 0.0.91), wait until no install older than that remains, then
+ * change productName. Until then this list has one entry.
  */
-export const APP_BUNDLE_NAMES = [`${PRODUCT_DISPLAY_NAME}.app`, `${INTERNAL_APP_NAME}.app`] as const;
+export const APP_BUNDLE_NAMES = [`${INTERNAL_APP_NAME}.app`] as const;

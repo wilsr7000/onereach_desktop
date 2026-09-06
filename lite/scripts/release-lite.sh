@@ -525,11 +525,11 @@ be notarized at build time (likely a transient Apple notary or timestamp
 outage). To install:
 
 1. Download the .dmg above
-2. Open it and drag **Onereach Desktop** to /Applications
+2. Open it and drag the app to /Applications (the file is named **Onereach.ai Lite**; it presents as Onereach Desktop once running)
 3. Open Terminal and paste this one-line command:
 
 \`\`\`
-xattr -dr com.apple.quarantine \"/Applications/Onereach Desktop.app\"
+xattr -dr com.apple.quarantine \"/Applications/Onereach.ai Lite.app\"
 \`\`\`
 
 4. Launch Onereach Desktop from /Applications. No further prompts."
@@ -537,7 +537,7 @@ else
 INSTALL_BLOCK="## Install
 
 1. Download the .dmg above
-2. Open it and drag **Onereach Desktop** to /Applications
+2. Open it and drag the app to /Applications (the file is named **Onereach.ai Lite**; it presents as Onereach Desktop once running)
 3. Launch Onereach Desktop from /Applications
 
 This release is signed with Onereach's Apple Developer ID and
@@ -550,7 +550,7 @@ PUBLIC_NOTES="# Onereach Desktop ${LITE_TAG}
 ## Download
 
 For Apple Silicon Macs (M1/M2/M3/M4):
-${LITE_PRODUCT_NAME}-${NEW_VERSION}-arm64-mac.dmg
+${LITE_ARTIFACT_PREFIX}-${NEW_VERSION}-arm64-mac.dmg
 
 ${INSTALL_BLOCK}
 
@@ -563,7 +563,7 @@ to upgrade automatically. No reinstall needed.
 ${COMMITS}
 
 ---
-*Onereach Desktop is the slim companion to [Onereach.ai](https://github.com/wilsr7000/Onereach_Desktop_App). Source: wilsr7000/onereach_desktop (private).*"
+*Onereach Desktop is the slim companion to [the full Onereach app](https://github.com/wilsr7000/Onereach_Desktop_App). Source: wilsr7000/onereach_desktop (private).*"
 
 # ---------------------------------------------------------------------------
 # Step 8: Publish to public repo

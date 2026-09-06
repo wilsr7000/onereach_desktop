@@ -143,8 +143,8 @@ describe('buildTrayMenuTemplate', () => {
     const labels = template
       .map((t) => t.label)
       .filter((l): l is string => typeof l === 'string');
-    expect(labels).toContain('Show WISER');
-    expect(labels).toContain('Hide WISER');
+    expect(labels).toContain('Show Onereach Desktop');
+    expect(labels).toContain('Hide Onereach Desktop');
     expect(labels).toContain('Quit Onereach Desktop');
   });
 
@@ -182,7 +182,7 @@ describe('buildTrayMenuTemplate', () => {
       .filter((l): l is string => typeof l === 'string');
     expect(labels).not.toContain('Spaces…');
     expect(labels).not.toContain('Settings…');
-    expect(labels).not.toContain('WISER Help');
+    expect(labels).not.toContain('Onereach Desktop Help');
   });
 
   it('includes each optional entry only when its handler is provided', () => {
@@ -201,11 +201,11 @@ describe('buildTrayMenuTemplate', () => {
     // First labeled item is the version header caption (dynamic version).
     expect(labels[0]).toMatch(/^Onereach Desktop( v\S+)?$/);
     expect(labels.slice(1)).toEqual([
-      'Show WISER',
-      'Hide WISER',
+      'Show Onereach Desktop',
+      'Hide Onereach Desktop',
       'Spaces…',
       'Settings…',
-      'WISER Help',
+      'Onereach Desktop Help',
       'Quit Onereach Desktop',
     ]);
   });
@@ -220,7 +220,7 @@ describe('buildTrayMenuTemplate', () => {
     expect(template[0]?.enabled).toBe(false);
     expect(template[0]?.label).toMatch(/^Onereach Desktop/);
     expect(template[1]?.type).toBe('separator');
-    expect(template[2]?.label).toBe('Show WISER');
+    expect(template[2]?.label).toBe('Show Onereach Desktop');
     expect(template[4]?.type).toBe('separator');
     expect(template[5]?.label).toBe('Settings…');
     expect(template[6]?.type).toBe('separator');
@@ -245,7 +245,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    clickByLabel(template, 'Show WISER');
+    clickByLabel(template, 'Show Onereach Desktop');
     expect(win.minimized).toBe(false);
     expect(win.visible).toBe(true);
   });
@@ -255,7 +255,7 @@ describe('buildTrayMenuTemplate', () => {
       getMainWindow: (() => null) as GetMain as () => never,
     });
     // Should not throw.
-    expect(() => clickByLabel(template, 'Show WISER')).not.toThrow();
+    expect(() => clickByLabel(template, 'Show Onereach Desktop')).not.toThrow();
   });
 
   it('Show handler no-ops when the main window has been destroyed', () => {
@@ -263,7 +263,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    expect(() => clickByLabel(template, 'Show WISER')).not.toThrow();
+    expect(() => clickByLabel(template, 'Show Onereach Desktop')).not.toThrow();
     expect(win.visible).toBe(false);
   });
 
@@ -272,7 +272,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    clickByLabel(template, 'Hide WISER');
+    clickByLabel(template, 'Hide Onereach Desktop');
     expect(win.visible).toBe(false);
   });
 
@@ -281,7 +281,7 @@ describe('buildTrayMenuTemplate', () => {
     const template = buildTrayMenuTemplate({
       getMainWindow: (() => win) as GetMain as () => never,
     });
-    expect(() => clickByLabel(template, 'Hide WISER')).not.toThrow();
+    expect(() => clickByLabel(template, 'Hide Onereach Desktop')).not.toThrow();
     expect(win.visible).toBe(false);
   });
 
@@ -299,7 +299,7 @@ describe('buildTrayMenuTemplate', () => {
     expect(onOpenSpaces).toHaveBeenCalledTimes(1);
     clickByLabel(template, 'Settings…');
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
-    clickByLabel(template, 'WISER Help');
+    clickByLabel(template, 'Onereach Desktop Help');
     expect(onOpenHelp).toHaveBeenCalledTimes(1);
   });
 

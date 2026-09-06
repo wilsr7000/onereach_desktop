@@ -55,7 +55,7 @@ export interface LaunchOptions {
   /**
    * Path to the built lite executable. Defaults to the standard packaged
    * location for the current platform (dist-lite/mac-arm64/... on macOS,
-   * dist-lite/win-unpacked/Onereach Desktop.exe on Windows).
+   * dist-lite/win-unpacked/Onereach.ai Lite.exe on Windows).
    */
   executablePath?: string;
   /**
@@ -105,14 +105,14 @@ export function defaultExecutablePath(): string {
     return path.join(
       DIST_LITE,
       'mac-arm64',
-      'Onereach Desktop.app',
+      'Onereach.ai Lite.app',
       'Contents',
       'MacOS',
-      'Onereach Desktop'
+      'Onereach.ai Lite'
     );
   }
   if (process.platform === 'win32') {
-    return path.join(DIST_LITE, 'win-unpacked', 'Onereach Desktop.exe');
+    return path.join(DIST_LITE, 'win-unpacked', 'Onereach.ai Lite.exe');
   }
   throw new Error(`Unsupported platform: ${process.platform}`);
 }

@@ -305,7 +305,7 @@ async function copyCurrentCode(codeEl: HTMLElement, hintEl: HTMLElement): Promis
 
 async function removeFlow(state: MountState, status: HTMLElement): Promise<void> {
   const confirmed = window.confirm(
-    `Remove the saved authenticator secret? ${PRODUCT_DISPLAY_NAME} and the full Onereach app use the same keychain entry, so you will need to scan the OneReach setup QR again to generate 2FA codes on this Mac.`
+    `Remove the saved authenticator secret? ${PRODUCT_DISPLAY_NAME} and the full Onereach app use the same keychain entry, so you will need to scan the Onereach setup QR again to generate 2FA codes on this Mac.`
   );
   if (!confirmed) return;
   try {

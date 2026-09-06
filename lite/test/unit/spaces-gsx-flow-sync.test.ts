@@ -306,6 +306,27 @@ describe('runGsxFlowSync', () => {
       expect(isGraphOutage(null)).toBe(false);
       expect(isGraphOutage('Neon query failed')).toBe(false);
     });
+
+    // 2026-09-06 review: the client wraps every graph error as
+    // SPACES_CYPHER, so the wrap alone cannot tell an outage from a query
+    // the graph refused. Look through to the transport error: a refusal
+    // (bad Cypher, a constraint, a 4xx) is one bot's problem; a timeout,
+    // a network failure, a 5xx, or an unclassified transport error is
+    // the graph.
+    it('a query the graph refused is not an outage; a timeout, a 5xx or a network failure is', () => {
+      const neon = (code: string, status?: number) => Object.assign(new Error(code), { name: 'NeonError', code, status });
+      const wrapped = (cause: Error) => Object.assign(new Error('Neon query failed'), { code: 'SPACES_CYPHER', cause });
+      expect(isGraphOutage(wrapped(neon('NEON_QUERY')))).toBe(false);
+      expect(isGraphOutage(wrapped(neon('NEON_BAD_INPUT')))).toBe(false);
+      expect(isGraphOutage(wrapped(neon('NEON_HTTP', 400)))).toBe(false);
+      expect(isGraphOutage(wrapped(neon('NEON_HTTP', 500)))).toBe(true);
+      expect(isGraphOutage(wrapped(neon('NEON_HTTP')))).toBe(true);
+      expect(isGraphOutage(wrapped(neon('NEON_TIMEOUT')))).toBe(true);
+      expect(isGraphOutage(wrapped(neon('NEON_NETWORK')))).toBe(true);
+      expect(isGraphOutage(neon('NEON_QUERY'))).toBe(false);
+      expect(isGraphOutage(neon('NEON_TIMEOUT'))).toBe(true);
+      expect(isGraphOutage(Object.assign(new Error('Neon request timed out'), { code: 'SPACES_NETWORK' }))).toBe(true);
+    });
   });
 
   it('dry run reads Designer and touches nothing', async () => {

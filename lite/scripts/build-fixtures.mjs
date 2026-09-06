@@ -41,7 +41,7 @@ await fs.mkdir(cacheDir, { recursive: true });
 
 for (const version of pair) {
   const versionCacheDir = path.join(cacheDir, version);
-  const cachedApp = path.join(versionCacheDir, 'Onereach Desktop.app');
+  const cachedApp = path.join(versionCacheDir, 'Onereach.ai Lite.app');
 
   if (!force && existsSync(cachedApp)) {
     console.log(`[fixtures] cache hit for v${version} -- skip`);
@@ -80,7 +80,7 @@ for (const version of pair) {
 
   // Copy artifacts to cache. Note artifactName produces dotted file names
   // per lite/electron-builder.json (avoids GitHub auto-rename surprise).
-  const builtAppPath = path.join(repoRoot, 'dist-lite', 'mac-arm64', 'Onereach Desktop.app');
+  const builtAppPath = path.join(repoRoot, 'dist-lite', 'mac-arm64', 'Onereach.ai Lite.app');
   const builtZipPath = path.join(
     repoRoot,
     'dist-lite',
@@ -91,7 +91,7 @@ for (const version of pair) {
 
   // Copy the .app (recursive) -- use cp -R because Node's fs.cp can
   // mishandle symlinks inside .app bundles.
-  execSync(`cp -R "${builtAppPath}" "${path.join(versionCacheDir, 'Onereach Desktop.app')}"`);
+  execSync(`cp -R "${builtAppPath}" "${path.join(versionCacheDir, 'Onereach.ai Lite.app')}"`);
   if (existsSync(builtZipPath)) {
     await fs.copyFile(builtZipPath, path.join(versionCacheDir, path.basename(builtZipPath)));
   }

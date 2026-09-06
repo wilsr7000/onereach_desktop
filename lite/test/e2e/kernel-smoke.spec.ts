@@ -1,8 +1,8 @@
 /**
  * Phase 0a kernel smoke test -- the falsifiable exit gate per the plan.
  *
- * Launches the BUILT lite installer (dist-lite/Onereach Desktop.app on
- * macOS, dist-lite/Onereach Desktop.exe / unpacked dir on Windows) and
+ * Launches the BUILT lite installer (dist-lite/Onereach.ai Lite.app on
+ * macOS, dist-lite/Onereach.ai Lite.exe / unpacked dir on Windows) and
  * asserts:
  *
  *   1. Single window opens with placeholder content
@@ -62,7 +62,7 @@ test.afterEach(async () => {
 test('kernel: code signing on macOS passes codesign --verify --deep --strict', async ({}, testInfo) => {
   test.skip(process.platform !== 'darwin', 'codesign is macOS-only');
 
-  const appBundle = path.join(distLite, 'mac-arm64', 'Onereach Desktop.app');
+  const appBundle = path.join(distLite, 'mac-arm64', 'Onereach.ai Lite.app');
   try {
     await fs.access(appBundle);
   } catch {

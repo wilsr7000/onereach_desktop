@@ -34,8 +34,18 @@ describe('the display name reaches every surface', () => {
       dmg: { title: string };
       nsis: { artifactName: string };
     };
-    expect(cfg.productName).toBe(PRODUCT_DISPLAY_NAME);
+    // productName is the bundle folder, the executable and the zip root —
+    // FROZEN to the internal name: the helper inside every installed app
+    // finds the update inside the zip by the installed folder's basename
+    // (ADR-095 amendment). The visible name rides on the two plist keys.
+    expect(cfg.productName).toBe(INTERNAL_APP_NAME);
+    expect(cfg.mac.extendInfo['CFBundleName']).toBe(PRODUCT_DISPLAY_NAME);
     expect(cfg.mac.extendInfo['CFBundleDisplayName']).toBe(PRODUCT_DISPLAY_NAME);
+    // The sentence macOS shows under "<app> would like to access the
+    // microphone" — it names the product, not a codename.
+    for (const key of ['NSMicrophoneUsageDescription', 'NSCameraUsageDescription']) {
+      expect(cfg.mac.extendInfo[key]?.startsWith(`${PRODUCT_DISPLAY_NAME} `)).toBe(true);
+    }
     expect(cfg.dmg.title).toBe(`${PRODUCT_DISPLAY_NAME} \${version}`);
     for (const name of [cfg.mac.artifactName, cfg.win.artifactName, cfg.nsis.artifactName]) {
       expect(name.startsWith(`${ARTIFACT_PREFIX}-`)).toBe(true);
@@ -46,7 +56,9 @@ describe('the display name reaches every surface', () => {
     const sh = read('scripts/release-lite.sh');
     expect(sh).toContain(`LITE_ARTIFACT_PREFIX="${ARTIFACT_PREFIX}"`);
     expect(sh).toContain(`PUBLIC_NOTES="# ${PRODUCT_DISPLAY_NAME} \${LITE_TAG}`);
-    expect(sh).toContain(`/Applications/${PRODUCT_DISPLAY_NAME}.app`);
+    // The install instructions name the folder as it really is on disk.
+    expect(sh).toContain(`/Applications/${INTERNAL_APP_NAME}.app`);
+    expect(sh).not.toContain(`/Applications/${PRODUCT_DISPLAY_NAME}.app`);
   });
 
   it('static window titles', () => {
@@ -107,7 +119,7 @@ describe('the display name reaches every surface', () => {
         for (const [i, line] of src.split('\n').entries()) {
           const t = line.trim();
           if (t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || t.startsWith('<!--')) continue;
-          if (/Onereach(\.ai)? Lite\b/.test(line) || /['"`>](About |Quit )?WISER['"`<]/.test(line)) offenders.push(`${rel}:${i + 1}: ${t.slice(0, 90)}`);
+          if (/Onereach(\.ai)? Lite\b/.test(line) || /['"`>](About |Quit |Show |Hide )?WISER( Help)?['"`<]/.test(line)) offenders.push(`${rel}:${i + 1}: ${t.slice(0, 90)}`);
           // The brand is dropping the ".ai" (2026-09-06): copy says
           // "Onereach". Domains (idw.edison.onereach.ai), the full app's
           // config path, and keychain service ids are not copy.
@@ -127,7 +139,11 @@ describe('the internal identity is frozen', () => {
     expect(INTERNAL_APP_NAME).toBe('Onereach.ai Lite');
     const cfg = JSON.parse(read('electron-builder.json')) as { appId: string };
     expect(cfg.appId).toBe('com.onereach.lite');
-    expect(APP_BUNDLE_NAMES).toEqual([`${PRODUCT_DISPLAY_NAME}.app`, 'Onereach.ai Lite.app']);
+    expect(APP_BUNDLE_NAMES).toEqual(['Onereach.ai Lite.app']);
+    // The helper that applies updates must tolerate a differently named
+    // lone bundle, or the folder can never be renamed (ADR-095 amendment).
+    const helper = readFileSync(join(ROOT, '..', 'scripts', 'install-update.sh'), 'utf8');
+    expect(helper).toContain("-maxdepth 1 -name '*.app' -type d");
     // The release script's boot-log needle is the INTERNAL name — the
     // banner prints app.getName(), which must not follow the rename.
     expect(read('scripts/release-lite.sh')).toContain('LITE_PRODUCT_NAME="Onereach.ai Lite"');

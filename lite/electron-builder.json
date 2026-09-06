@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.onereach.lite",
-  "productName": "Onereach Desktop",
+  "productName": "Onereach.ai Lite",
   "copyright": "Copyright © 2026 Onereach",
   "directories": {
     "output": "dist-lite",
@@ -125,9 +125,10 @@
     "entitlementsInherit": "lite/build/entitlements.mac.inherit.plist",
     "notarize": false,
     "extendInfo": {
+      "CFBundleName": "Onereach Desktop",
       "CFBundleDisplayName": "Onereach Desktop",
-      "NSMicrophoneUsageDescription": "WISER uses the microphone for future voice features (kernel does not access mic).",
-      "NSCameraUsageDescription": "WISER uses the camera for future recording features (kernel does not access camera).",
+      "NSMicrophoneUsageDescription": "Onereach Desktop uses the microphone for meetings and voice features in the pages you open.",
+      "NSCameraUsageDescription": "Onereach Desktop uses the camera for meetings and recording features in the pages you open.",
       "CFBundleHelpBookFolder": "OnereachLite.help",
       "CFBundleHelpBookName": "com.onereach.lite.help"
     },

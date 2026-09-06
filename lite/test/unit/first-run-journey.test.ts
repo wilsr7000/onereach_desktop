@@ -170,7 +170,7 @@ describe('the just-in-time Claude key walkthrough', () => {
     expect(s).not.toContain('ai-config.json in the app data folder');
     expect(s).not.toContain('See lite/ai/README.md');
     // ADR-094: either key-based provider fixes it, so the remediation names both.
-    expect(s).toContain('Add a Claude or OpenAI API key in Settings → AI');
+    expect(s).toContain('Add a Claude API key in Settings → AI');
   });
 });
 

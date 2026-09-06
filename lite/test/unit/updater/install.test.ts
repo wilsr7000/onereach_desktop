@@ -362,8 +362,8 @@ describe('performUpdateInstall', () => {
     expect(options.env.ONEREACH_TARGET_VERSION).toBe('2.0.0');
     // APP_PATH must point at a path whose basename matches the lite
     // bundle name so the script's `basename "$APP_PATH"` derivation
-    // resolves to the product bundle â "Onereach Desktop.app" for a fresh install, "Onereach.ai Lite.app" for one updated in place (ADR-095).
-    expect(options.env.ONEREACH_APP_PATH).toMatch(/Onereach (Desktop|\.ai Lite)\.app$/);
+    // resolves to the installed bundle, which keeps the internal name (ADR-095 amendment).
+    expect(options.env.ONEREACH_APP_PATH).toMatch(/Onereach\.ai Lite\.app$/);
     // Lite-specific cache paths. A regression to the full app's
     // `com.gsx.poweruser.ShipIt` / `gsx-power-user-updater` would
     // silently search the wrong cache dirs and find nothing to swap.

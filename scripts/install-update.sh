@@ -189,6 +189,14 @@ NEW_APP=""
 if compgen -G "$SHIPIT_CACHE/update.*" >/dev/null 2>&1; then
     while IFS= read -r d; do
         candidate="$d/$BUNDLE_NAME"
+        if [ ! -d "$candidate" ]; then
+            # Same rename tolerance as the zip path below: one lone bundle
+            # in the staging dir is the update whatever it is called.
+            lone_app=$(find "$d" -maxdepth 1 -name '*.app' -type d 2>/dev/null)
+            if [ -n "$lone_app" ] && [ "$(printf '%s\n' "$lone_app" | wc -l | tr -d ' ')" = "1" ]; then
+                candidate="$lone_app"
+            fi
+        fi
         if [ -d "$candidate" ]; then
             ver=$(bundle_version "$candidate")
             if [ -n "$TARGET_VERSION" ] && [ "$TARGET_VERSION" != "unknown" ] && [ -n "$ver" ] && [ "$ver" != "$TARGET_VERSION" ]; then
@@ -225,6 +233,17 @@ if [ -z "$NEW_APP" ]; then
         exit 1
     fi
     NEW_APP="$EXTRACT_DIR/$BUNDLE_NAME"
+    # A zip whose root bundle carries a different name (a product rename
+    # after this helper shipped) is still the update when it is the ONLY
+    # bundle in the archive. The swap below copies its contents into the
+    # installed folder, so the folder keeps its name either way.
+    if [ ! -d "$NEW_APP" ]; then
+        lone_app=$(find "$EXTRACT_DIR" -maxdepth 1 -name '*.app' -type d 2>/dev/null)
+        if [ -n "$lone_app" ] && [ "$(printf '%s\n' "$lone_app" | wc -l | tr -d ' ')" = "1" ]; then
+            echo "[$(ts)] zip root carries $(basename "$lone_app") rather than $BUNDLE_NAME -- using the lone bundle"
+            NEW_APP="$lone_app"
+        fi
+    fi
 fi
 
 if [ ! -d "$NEW_APP" ]; then

@@ -38,7 +38,7 @@
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { APP_BUNDLE_NAMES, PRODUCT_DISPLAY_NAME } from '../product.js';
+import { APP_BUNDLE_NAMES } from '../product.js';
 import * as path from 'node:path';
 import { spawn } from 'node:child_process';
 import type { AutoUpdaterLike } from './init.js';
@@ -355,7 +355,7 @@ export function resolveInstalledAppPath(deps: Pick<InstallDeps, 'execPath' | 'fs
       // an fs seam that refuses is the same as "not there"
     }
   }
-  return `/Applications/${PRODUCT_DISPLAY_NAME}.app`;
+  return `/Applications/${APP_BUNDLE_NAMES[0]}`;
 }
 
 function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
@@ -367,13 +367,11 @@ function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
   const homeDir = (deps.homedir ?? os.homedir)();
   const ts = Date.now();
   const helperLog = deps.getHelperLogPath?.() ?? `/tmp/onereach-lite-installer-${ts}.log`;
-  // The installed `.app` path the helper swaps. Since the rename
-  // (ADR-095) an install can live under either folder name — a fresh
-  // install is "<product>.app", one that auto-updated in place keeps
-  // the folder it was dragged in as (Squirrel never renames it) — so:
-  // the running bundle when it sits in /Applications, else the first
-  // of the known names that exists, else the product's own. The
-  // script's `basename "$APP_PATH"` derivation follows whichever it is.
+  // The installed `.app` path the helper swaps: the running bundle when
+  // it sits in /Applications, else the first known bundle name that
+  // exists there, else the canonical one. The helper derives the bundle
+  // name it looks for inside the zip from this path's basename (ADR-095
+  // explains why that name is frozen).
   const appPath = resolveInstalledAppPath(deps);
   const shipItCache = path.join(homeDir, 'Library/Caches/com.onereach.lite.ShipIt');
   const electronUpdaterCache = path.join(
