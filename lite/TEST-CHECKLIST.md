@@ -314,6 +314,17 @@ and `test/live/journey-map-ai.test.ts` (real model). What still needs eyes:
       window never navigates off the `ioa-explorer/` deployment; both
       `window.lite` and `window.journeySpaces` are undefined inside it.
 
+### GSX → Tickets (2026-09-06, v0.0.92)
+- [ ] **Opens the account's app** — GSX → Tickets loads the IDW Agentic TMS
+      app (the deployed `agententic-tms` build, `TICKETS_APP_URL`) in the
+      signed-in GSX window titled "Tickets — Edison"; the app's own sign-in
+      screen appears and the board loads after signing in. It is the ONLY
+      Tickets entry in the menu bar (there is no `tickets.<env>.onereach.ai`
+      host — the old entry failed on every click).
+- [ ] **Per environment** — with several environments signed in, each
+      environment's submenu has a Tickets entry; all open the same
+      deployment (it is not per-env).
+
 ### Session expiry handling (2026-08-11 — the "login broken AGAIN" fix)
 - [ ] ☠ **Server-dead session never re-injects** — with a stale session,
       opening an IDW goes to ONE clean sign-in (no 20s probe storm, no

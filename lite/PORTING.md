@@ -153,7 +153,7 @@ Top-level menu order across the eventual lite menu:
 | 70 | Tools | Bookmarks-as-menu + Manage Tools (NOT agent registration; Settings → IDWs is the Agent Manager) |
 | 75 | Spaces | The platform primitive — own top-level as of 2026-08-07 |
 | 80 | Agentic University | LMS / Quick Starts / AI Run Times / Wiser Method |
-| 85 | Planning | WISER Playbooks |
+| 85 | Planning | WISER Playbooks, Journey Map Builder, New Journey Map… (quick), NEON Graph Explorer |
 | 90 | Dev Tools | Dev-mode only |
 | 100 | Help | Report a Bug, Documentation |
 
