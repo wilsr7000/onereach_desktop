@@ -2181,6 +2181,77 @@ the in-app path (wizard → NEON → Designer → stamp) needs a signed-in Lite
 and is checked in the user's app, from the outside, through NEON and the
 hub's bot list.
 
+## ADR-093: The NEON Graph Explorer borrows Lite's OpenAI key for voice (2026-09-05)
+
+**Context.** The explorer (Graphtester's hosted "GSX Digital Twin" build,
+opened from Planning) grew a voice orb ported from WISER Playbooks: it
+transcribes through OpenAI's Realtime API (Whisper as fallback) and speaks
+replies with OpenAI's voice, because the browser's own speech engine
+reports "network" errors in this shell. That needs an OpenAI key. The
+explorer's own Voice settings dialog can hold one, but the user's
+expectation was plain: "it should get one from the setting in the Lite
+app." Lite had no OpenAI key at all — Settings → AI held only the
+Anthropic key — and the explorer window was opened with no preload, so
+the page could not have asked even if one existed.
+
+**Decision.**
+- **Lite gains an OpenAI key.** A second card in Settings → AI, stored in
+  its own keychain item (`OneReach.ai-OpenAI`, `ai/key-store.ts`, now a
+  generic `KeychainKeyStore` with an Anthropic and an OpenAI subclass), with
+  the same write-only save / has / delete / test surface as the Claude key
+  (`lite:ai:openai-key-*`). Test = `GET /v1/models`, which is free.
+- **The explorer window gets a narrow preload.** `preload-lite-neon-explorer.ts`
+  exposes `window.liteVoice` (`getOpenAIKey`, `hasOpenAIKey`,
+  `openVoiceSettings`) and nothing else — never `window.lite.*`, in the
+  same spirit as the WISER (`window.ai`) and Journey Map (`window.journeySpaces`)
+  windows.
+- **The key reaches exactly one page.** The main-process handlers
+  (`neon-explorer-bridge.ts`, pure and unit-tested) answer the key only to
+  the explorer window's own webContents; every other sender gets
+  `FORBIDDEN` and never the value. The window's existing `will-navigate`
+  guard keeps that webContents on the explorer's deployment directory, so
+  the page that can read the key is always the explorer.
+- **Lite makes no OpenAI calls itself.** The key is for the hosted app; the
+  read is logged (`neon-explorer.openai-key-read`) as allowed/denied and
+  whether a key existed — never the value.
+
+**Consequences.** This is the one place a secret is deliberately handed to
+a hosted page, and it is scoped to a single sandboxed window on a pinned
+origin. The explorer prefers this key over its own dialog when the bridge
+is present and shows where the key comes from. Removing the key in Lite
+drops the explorer back to browser speech on its next voice start.
+
+
+## ADR-094: OpenAI is a first-class provider for Lite's own AI (2026-09-05)
+
+**Context.** ADR-093 gave Lite an OpenAI key slot so the hosted NEON Graph
+Explorer could borrow it for voice; Lite itself still made no OpenAI
+calls. The user asked for "an option for an OpenAI key with test" in
+Settings → AI — the key was there, but the only thing it could do was
+speak. Every Lite AI feature (Space drafting, asset metadata, OKF
+conversion, Space suggestions, WISER chat) was Claude-only by `provider
+!== 'claude'` guards scattered through the service.
+
+**Decision.** The OpenAI key is a provider, not just a voice credential.
+`ai/openai.ts` implements the two seams every capability already calls —
+`ClaudeMessageCreator` and `ClaudeChatClient` — over plain `fetch` to the
+Chat Completions API (no SDK, so the asar externals guard is untouched).
+The service resolves a `KeyedModelConfig` (Claude | OpenAI) per call and
+builds the creator/chat client by provider; the guards became one
+`requireModelConfig`. Provider choice: an explicit `AI_PROVIDER` / file
+`provider` wins; else the Settings → AI **Use** preference (`auto` |
+`claude` | `openai`, stored in `ai-provider.json`, applied on the next
+call without a restart); else Claude, then OpenAI, then the OneReach flow.
+`getStatus().provider` now tells the renderer which one is live.
+
+**Consequences.** Both key slots feed the synchronous config loader
+(cached like the Anthropic key, refreshed at boot + after each mutation).
+Dark-corner translation rules are pinned by tests: image → `image_url`
+data URL, PDF → `file` input, JSON schema → non-strict `response_format`,
+`max_tokens` → `max_completion_tokens`, `temperature` dropped for
+reasoning models. The OneReach flow stays `spaceAssist`-only. Cost
+estimates for GPT models return 0 (the pricing table is Claude-only);
+add a row when it matters.
 
 ## ADR-095: The product is "Onereach Desktop"; the identity underneath stays "Onereach.ai Lite" (2026-09-06)
 
@@ -2189,3 +2260,21 @@ hub's bot list.
 - **Frozen, deliberately**: `INTERNAL_APP_NAME = 'Onereach.ai Lite'` → `app.setName()` → the userData folder, the log folder, the safeStorage keychain item, the SessionVault service, Squirrel.Mac pathing; and `appId com.onereach.lite` (auto-update, keychain access, passkeys). Renaming either silently relocates every install's data and vault — the user signs in again to an empty app. Provenance labels written to the graph (`updated_by_app_name`, presence `app`, the "Onereach.ai Lite Feedback" Space) are a cross-app contract and also stay; the Agent Library shows them as "Desktop".
 - **Existing installs**: Squirrel swaps a bundle's contents at the running app's path and never renames the folder, so an install that updates in place keeps `/Applications/Onereach.ai Lite.app` as its folder name while everything inside (menus, Dock, About) says Onereach Desktop. A fresh install from the DMG lands as `Onereach Desktop.app`. Code that needs the installed bundle resolves it from the running executable first, then `APP_BUNDLE_NAMES` in order (`updater/install.ts`), never a hard-coded folder.
 - **Codename**: `lite/`, `lite:*` scripts, `LITE_*` env, ADR prose and the internal log prefix keep saying Lite. It is a directory name, not a product.
+
+## ADR-096: Google sign-in in Lite — FedCM off, Chrome UA on popups at creation (2026-09-06)
+
+**Problem (robb: "google oauth to log in still does not work!!! In the main window when a user tries to log in using google it does not work").** The installed 0.0.90 logs showed the OneReach login page (`auth.<env>.onereach.ai/login?sso=true…`) inside a main-window tab, the click on "Sign in with Google" producing no popup, no navigation and no request, and Lite's probe concluding "manual sign-in required". Reproduced in the dev app over CDP with hooks on the page's Google Identity Services calls.
+
+**What the login page does (read from its bundle).** Its `GoogleLogin` component calls `google.accounts.id.initialize` + `google.accounts.id.prompt(l)` — One Tap. Its own fallback `c()` (a `window.open` of `sso.global.api.onereach.ai?…` named "SSO", 590×600) runs only when One Tap reports not-displayed / skipped-for-unknown-reason, or up front when the user agent matches `/onereach/i` or the page runs in an iOS in-app browser or a node-integrated Electron renderer.
+
+**Root cause 1 — FedCM.** GIS uses the browser's FedCM API for One Tap whenever `IdentityCredential` exists. Chromium 146 in Electron 41 exposes it, but Electron ships no FedCM UI, so the `navigator.credentials.get({identity})` behind the prompt never resolves and GIS never calls the moment callback with "not displayed" (FedCM removed those reasons by design). The page waits forever; the button looks dead. Under the tab's Chrome-parity UA the page has no reason to take its fallback.
+
+**Root cause 2 — the popup's user agent.** Both Chrome disguises (tab parity, sign-in window) set the UA on popups from `did-create-window`, which fires after the popup's first document has started loading with Electron's default UA. Measured on the SSO popup: `navigator.userAgent` AND the User-Agent header on the wire were `… Onereach.aiLite/41.10.5 Chrome/146 … Electron/41.10.5 …` while the opener said plain Chrome. Google's sign-in gates on that string ("This browser or app may not be secure"). A `web-contents-created` hook calling `setUserAgent` before the navigation changed nothing (tried first; removed).
+
+**Decision.**
+1. `app.commandLine.appendSwitch('disable-features', 'FedCm')` before the app is ready (main-lite). With the feature off, `IdentityCredential` is absent, GIS reports not-displayed at once, and the page takes its own fallback: the SSO popup, routed in-app by the tab handler (it has window features → 'popup', same partition), which reaches Google's real sign-in. Verified live in the dev app: FedCM gone from the page, popup within about a second of the click, "Sign in - Google Accounts" with the Workspace identifier form.
+2. `app.userAgentFallback = chromeParityUserAgent()` (main-lite): what any web contents without a UA of its own presents. Verified live: the SSO popup now says Chrome on the wire and in `navigator.userAgent`. Lite's own pages see the same string; nothing in Lite sniffs its UA. `did-create-window` logs one `popup created` line (same session?, UAs) as support evidence.
+
+**Rejected.** A `OneReach` token in the UA to force the page's fallback (works — verified — but changes what every site sees and depends on the page's private check); allowing One Tap by another route (Electron has no FedCM to allow); patching the page; a per-contents override at creation (measured ineffective for window.open children).
+
+**Not done here.** The installed app is 0.0.90; this ships with the next release (release rule: full delta review first).

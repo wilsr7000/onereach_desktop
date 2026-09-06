@@ -285,3 +285,7 @@ The fix lives in [`oauth-popup.ts`](./oauth-popup.ts). `setWindowOpenHandler` no
 The same helper is used by [`lite/main-window/window.ts`](../main-window/window.ts) for each agent tab and [`lite/idw/browser-window.ts`](../idw/browser-window.ts) for the placeholder fallback. Each surface passes its own partition so OAuth state stays isolated across tabs (per-tab `persist:tab-<uuid>`) but shared inside one tab's session.
 
 Allowlist matching is exact-host or subdomain (`accounts.google.com` matches; `accounts.google.com.evil.com` does NOT). Adding entries means a one-line edit to `OAUTH_POPUP_ALLOWLIST`.
+
+## Google sign-in: FedCM off, Chrome UA on popups at creation (ADR-096)
+
+The OneReach login page's "Sign in with Google" is Google One Tap, which uses FedCM when the browser exposes it. Electron exposes the API without the UI, so the prompt never resolves and the page never falls back. Lite starts Chromium with `--disable-features=FedCm`; the page then takes its SSO popup path, which reaches Google's sign-in. Popups start their first navigation before any per-contents override lands, so `app.userAgentFallback` is the Chrome string: a window.open child (the SSO popup) presents Chrome on the wire and in `navigator.userAgent` from its first request (`did-create-window` is too late for that).

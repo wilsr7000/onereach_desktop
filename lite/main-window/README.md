@@ -82,3 +82,5 @@ reachability (auto-sweep on show + app-menu "Bring Windows Into
 View"); this module only needs to never fight its bounds corrections.
 Edge cases stay covered by `test/unit/window-rescue.test.ts` (16
 tests, real observed coordinates).
+
+**Popups and the user agent (ADR-096).** A popup's first document loads before `did-create-window` can set a UA; `app.userAgentFallback` (main-lite) is the Chrome string, so popups present Chrome from their first request. `did-create-window` logs one `popup created` line with the session match and the UAs.

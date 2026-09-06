@@ -85,6 +85,7 @@ import { runKvMigration } from './kv/migration.js';
 import { setKVAuthBindings } from './kv/api.js';
 import { setFilesAuthBindings } from './files/api.js';
 import { installReSignInPrompter } from './auth/re-signin-prompt.js';
+import { chromeParityUserAgent } from './main-window/browser-parity.js';
 import { getDiscoveryApi } from './discovery/api.js';
 import { rescueAllWindows } from './window-rescue.js';
 
@@ -257,6 +258,30 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
   process.exit(0);
 }
+
+// ============================================================================
+// GOOGLE SIGN-IN (2026-09-06, ADR-096) — two things Chromium-in-Electron gets wrong.
+//
+// 1. FedCM. Google Identity Services' One Tap (the OneReach login page's
+//    "Sign in with Google") uses the browser's FedCM API whenever
+//    `IdentityCredential` exists. Chromium 146 exposes it, but Electron
+//    ships no FedCM UI, so the prompt never resolves and never reports
+//    "not displayed" — the page waits forever and the button looks dead
+//    (live 2026-09-06: no popup, no navigation, no request after the
+//    click). With the feature off, GIS reports not-displayed at once and
+//    the page takes its own fallback: the SSO popup, which reaches
+//    Google's real sign-in. Must be set before the app is ready.
+// 2. Popup user agent. A window.open child starts its first navigation
+//    before any per-contents override can land — measured: the SSO popup
+//    presented Electron's default UA on the wire and in
+//    navigator.userAgent while its opener said Chrome, and a
+//    `web-contents-created` override changed nothing. The app-wide
+//    fallback is what a contents without a UA of its own presents, so
+//    popups say Chrome from their first request. Lite's own pages see
+//    the same string; nothing in Lite sniffs its UA.
+// ============================================================================
+app.commandLine.appendSwitch('disable-features', 'FedCm');
+app.userAgentFallback = chromeParityUserAgent();
 
 // ============================================================================
 // TOUCH ID WEBAUTHN (ADR-066) — Secure Enclave platform authenticator for

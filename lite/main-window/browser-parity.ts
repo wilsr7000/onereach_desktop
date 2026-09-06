@@ -380,6 +380,19 @@ export function attachChromeParity(contents: WebContents, opts: { partition: str
   ensureSessionParity(contents.session);
   contents.setWindowOpenHandler(buildTabWindowOpenHandler({ partition: opts.partition }));
   contents.on('did-create-window', (child) => {
+    // ADR-096 — what a popup starts with (its first document is already
+    // loading here; the app-wide UA fallback in main-lite is what makes
+    // it Chrome). One line per popup: support evidence, not volume.
+    try {
+      getLoggingApi().info('main-window', 'popup created', {
+        sameSession: child.webContents.session === contents.session,
+        sessionUserAgent: child.webContents.session.getUserAgent().slice(0, 120),
+        contentsUserAgent: child.webContents.getUserAgent().slice(0, 120),
+        openerUserAgent: contents.getUserAgent().slice(0, 120),
+      });
+    } catch {
+      /* diagnostics only */
+    }
     attachChromeParity(child.webContents, opts);
   });
   contents.on('context-menu', (_event, params) => {
