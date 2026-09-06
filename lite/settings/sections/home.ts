@@ -2,7 +2,7 @@
  * Settings → Home: which page the main window's Home tab loads.
  *
  * 2026-08-07, per user request: the Home tab's remote page is
- * configurable, defaulting to the WISER capture join room. The URL may
+ * configurable; the default is the GSX Expert IDW (2026-09-06). The URL may
  * contain a literal `{accountId}` placeholder, substituted at load
  * time with the signed-in GSX account id.
  *
@@ -62,7 +62,7 @@ export function mountHome(container: HTMLElement): (() => void) | undefined {
   const render = (state: { url: string; isDefault: boolean }): void => {
     input.value = state.url;
     note.textContent = state.isDefault
-      ? 'Using the default (GSX Product Expert — email triage).'
+      ? 'Using the default (GSX Expert IDW).'
       : 'Custom URL set.';
   };
 

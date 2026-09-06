@@ -3,8 +3,7 @@
  *
  * The main window's Home tab loads a remote page; WHICH page is a
  * user setting (Settings → Home) persisted as one JSON file under
- * userData. Default: the GSX Product Expert email-triage prototype
- * (see DEFAULT_HOME_URL).
+ * userData. Default: the GSX Expert IDW (see DEFAULT_HOME_URL).
  *
  * The stored URL may contain the literal placeholder `{accountId}`,
  * substituted at load time with the signed-in GSX account id — so a
@@ -20,14 +19,24 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 /**
- * The default Home page (2026-09-01, by user request): the hosted GSX
- * Expert UI on Edison public files. A static hosted page (not an IDW
- * login route), so it never bounces through the SSO interstitial; it
- * reads the signed-in session itself. No `{accountId}` placeholder —
- * the account is baked into the published path.
+ * The default Home page (2026-09-06, by user request): the GSX Expert
+ * IDW itself. An IDW route shows its SSO interstitial when the Home
+ * partition holds no session, so the Home view injects the app session
+ * before the load (2026-08-15) and reloads on sign-in — a signed-in
+ * user lands in the IDW. No `{accountId}` placeholder.
  */
-export const DEFAULT_HOME_URL =
-  'https://files.edison.api.onereach.ai/public/dd96413e-9de1-4920-b53d-00d3af691a0f/gsx-expert-ui/index.html';
+export const DEFAULT_HOME_URL = 'https://idw.edison.onereach.ai/gsx-expert';
+
+/**
+ * Earlier defaults. A store file holding one of these belongs to a user
+ * who never chose a page — Settings → Home writes the default text back
+ * as a "custom" URL on Save — so it reads as the CURRENT default, and a
+ * default change reaches them without a reset.
+ */
+export const LEGACY_DEFAULT_HOME_URLS: readonly string[] = Object.freeze([
+  // 2026-09-01 → 2026-09-06: the hosted GSX Expert page on Edison public files.
+  'https://files.edison.api.onereach.ai/public/dd96413e-9de1-4920-b53d-00d3af691a0f/gsx-expert-ui/index.html',
+]);
 
 /** Overridable for tests. */
 let baseDirOverride: string | null = null;
@@ -61,13 +70,15 @@ export function validateHomeUrl(raw: unknown): string | null {
   return trimmed;
 }
 
-/** The configured URL, or the default when unset/corrupt. */
+/** The configured URL, or the default when unset, corrupt, or an earlier default. */
 export async function readHomeUrl(): Promise<{ url: string; isDefault: boolean }> {
   try {
     const raw = await fs.readFile(storePath(), 'utf8');
     const parsed = JSON.parse(raw) as { url?: unknown };
     const valid = validateHomeUrl(parsed.url);
-    if (valid !== null) return { url: valid, isDefault: false };
+    if (valid !== null && !LEGACY_DEFAULT_HOME_URLS.includes(valid)) {
+      return { url: valid, isDefault: false };
+    }
   } catch {
     /* missing or corrupt → default */
   }
@@ -82,13 +93,15 @@ export async function writeHomeUrl(
   raw: string | null
 ): Promise<{ url: string; isDefault: boolean }> {
   const target = storePath();
-  if (raw === null) {
+  const valid = raw === null ? null : validateHomeUrl(raw);
+  if (raw !== null && valid === null) {
+    throw new Error('Home URL must be a valid https:// URL (max 2048 chars).');
+  }
+  // null resets; so does saving an earlier default — the store must
+  // never say "custom" for a URL the next read will report as default.
+  if (valid === null || LEGACY_DEFAULT_HOME_URLS.includes(valid)) {
     await fs.rm(target, { force: true });
     return { url: DEFAULT_HOME_URL, isDefault: true };
-  }
-  const valid = validateHomeUrl(raw);
-  if (valid === null) {
-    throw new Error('Home URL must be a valid https:// URL (max 2048 chars).');
   }
   const tmp = `${target}.tmp`;
   await fs.mkdir(path.dirname(target), { recursive: true });

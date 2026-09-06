@@ -71,7 +71,8 @@ Per ADR-019 / Rule 11, consumers import ONLY from `api.ts`
   `tone: null` (boot chat under the bar) = theme colours.
 - IPC `lite:main-window:homeUrl:get|set` (preload:
   `window.lite.homeUrl`) — the configurable Home-tab URL
-  (`home-url-store.ts`; default = GSX Product Expert email-triage;
+  (`home-url-store.ts`; default = the GSX Expert IDW since 2026-09-06;
+  earlier defaults stored by Save read as the current default;
   `{accountId}` placeholder substitution; Settings → Home is the UI).
 - Home-tab modes: default remote page → `LITE_HOME=learn` (local
   Learning Center) → `=feed` (legacy IDW feed) → `=chrome` (boot-chat).

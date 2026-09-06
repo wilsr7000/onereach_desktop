@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   DEFAULT_HOME_URL,
+  LEGACY_DEFAULT_HOME_URLS,
   readHomeUrl,
   resolveHomeUrl,
   setHomeUrlStoreDirForTesting,
@@ -34,14 +35,35 @@ describe('home-url store', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('defaults to the GSX Product Expert email-triage prototype', async () => {
+  it('defaults to the GSX Expert IDW (2026-09-06, by user request)', async () => {
     const state = await readHomeUrl();
     expect(state.isDefault).toBe(true);
     expect(state.url).toBe(DEFAULT_HOME_URL);
-    expect(DEFAULT_HOME_URL).toBe(
+    expect(DEFAULT_HOME_URL).toBe('https://idw.edison.onereach.ai/gsx-expert');
+    expect(validateHomeUrl(DEFAULT_HOME_URL)).toBe(DEFAULT_HOME_URL);
+  });
+
+  // A default change must reach a user whose store file holds the
+  // PREVIOUS default (Settings → Home writes the default text back as
+  // "custom" on Save) — otherwise the new default is invisible to them.
+  it('a stored earlier default reads as the current default', async () => {
+    const legacy = LEGACY_DEFAULT_HOME_URLS[0];
+    expect(legacy).toBe(
       'https://files.edison.api.onereach.ai/public/dd96413e-9de1-4920-b53d-00d3af691a0f/gsx-expert-ui/index.html'
     );
-    expect(validateHomeUrl(DEFAULT_HOME_URL)).toBe(DEFAULT_HOME_URL);
+    expect(LEGACY_DEFAULT_HOME_URLS).not.toContain(DEFAULT_HOME_URL);
+    const fs = await import('node:fs');
+    fs.writeFileSync(path.join(dir, 'home-url.json'), JSON.stringify({ url: legacy }));
+    expect(await readHomeUrl()).toEqual({ url: DEFAULT_HOME_URL, isDefault: true });
+  });
+
+  it('saving an earlier default is a reset — write and the next read agree', async () => {
+    const legacy = LEGACY_DEFAULT_HOME_URLS[0] as string;
+    const saved = await writeHomeUrl(legacy);
+    expect(saved).toEqual({ url: DEFAULT_HOME_URL, isDefault: true });
+    expect(await readHomeUrl()).toEqual({ url: DEFAULT_HOME_URL, isDefault: true });
+    const fs = await import('node:fs');
+    expect(fs.existsSync(path.join(dir, 'home-url.json'))).toBe(false);
   });
 
   it('round-trips a custom URL and resets to default with null', async () => {

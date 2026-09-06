@@ -143,7 +143,7 @@ const BACKGROUND = (): string => windowBackgroundColor();
 /**
  * Home-tab mode (2026-08-07, updated same day per user request): the
  * default Home surface is the CONFIGURED remote page (Settings →
- * Home; default = the GSX Product Expert email-triage prototype), with
+ * Home; default = the GSX Expert IDW since 2026-09-06), with
  * `{accountId}` substitution for personalization. Overrides:
  *   LITE_HOME=learn  → the local Learning Center page (lite/learn)
  *   LITE_HOME=feed   → the old remote IDW feed
