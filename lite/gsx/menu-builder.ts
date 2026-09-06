@@ -45,21 +45,41 @@ export const SEPARATOR_ID = 'gsx:sep-links';
 /** Order 65: between IDW (60) and Tools (70), matching the full app. */
 export const TOP_LEVEL_ORDER = 65;
 
+/**
+ * Tickets is the account's own Agentic TMS app (the IDW "Tickets"
+ * project, deployed to the account's public files). There is no
+ * `tickets.<env>.onereach.ai` on the platform — the host never resolved,
+ * and the menu entry that pointed at it failed to load on every click
+ * (2026-09-06, found from the installed app's log).
+ */
+export const TICKETS_APP_URL =
+  'https://files.edison.api.onereach.ai/public/35254342-4a2e-475b-aec1-18547e517e29/agententic-tms/index.html';
+
+export type GsxLink =
+  | { key: string; label: string; host: string; path: string }
+  | { key: string; label: string; url: string };
+
 /** The GSX surfaces, in the order full lists them. */
-export const GSX_LINKS: ReadonlyArray<{ key: string; label: string; host: string; path: string }> = [
+export const GSX_LINKS: ReadonlyArray<GsxLink> = [
   { key: 'hitl', label: 'HITL', host: 'hitl', path: '/' },
   { key: 'actiondesk', label: 'Action Desk', host: 'actiondesk', path: '/dashboard/' },
   { key: 'designer', label: 'Designer', host: 'studio', path: '/bots' },
   { key: 'agents', label: 'Agents', host: 'agents', path: '/agents' },
-  { key: 'tickets', label: 'Tickets', host: 'tickets', path: '/' },
+  { key: 'tickets', label: 'Tickets', url: TICKETS_APP_URL },
   { key: 'calendar', label: 'Calendar', host: 'calendar', path: '/' },
   { key: 'developer', label: 'Developer', host: 'docs', path: '/' },
 ];
 
-/** `https://<host>.<env>.onereach.ai<path>[?accountId=…]` — full's `withAccount`. */
+/**
+ * `https://<host>.<env>.onereach.ai<path>[?accountId=…]` — full's
+ * `withAccount`. A link that names a full `url` opens exactly that: it
+ * is a deployment, not a per-env platform host, and takes no account
+ * parameter.
+ */
 export function gsxLinkUrl(key: string, env: Environment, accountId: string | null): string {
   const link = GSX_LINKS.find((l) => l.key === key);
   if (link === undefined) throw new Error(`unknown GSX link: ${key}`);
+  if ('url' in link) return link.url;
   const base = `https://${link.host}.${env}.onereach.ai${link.path}`;
   return accountId !== null && accountId.length > 0 ? `${base}?accountId=${encodeURIComponent(accountId)}` : base;
 }

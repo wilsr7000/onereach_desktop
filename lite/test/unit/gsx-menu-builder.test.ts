@@ -23,6 +23,7 @@ import {
   gsxLinkUrl,
   activeEnvironments,
   GSX_LINKS,
+  TICKETS_APP_URL,
   TOP_LEVEL_ID,
   OPEN_STUDIO_ID,
   AGENT_LIBRARY_ID,
@@ -76,6 +77,11 @@ describe('GSX menu-builder', () => {
     expect(gsxLinkUrl('actiondesk', 'staging', 'a')).toBe('https://actiondesk.staging.onereach.ai/dashboard/?accountId=a');
     expect(gsxLinkUrl('designer', 'edison', null)).toBe('https://studio.edison.onereach.ai/bots');
     expect(gsxLinkUrl('developer', 'edison', '')).toBe('https://docs.edison.onereach.ai/');
+    // Tickets is the account's Agentic TMS deployment, not a platform
+    // host (tickets.<env>.onereach.ai never resolved; every click failed
+    // to load until 2026-09-06). A deployment takes no account parameter.
+    expect(gsxLinkUrl('tickets', 'edison', 'acct-1')).toBe(TICKETS_APP_URL);
+    expect(TICKETS_APP_URL).toMatch(/^https:\/\/files\.edison\.api\.onereach\.ai\/public\/[0-9a-f-]+\/agententic-tms\/index\.html$/);
     expect(GSX_LINKS.map((l) => l.label)).toEqual([
       'HITL', 'Action Desk', 'Designer', 'Agents', 'Tickets', 'Calendar', 'Developer',
     ]);
@@ -148,7 +154,7 @@ describe('GSX menu-builder', () => {
     registry.get('gsx:link:edison:tickets')?.click?.();
     expect(deps.openWindow).toHaveBeenLastCalledWith({
       env: 'edison',
-      url: 'https://tickets.edison.onereach.ai/?accountId=acct-1',
+      url: TICKETS_APP_URL,
       title: 'Tickets — Edison',
     });
     registry.get(OPEN_STUDIO_ID)?.click?.();
