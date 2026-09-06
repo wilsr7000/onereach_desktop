@@ -128,30 +128,33 @@ const MIN_WIDTH = 720;
 const MIN_HEIGHT = 480;
 // The window opens at a size that suits the display (2026-09-06, user:
 // "make the main window a bit larger"): 80% of the work area's width and
-// 85% of its height, never smaller than the old fixed default, and capped
-// so a 6K display still gets a window rather than a wall.
+// 85% of its height, never smaller than 1360×850 (so a 14-inch laptop
+// sees the difference too — 80% of its work area is the old 1280), and
+// capped so a 6K display still gets a window rather than a wall. A
+// display too small for that keeps a 40 px margin all round.
 const INITIAL_WORK_AREA_FRACTION = { width: 0.8, height: 0.85 } as const;
+const INITIAL_FLOOR = { width: 1360, height: 850 } as const;
 const INITIAL_MAX = { width: 1680, height: 1050 } as const;
+const INITIAL_MARGIN_PX = 40;
 const BACKGROUND = (): string => windowBackgroundColor();
 
 /**
  * Initial main-window size for a display work area. Pure; exported for
- * tests. Falls back to the fixed default when the work area is unknown
- * or smaller than it.
+ * tests. Falls back to the fixed default when the work area is unknown;
+ * a display too small for the target gets the display minus a margin.
  */
 export function initialMainWindowSize(workArea: { width: number; height: number } | null): { width: number; height: number } {
   if (workArea === null || !(workArea.width > 0) || !(workArea.height > 0)) {
     return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
   }
   const fit = (avail: number, fraction: number, floor: number, cap: number, min: number): number => {
-    const wanted = Math.round(avail * fraction);
-    // A display too small for the old default gets the display, minus a margin.
-    if (avail < floor) return Math.max(min, avail - 40);
-    return Math.min(cap, Math.max(floor, wanted));
+    const target = Math.min(cap, Math.max(floor, Math.round(avail * fraction)));
+    const room = avail - INITIAL_MARGIN_PX;
+    return target <= room ? target : Math.max(min, room);
   };
   return {
-    width: fit(workArea.width, INITIAL_WORK_AREA_FRACTION.width, DEFAULT_WIDTH, INITIAL_MAX.width, MIN_WIDTH),
-    height: fit(workArea.height, INITIAL_WORK_AREA_FRACTION.height, DEFAULT_HEIGHT, INITIAL_MAX.height, MIN_HEIGHT),
+    width: fit(workArea.width, INITIAL_WORK_AREA_FRACTION.width, INITIAL_FLOOR.width, INITIAL_MAX.width, MIN_WIDTH),
+    height: fit(workArea.height, INITIAL_WORK_AREA_FRACTION.height, INITIAL_FLOOR.height, INITIAL_MAX.height, MIN_HEIGHT),
   };
 }
 
