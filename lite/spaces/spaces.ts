@@ -16464,7 +16464,7 @@ interface NewSpaceWizardState {
   people: WizardPerson[];
   shared: boolean;
   aiConfigured: boolean;
-  aiProvider: 'claude' | 'onereach-flow' | null;
+  aiProvider: 'claude' | 'openai' | 'onereach-flow' | null;
   busy: boolean;
 }
 
@@ -16888,13 +16888,19 @@ function buildWizardStepDetails(w: NewSpaceWizardState): HTMLElement {
       void handleDraftWithAi();
     });
     const providerLabel =
-      w.aiProvider === 'claude' ? 'Claude' : w.aiProvider === 'onereach-flow' ? 'OneReach flow' : null;
+      w.aiProvider === 'claude'
+        ? 'Claude'
+        : w.aiProvider === 'openai'
+          ? 'OpenAI'
+          : w.aiProvider === 'onereach-flow'
+            ? 'OneReach flow'
+            : null;
     const hint = wizEl(
       'span',
       'spaces-wizard-hint',
       w.aiConfigured
         ? `Turns your purpose into a polished description + objectives${providerLabel !== null ? ` (via ${providerLabel})` : ''}.`
-        : 'Connect a Claude API key or a OneReach flow to enable AI drafting (see lite/ai/README.md). You can still fill these in manually.'
+        : 'Add a Claude or OpenAI API key in Settings → AI (or connect a OneReach flow) to enable AI drafting. You can still fill these in manually.'
     );
     aiBox.append(aiBtn, hint);
     step.appendChild(aiBox);

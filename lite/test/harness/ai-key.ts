@@ -129,7 +129,7 @@ export function buildAppAiCredentials(
   const config = resolveAiConfig(env, fileJson, keychainKey);
   if (config === null) return null;
 
-  if (config.provider !== 'claude') {
+  if (config.provider === 'onereach-flow') {
     return { config, source: 'unknown', fingerprint: fingerprintSecret(config.url) };
   }
   return {
@@ -189,11 +189,11 @@ export function describeAiCredentials(found: AppAiCredentials | null): string {
       `into ${liteUserDataDir()}`
     );
   }
-  if (found.config.provider !== 'claude') {
+  if (found.config.provider === 'onereach-flow') {
     return `provider=onereach-flow url=${found.config.url} (${found.fingerprint})`;
   }
   return (
-    `provider=claude source=${found.source} model=${found.config.model} ` +
+    `provider=${found.config.provider} source=${found.source} model=${found.config.model} ` +
     `(${found.fingerprint})`
   );
 }

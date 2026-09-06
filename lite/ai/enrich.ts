@@ -217,5 +217,5 @@ function toMetadataBag(m: AssetMetadataResult): Record<string, string | string[]
 /** Best-effort current model id for provenance (no secrets). */
 function resolveModelLabel(): string {
   const cfg = loadAiConfigFromDisk(null);
-  return cfg !== null && cfg.provider === 'claude' ? cfg.model : DEFAULT_CLAUDE_MODEL;
+  return cfg !== null && cfg.provider !== 'onereach-flow' ? cfg.model : DEFAULT_CLAUDE_MODEL;
 }

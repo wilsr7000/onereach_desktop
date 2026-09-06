@@ -13,8 +13,17 @@
  */
 
 /** The providers the AI module can be backed by. */
-export const AI_PROVIDERS = ['claude', 'onereach-flow'] as const;
+export const AI_PROVIDERS = ['claude', 'openai', 'onereach-flow'] as const;
 export type AiProvider = (typeof AI_PROVIDERS)[number];
+
+/**
+ * The providers a user authenticates with their own API key (Settings →
+ * AI). Each has a keychain slot, a Test button, and serves the full
+ * capability surface; the OneReach flow is session-authenticated and
+ * covers `spaceAssist` only.
+ */
+export const AI_KEY_PROVIDERS = ['claude', 'openai'] as const;
+export type AiKeyProvider = (typeof AI_KEY_PROVIDERS)[number];
 
 /** Input to {@link AiApi.spaceAssist}. */
 export interface SpaceAssistInput {

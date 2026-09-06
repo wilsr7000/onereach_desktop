@@ -22,7 +22,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { AiError, AI_ERROR_CODES } from './errors.js';
 import { mapClaudeError } from './client.js';
-import type { ClaudeConfig } from './config.js';
+import { makeOpenAiChatClient } from './openai.js';
+import type { ClaudeConfig, KeyedModelConfig } from './config.js';
 
 /**
  * WISER's model "profile" abstraction (mirrors the Spaces shell contract).
@@ -59,7 +60,8 @@ export interface AiChatResult {
   content: string;
   usage: { inputTokens: number; outputTokens: number };
   model: string;
-  provider: 'claude';
+  /** Which key-based provider answered (ADR-094). */
+  provider: 'claude' | 'openai';
   /** Best-effort USD estimate. WISER ignores this; populated for parity/telemetry. */
   cost: number;
 }
@@ -216,7 +218,11 @@ function buildParams(input: AiChatInput, model: string): Record<string, unknown>
   };
 }
 
-function toResult(model: string, message: ClaudeMessageLike): AiChatResult {
+function toResult(
+  model: string,
+  message: ClaudeMessageLike,
+  provider: KeyedModelConfig['provider']
+): AiChatResult {
   const usage = {
     inputTokens: typeof message.usage?.input_tokens === 'number' ? message.usage.input_tokens : 0,
     outputTokens: typeof message.usage?.output_tokens === 'number' ? message.usage.output_tokens : 0,
@@ -225,9 +231,16 @@ function toResult(model: string, message: ClaudeMessageLike): AiChatResult {
     content: extractText(message.content),
     usage,
     model,
-    provider: 'claude',
+    provider,
     cost: estimateCost(model, usage),
   };
+}
+
+/** The default (SDK / fetch) chat client for whichever key-based provider is configured. */
+function defaultChatClient(config: KeyedModelConfig, fetchImpl?: typeof fetch): ClaudeChatClient {
+  return config.provider === 'openai'
+    ? makeOpenAiChatClient(config, fetchImpl !== undefined ? { fetchImpl } : {})
+    : makeClaudeChatClient(config);
 }
 
 // ─── public runners ──────────────────────────────────────────────────────
@@ -235,13 +248,13 @@ function toResult(model: string, message: ClaudeMessageLike): AiChatResult {
 /** Non-streaming chat. Returns the full result once the model finishes. */
 export async function runClaudeChat(
   input: AiChatInput,
-  opts: { config: ClaudeConfig; client?: ClaudeChatClient }
+  opts: { config: KeyedModelConfig; client?: ClaudeChatClient; fetchImpl?: typeof fetch }
 ): Promise<AiChatResult> {
   const model = profileToModel(input.profile, opts.config.model);
-  const client = opts.client ?? makeClaudeChatClient(opts.config);
+  const client = opts.client ?? defaultChatClient(opts.config, opts.fetchImpl);
   try {
     const message = await client.stream(buildParams(input, model)).finalMessage();
-    return toResult(model, message);
+    return toResult(model, message, opts.config.provider);
   } catch (err) {
     throw mapClaudeError(err);
   }
@@ -254,10 +267,15 @@ export async function runClaudeChat(
  */
 export async function runClaudeChatStream(
   input: AiChatInput,
-  opts: { config: ClaudeConfig; client?: ClaudeChatClient; onDelta: (delta: string) => void }
+  opts: {
+    config: KeyedModelConfig;
+    client?: ClaudeChatClient;
+    fetchImpl?: typeof fetch;
+    onDelta: (delta: string) => void;
+  }
 ): Promise<AiChatResult> {
   const model = profileToModel(input.profile, opts.config.model);
-  const client = opts.client ?? makeClaudeChatClient(opts.config);
+  const client = opts.client ?? defaultChatClient(opts.config, opts.fetchImpl);
   try {
     const stream = client.stream(buildParams(input, model));
     stream.on('text', (text: string) => {
@@ -268,7 +286,7 @@ export async function runClaudeChatStream(
       }
     });
     const message = await stream.finalMessage();
-    return toResult(model, message);
+    return toResult(model, message, opts.config.provider);
   } catch (err) {
     throw mapClaudeError(err);
   }

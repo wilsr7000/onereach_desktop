@@ -7,9 +7,12 @@
  *
  *   - Claude        -> the Anthropic SDK (via an injectable message-creator
  *                      factory; default = `makeClaudeMessageCreator`).
+ *   - OpenAI        -> the Chat Completions API over plain fetch, behind
+ *                      the SAME creator / chat-client seams (`ai/openai.ts`),
+ *                      so every capability below serves both providers.
  *   - OneReach flow -> a FLOW token minted from the logged-in session
  *                      (`accountId` provider) unless an explicit token
- *                      override is configured.
+ *                      override is configured. `spaceAssist` only.
  *
  * Structurally conforms to `AiApi` (enforced where `api.ts`'s
  * `buildDefaultApi(): AiApi` returns a new instance). Not declared with
@@ -22,7 +25,7 @@
 import { AiError, AI_ERROR_CODES } from './errors.js';
 import { callClaudeSuggestSpaces } from './suggest-spaces.js';
 import type { SuggestSpacesInput, SuggestSpacesResult } from './types.js';
-import type { ClaudeConfig, ResolvedAiConfig } from './config.js';
+import type { ClaudeConfig, KeyedModelConfig, ResolvedAiConfig } from './config.js';
 import {
   callClaude,
   callOneReachFlow,
@@ -30,6 +33,7 @@ import {
   mintFlowAuthHeader,
   type ClaudeMessageCreator,
 } from './client.js';
+import { makeOpenAiMessageCreator } from './openai.js';
 import { callClaudeMetadata } from './metadata.js';
 import { callClaudeOkf } from './okf.js';
 import {
@@ -51,10 +55,14 @@ import type {
   OkfConversionResult,
 } from './types.js';
 
+/** The user-facing fix for "nothing is configured" — every key path offers it. */
+export const NOT_CONFIGURED_REMEDIATION =
+  'Add a Claude or OpenAI API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.';
+
 export interface AiServiceDeps {
   /** Resolve the active provider config (or null when unconfigured). */
   loadConfig: () => ResolvedAiConfig | null;
-  /** Fetch implementation (injectable for tests) -- used by the flow path. */
+  /** Fetch implementation (injectable for tests) -- used by the flow + OpenAI paths. */
   fetchImpl: typeof fetch;
   /** Resolve the logged-in OneReach accountId (or null when signed out). */
   accountId: () => string | null;
@@ -64,22 +72,30 @@ export interface AiServiceDeps {
   makeClaudeMessageCreator?: (config: ClaudeConfig) => ClaudeMessageCreator;
   /** Test seam: build the Claude chat client (chat/chatStream). Defaults to the SDK one. */
   makeClaudeChatClient?: (config: ClaudeConfig) => ClaudeChatClient;
+  /** Test seam: build the OpenAI message-creator. Defaults to the fetch adapter. */
+  makeOpenAiMessageCreator?: (config: KeyedModelConfig) => ClaudeMessageCreator;
+  /** Test seam: build the OpenAI chat client. Defaults to the fetch/SSE adapter. */
+  makeOpenAiChatClient?: (config: KeyedModelConfig) => ClaudeChatClient;
 }
 
 export class AiService {
   private readonly loadConfig: AiServiceDeps['loadConfig'];
   private readonly fetchImpl: typeof fetch;
   private readonly accountId: () => string | null;
-  private readonly makeCreator: (config: ClaudeConfig) => ClaudeMessageCreator;
-  private readonly makeChatClient: ((config: ClaudeConfig) => ClaudeChatClient) | undefined;
+  private readonly makeClaudeCreator: (config: ClaudeConfig) => ClaudeMessageCreator;
+  private readonly makeOpenAiCreator: ((config: KeyedModelConfig) => ClaudeMessageCreator) | undefined;
+  private readonly makeClaudeChat: ((config: ClaudeConfig) => ClaudeChatClient) | undefined;
+  private readonly makeOpenAiChat: ((config: KeyedModelConfig) => ClaudeChatClient) | undefined;
   private readonly log: NonNullable<AiServiceDeps['logger']>;
 
   constructor(deps: AiServiceDeps) {
     this.loadConfig = deps.loadConfig;
     this.fetchImpl = deps.fetchImpl;
     this.accountId = deps.accountId;
-    this.makeCreator = deps.makeClaudeMessageCreator ?? makeClaudeMessageCreator;
-    this.makeChatClient = deps.makeClaudeChatClient;
+    this.makeClaudeCreator = deps.makeClaudeMessageCreator ?? makeClaudeMessageCreator;
+    this.makeOpenAiCreator = deps.makeOpenAiMessageCreator;
+    this.makeClaudeChat = deps.makeClaudeChatClient;
+    this.makeOpenAiChat = deps.makeOpenAiChatClient;
     this.log =
       deps.logger ??
       ((): void => {
@@ -92,6 +108,24 @@ export class AiService {
     return cfg === null
       ? { configured: false, provider: null }
       : { configured: true, provider: cfg.provider };
+  }
+
+  /** The message-creator for whichever key-based provider is active. */
+  private makeCreator(cfg: KeyedModelConfig): ClaudeMessageCreator {
+    if (cfg.provider === 'openai') {
+      return this.makeOpenAiCreator !== undefined
+        ? this.makeOpenAiCreator(cfg)
+        : makeOpenAiMessageCreator(cfg, { fetchImpl: this.fetchImpl });
+    }
+    return this.makeClaudeCreator(cfg);
+  }
+
+  /** The chat client for whichever key-based provider is active (undefined = runner default). */
+  private makeChatClient(cfg: KeyedModelConfig): ClaudeChatClient | undefined {
+    if (cfg.provider === 'openai') {
+      return this.makeOpenAiChat !== undefined ? this.makeOpenAiChat(cfg) : undefined;
+    }
+    return this.makeClaudeChat !== undefined ? this.makeClaudeChat(cfg) : undefined;
   }
 
   async spaceAssist(input: SpaceAssistInput): Promise<SpaceAssistResult> {
@@ -111,8 +145,7 @@ export class AiService {
         code: AI_ERROR_CODES.NOT_CONFIGURED,
         message: 'No AI provider is configured.',
         context: { op: 'space-assist' },
-        remediation:
-          'Add your Claude API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.',
+        remediation: NOT_CONFIGURED_REMEDIATION,
       });
     }
 
@@ -123,22 +156,22 @@ export class AiService {
 
     this.log('info', 'space-assist start', {
       provider: cfg.provider,
-      model: cfg.provider === 'claude' ? cfg.model : undefined,
+      model: cfg.provider === 'onereach-flow' ? undefined : cfg.model,
       purposeLen: purpose.length,
       hasName: normalized.name !== undefined,
     });
 
     try {
       const result =
-        cfg.provider === 'claude'
-          ? await callClaude(normalized, {
-              model: cfg.model,
-              createMessage: this.makeCreator(cfg),
-            })
-          : await callOneReachFlow(normalized, {
+        cfg.provider === 'onereach-flow'
+          ? await callOneReachFlow(normalized, {
               url: cfg.url,
               authHeader: await this.resolveFlowAuthHeader(cfg.token, cfg.tokenBaseUrl),
               fetchImpl: this.fetchImpl,
+            })
+          : await callClaude(normalized, {
+              model: cfg.model,
+              createMessage: this.makeCreator(cfg),
             });
       this.log('info', 'space-assist ok', {
         provider: cfg.provider,
@@ -174,18 +207,9 @@ export class AiService {
       });
     }
 
-    const cfg = this.loadConfig();
-    // Metadata extraction is Claude-only -- the OneReach flow contract
-    // covers space-assist only. Require a Claude config explicitly.
-    if (cfg === null || cfg.provider !== 'claude') {
-      throw new AiError({
-        code: AI_ERROR_CODES.NOT_CONFIGURED,
-        message: 'Claude is not configured for metadata extraction.',
-        context: { op: 'extract-metadata', provider: cfg?.provider ?? null },
-        remediation:
-          'Add your Claude API key in Settings → AI. It takes a minute — the walkthrough there shows where to get one.',
-      });
-    }
+    // Metadata extraction needs a model provider -- the OneReach flow
+    // contract covers space-assist only.
+    const cfg = this.requireModelConfig('extract-metadata');
 
     const modality = input.imageBase64
       ? 'image'
@@ -195,7 +219,7 @@ export class AiService {
           ? 'text'
           : 'hints';
     this.log('info', 'extract-metadata start', {
-      provider: 'claude',
+      provider: cfg.provider,
       model: cfg.model,
       kind: input.kind,
       modality,
@@ -208,24 +232,24 @@ export class AiService {
         createMessage: this.makeCreator(cfg),
       });
       this.log('info', 'extract-metadata ok', {
-        provider: 'claude',
+        provider: cfg.provider,
         tags: result.tags.length,
         topics: result.topics.length,
       });
       return result;
     } catch (err) {
       if (err instanceof AiError) {
-        this.log('warn', 'extract-metadata rejected', { provider: 'claude', code: err.code });
+        this.log('warn', 'extract-metadata rejected', { provider: cfg.provider, code: err.code });
         throw err;
       }
       this.log('error', 'extract-metadata unexpected', {
-        provider: 'claude',
+        provider: cfg.provider,
         error: (err as Error).message,
       });
       throw new AiError({
         code: AI_ERROR_CODES.PROVIDER_ERROR,
         message: `AI provider error: ${(err as Error).message}`,
-        context: { provider: 'claude', op: 'extract-metadata' },
+        context: { provider: cfg.provider, op: 'extract-metadata' },
         remediation: 'Try again, or add metadata manually.',
         cause: err,
       });
@@ -233,9 +257,7 @@ export class AiService {
   }
 
   /**
-   * Convert an agent definition (pasted text, or the contents of a
-   * pasted URL) into OKF via Claude. Claude-only. When `isUrl`, the URL
-   * contents are fetched first (https only + basic SSRF guard).
+   * Shortlist the Spaces an item belongs in. Needs a model provider.
    */
   async suggestSpaces(input: SuggestSpacesInput): Promise<SuggestSpacesResult> {
     const candidates = Array.isArray(input?.spaces) ? input.spaces : [];
@@ -244,9 +266,9 @@ export class AiService {
     // -> an empty shortlist is the correct answer, not an error. The
     // picker still lists every Space.
     if (candidates.length === 0 || title.length === 0) return { suggestions: [] };
-    const cfg = this.requireClaudeConfig('suggest-spaces');
+    const cfg = this.requireModelConfig('suggest-spaces');
     this.log('info', 'suggest-spaces start', {
-      provider: 'claude',
+      provider: cfg.provider,
       model: cfg.model,
       candidates: candidates.length,
     });
@@ -263,6 +285,11 @@ export class AiService {
     }
   }
 
+  /**
+   * Convert an agent definition (pasted text, or the contents of a
+   * pasted URL) into OKF. Needs a model provider. When `isUrl`, the URL
+   * contents are fetched first (https only + basic SSRF guard).
+   */
   async convertToOkf(input: OkfConversionInput): Promise<OkfConversionResult> {
     const source = typeof input?.source === 'string' ? input.source.trim() : '';
     if (source.length === 0) {
@@ -273,11 +300,11 @@ export class AiService {
         remediation: 'Paste a URL or the agent definition text, then try again.',
       });
     }
-    const cfg = this.requireClaudeConfig('convert-okf');
+    const cfg = this.requireModelConfig('convert-okf');
     const isUrl = input.isUrl === true;
     const text = isUrl ? await this.fetchUrlForOkf(source) : source;
     this.log('info', 'convert-okf start', {
-      provider: 'claude',
+      provider: cfg.provider,
       model: cfg.model,
       isUrl,
       sourceLen: text.length,
@@ -288,24 +315,24 @@ export class AiService {
         createMessage: this.makeCreator(cfg),
       });
       this.log('info', 'convert-okf ok', {
-        provider: 'claude',
+        provider: cfg.provider,
         agentType: result.agentType,
         okfLen: result.okf.length,
       });
       return result;
     } catch (err) {
       if (err instanceof AiError) {
-        this.log('warn', 'convert-okf rejected', { provider: 'claude', code: err.code });
+        this.log('warn', 'convert-okf rejected', { provider: cfg.provider, code: err.code });
         throw err;
       }
       this.log('error', 'convert-okf unexpected', {
-        provider: 'claude',
+        provider: cfg.provider,
         error: (err as Error).message,
       });
       throw new AiError({
         code: AI_ERROR_CODES.PROVIDER_ERROR,
         message: `AI provider error: ${(err as Error).message}`,
-        context: { provider: 'claude', op: 'convert-okf' },
+        context: { provider: cfg.provider, op: 'convert-okf' },
         remediation: 'Try again, or paste the OKF definition manually.',
         cause: err,
       });
@@ -372,26 +399,28 @@ export class AiService {
 
   async chat(input: AiChatInput): Promise<AiChatResult> {
     assertValidChatInput(input);
-    const cfg = this.requireClaudeConfig('chat');
+    const cfg = this.requireModelConfig('chat');
     this.log('info', 'chat start', {
-      provider: 'claude',
+      provider: cfg.provider,
       model: profileToModel(input.profile, cfg.model),
       messages: Array.isArray(input.messages) ? input.messages.length : 0,
       feature: typeof input.feature === 'string' ? input.feature : undefined,
     });
     try {
+      const client = this.makeChatClient(cfg);
       const result = await runClaudeChat(input, {
         config: cfg,
-        ...(this.makeChatClient !== undefined ? { client: this.makeChatClient(cfg) } : {}),
+        fetchImpl: this.fetchImpl,
+        ...(client !== undefined ? { client } : {}),
       });
       this.log('info', 'chat ok', {
-        provider: 'claude',
+        provider: cfg.provider,
         model: result.model,
         outputTokens: result.usage.outputTokens,
       });
       return result;
     } catch (err) {
-      throw this.normalizeChatError(err, 'chat');
+      throw this.normalizeChatError(err, 'chat', cfg.provider);
     }
   }
 
@@ -400,58 +429,61 @@ export class AiService {
     onDelta: (delta: string) => void
   ): Promise<AiChatResult> {
     assertValidChatInput(input);
-    const cfg = this.requireClaudeConfig('chat-stream');
+    const cfg = this.requireModelConfig('chat-stream');
     this.log('info', 'chat-stream start', {
-      provider: 'claude',
+      provider: cfg.provider,
       model: profileToModel(input.profile, cfg.model),
       messages: Array.isArray(input.messages) ? input.messages.length : 0,
       feature: typeof input.feature === 'string' ? input.feature : undefined,
     });
     try {
+      const client = this.makeChatClient(cfg);
       const result = await runClaudeChatStream(input, {
         config: cfg,
         onDelta,
-        ...(this.makeChatClient !== undefined ? { client: this.makeChatClient(cfg) } : {}),
+        fetchImpl: this.fetchImpl,
+        ...(client !== undefined ? { client } : {}),
       });
       this.log('info', 'chat-stream ok', {
-        provider: 'claude',
+        provider: cfg.provider,
         model: result.model,
         outputTokens: result.usage.outputTokens,
       });
       return result;
     } catch (err) {
-      throw this.normalizeChatError(err, 'chat-stream');
+      throw this.normalizeChatError(err, 'chat-stream', cfg.provider);
     }
   }
 
   /**
-   * Chat is Claude-only (the OneReach flow contract covers `spaceAssist`
-   * only). Require an active Claude config or throw `AI_NOT_CONFIGURED`.
+   * Everything except `spaceAssist` needs a MODEL provider (Claude or
+   * OpenAI) — the OneReach flow contract covers `spaceAssist` only.
+   * Throws `AI_NOT_CONFIGURED` otherwise.
    */
-  private requireClaudeConfig(op: string): ClaudeConfig {
+  private requireModelConfig(op: string): KeyedModelConfig {
     const cfg = this.loadConfig();
-    if (cfg === null || cfg.provider !== 'claude') {
+    if (cfg === null || cfg.provider === 'onereach-flow') {
       throw new AiError({
         code: AI_ERROR_CODES.NOT_CONFIGURED,
-        message: 'Claude is not configured.',
+        message: 'No AI model provider is configured.',
         context: { op, provider: cfg?.provider ?? null },
-        remediation: 'Open Settings -> AI and paste your Anthropic API key (or set ANTHROPIC_API_KEY).',
+        remediation: NOT_CONFIGURED_REMEDIATION,
       });
     }
     return cfg;
   }
 
   /** Pass AiErrors through; wrap anything else as a provider error. */
-  private normalizeChatError(err: unknown, op: string): AiError {
+  private normalizeChatError(err: unknown, op: string, provider: string): AiError {
     if (err instanceof AiError) {
-      this.log('warn', `${op} rejected`, { provider: 'claude', code: err.code });
+      this.log('warn', `${op} rejected`, { provider, code: err.code });
       return err;
     }
-    this.log('error', `${op} unexpected`, { provider: 'claude', error: (err as Error).message });
+    this.log('error', `${op} unexpected`, { provider, error: (err as Error).message });
     return new AiError({
       code: AI_ERROR_CODES.PROVIDER_ERROR,
       message: `AI provider error: ${(err as Error).message}`,
-      context: { provider: 'claude', op },
+      context: { provider, op },
       remediation: 'Try again in a moment.',
       cause: err,
     });
