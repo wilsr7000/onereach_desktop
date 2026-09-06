@@ -34,12 +34,12 @@ body { background: var(--or-bg-canvas); color: var(--or-text-primary); font: 13p
 .cal-banner.is-error { border-color: var(--or-danger); color: var(--or-danger); }
 .cal-banner.is-warn { border-color: var(--or-amber); }
 .cal-banner code { font-family: var(--or-font-mono); font-size: 11.5px; }
-.cal-body { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; flex: 1; min-height: 0; }
+.cal-body { display: grid; grid-template-columns: minmax(0, 1fr) 336px; gap: 0; flex: 1; min-height: 0; }
 .cal-grid-wrap { display: flex; flex-direction: column; min-height: 0; padding: 12px 12px 12px 16px; }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 0 6px; }
 .cal-weekdays[hidden] { display: none; }
 .cal-weekdays span { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--or-text-muted); padding-left: 8px; }
-.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(118px, 1fr); gap: 6px; flex: 1; min-height: 0; overflow-y: auto; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); grid-auto-rows: minmax(148px, 1fr); gap: 6px; flex: 1; min-height: 0; overflow-y: auto; }
 .cal-day { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 6px 8px; border: 1px solid var(--or-border-subtle); border-radius: 8px; background: var(--or-bg-surface); cursor: pointer; text-align: left; font: inherit; color: inherit; }
 .cal-day:hover { border-color: var(--or-border-strong); }
 .cal-day.is-outside { opacity: 0.55; }
@@ -154,3 +154,9 @@ body { background: var(--or-bg-canvas); color: var(--or-text-primary); font: 13p
 .cal-links h4 { margin: 0; }
 .cal-links__btn { text-align: left; white-space: normal; }
 .cal-links__pending, .cal-links__none, .cal-links__note { font-size: 12px; color: var(--or-text-muted); line-height: 1.4; }
+
+/* Month-cell rollup lines read as two rows: the flow's name, then its number (or the single run's time). */
+.cal-day .cal-chip { display: grid; grid-template-columns: minmax(0, 1fr); row-gap: 1px; padding: 3px 6px 3px 7px; }
+.cal-day .cal-chip-text { font-size: 11.5px; line-height: 1.25; }
+.cal-day .cal-chip-count { margin-left: 0; font-size: 10.5px; line-height: 1.2; }
+.cal-day .cal-more { margin-top: 1px; }
