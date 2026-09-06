@@ -129,6 +129,15 @@
 - [ ] **Search** — substring search within a space and globally.
 - [ ] **Attribution** — detail shows "Created by … / Last edited …" provenance.
 - [ ] **Activity log** — per-asset recent commits timeline renders.
+- [ ] **GSX agent flows (2026-09-05)** — open a Space synced from Designer:
+      each agent is labelled "GSX agent flow"; its detail shows **Open in
+      Designer** (the flow in Studio) and, for a flow with an Action Desk
+      view, **Open view** — both open in the signed-in GSX window.
+- [ ] **Space → GSX space (ADR-092)** — New Space wizard: the toast says
+      "also created as a GSX space in Designer"; Designer's bot list shows
+      the new bot with the Space's name; the next Designer sync puts that
+      bot's flows into THIS Space (no "<name> (GSX)" mirror). Signed out,
+      the Space is still created and the toast says GSX was skipped.
 - [ ] **GSX migration sweep** — **NEW**: on boot (~20s after init) any legacy
       base64-stub assets upload to GSX and the node flips to `fileKey`
       (`/logs?category=spaces` → `spaces.gsxMigrate.finish` with counts).

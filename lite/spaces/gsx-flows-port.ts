@@ -46,9 +46,37 @@ export interface GsxFlow {
   isDeleted: boolean;
 }
 
+/**
+ * A GSX View (Action Desk → Views). A view built from a flow carries
+ * that flow's id — Action Desk's own list asks the hub for `flowId` /
+ * `botId`; the SDK's typings call the same link `linkId` + `linkType`.
+ * Either spelling is accepted.
+ */
+export interface GsxView {
+  id: string;
+  label: string;
+  flowId: string | null;
+  botId: string | null;
+  dateModified: number | null;
+}
+
 export interface GsxFlowsPort {
   listBots(): Promise<GsxBot[]>;
   listFlows(botId: string): Promise<GsxFlow[]>;
+  /**
+   * The account's live views (2026-09-05). Needs the signed-in USER
+   * token — the hub refuses the FLOW token on this route ("wrong
+   * keyId") — so a port without one answers an empty list.
+   */
+  listViews?(): Promise<GsxView[]>;
+  /**
+   * ADR-092 — create a Designer bot (what GSX calls a space). Needs the
+   * signed-in USER token like the views route; without one it throws a
+   * GsxFlowsError with status 401 so the caller can say "sign in".
+   */
+  createBot?(input: { label: string; description: string }): Promise<{ id: string }>;
+  /** Soft-delete a bot (Designer's own "temporarily"); it can be recovered in Designer. */
+  deleteBot?(id: string): Promise<void>;
 }
 
 export class GsxFlowsError extends Error {
@@ -63,7 +91,10 @@ export class GsxFlowsError extends Error {
 export interface GsxFlowsPortDeps {
   env: string;
   accountId: string;
-  fetch: (url: string, init?: { method?: string; headers?: Record<string, string> }) => Promise<{
+  fetch: (
+    url: string,
+    init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }
+  ) => Promise<{
     ok: boolean;
     status: number;
     text(): Promise<string>;
@@ -71,9 +102,16 @@ export interface GsxFlowsPortDeps {
   now?: () => number;
   /** Page size for list calls (test seam). */
   pageSize?: number;
+  /**
+   * The signed-in user's token (Lite's auth session), sent raw as
+   * `Authorization` the way Studio and Action Desk send it. Only the
+   * views route needs it; null (signed out) makes `listViews` answer [].
+   */
+  userToken?: () => string | null;
 }
 
 const TOKEN_TTL_MS = 50 * 60 * 1000;
+const REQUEST_TIMEOUT_MS = 20_000;
 const FLOW_PROJECTION = [
   'id',
   'botId',
@@ -84,6 +122,9 @@ const FLOW_PROJECTION = [
   'isDeleted',
   'version',
 ];
+
+/** What Action Desk's own list asks for, trimmed to what Lite links to. */
+const VIEW_PROJECTION = ['id', 'data.data.label', 'dateModified', 'flowId', 'botId', 'linkId', 'linkType'];
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -134,16 +175,81 @@ export class FetchGsxFlowsPort implements GsxFlowsPort {
       .filter((f) => f.id.length > 0);
   }
 
+  async listViews(): Promise<GsxView[]> {
+    const user = this.deps.userToken?.() ?? null;
+    if (user === null || user.length === 0) return [];
+    const rows = await this.listAll('views', { isDeleted: false }, VIEW_PROJECTION, user);
+    return rows
+      .map((r) => {
+        const data = (r['data'] ?? {}) as Record<string, unknown>;
+        const inner = (data['data'] ?? {}) as Record<string, unknown>;
+        const linkType = str(r['linkType']);
+        const linkId = str(r['linkId']);
+        const flowId = str(r['flowId']) || (linkType === 'flow' ? linkId : '');
+        const botId = str(r['botId']) || (linkType === 'bot' ? linkId : '');
+        return {
+          id: str(r['id']),
+          label: str(inner['label']) || str(r['id']),
+          flowId: flowId.length > 0 ? flowId : null,
+          botId: botId.length > 0 ? botId : null,
+          dateModified: num(r['dateModified']),
+        };
+      })
+      .filter((v) => v.id.length > 0);
+  }
+
+  async createBot(input: { label: string; description: string }): Promise<{ id: string }> {
+    const user = this.userTokenOrThrow('Creating a GSX space');
+    const base = await this.discover();
+    // Studio's own `saveBot` for a new bot: POST /bots/new with the bot
+    // under `bot`, id 'new', and the empty fields Studio's getNewBot()
+    // starts from. The hub answers the created record's id.
+    const body = {
+      bot: {
+        id: 'new',
+        data: {
+          label: input.label,
+          description: input.description,
+          longDescription: '',
+          iconUrl: '',
+          deploy: {},
+        },
+      },
+    };
+    const res = await this.sendJson('POST', `${base}/bots/new`, user, body);
+    const rec = typeof res === 'object' && res !== null ? (res as Record<string, unknown>) : {};
+    const nested = typeof rec['bot'] === 'object' && rec['bot'] !== null ? (rec['bot'] as Record<string, unknown>) : {};
+    const id = str(rec['id']) || str(nested['id']);
+    if (id.length === 0) throw new GsxFlowsError('The data hub created the bot but answered without its id.');
+    return { id };
+  }
+
+  async deleteBot(id: string): Promise<void> {
+    const user = this.userTokenOrThrow('Deleting a GSX space');
+    const base = await this.discover();
+    await this.sendJson('DELETE', `${base}/bots/${encodeURIComponent(id)}`, user, { temporarily: true });
+  }
+
   // ── internals ────────────────────────────────────────────────────────
 
+  private userTokenOrThrow(what: string): string {
+    const user = this.deps.userToken?.() ?? null;
+    if (user === null || user.length === 0) {
+      throw new GsxFlowsError(`${what} needs the signed-in user token; nobody is signed in.`, 401);
+    }
+    return user;
+  }
+
   private async listAll(
-    route: 'bots' | 'flows',
+    route: 'bots' | 'flows' | 'views',
     query: Record<string, unknown>,
-    projection: string[] | null
+    projection: string[] | null,
+    userToken: string | null = null
   ): Promise<Array<Record<string, unknown>>> {
     // Token first: an account without the refresh flow fails fast on its
     // 404 (the caller aborts quietly) before discovery is even asked.
-    const token = await this.mintToken();
+    // Views are the exception: they ride the user's own token.
+    const token = userToken ?? (await this.mintToken());
     const base = await this.discover();
     const out: Array<Record<string, unknown>> = [];
     const seen = new Set<string>();
@@ -206,15 +312,22 @@ export class FetchGsxFlowsPort implements GsxFlowsPort {
     return this.serviceUrl;
   }
 
-  private async getJson(url: string, auth: string | null): Promise<unknown> {
+  private getJson(url: string, auth: string | null): Promise<unknown> {
+    return this.sendJson('GET', url, auth);
+  }
+
+  private async sendJson(method: 'GET' | 'POST' | 'DELETE', url: string, auth: string | null, body?: unknown): Promise<unknown> {
     let res: { ok: boolean; status: number; text(): Promise<string> };
     try {
       res = await this.deps.fetch(url, {
-        method: 'GET',
+        method,
         headers: {
           'Content-Type': 'application/json;charset=UTF-8',
           ...(auth !== null ? { Authorization: auth } : {}),
         },
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        // A hub that hangs must not hang a Space creation or a sync.
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch (err) {
       throw new GsxFlowsError(`${new URL(url).host} did not answer: ${err instanceof Error ? err.message : String(err)}`);

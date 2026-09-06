@@ -661,6 +661,8 @@ interface LiteSpaceNesting {
 interface LiteSpace {
   id: string;
   name: string;
+  /** ADR-092 — the GSX Designer bot this Space is, when it was created in GSX too. */
+  gsxBotId?: string;
   description?: string;
   color?: string;
   iconKey?: string;

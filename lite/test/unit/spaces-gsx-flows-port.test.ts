@@ -141,3 +141,103 @@ describe('FetchGsxFlowsPort — flows', () => {
   });
 });
 void base;
+
+// ── views (2026-09-05): the flow's Action Desk view rides the USER token ──
+describe('FetchGsxFlowsPort — views', () => {
+  it('lists views with the user token sent raw (never FLOW), the projection Action Desk asks for, and both link spellings', async () => {
+    const { fetch, calls } = scripted({
+      '/refresh_token': () => ({ body: { token: 'flow-token' } }),
+      'discovery.edison.api.onereach.ai/api/v2': () => ({ body: { url: 'https://hub.example' } }),
+      '/views': () => ({ body: [
+        { id: 'v1', flowId: 'f1', botId: 'b1', dateModified: 20, data: { data: { label: 'HTTP toolkit 1.0.0' } } },
+        { id: 'v2', linkType: 'flow', linkId: 'f2', dateModified: 10, data: { data: { label: 'Text SMS Auth' } } },
+        { id: 'v3', linkType: 'bot', linkId: 'b1', data: {} },
+        { id: '', data: {} },
+      ] }),
+    });
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch, userToken: () => 'user-jwt' });
+    const views = await port.listViews();
+    expect(views).toEqual([
+      { id: 'v1', label: 'HTTP toolkit 1.0.0', flowId: 'f1', botId: 'b1', dateModified: 20 },
+      { id: 'v2', label: 'Text SMS Auth', flowId: 'f2', botId: null, dateModified: 10 },
+      { id: 'v3', label: 'v3', flowId: null, botId: 'b1', dateModified: null },
+    ]);
+    const list = calls.find((c) => c.url.includes('/views'));
+    expect(list?.auth).toBe('user-jwt');
+    const u = new URL(list!.url);
+    expect(u.searchParams.get('query')).toBe('{"isDeleted":false}');
+    expect(JSON.parse(u.searchParams.get('projection') ?? '[]')).toEqual(['id', 'data.data.label', 'dateModified', 'flowId', 'botId', 'linkId', 'linkType']);
+    // The account token endpoint is never asked for views.
+    expect(calls.some((c) => c.url.includes('/refresh_token'))).toBe(false);
+  });
+
+  it('answers an empty list without a user token (signed out), touching nothing', async () => {
+    const { fetch, calls } = scripted({});
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch });
+    expect(await port.listViews()).toEqual([]);
+    const withNull = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch, userToken: () => null });
+    expect(await withNull.listViews()).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a hub that refuses the token surfaces as a GsxFlowsError with the status', async () => {
+    const { fetch } = scripted({
+      'discovery.edison.api.onereach.ai/api/v2': () => ({ body: { url: 'https://hub.example' } }),
+      '/views': () => ({ status: 400, body: { error: 'auth fail: wrong keyId' } }),
+    });
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch, userToken: () => 'stale' });
+    await expect(port.listViews()).rejects.toMatchObject({ name: 'GsxFlowsError', status: 400 });
+  });
+});
+
+// ── ADR-092: a Space made in Lite becomes a Designer bot ───────────────
+describe('FetchGsxFlowsPort — bots (writes)', () => {
+  it('createBot POSTs Studio\'s new-bot shape to /bots/new on the user token and returns the id', async () => {
+    const bodies: string[] = [];
+    const fetchSpy = async (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+      if (url.includes('discovery.')) return { ok: true, status: 200, text: async () => JSON.stringify({ url: 'https://hub.example' }) };
+      if (url === 'https://hub.example/bots/new' && init?.method === 'POST') {
+        bodies.push(init.body ?? '');
+        expect(init.headers?.['Authorization']).toBe('user-jwt');
+        return { ok: true, status: 200, text: async () => JSON.stringify({ id: 'bot-9' }) };
+      }
+      return { ok: false, status: 404, text: async () => 'no route' };
+    };
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch: fetchSpy, userToken: () => 'user-jwt' });
+    expect(await port.createBot({ label: 'Customer Care', description: 'Support flows' })).toEqual({ id: 'bot-9' });
+    expect(JSON.parse(bodies[0]!)).toEqual({
+      bot: { id: 'new', data: { label: 'Customer Care', description: 'Support flows', longDescription: '', iconUrl: '', deploy: {} } },
+    });
+  });
+
+  it('accepts the id nested under bot, and refuses an answer without one', async () => {
+    const answers = [JSON.stringify({ bot: { id: 'bot-n' } }), JSON.stringify({ ok: true })];
+    const fetch = async (url: string) => {
+      if (url.includes('discovery.')) return { ok: true, status: 200, text: async () => JSON.stringify({ url: 'https://hub.example' }) };
+      return { ok: true, status: 200, text: async () => answers.shift() ?? '{}' };
+    };
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch, userToken: () => 'u' });
+    expect(await port.createBot({ label: 'A', description: '' })).toEqual({ id: 'bot-n' });
+    await expect(port.createBot({ label: 'B', description: '' })).rejects.toMatchObject({ name: 'GsxFlowsError' });
+  });
+
+  it('without a user token, createBot and deleteBot throw a 401-shaped GsxFlowsError before touching the network', async () => {
+    const { fetch, calls } = scripted({});
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch });
+    await expect(port.createBot({ label: 'X', description: '' })).rejects.toMatchObject({ name: 'GsxFlowsError', status: 401 });
+    await expect(port.deleteBot('bot-1')).rejects.toMatchObject({ name: 'GsxFlowsError', status: 401 });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('deleteBot soft-deletes (temporarily: true) on the user token', async () => {
+    let seen: { method: string | undefined; body: string | undefined; auth: string | undefined } | null = null;
+    const fetch = async (url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }) => {
+      if (url.includes('discovery.')) return { ok: true, status: 200, text: async () => JSON.stringify({ url: 'https://hub.example' }) };
+      if (url === 'https://hub.example/bots/bot%201') { seen = { method: init?.method, body: init?.body, auth: init?.headers?.['Authorization'] }; return { ok: true, status: 200, text: async () => JSON.stringify({ requestId: 'r' }) }; }
+      return { ok: false, status: 404, text: async () => 'no route' };
+    };
+    const port = new FetchGsxFlowsPort({ env: 'edison', accountId: ACCT, fetch, userToken: () => 'u' });
+    await port.deleteBot('bot 1');
+    expect(seen).toEqual({ method: 'DELETE', body: JSON.stringify({ temporarily: true }), auth: 'u' });
+  });
+});

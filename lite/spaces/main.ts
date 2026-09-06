@@ -52,6 +52,7 @@ import { parseSpreadsheetBuffer, type SpreadsheetPreviewModel } from './spreadsh
 import { SPACES_EVENTS } from './events.js';
 import { runGsxFlowSync, type GsxFlowSyncResult } from './gsx-flow-sync.js';
 import { FetchGsxFlowsPort } from './gsx-flows-port.js';
+import { mirrorSpaceToGsx } from './gsx-space-mirror.js';
 import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
@@ -193,6 +194,27 @@ let gsxFlowSyncInFlight: Promise<GsxFlowSyncResult> | null = null;
  * callers share one run. A run that changed anything drops the read
  * cache and refetches the Space list so an open window repaints.
  */
+/**
+ * The Designer port for the signed-in session — one shape for the sync
+ * (ADR-091) and the create-Space mirror (ADR-092). Bots and flows ride
+ * the account's FLOW token; views and writes ride the user's own token
+ * (the hub refuses the FLOW token there). Null when nobody is signed in.
+ */
+function gsxFlowsPortForSession(accountId: string): FetchGsxFlowsPort {
+  return new FetchGsxFlowsPort({
+    env: 'edison',
+    accountId,
+    fetch: (url, init) => fetch(url, init),
+    userToken: () => getAuthApi().getToken('edison'),
+  });
+}
+
+function gsxFlowsPortIfSignedIn(): FetchGsxFlowsPort | null {
+  const session = getAuthApi().getSession('edison');
+  const accountId = typeof session?.accountId === 'string' ? session.accountId : '';
+  return accountId.length > 0 ? gsxFlowsPortForSession(accountId) : null;
+}
+
 export function runGsxFlowSyncNow(opts: { force?: boolean; dryRun?: boolean } = {}): Promise<GsxFlowSyncResult> {
   if (gsxFlowSyncInFlight !== null) return gsxFlowSyncInFlight;
   const aborted = (reason: string): GsxFlowSyncResult => ({
@@ -210,13 +232,14 @@ export function runGsxFlowSyncNow(opts: { force?: boolean; dryRun?: boolean } = 
   if (accountId.length === 0) return Promise.resolve(aborted('signed-out'));
   gsxFlowSyncLastRunMs = now;
   const log = getLoggingApi();
-  const port = new FetchGsxFlowsPort({ env: 'edison', accountId, fetch: (url, init) => fetch(url, init) });
+  const port = gsxFlowsPortForSession(accountId);
   gsxFlowSyncInFlight = runGsxFlowSync({
     client,
     port,
     log,
     viewerId: () => resolveViewerId(),
     env: 'edison',
+    accountId,
     ...(opts.dryRun === true ? { dryRun: true } : {}),
   })
     .then(async (result) => {
@@ -1804,6 +1827,23 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     async createSpace(input: CreateSpaceInput): Promise<Space> {
       const result = await client.createSpace(input);
       nukeReadCache();
+      // ADR-092 — a Space made in Lite is a GSX space too: the same name
+      // lands in Designer as a bot, and the Space remembers it so the
+      // Designer sync fills THIS Space with the bot's GSX agent flows.
+      // Best-effort: the Space exists in NEON whatever happens here.
+      const mirror = await mirrorSpaceToGsx(
+        { port: gsxFlowsPortIfSignedIn(), client, log: getLoggingApi() },
+        result
+      );
+      if (mirror.mirrored) {
+        nukeReadCache();
+        return { ...result, gsxBotId: mirror.botId };
+      }
+      getLoggingApi().info('spaces', 'gsx space mirror skipped', {
+        spaceId: result.id,
+        reason: mirror.reason,
+        ...(mirror.error !== undefined ? { error: mirror.error } : {}),
+      });
       return result;
     },
     async renameSpace(id: string, name: string): Promise<Space> {

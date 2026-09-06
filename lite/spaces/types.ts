@@ -88,6 +88,12 @@ export interface Space {
   id: string;
   /** Display name. */
   name: string;
+  /**
+   * ADR-092 — the GSX Designer bot this Space is (a Space created in
+   * Lite is created in Designer too). Present on the create result and
+   * on Spaces the Designer sync stamped.
+   */
+  gsxBotId?: string;
   /** Optional human description. */
   description?: string;
   /** Optional hex color for sidebar dot. */

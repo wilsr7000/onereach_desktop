@@ -2536,6 +2536,47 @@ function journeyOpenBridge(): ((itemId: string | null) => Promise<{ ok: true }>)
 }
 
 /**
+ * Narrow view of the GSX window bridge (`window.lite.gsx.openWindow`):
+ * a signed-in, contained GSX window, the same one the GSX menu uses.
+ * A GSX agent flow opens its Designer page and its Action Desk view
+ * through it — never the OS browser, where the session is missing.
+ */
+type GsxOpenBridge = {
+  openWindow?: (opts: { env?: string; url?: string; title?: string }) => Promise<unknown>;
+};
+
+function gsxOpenBridge(): ((opts: { env?: string; url?: string; title?: string }) => Promise<unknown>) | null {
+  const lite = window.lite as unknown as { gsx?: GsxOpenBridge } | undefined;
+  const gsx = lite?.gsx;
+  if (gsx === undefined || typeof gsx.openWindow !== 'function') return null;
+  return gsx.openWindow.bind(gsx);
+}
+
+/**
+ * The two places a GSX agent flow lives: its flow in Designer and, when
+ * it has one, its View in Action Desk. Both come from the sync's
+ * metadata (ADR-091 + 2026-09-05); `sourceUrl` is the Designer link
+ * for agents synced before `gsxDesignerUrl` existed. Null for any
+ * other asset. Exported for tests.
+ */
+export function gsxAgentFlowLinks(item: {
+  kind: string;
+  sourceUrl?: string;
+  metadata?: Record<string, unknown> | null;
+}): { designerUrl: string | null; viewUrl: string | null; viewLabel: string | null; botLabel: string | null } | null {
+  if (item.kind !== 'agent') return null;
+  const meta = (item.metadata ?? {}) as Record<string, unknown>;
+  if (meta['source'] !== 'gsx-designer') return null;
+  const s = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
+  return {
+    designerUrl: s(meta['gsxDesignerUrl']) ?? s(item.sourceUrl),
+    viewUrl: s(meta['gsxViewUrl']),
+    viewLabel: s(meta['gsxViewLabel']),
+    botLabel: s(meta['gsxBotLabel']),
+  };
+}
+
+/**
  * Open a playbook asset in WISER Playbooks — deep-linked to the actual
  * playbook when the asset carries a riff id in metadata (riffId /
  * wiserRiffId, the keys a WISER export writes); the app opens plainly
@@ -11395,7 +11436,8 @@ export function buildDetailPane(
   } else {
     const kind = document.createElement('span');
     kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
-    kind.textContent = kindLabel(item.kind);
+    // A flow synced from GSX Designer says what it is (2026-09-05).
+    kind.textContent = gsxAgentFlowLinks(item) !== null ? 'GSX agent flow' : kindLabel(item.kind);
     header.appendChild(kind);
   }
 
@@ -11494,6 +11536,50 @@ export function buildDetailPane(
       bridgeRow.appendChild(openBtn);
       wrap.appendChild(bridgeRow);
     }
+  }
+
+  // ── GSX agent flow: Designer + Action Desk view ─────────────────────
+  // A flow synced from GSX Designer opens in two places: the flow
+  // itself in Designer, and its View in Action Desk when it has one.
+  // Both go through the signed-in GSX window (the GSX menu's), so they
+  // land signed in rather than on a login page in the OS browser.
+  const flowLinks = gsxAgentFlowLinks(item);
+  if (flowLinks !== null && (flowLinks.designerUrl !== null || flowLinks.viewUrl !== null)) {
+    const openGsx = gsxOpenBridge();
+    const bridgeRow = document.createElement('div');
+    bridgeRow.className = 'spaces-detail-wiser spaces-detail-gsx-flow';
+    const addButton = (label: string, title: string, url: string): void => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'spaces-detail-wiser-btn';
+      btn.textContent = label;
+      btn.title = title;
+      btn.addEventListener('click', () => {
+        if (openGsx === null) {
+          window.open(url, '_blank', 'noopener');
+          return;
+        }
+        void openGsx({ env: 'edison', url, title: `${label} — ${generateItemTitle(item)}` }).catch((err: unknown) => {
+          window.logging?.warn?.('spaces', 'gsx agent flow open failed', {
+            itemId: item.id,
+            url,
+            error: messageFrom(err),
+          });
+        });
+      });
+      bridgeRow.appendChild(btn);
+    };
+    if (flowLinks.designerUrl !== null) {
+      addButton('Open in Designer', 'Open this GSX agent flow in GSX Designer', flowLinks.designerUrl);
+    }
+    if (flowLinks.viewUrl !== null) {
+      addButton(
+        'Open view',
+        flowLinks.viewLabel !== null ? `Open its Action Desk view “${flowLinks.viewLabel}”` : 'Open its Action Desk view',
+        flowLinks.viewUrl
+      );
+    }
+    wrap.appendChild(bridgeRow);
   }
 
   // ── Title (click-to-edit when callback is present) ───────────────────
@@ -17253,6 +17339,11 @@ async function createSpaceFromWizard(): Promise<void> {
     closeNewSpaceDialog();
     await loadSpaces();
     let toast = wasShared ? `Created shared space "${name}"` : `Created "${name}"`;
+    // ADR-092 — the Space is a GSX space too; say whether Designer has it.
+    const gsxBotId = (created.value as { gsxBotId?: unknown }).gsxBotId;
+    toast += typeof gsxBotId === 'string' && gsxBotId.length > 0
+      ? ' · also created as a GSX space in Designer'
+      : ' · not created in GSX (sign in to OneReach, or see Logs)';
     if (sharedFlipFailed) {
       toast += " · couldn't switch it to shared — use the row menu to retry";
     }

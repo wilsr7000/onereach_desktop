@@ -2411,6 +2411,34 @@ export const CYPHER = {
         s.deletedAt = null
     RETURN s.id AS id
   `,
+  /**
+   * ADR-092 — a Space made in Lite is a GSX space too: once its Designer
+   * bot exists, the Space remembers it. Gated: only the Space's writer.
+   */
+  SET_SPACE_GSX_BOT: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_WRITABLE}
+    SET s.gsxBotId = $gsxBotId,
+        s.gsxBotLabel = $gsxBotLabel,
+        s.updatedAt = $now
+    RETURN s.id AS id
+  `,
+  /**
+   * ADR-092 — the viewer's own Space for a Designer bot (a Space created
+   * in Lite that became a bot), so the sync fills it with the bot's GSX
+   * agent flows instead of minting a mirror Space. Never a mirror itself
+   * (`source = 'gsx-designer'`), and only one the viewer may write to.
+   */
+  SPACE_BY_GSX_BOT_ID: `
+    MATCH (s:Space {gsxBotId: $gsxBotId})
+      WHERE s.deletedAt IS NULL
+        AND coalesce(s.source, '') <> 'gsx-designer'
+        AND ${SPACE_WRITABLE}
+    RETURN s.id AS id, coalesce(s.name, s.id) AS name
+    ORDER BY s.createdAt
+    LIMIT 1
+  `,
   /** Case-insensitive name clash with a Space that is NOT the synced one. */
   SPACE_NAME_TAKEN: `
     MATCH (s:Space)
@@ -6153,6 +6181,28 @@ export class SdkSpacesClient {
   async spaceNameTaken(name: string, exceptSpaceId: string): Promise<boolean> {
     const rows = await this.run(CYPHER.SPACE_NAME_TAKEN, { name, exceptSpaceId });
     return rows[0]?.['taken'] === true;
+  }
+
+  // ─── ADR-092: a Space made in Lite is a GSX space too ────────────────
+
+  /** Stamp a Space with its Designer bot; false when the Space is not the viewer's to write. */
+  async setSpaceGsxBot(spaceId: string, gsxBotId: string, gsxBotLabel: string): Promise<boolean> {
+    const rows = await this.run(CYPHER.SET_SPACE_GSX_BOT, {
+      id: spaceId,
+      gsxBotId,
+      gsxBotLabel: gsxBotLabel.slice(0, MAX_SPACE_NAME_LENGTH),
+      now: nowIso(),
+      viewerId: this.viewerParam(),
+    });
+    return rows[0] !== undefined;
+  }
+
+  /** The viewer's own (non-mirror) Space for a Designer bot, if any. */
+  async spaceByGsxBotId(gsxBotId: string): Promise<{ id: string; name: string } | null> {
+    const rows = await this.run(CYPHER.SPACE_BY_GSX_BOT_ID, { gsxBotId, viewerId: this.viewerParam() });
+    const row = rows[0];
+    if (row === undefined) return null;
+    return { id: String(row['id']), name: String(row['name'] ?? row['id']) };
   }
 
   async upsertGsxFlowAgents(

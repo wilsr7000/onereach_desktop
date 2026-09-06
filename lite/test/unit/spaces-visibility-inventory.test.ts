@@ -66,7 +66,11 @@ const EXEMPT: Record<string, string> = {
 // ADR-065 inline fail-closed signature — a query carrying the
 // viewer-required clause is gated by construction even when its alias
 // forces the predicate inline.
-const GATE_MARKERS = ['SPACE_VISIBLE', 'ASSET_VISIBLE', 'OTHER_SPACE_VISIBLE', 'AGENT_VISIBLE(', "$viewerId <> ''"];
+// SPACE_WRITABLE counts as a sight gate too: a Space the viewer may write
+// (creator, or a live writer grant) is a Space the viewer may see —
+// the writer predicate is the visibility predicate narrowed, never
+// widened (ADR-084). Reads that answer "the viewer's OWN Space" use it.
+const GATE_MARKERS = ['SPACE_VISIBLE', 'ASSET_VISIBLE', 'OTHER_SPACE_VISIBLE', 'AGENT_VISIBLE(', 'SPACE_WRITABLE', "$viewerId <> ''"];
 const WRITE_MARKERS = [/\bMERGE\b/, /\bCREATE\b/, /\bSET\b/, /\bDETACH\b/, /\bDELETE\b/];
 
 function loadSource(): string {

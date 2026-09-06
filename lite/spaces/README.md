@@ -161,3 +161,19 @@ runs it on window open (10-minute cooldown, one at a time) and exposes
 `syncGsxFlows()`. Writes go through `SdkSpacesClient`
 (`UPDATE_/CREATE_GSX_FLOW_SPACE`, `UPSERT_GSX_FLOW_AGENTS` batched per
 bot, `RETIRE_GSX_FLOW_AGENT`) — all gated like every other write.
+
+Since 2026-09-05 these agents are **GSX agent flows**: each links to the
+flow in Designer and, when the flow has one, to its View in Action Desk
+(`listViews()` on the port — the signed-in user's token, never the FLOW
+token — most recent view per flow; `gsxDesignerUrl` / `gsxViewUrl` in the
+agent's metadata; two buttons in the detail pane that open the signed-in
+GSX window).
+
+## A Space made in Lite is a GSX space too (ADR-092)
+
+`gsx-space-mirror.ts`: after `createSpace` writes the Space, the same name
+and description become a Designer bot (`createBot` on the port —
+`POST /bots/new`, Studio's own shape, user token) and the Space is stamped
+with it (`SET_SPACE_GSX_BOT`). The Designer sync then fills that Space
+(`SPACE_BY_GSX_BOT_ID`) instead of minting a mirror. Best-effort: the Space
+exists in NEON whatever GSX answers; the wizard's toast says which.

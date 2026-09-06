@@ -195,6 +195,10 @@ export const SPACES_EVENTS = {
   GSX_FLOW_SYNC_BOT_START: 'spaces.gsxFlowSync.bot.start',
   GSX_FLOW_SYNC_BOT_FINISH: 'spaces.gsxFlowSync.bot.finish',
   GSX_FLOW_SYNC_BOT_FAIL: 'spaces.gsxFlowSync.bot.fail',
+  // ─── A Space made in Lite is a GSX space too (ADR-092) ─────────────
+  GSX_BOT_CREATE_START: 'spaces.gsxBot.create.start',
+  GSX_BOT_CREATE_FINISH: 'spaces.gsxBot.create.finish',
+  GSX_BOT_CREATE_FAIL: 'spaces.gsxBot.create.fail',
   // NOTE: IPC entry events are emitted dynamically as
   // `spaces.ipc.<verb>` by the wrapper in `ipc.ts` (the verb derived
   // from each `lite:spaces:*` channel). They are intentionally NOT
@@ -434,6 +438,23 @@ export interface SpacesGsxMigrateFailEvent extends SpacesEventBase {
   durationMs: number;
   error: SerializedEventError;
 }
+export interface SpacesGsxBotCreateStartEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.GSX_BOT_CREATE_START;
+  level: 'info';
+  data?: { spaceId: string };
+}
+export interface SpacesGsxBotCreateFinishEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.GSX_BOT_CREATE_FINISH;
+  level: 'info';
+  durationMs: number;
+  data?: { botId: string; stamped: boolean };
+}
+export interface SpacesGsxBotCreateFailEvent extends SpacesEventBase {
+  name: typeof SPACES_EVENTS.GSX_BOT_CREATE_FAIL;
+  level: 'error';
+  durationMs: number;
+  error: SerializedEventError;
+}
 export interface SpacesGsxMigrateItemEvent
   extends Omit<SpacesEventBase, 'spanId'> {
   name: typeof SPACES_EVENTS.GSX_MIGRATE_ITEM;
@@ -472,7 +493,10 @@ export type SpacesEvent =
   | SpacesGsxMigrateStartEvent
   | SpacesGsxMigrateFinishEvent
   | SpacesGsxMigrateFailEvent
-  | SpacesGsxMigrateItemEvent;
+  | SpacesGsxMigrateItemEvent
+  | SpacesGsxBotCreateStartEvent
+  | SpacesGsxBotCreateFinishEvent
+  | SpacesGsxBotCreateFailEvent;
 
 /**
  * Type-guard. Use to narrow a generic `EventRecord` to the typed
