@@ -10433,3 +10433,612 @@ body {
 .spaces-agent-registry-share { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--or-text-primary); cursor: pointer; }
 .spaces-agent-registry-share input:disabled + span { color: var(--or-text-muted); }
 .spaces-agent-registry-why { margin-top: 4px; font-size: 12px; color: var(--or-text-secondary-solid); line-height: 1.4; }
+
+/* ════════════════════════════════════════════════════════════════════
+ * ASSET TILE v3 — PAPER CARD (2026-09-06)
+ *
+ * "Why are asset tiles in Spaces still so ugly?" Because three polish
+ * passes tuned for a dark canvas were still painting on paper: black
+ * drop shadows at rest, spring lifts, a gradient surface and a violet
+ * ring per kind, and a 4:3 box that sat half empty under two lines of
+ * text. This pass replaces all of it with ONE card, the way the creed
+ * asks: monochrome paper, colour only where it is data, low density
+ * from six feet, high density from six inches.
+ *
+ *   ┌──────────────────────────────┐
+ *   │ Title, two lines at most     │  sans — the system's voice
+ *   │ ★ PLAYBOOK · 3/7             │  small-caps eyebrow, where a kind has one
+ *   │ The first lines of the thing │  serif — knowledge's voice
+ *   │ itself, fading out…          │
+ *   │ Spreadsheet · edited Aug 28  │  faint footer, pinned to the bottom
+ *   └──────────────────────────────┘
+ *
+ * Media (image / video / audio) keep the picture first, then the
+ * title. The rules below win by cascade order — the earlier blocks
+ * keep their layout, and every colour, shadow and gradient they set
+ * is retired here. Tokens only: both themes fall out of them.
+ * ════════════════════════════════════════════════════════════════════ */
+
+.spaces-card-grid {
+  gap: 16px;
+}
+
+@keyframes spaces-card-enter {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.spaces-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--or-bg-surface);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.1);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: none;
+  animation: spaces-card-enter 260ms ease-out backwards;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.spaces-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(var(--or-ink-rgb), 0.2);
+  box-shadow: var(--or-shadow-sm);
+}
+
+.spaces-card.is-active {
+  border-color: rgba(var(--or-accent-rgb), 0.75);
+  box-shadow: 0 0 0 2px rgba(var(--or-accent-rgb), 0.16);
+}
+
+.spaces-card.is-selected {
+  border-color: rgba(var(--or-success-rgb), 0.7);
+  box-shadow: 0 0 0 2px rgba(var(--or-success-rgb), 0.16);
+}
+
+.spaces-card:focus-visible {
+  border-color: rgba(var(--or-accent-rgb), 0.75);
+  box-shadow: 0 0 0 2px rgba(var(--or-accent-rgb), 0.35);
+}
+
+/* The preview is a region of the card, not a floating box. */
+.spaces-card .spaces-card-preview,
+.spaces-card:hover .spaces-card-preview,
+.spaces-card.is-active .spaces-card-preview,
+.spaces-card.is-selected .spaces-card-preview,
+.spaces-card:focus-visible .spaces-card-preview,
+.spaces-card-playbook .spaces-card-preview,
+.spaces-card-playbook:hover .spaces-card-preview {
+  aspect-ratio: auto;
+  height: 128px;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  transform: none;
+  background: transparent;
+}
+
+.spaces-card-playbook .spaces-card-preview::before {
+  display: none;
+}
+
+/* ── Order: title, body, footer — the picture first for media ──────── */
+.spaces-card-meta {
+  display: contents;
+}
+
+.spaces-card-title-row {
+  order: 1;
+  padding: 13px 14px 5px;
+  align-items: flex-start;
+}
+
+.spaces-card .spaces-card-preview {
+  order: 2;
+}
+
+.spaces-card-meta-row {
+  order: 3;
+  margin-top: auto;
+  padding: 0 14px 12px;
+}
+
+.spaces-card-share-row {
+  order: 4;
+  padding: 0 14px 12px;
+}
+
+.spaces-card-media .spaces-card-preview {
+  order: 0;
+  height: 150px;
+  background: rgba(var(--or-ink-rgb), 0.04);
+}
+
+.spaces-card-media .spaces-card-title-row {
+  padding-top: 11px;
+}
+
+/* ── Type: sans title, serif body, faint footer ────────────────────── */
+.spaces-card-title {
+  font-family: var(--or-font-sans);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  color: var(--or-text-primary);
+}
+
+.spaces-card:hover .spaces-card-title {
+  color: var(--or-text-primary);
+}
+
+.spaces-card-edit-hint {
+  margin-top: 2px;
+}
+
+.spaces-card-meta-row {
+  font-size: 11px;
+  color: rgba(var(--or-text-rgb), 0.5);
+}
+
+.spaces-card-kind,
+.spaces-card-kind-image,
+.spaces-card-kind-url,
+.spaces-card-kind-audio,
+.spaces-card-kind-video,
+.spaces-card-kind-playbook,
+.spaces-card-kind-transcript,
+.spaces-card-kind-ticket,
+.spaces-card-kind-agent,
+.spaces-card-kind-knowledge,
+.spaces-card-kind-journey {
+  color: inherit;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.spaces-card-time,
+.spaces-card-spaces,
+.spaces-card-meta-sep {
+  font-size: 11px;
+  color: inherit;
+}
+
+.spaces-card-meta-sep {
+  opacity: 0.5;
+}
+
+/* Kinds with their own eyebrow inside the body say it once, not twice. */
+.spaces-card-playbook .spaces-card-kind,
+.spaces-card-playbook .spaces-card-kind + .spaces-card-meta-sep,
+.spaces-card-agent .spaces-card-kind,
+.spaces-card-agent .spaces-card-kind + .spaces-card-meta-sep,
+.spaces-card-knowledge .spaces-card-kind,
+.spaces-card-knowledge .spaces-card-kind + .spaces-card-meta-sep,
+.spaces-card-journey .spaces-card-kind,
+.spaces-card-journey .spaces-card-kind + .spaces-card-meta-sep,
+.spaces-card-transcript .spaces-card-kind,
+.spaces-card-transcript .spaces-card-kind + .spaces-card-meta-sep,
+.spaces-card-ticket .spaces-card-kind,
+.spaces-card-ticket .spaces-card-kind + .spaces-card-meta-sep {
+  display: none;
+}
+
+/* ── Bodies: the thing itself, typeset ─────────────────────────────── */
+.spaces-card-preview-text,
+.spaces-card-preview-document,
+.spaces-card-preview-other,
+.spaces-card-preview-playbook,
+.spaces-card-preview-agent,
+.spaces-card-preview-knowledge,
+.spaces-card-preview-journey,
+.spaces-card-preview-transcript,
+.spaces-card-preview-ticket,
+.spaces-card-preview-url {
+  padding: 0 14px 10px;
+  gap: 6px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+}
+
+.spaces-card-preview.has-badges,
+.spaces-card-preview-text.has-badges,
+.spaces-card-preview-document.has-badges,
+.spaces-card-preview-other.has-badges,
+.spaces-card-preview-ticket.has-badges,
+.spaces-card-preview-playbook.has-badges,
+.spaces-card-preview-agent.has-badges,
+.spaces-card-preview-knowledge.has-badges,
+.spaces-card-preview-journey.has-badges,
+.spaces-card-preview-transcript.has-badges {
+  padding-top: 0;
+}
+
+.spaces-card-preview-text .spaces-card-excerpt,
+.spaces-card-preview-document .spaces-card-excerpt,
+.spaces-card-preview-other .spaces-card-excerpt,
+.spaces-card-preview-playbook .spaces-card-excerpt,
+.spaces-card-preview-ticket .spaces-card-excerpt,
+.spaces-card-excerpt {
+  font-family: var(--or-font-display);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: rgba(var(--or-text-rgb), 0.72);
+  -webkit-line-clamp: 5;
+  mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+}
+
+.spaces-card-preview-agent .spaces-card-agent-okf,
+.spaces-card-playbook-step-text,
+.spaces-card-playbook-desc-text,
+.spaces-card-transcript-text,
+.spaces-card-knowledge-intro {
+  font-family: var(--or-font-display);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(var(--or-text-rgb), 0.74);
+}
+
+.spaces-card-preview-agent .spaces-card-agent-okf.is-mono {
+  font-family: var(--or-font-mono);
+  font-size: 11px;
+}
+
+/* ── Eyebrows: one small-caps voice; a single hue only on the mark ─── */
+.spaces-card-playbook-label,
+.spaces-card-agent-label,
+.spaces-card-knowledge-label,
+.spaces-card-journey-label,
+.spaces-card-transcript-label {
+  font-family: var(--or-font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(var(--or-text-rgb), 0.55);
+}
+
+.spaces-card-playbook-star {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  -webkit-text-fill-color: var(--or-amber);
+  color: var(--or-amber);
+  filter: none;
+  font-size: 12px;
+}
+
+.spaces-card-agent-mark { color: var(--or-ai-accent); }
+.spaces-card-knowledge-mark { color: var(--or-mint); }
+.spaces-card-journey-mark { color: var(--or-accent); }
+.spaces-card-transcript-mark { color: var(--or-mint); }
+.spaces-card-playbook-desc-pen { color: var(--or-amber); }
+
+.spaces-card-playbook-pill,
+.spaces-card-playbook-pill.is-stage,
+.spaces-card-agent-type,
+.spaces-card-knowledge-domain,
+.spaces-card-journey-stage,
+.spaces-card-agent-endpoint,
+.spaces-card-agent-endpoint-api,
+.spaces-card-agent-endpoint-skill {
+  background: transparent;
+  border: 1px solid rgba(var(--or-ink-rgb), 0.16);
+  color: rgba(var(--or-text-rgb), 0.62);
+  font-family: var(--or-font-sans);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  font-weight: 500;
+}
+
+.spaces-card-agent-endpoint-skill { color: var(--or-amber-deep); }
+.spaces-card-agent-endpoint-api { color: var(--or-accent); }
+
+.spaces-card-playbook-pill.is-complete {
+  border-color: rgba(var(--or-success-rgb), 0.5);
+  color: var(--or-success);
+  background: transparent;
+}
+
+.spaces-card-playbook-progress {
+  margin: 2px 0 4px;
+  background: rgba(var(--or-ink-rgb), 0.08);
+}
+
+.spaces-card-playbook-progress-fill {
+  background: var(--or-accent);
+}
+
+.spaces-card-playbook-step-marker {
+  border-color: rgba(var(--or-ink-rgb), 0.3);
+  color: rgba(var(--or-text-rgb), 0.6);
+  font-family: var(--or-font-sans);
+}
+
+.spaces-card-playbook-step:not(:last-child)::after {
+  background: rgba(var(--or-ink-rgb), 0.12);
+}
+
+.spaces-card-playbook-step.is-done .spaces-card-playbook-step-marker {
+  background: transparent;
+  border-color: rgba(var(--or-success-rgb), 0.6);
+  color: var(--or-success);
+}
+
+.spaces-card-playbook-more,
+.spaces-card-knowledge-more,
+.spaces-card-journey-more,
+.spaces-card-transcript-foot,
+.spaces-card-journey-arrow {
+  color: rgba(var(--or-text-rgb), 0.45);
+}
+
+.spaces-card-transcript-speaker { color: rgba(var(--or-text-rgb), 0.8); }
+.spaces-card-ticket-tag { font-size: 18px; color: rgba(var(--or-text-rgb), 0.45); }
+.spaces-hex-logo { opacity: 0.35; }
+
+/* Playbook ruled-line placeholder read as a loading skeleton; it is a
+   quiet ink rule now, and only when a plan has nothing else to show. */
+.spaces-card-playbook-line {
+  height: 1px;
+  background: rgba(var(--or-ink-rgb), 0.14);
+  border-radius: 0;
+}
+
+/* ── File and type marks: one voice, no family tints ───────────────── */
+.spaces-card-filecard-ext,
+.spaces-card-type-chip,
+.spaces-card-filecard-ext[data-family='sheet'],
+.spaces-card-filecard-ext[data-family='deck'],
+.spaces-card-filecard-ext[data-family='archive'] {
+  font-family: var(--or-font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: rgba(var(--or-text-rgb), 0.55);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.18);
+  border-radius: 4px;
+  padding: 2px 7px;
+  align-self: flex-start;
+}
+
+.spaces-card-filecard {
+  margin: auto;
+  align-self: center;
+  gap: 6px;
+}
+
+.spaces-card-glyph,
+.spaces-card-glyph-doc {
+  margin: auto;
+  align-self: center;
+  color: rgba(var(--or-text-rgb), 0.16);
+}
+
+/* ── Media: image, video, audio ────────────────────────────────────── */
+.spaces-card:hover .spaces-card-image {
+  transform: scale(1.02);
+}
+
+.spaces-card-preview-audio,
+.spaces-card-preview-video,
+.spaces-card-preview-url {
+  background: transparent;
+}
+
+.spaces-card-media .spaces-card-preview-audio,
+.spaces-card-media .spaces-card-preview-video {
+  background: rgba(var(--or-ink-rgb), 0.04);
+  padding: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.spaces-card-wave-bar {
+  background: rgba(var(--or-text-rgb), 0.5);
+}
+
+.spaces-card-play,
+.spaces-card-play-large,
+.spaces-card:hover .spaces-card-play,
+.spaces-card-preview-video.has-video-frame .spaces-card-play-large {
+  background: rgba(var(--or-glass-rgb), 0.94);
+  color: var(--or-text-primary);
+  box-shadow: var(--or-shadow-sm);
+}
+
+.spaces-card-url-host {
+  font-family: var(--or-font-sans);
+  font-size: 13px;
+  color: var(--or-accent);
+}
+
+.spaces-card-preview-url::before {
+  color: rgba(var(--or-text-rgb), 0.35);
+  bottom: 10px;
+}
+
+/* ── Badges: in the title row for text tiles, on the picture for media ─ */
+.spaces-card-badge {
+  height: 18px;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.spaces-card-badge-new {
+  background: var(--or-accent);
+  color: var(--or-on-accent);
+}
+
+.spaces-card-badge-agent {
+  background: rgba(var(--or-ai-rgb), 0.14);
+  color: var(--or-ai-deep);
+}
+
+.spaces-card-title-row .spaces-card-badges {
+  position: static;
+  margin-left: auto;
+  margin-top: 1px;
+  flex: 0 0 auto;
+}
+
+.spaces-card.is-selected .spaces-card-preview::after {
+  background: var(--or-success);
+  box-shadow: none;
+  top: 10px;
+  right: 10px;
+}
+
+.spaces-card-title-row .spaces-card-badges + .spaces-card-edit-hint,
+.spaces-card-title-row .spaces-card-edit-hint {
+  order: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spaces-card,
+  .spaces-card:hover {
+    animation: none;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* The earlier "paper playbook" treatment (.spaces-card.spaces-card-playbook,
+   hard-coded hexes) outranks the card rule above by specificity; it is
+   retired at its own weight here. Same for the agent prose face. */
+.spaces-card.spaces-card-playbook,
+.spaces-card.spaces-card-playbook:hover,
+.spaces-card.spaces-card-playbook.is-active {
+  background: var(--or-bg-surface);
+  background-image: none;
+}
+
+.spaces-card.spaces-card-playbook {
+  border-color: rgba(var(--or-ink-rgb), 0.1);
+  box-shadow: none;
+}
+
+.spaces-card.spaces-card-playbook:hover {
+  border-color: rgba(var(--or-ink-rgb), 0.2);
+  box-shadow: var(--or-shadow-sm);
+}
+
+.spaces-card.spaces-card-playbook.is-active {
+  border-color: rgba(var(--or-accent-rgb), 0.75);
+  box-shadow: 0 0 0 2px rgba(var(--or-accent-rgb), 0.16);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-preview,
+.spaces-card.spaces-card-playbook:hover .spaces-card-preview,
+.spaces-card.spaces-card-playbook.is-active .spaces-card-preview {
+  background: transparent;
+  background-image: none;
+  border: none;
+  box-shadow: none;
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-preview::before,
+.spaces-card.spaces-card-playbook .spaces-card-preview::after {
+  display: none;
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-title,
+.spaces-card.spaces-card-playbook .spaces-card-title-row {
+  color: var(--or-text-primary);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-excerpt {
+  color: rgba(var(--or-text-rgb), 0.72);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-meta,
+.spaces-card.spaces-card-playbook .spaces-card-meta-row,
+.spaces-card.spaces-card-playbook .spaces-card-kind-playbook {
+  color: rgba(var(--or-text-rgb), 0.5);
+}
+
+.spaces-card-preview-agent .spaces-card-agent-okf.is-prose {
+  font-family: var(--or-font-display);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: rgba(var(--or-text-rgb), 0.74);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-pill,
+.spaces-card.spaces-card-playbook .spaces-card-playbook-pill.is-stage {
+  border-color: rgba(var(--or-ink-rgb), 0.16);
+  color: rgba(var(--or-text-rgb), 0.62);
+  background: transparent;
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-pill.is-complete {
+  border-color: rgba(var(--or-success-rgb), 0.5);
+  color: var(--or-success);
+  background: transparent;
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-progress {
+  background: rgba(var(--or-ink-rgb), 0.08);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-progress-fill {
+  background: var(--or-accent);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step:not(:last-child)::after {
+  background: rgba(var(--or-ink-rgb), 0.12);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step-marker {
+  border-color: rgba(var(--or-ink-rgb), 0.3);
+  color: rgba(var(--or-text-rgb), 0.6);
+  background: transparent;
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step.is-done .spaces-card-playbook-step-marker {
+  border-color: rgba(var(--or-success-rgb), 0.6);
+  color: var(--or-success);
+  background: transparent;
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step-text {
+  color: rgba(var(--or-text-rgb), 0.74);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-step.is-done .spaces-card-playbook-step-text {
+  color: rgba(var(--or-text-rgb), 0.42);
+  text-decoration-color: rgba(var(--or-success-rgb), 0.4);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-more,
+.spaces-card.spaces-card-playbook .spaces-card-playbook-label {
+  color: rgba(var(--or-text-rgb), 0.5);
+}
+
+.spaces-card.spaces-card-playbook .spaces-card-playbook-line {
+  background: rgba(var(--or-ink-rgb), 0.14);
+}
+
+/* The hexagon watermark keeps its place, further back, so the words
+   in front of it stay the thing you read. */
+.spaces-card-preview-agent .spaces-hex-logo,
+.spaces-card-preview-knowledge .spaces-hex-logo {
+  opacity: 0.16;
+  right: -30px;
+  top: 62%;
+}
+
+/* On a tile the words are the agent; the hexagon stays for the detail
+   pane, where it has room. */
+.spaces-card .spaces-hex-logo { display: none; }

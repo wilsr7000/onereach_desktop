@@ -15,12 +15,16 @@ import { join, resolve } from 'node:path';
 import {
   agentTileBody,
   buildItemCard,
+  isMediaTileKind,
   looksLikeYaml,
   humanizeTileTitle,
   looksLikeCode,
   looksLikeMarkup,
+  stripMarkdownForExcerpt,
   stripMarkupForExcerpt,
+  stripSummaryBoilerplate,
   tileExcerptText,
+  tileKindLabel,
   tileSummaryText,
 } from '../../spaces/spaces.js';
 
@@ -219,5 +223,139 @@ describe('CSS: text stays inside the tile', () => {
   it('excerpts wrap long tokens; the grid gains a column at laptop widths', () => {
     expect(block('.spaces-card-excerpt')).toMatch(/overflow-wrap:\s*anywhere/);
     expect(block('.spaces-card-grid')).toMatch(/minmax\(228px, 1fr\)/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The paper card (2026-09-06, user: "why are asset tiles in Spaces still
+// so ugly"). One shape for every kind: the title first in the system
+// face, the asset's own words in the knowledge face, kind and date
+// pinned to the foot. Colour is data — the amber playbook star, the
+// violet agent mark — never decoration, so the old violet playbook
+// pills, black shadows and tinted playbook paper are retired.
+// ---------------------------------------------------------------------------
+describe('tile kind labels', () => {
+  it('a file is called what it is, never "Other"', () => {
+    expect(tileKindLabel({ kind: 'other', title: 'Q3 numbers.xlsx' })).toBe('Spreadsheet');
+    expect(tileKindLabel({ kind: 'document', title: 'Hype Cycle.pdf' })).toBe('PDF');
+    expect(tileKindLabel({ kind: 'other', title: 'deck.pptx' })).toBe('Presentation');
+    expect(tileKindLabel({ kind: 'other', title: 'blob' })).toBe('File');
+  });
+
+  it('the stored filename wins over a humanized title', () => {
+    expect(
+      tileKindLabel({ kind: 'document', title: 'frame shell CMMHnGQr', metadata: { filename: 'frame-shell-CMMHnGQr.js' } })
+    ).toBe('Code');
+  });
+
+  it('kinds with a name of their own keep it', () => {
+    expect(tileKindLabel({ kind: 'playbook', title: 'Plan.pdf' })).toMatch(/^playbook$/i);
+    expect(tileKindLabel({ kind: 'agent', title: 'Risk Analyst' })).toMatch(/^agent$/i);
+  });
+});
+
+describe('summary boilerplate', () => {
+  it('drops the "could not be extracted" apology and keeps the rest', () => {
+    const s =
+      'A Gartner research note on agentic AI. The file contents could not be extracted, so details are inferred from the filename only.';
+    expect(stripSummaryBoilerplate(s)).toBe('A Gartner research note on agentic AI.');
+  });
+
+  it('a summary that is only apology stays as it was — better than an empty tile', () => {
+    const s = 'The file could not be read.';
+    expect(stripSummaryBoilerplate(s)).toBe(s);
+  });
+
+  it('reaches the tile through tileSummaryText', () => {
+    expect(tileSummaryText(base({ metadata: { ai_summary: 'Meeting notes. Details are inferred from the filename.' } }))).toBe(
+      'Meeting notes.'
+    );
+  });
+});
+
+describe('markdown in excerpts', () => {
+  it('single-underscore italics unwrap; snake_case identifiers survive', () => {
+    expect(stripMarkdownForExcerpt('_Meeting completed — no analysis yet._ Next: thread_id and received_at.')).toBe(
+      'Meeting completed — no analysis yet. Next: thread_id and received_at.'
+    );
+  });
+});
+
+describe('buildItemCard: the paper card', () => {
+  const byAgent = { kind: 'Agent', name: 'Scout' };
+
+  it('a text tile keeps its badges beside the title, not over the words', () => {
+    const card = buildItemCard(base({ excerpt: 'Prose about a thing.', producedBy: byAgent }), false);
+    expect(card.classList.contains('spaces-card-media')).toBe(false);
+    expect(card.querySelector('.spaces-card-title-row .spaces-card-badges')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-preview .spaces-card-badges')).toBeNull();
+  });
+
+  it('a picture leads with itself and wears its badges in a corner', () => {
+    if (typeof IntersectionObserver === 'undefined') {
+      (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      };
+    }
+    expect(isMediaTileKind('image')).toBe(true);
+    expect(isMediaTileKind('document')).toBe(false);
+    const card = buildItemCard(
+      base({ kind: 'image', title: 'photo.png', fileKey: 'lite-spaces/assets/photo.png', producedBy: byAgent }),
+      false
+    );
+    expect(card.classList.contains('spaces-card-media')).toBe(true);
+    expect(card.querySelector('.spaces-card-preview .spaces-card-badges')).not.toBeNull();
+    expect(card.querySelector('.spaces-card-title-row .spaces-card-badges')).toBeNull();
+  });
+
+  it('the footer calls a file what it is', () => {
+    const card = buildItemCard(base({ kind: 'other', title: 'Q3 numbers.xlsx', fileKey: 'lite-spaces/assets/q3.xlsx' }), false);
+    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Spreadsheet');
+  });
+});
+
+describe('CSS: the paper card', () => {
+  const v3 = css.slice(css.indexOf('ASSET TILE v3'));
+  const rule = (selector: string): string => {
+    const start = v3.indexOf(`\n${selector} {`);
+    expect(start, `${selector} missing from the v3 block`).toBeGreaterThan(-1);
+    return v3.slice(start, v3.indexOf('}', start));
+  };
+
+  it('the v3 block exists and comes after every older tile rule', () => {
+    expect(v3.length).toBeGreaterThan(0);
+    // The block must be the LAST word on these selectors: an older rule
+    // written later in the file would win again by source order.
+    expect(css.lastIndexOf('\n.spaces-card {')).toBeGreaterThan(css.indexOf('ASSET TILE v3'));
+  });
+
+  it('a card at rest is paper with a hairline, no shadow, no lift', () => {
+    const card = rule('.spaces-card');
+    expect(card).toMatch(/background:\s*var\(--or-bg-surface\)/);
+    expect(card).toMatch(/border:\s*1px solid rgba\(var\(--or-ink-rgb\)/);
+    expect(card).toMatch(/box-shadow:\s*none/);
+  });
+
+  it('the title leads in the system face; the excerpt reads in the knowledge face', () => {
+    expect(rule('.spaces-card-title')).toMatch(/font-family:\s*var\(--or-font-sans\)/);
+    expect(rule('.spaces-card-title-row')).toMatch(/order:\s*1/);
+    expect(rule('.spaces-card .spaces-card-preview')).toMatch(/order:\s*2/);
+    expect(v3).toMatch(/\.spaces-card-excerpt[^{]*\{[^}]*font-family:\s*var\(--or-font-display\)/);
+  });
+
+  it('the footer is pinned to the foot and the old paper-playbook tint is gone', () => {
+    expect(rule('.spaces-card-meta-row')).toMatch(/margin-top:\s*auto/);
+    // The old rule painted playbooks on a tinted, shadowed card at
+    // (0,2,0); the retire rules answer at the same weight, so they are
+    // grouped by state rather than by property.
+    expect(v3).toMatch(/\.spaces-card\.spaces-card-playbook,\n[^{]*\{[^}]*background:\s*var\(--or-bg-surface\)/);
+    expect(rule('.spaces-card.spaces-card-playbook')).toMatch(/box-shadow:\s*none/);
+    expect(v3).toMatch(/\.spaces-card\.spaces-card-playbook \.spaces-card-playbook-pill,\n[^{]*\{[^}]*background:\s*transparent/);
+  });
+
+  it('the hexagon stays off the tile', () => {
+    expect(rule('.spaces-card .spaces-hex-logo')).toMatch(/display:\s*none/);
   });
 });

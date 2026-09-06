@@ -8397,6 +8397,10 @@ export function buildItemCard(
 ): HTMLElement {
   const card = document.createElement('article');
   card.className = `spaces-card spaces-card-${item.kind}`;
+  // Media leads with its picture; everything else leads with its title
+  // (tile v3, 2026-09-06). The class drives the order in CSS.
+  const media = isMediaTileKind(item.kind);
+  if (media) card.classList.add('spaces-card-media');
   if (active) card.classList.add('is-active');
   // Bulk-select visual: mirror the selection set so the toolbar's
   // selected items read as selected tiles (Cmd/Ctrl-click toggles).
@@ -8453,9 +8457,9 @@ export function buildItemCard(
   // (New / AI) overlay the preview's top-left corner.
   const preview = buildAssetTilePreview(item);
   const badges = buildTileBadgeStack(isNew, byAgent);
-  if (badges !== null) {
-    // `has-badges` lets text/doc/ticket previews reserve top padding so
-    // the badge row doesn't cover the first line of the excerpt.
+  if (badges !== null && media) {
+    // On a picture the badges sit in its corner; on a text tile they
+    // sit in the title row (appended below) so they never cover words.
     preview.classList.add('has-badges');
     preview.appendChild(badges);
   }
@@ -8475,6 +8479,7 @@ export function buildItemCard(
   // …) when the title was missing or hash-shaped. Never empty.
   title.textContent = humanizeTileTitle(generateItemTitle(item));
   titleRow.appendChild(title);
+  if (badges !== null && !media) titleRow.appendChild(badges);
 
   // Hover-reveal pencil. Click opens the detail pane (which has the
   // inline title editor) — the pencil is a visual cue that the title
@@ -8492,7 +8497,7 @@ export function buildItemCard(
 
   const kind = document.createElement('span');
   kind.className = `spaces-card-kind spaces-card-kind-${item.kind}`;
-  kind.textContent = kindLabel(item.kind);
+  kind.textContent = tileKindLabel(item);
   metaRow.appendChild(kind);
 
   const dot = document.createElement('span');
@@ -8567,6 +8572,56 @@ export function buildItemCard(
   card.appendChild(meta);
 
   return card;
+}
+
+/** Image, video and audio lead with their picture; every other kind leads with its title. */
+export function isMediaTileKind(kind: string): boolean {
+  return kind === 'image' || kind === 'video' || kind === 'audio';
+}
+
+/**
+ * What a tile's footer calls the asset. "Other" is not a kind anyone
+ * recognises: a file with an extension is called what it is
+ * (Spreadsheet, Presentation, PDF…); everything else keeps the kind's
+ * label. Exported for tests.
+ */
+export function tileKindLabel(item: Pick<RendererItemSummary, 'kind' | 'title' | 'metadata'>): string {
+  if (item.kind === 'other' || item.kind === 'document' || item.kind === 'text') {
+    const meta = (item.metadata ?? {}) as Record<string, unknown>;
+    const filename = typeof meta['filename'] === 'string' && (meta['filename'] as string).length > 0 ? (meta['filename'] as string) : item.title;
+    const m = /\.([a-z0-9]{1,5})$/i.exec((filename ?? '').trim());
+    const ext = (m?.[1] ?? '').toLowerCase();
+    const byExt: Record<string, string> = {
+      pdf: 'PDF', doc: 'Document', docx: 'Document', rtf: 'Document', odt: 'Document', pages: 'Document',
+      xls: 'Spreadsheet', xlsx: 'Spreadsheet', csv: 'Spreadsheet', ods: 'Spreadsheet', numbers: 'Spreadsheet',
+      ppt: 'Presentation', pptx: 'Presentation', key: 'Presentation', odp: 'Presentation',
+      md: 'Markdown', txt: 'Text', json: 'Data', html: 'Web page', htm: 'Web page',
+      js: 'Code', ts: 'Code', py: 'Code', mjs: 'Code', zip: 'Archive', tar: 'Archive', gz: 'Archive',
+    };
+    const label = byExt[ext];
+    if (label !== undefined) return label;
+    if (item.kind === 'other') return 'File';
+  }
+  return kindLabel(item.kind);
+}
+
+/**
+ * AI summaries of files that could not be read end in an apology —
+ * "The file contents could not be extracted, so details are inferred
+ * from the filename only." Read once it is information; read on every
+ * tile of a Space it is noise. Those sentences go; the rest stays.
+ * Exported for tests.
+ */
+export function stripSummaryBoilerplate(text: string): string {
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter(
+    (s) =>
+      !/(could not be|couldn't be|cannot be|can't be|were not|was not|are not|is not)\s+(extracted|read|parsed|accessed|extractable|readable)/i.test(s) &&
+      !/(inferred|based|derived)\s+(solely\s+|only\s+)?(from|on)\s+the\s+(file\s*name|filename|title)/i.test(s) &&
+      !/no (readable|extractable) (content|text)/i.test(s)
+  );
+  const out = kept.join(' ').trim();
+  return out.length > 0 ? out : text.trim();
 }
 
 /**
@@ -9830,6 +9885,7 @@ export function stripMarkdownForExcerpt(text: string): string {
     .replace(/\*\*([^*]+)\*\*/g, '$1')     // bold
     .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1$2') // italic (single *)
     .replace(/__([^_]+)__/g, '$1')         // bold underscore
+    .replace(/(^|[^\w_])_([^_\n]+)_(?![\w_])/g, '$1$2') // italic (single _), e.g. "_Meeting completed — no analysis yet._"
     .replace(/\s*\n\s*/g, ' ')            // collapse lines
     .replace(/\s{2,}/g, ' ')               // collapse runs
     .trim();
@@ -9900,7 +9956,7 @@ export function tileSummaryText(item: Pick<RendererItemSummary, 'metadata' | 'de
   const meta = (item.metadata ?? {}) as Record<string, unknown>;
   const summary = meta['ai_summary'];
   if (typeof summary === 'string') {
-    const cleaned = tileExcerptText(summary);
+    const cleaned = tileExcerptText(stripSummaryBoilerplate(summary));
     if (cleaned !== null) return cleaned;
   }
   const description = typeof item.description === 'string' ? item.description : '';
