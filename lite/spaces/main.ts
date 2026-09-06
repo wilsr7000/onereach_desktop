@@ -50,6 +50,8 @@ import { registerJourneyMapTargetChannel } from '../journey-map-window.js';
 import { riffSheetDescription } from './riff-summary.js';
 import { parseSpreadsheetBuffer, type SpreadsheetPreviewModel } from './spreadsheet-preview.js';
 import { SPACES_EVENTS } from './events.js';
+import { runGsxFlowSync, type GsxFlowSyncResult } from './gsx-flow-sync.js';
+import { FetchGsxFlowsPort } from './gsx-flows-port.js';
 import { SdkSpacesClient, hashAssetState } from './sdk-client.js';
 import { getNeonApi } from '../neon/api.js';
 import { getFilesApi } from '../files/api.js';
@@ -177,6 +179,68 @@ let activeCache: SpacesCache | null = null;
 let lastCachedViewer: string | null = null;
 /** Live SDK client for background jobs (GSX migration sweep). */
 let activeClient: SdkSpacesClient | null = null;
+
+// ─── ADR-091: GSX Designer → Spaces sync ──────────────────────────────
+/** Spaces-open trigger cooldown: Designer changes slowly; the window opens often. */
+const GSX_FLOW_SYNC_COOLDOWN_MS = 10 * 60 * 1000;
+let gsxFlowSyncLastRunMs = 0;
+let gsxFlowSyncInFlight: Promise<GsxFlowSyncResult> | null = null;
+
+/**
+ * Sync GSX Designer (bots → Spaces, flows → agent assets) for the
+ * signed-in account. Never throws. `force` skips the cooldown (the
+ * on-demand API); the Spaces-open trigger respects it. Concurrent
+ * callers share one run. A run that changed anything drops the read
+ * cache and refetches the Space list so an open window repaints.
+ */
+export function runGsxFlowSyncNow(opts: { force?: boolean; dryRun?: boolean } = {}): Promise<GsxFlowSyncResult> {
+  if (gsxFlowSyncInFlight !== null) return gsxFlowSyncInFlight;
+  const aborted = (reason: string): GsxFlowSyncResult => ({
+    bots: 0, botsFailed: 0, spacesCreated: 0, spacesUpdated: 0, flows: 0,
+    agentsCreated: 0, agentsUpdated: 0, agentsRetired: 0, aborted: true, reason,
+  });
+  const now = Date.now();
+  if (opts.force !== true && now - gsxFlowSyncLastRunMs < GSX_FLOW_SYNC_COOLDOWN_MS) {
+    return Promise.resolve(aborted('cooldown'));
+  }
+  const client = activeClient;
+  if (client === null) return Promise.resolve(aborted('not-initialized'));
+  const session = getAuthApi().getSession('edison');
+  const accountId = typeof session?.accountId === 'string' ? session.accountId : '';
+  if (accountId.length === 0) return Promise.resolve(aborted('signed-out'));
+  gsxFlowSyncLastRunMs = now;
+  const log = getLoggingApi();
+  const port = new FetchGsxFlowsPort({ env: 'edison', accountId, fetch: (url, init) => fetch(url, init) });
+  gsxFlowSyncInFlight = runGsxFlowSync({
+    client,
+    port,
+    log,
+    viewerId: () => resolveViewerId(),
+    env: 'edison',
+    ...(opts.dryRun === true ? { dryRun: true } : {}),
+  })
+    .then(async (result) => {
+      const changed = result.spacesCreated + result.agentsCreated + result.agentsUpdated + result.agentsRetired + result.spacesUpdated;
+      log.info('spaces', 'gsx-flow-sync done', { ...result, forced: opts.force === true });
+      if (!result.aborted && changed > 0 && opts.dryRun !== true && activeCache !== null) {
+        try {
+          activeCache.invalidate(() => true);
+          await activeCache.getOrFetch(SPACES_CACHE_KEYS.LIST_SPACES, () => client.listSpaces());
+        } catch (err) {
+          log.warn('spaces', 'gsx-flow-sync: post-sync refresh failed', { error: (err as Error).message });
+        }
+      }
+      return result;
+    })
+    .catch((err: unknown) => {
+      log.warn('spaces', 'gsx-flow-sync threw', { error: err instanceof Error ? err.message : String(err) });
+      return aborted('threw');
+    })
+    .finally(() => {
+      gsxFlowSyncInFlight = null;
+    });
+  return gsxFlowSyncInFlight;
+}
 
 /**
  * Riff playbook ids this boot has already tried to enrich. Sheets are
@@ -404,6 +468,9 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
         // happens HERE, on first window open — the moment the data is
         // actually about to be looked at — instead of at app launch.
         ensureFullPrewarm(getSpacesApi(), log);
+        // ADR-091: Designer bots → Spaces, flows → agents. Throttled; the
+        // user is looking at the list, so a change repaints via the cache.
+        void runGsxFlowSyncNow();
         log.info('spaces window opened', {});
       } catch (err) {
         log.error('failed to open spaces window', { error: (err as Error).message });
@@ -1614,6 +1681,9 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     open: handle.open,
     listSpaces(): Promise<Space[]> {
       return cache.getOrFetch(SPACES_CACHE_KEYS.LIST_SPACES, () => client.listSpaces());
+    },
+    syncGsxFlows(): Promise<GsxFlowSyncResult> {
+      return runGsxFlowSyncNow({ force: true });
     },
     async refresh(): Promise<void> {
       // Nuke the whole read cache: a Space created elsewhere changes

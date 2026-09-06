@@ -27,6 +27,11 @@ function sdkSource(): string {
  * that survives review.
  */
 const EXEMPT: Record<string, string> = {
+  CREATE_GSX_FLOW_SPACE:
+    'ADR-091: creates the viewer\'s OWN synced Space for a GSX Designer bot, ' +
+    'and only when no Space carries the id (OPTIONAL MATCH … WHERE existing IS ' +
+    'NULL); the creator becomes its writer by definition. The refresh half ' +
+    '(UPDATE_GSX_FLOW_SPACE) is SPACE_WRITABLE-gated',
   CREATE_SPACE:
     'creates the Space itself — there is no Space yet to hold a grant, and the ' +
     'creator becomes its writer by definition (s.createdBy)',

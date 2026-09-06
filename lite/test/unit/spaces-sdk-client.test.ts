@@ -4220,3 +4220,46 @@ describe('MEMBER_LIBRARY_SEARCH — junk filter (2026-08-18)', () => {
     expect(rows[0]?.id).toBe('rich@onereach.com');
   });
 });
+
+describe('ADR-091 — GSX Designer → Spaces sync Cypher', () => {
+  it('CREATE_GSX_FLOW_SPACE creates only when the id is absent and stamps the viewer as creator', () => {
+    expect(CYPHER.CREATE_GSX_FLOW_SPACE).toMatch(/OPTIONAL MATCH \(existing:Space \{id: \$id\}\)[\s\S]*WHERE existing IS NULL/);
+    expect(CYPHER.CREATE_GSX_FLOW_SPACE).toMatch(/createdBy: \$viewerId/);
+    expect(CYPHER.CREATE_GSX_FLOW_SPACE).toContain("source: 'gsx-designer'");
+  });
+
+  it('UPDATE_GSX_FLOW_SPACE is SPACE_WRITABLE-gated, refreshes name/description and un-deletes', () => {
+    expect(CYPHER.UPDATE_GSX_FLOW_SPACE).toMatch(/\$viewerId <> ''/);
+    expect(CYPHER.UPDATE_GSX_FLOW_SPACE).toMatch(/s\.deletedAt = null/);
+    expect(CYPHER.UPDATE_GSX_FLOW_SPACE).not.toMatch(/s\.createdBy = /);
+  });
+
+  it('LIST_GSX_FLOW_AGENTS is gated (only the Space writer sees what it may retire)', () => {
+    expect(CYPHER.LIST_GSX_FLOW_AGENTS).toMatch(/\$viewerId <> ''/);
+    expect(CYPHER.LIST_GSX_FLOW_AGENTS).toMatch(/a\.gsxFlowId IS NOT NULL/);
+  });
+
+  it('UPSERT_GSX_FLOW_AGENTS is gated by SPACE_WRITABLE, batched (UNWIND), and writes the agent-as-asset shape on stable ids', () => {
+    const q = CYPHER.UPSERT_GSX_FLOW_AGENTS;
+    expect(q).toMatch(/MATCH \(s:Space \{id: \$spaceId\}\)[\s\S]*\$viewerId <> ''/);
+    expect(q).toMatch(/UNWIND \$rows AS row/);
+    expect(q).toMatch(/MERGE \(a:Asset \{id: row\.assetId\}\)/);
+    expect(q).toMatch(/MERGE \(ag:Agent \{id: row\.agentId\}\)/);
+    expect(q).toMatch(/MERGE \(t:AgentType:__TYPE_LABEL__ \{id: row\.typeId\}\)/);
+    // The clause order Neo4j rejected live (REMOVE → MATCH needs WITH).
+    expect(q).toMatch(/REMOVE a\.__created\s*\n\s*WITH a, created\s*\n\s*OPTIONAL MATCH/);
+    expect(q).toMatch(/MERGE \(a\)-\[:BELONGS_TO\]->\(s\)/);
+    expect(q).toMatch(/MERGE \(a\)-\[:REPRESENTS\]->\(ag\)/);
+    expect(q).toMatch(/MERGE \(ag\)-\[:HAS_TYPE\]->\(t\)/);
+    expect(q).toContain("a.type = 'agent'");
+    expect(q).toContain("a.agentType = 'workflow'");
+    expect(q).toMatch(/a\.deletedAt = null/);
+  });
+
+  it('RETIRE_GSX_FLOW_AGENT soft-deletes only synced agents in a writable Space', () => {
+    expect(CYPHER.RETIRE_GSX_FLOW_AGENT).toMatch(/a\.gsxFlowId IS NOT NULL/);
+    expect(CYPHER.RETIRE_GSX_FLOW_AGENT).toMatch(/\$viewerId <> ''/);
+    expect(CYPHER.RETIRE_GSX_FLOW_AGENT).toMatch(/SET a\.deletedAt = \$now/);
+    expect(CYPHER.RETIRE_GSX_FLOW_AGENT).not.toMatch(/DETACH DELETE/);
+  });
+});

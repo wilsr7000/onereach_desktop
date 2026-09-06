@@ -187,6 +187,14 @@ export const SPACES_EVENTS = {
   GSX_MIGRATE_ITEM: 'spaces.gsxMigrate.item.finish',
   /** One riff-playbook description backfill batch landed (2026-08-20). */
   RIFF_ENRICH_FINISH: 'spaces.riffEnrich.finish',
+  // ─── GSX Designer → Spaces sync (ADR-091) ─────────────────────────
+  GSX_FLOW_SYNC_START: 'spaces.gsxFlowSync.start',
+  GSX_FLOW_SYNC_FINISH: 'spaces.gsxFlowSync.finish',
+  GSX_FLOW_SYNC_FAIL: 'spaces.gsxFlowSync.fail',
+  /** One bot ("Designer space") synced — its Space + flow agents. */
+  GSX_FLOW_SYNC_BOT_START: 'spaces.gsxFlowSync.bot.start',
+  GSX_FLOW_SYNC_BOT_FINISH: 'spaces.gsxFlowSync.bot.finish',
+  GSX_FLOW_SYNC_BOT_FAIL: 'spaces.gsxFlowSync.bot.fail',
   // NOTE: IPC entry events are emitted dynamically as
   // `spaces.ipc.<verb>` by the wrapper in `ipc.ts` (the verb derived
   // from each `lite:spaces:*` channel). They are intentionally NOT

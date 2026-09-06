@@ -111,6 +111,11 @@ describe('visibility predicates in the Cypher surface', () => {
     // Internal endpoint-diff helper on the agent WRITE path; the
     // renderer reads endpoints through gated GET_ITEM projections.
     'GET_AGENT_ENDPOINTS',
+    // ADR-091 sync pre-step (main-only, never on IPC): ONE boolean —
+    // does any live Space already use this name — the same
+    // account-wide check CREATE_SPACE performs inline. Gated, a synced
+    // Space could silently duplicate a name the viewer cannot see.
+    'SPACE_NAME_TAKEN',
   ];
 
   it('every ungated MATCH query is on the deliberate list — no accidental leaks', () => {

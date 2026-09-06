@@ -24,6 +24,11 @@ import * as path from 'node:path';
 
 /** Queries allowed to run ungated, each with its load-bearing reason. */
 const EXEMPT: Record<string, string> = {
+  SPACE_NAME_TAKEN:
+    'ADR-091 sync pre-step (main-process internal, never on IPC): answers ' +
+    'ONE boolean — does any live Space already use this name — the same ' +
+    'account-wide check CREATE_SPACE performs inline. Gating it would let a ' +
+    'synced Space silently duplicate a name the viewer cannot see.',
   FIND_ASSET_BY_FILE_KEY:
     'orphan-cleanup ambiguity guard (main-process internal): gating it makes ' +
     'restricted assets invisible to the guard, which then deletes their file',

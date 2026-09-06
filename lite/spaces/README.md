@@ -148,3 +148,16 @@ surface):
 - Agents as first-class room participants — subscribe-and-react (v2 chunk 3n)
 - Real-time activity pulse (server WebSocket prerequisite; no plan to add)
 - Pin / favorite Spaces (small follow-up; not roadmap-level)
+
+## GSX Designer sync (ADR-091)
+
+`gsx-flows-port.ts` reads Designer (bots + flows) from the account's data
+hub with plain fetch — the SDK's own wire format, captured from
+`@or-sdk/flows`/`@or-sdk/bots` 2.7.x. `gsx-flow-sync.ts` mirrors it: one
+Space per bot (`space-gsxbot-<botId>-<viewer>`), one agent asset per live
+flow (`asset-gsxflow-<flowId>-<viewer>`, REPRESENTS → `:Agent` →
+`:AgentType:Workflow`), retiring flows that left Designer. `main.ts`
+runs it on window open (10-minute cooldown, one at a time) and exposes
+`syncGsxFlows()`. Writes go through `SdkSpacesClient`
+(`UPDATE_/CREATE_GSX_FLOW_SPACE`, `UPSERT_GSX_FLOW_AGENTS` batched per
+bot, `RETIRE_GSX_FLOW_AGENT`) — all gated like every other write.

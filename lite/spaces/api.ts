@@ -676,6 +676,14 @@ export interface SpacesApi {
   /** Report the viewer's active Space onto their presence beacon. */
   presenceScope(spaceId: string | null, spaceName: string | null): void;
 
+  /**
+   * ADR-091 — sync GSX Designer into Spaces: each bot the signed-in
+   * account has in Designer becomes a Space, each flow inside it an
+   * agent asset. Runs automatically when the Spaces window opens
+   * (throttled); this is the on-demand entry point. Never throws —
+   * signed-out / no account / no flows resolve to `aborted`.
+   */
+  syncGsxFlows(): Promise<import('./gsx-flow-sync.js').GsxFlowSyncResult>;
   /** Learning Center: workspace signals for mission auto-detection. */
   learnSignals(): Promise<import('./learn-content.js').LearnSignals>;
 
@@ -1115,6 +1123,9 @@ class UninitializedSpacesApi implements SpacesApi {
     throw notInitialized('refresh');
   }
 
+  async syncGsxFlows(): Promise<import('./gsx-flow-sync.js').GsxFlowSyncResult> {
+    throw notInitialized('syncGsxFlows');
+  }
   async learnSignals(): Promise<import('./learn-content.js').LearnSignals> {
     throw notInitialized('learnSignals');
   }

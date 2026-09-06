@@ -2366,6 +2366,129 @@ export const CYPHER = {
    * guaranteed; see the discovery fallback). The raw `agentType` is also
    * stored as a property on all three nodes for property-based queries.
    */
+  // ─── ADR-091: GSX Designer → Spaces sync ───────────────────────────
+  /**
+   * A Designer bot as a Space. MERGE on the deterministic, viewer-scoped
+   * id (see gsx-flow-sync.ts); the creator is the viewer, so ADR-084
+   * sight/write follow from `createdBy`. Name/description refresh on
+   * every sync; a retired Space comes back if the bot reappears.
+   */
+  /**
+   * A Designer bot's Space, create half: only when NO Space carries this
+   * deterministic, viewer-scoped id (see gsx-flow-sync.ts). Same class
+   * as CREATE_SPACE — the creator becomes its writer by definition.
+   */
+  CREATE_GSX_FLOW_SPACE: `
+    OPTIONAL MATCH (existing:Space {id: $id})
+    WITH existing
+    WHERE existing IS NULL
+    CREATE (s:Space {
+      id: $id,
+      name: $name,
+      description: $description,
+      gsxBotId: $gsxBotId,
+      source: 'gsx-designer',
+      kind: 'user',
+      createdBy: $viewerId,
+      createdAt: $now,
+      updatedAt: $now
+    })
+    RETURN s.id AS id
+  `,
+  /**
+   * A Designer bot's Space, refresh half: name/description follow
+   * Designer, a retired Space comes back if the bot reappears. Gated —
+   * only the Space's writer (its creator, for a synced Space) can touch it.
+   */
+  UPDATE_GSX_FLOW_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE ${SPACE_WRITABLE}
+    SET s.name = $name,
+        s.description = $description,
+        s.gsxBotId = $gsxBotId,
+        s.source = 'gsx-designer',
+        s.updatedAt = $now,
+        s.deletedAt = null
+    RETURN s.id AS id
+  `,
+  /** Case-insensitive name clash with a Space that is NOT the synced one. */
+  SPACE_NAME_TAKEN: `
+    MATCH (s:Space)
+      WHERE toLower(coalesce(s.name, '')) = toLower($name)
+        AND s.deletedAt IS NULL
+        AND s.id <> $exceptSpaceId
+    RETURN count(s) > 0 AS taken
+  `,
+  /**
+   * A bot's Designer flows as agent assets of its Space, one query per
+   * batch (UNWIND): the same shape CREATE_AGENT writes (Asset
+   * ─REPRESENTS→ Agent ─HAS_TYPE→ AgentType:Workflow), MERGEd on
+   * deterministic ids so a re-sync refreshes instead of duplicating.
+   * Gated like every write: the Space must be writable by the viewer
+   * (its creator, for a synced Space). `__TYPE_LABEL__` is replaced
+   * with the sanitized label. Per-flow round-trips cost ~300 ms each
+   * (415 flows = 2 min); batching makes the whole sync a few seconds.
+   */
+  UPSERT_GSX_FLOW_AGENTS: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+          AND ${SPACE_WRITABLE}
+    UNWIND $rows AS row
+    MERGE (a:Asset {id: row.assetId})
+    ON CREATE SET a.type = 'agent',
+                  a.createdAt = $now,
+                  a.__created = true
+    ON MATCH SET  a.__created = false
+    SET a.name = row.name,
+        a.title = row.name,
+        a.description = row.description,
+        a.content = row.content,
+        a.sourceUrl = row.sourceUrl,
+        a.agentType = 'workflow',
+        a.metadata = row.metadata,
+        a.gsxBotId = $gsxBotId,
+        a.gsxFlowId = row.gsxFlowId,
+        a.source = 'gsx-designer',
+        a.updatedAt = $now,
+        a.deletedAt = null
+    MERGE (a)-[:BELONGS_TO]->(s)
+    MERGE (ag:Agent {id: row.agentId})
+    ON CREATE SET ag.createdAt = $now
+    SET ag.name = row.name,
+        ag.description = row.description,
+        ag.agentType = 'workflow',
+        ag.gsxBotId = $gsxBotId,
+        ag.gsxFlowId = row.gsxFlowId,
+        ag.source = 'gsx-designer',
+        ag.updatedAt = $now
+    MERGE (a)-[:REPRESENTS]->(ag)
+    MERGE (t:AgentType:__TYPE_LABEL__ {id: row.typeId})
+    ON CREATE SET t.agentType = 'workflow', t.createdAt = $now
+    MERGE (ag)-[:HAS_TYPE]->(t)
+    WITH a, a.__created AS created
+    REMOVE a.__created
+    WITH a, created
+    OPTIONAL MATCH (p:Person {id: coalesce($creatorId, $viewerId)})
+    FOREACH (x IN CASE WHEN p IS NULL THEN [] ELSE [p] END |
+      MERGE (x)-[:CREATED]->(a))
+    RETURN a.id AS id, created AS created
+  `,
+  /** The synced flow agents currently live in a Space (for retiring vanished flows). */
+  LIST_GSX_FLOW_AGENTS: `
+    MATCH (a:Asset)-[:BELONGS_TO]->(s:Space {id: $spaceId})
+      WHERE a.deletedAt IS NULL AND a.gsxFlowId IS NOT NULL
+          AND ${SPACE_VISIBLE}
+    RETURN a.id AS assetId, a.gsxFlowId AS gsxFlowId
+  `,
+  /** Soft-delete a synced agent whose flow left Designer (writable Space only). */
+  RETIRE_GSX_FLOW_AGENT: `
+    MATCH (a:Asset {id: $assetId})-[:BELONGS_TO]->(s:Space)
+      WHERE a.deletedAt IS NULL AND a.gsxFlowId IS NOT NULL
+          AND ${SPACE_WRITABLE}
+    SET a.deletedAt = $now, a.updatedAt = $now
+    RETURN a.id AS id
+  `,
+
   CREATE_AGENT: `
     MATCH (s:Space {id: $spaceId})
       WHERE s.deletedAt IS NULL
@@ -5995,6 +6118,104 @@ export class SdkSpacesClient {
     } catch {
       // best-effort, like ensureChecklistSchema — registry docs only
     }
+  }
+
+  // ─── ADR-091: GSX Designer → Spaces sync ───────────────────────────
+
+  async upsertGsxFlowSpace(input: {
+    id: string;
+    gsxBotId: string;
+    name: string;
+    description: string;
+  }): Promise<{ id: string; created: boolean }> {
+    const params = {
+      id: input.id,
+      gsxBotId: input.gsxBotId,
+      name: input.name.slice(0, MAX_SPACE_NAME_LENGTH),
+      description: input.description.slice(0, MAX_SPACE_DESC_LENGTH),
+      now: nowIso(),
+      viewerId: this.viewerParam(),
+    };
+    // Refresh first (gated: only the Space's writer); create only when
+    // no Space carries the id at all. Neither row → the id belongs to
+    // someone else's Space, which this viewer may not touch.
+    const updated = await this.run(CYPHER.UPDATE_GSX_FLOW_SPACE, params);
+    if (updated[0] !== undefined) return { id: String(updated[0]['id']), created: false };
+    const created = await this.run(CYPHER.CREATE_GSX_FLOW_SPACE, params);
+    if (created[0] !== undefined) return { id: String(created[0]['id']), created: true };
+    throw new SpacesError({
+      code: 'SPACES_FORBIDDEN',
+      message: 'A Space with this synced id exists but is not writable by the viewer.',
+      remediation: 'Sign in as the Space creator, or remove the stale Space.',
+    });
+  }
+
+  async spaceNameTaken(name: string, exceptSpaceId: string): Promise<boolean> {
+    const rows = await this.run(CYPHER.SPACE_NAME_TAKEN, { name, exceptSpaceId });
+    return rows[0]?.['taken'] === true;
+  }
+
+  async upsertGsxFlowAgents(
+    spaceId: string,
+    gsxBotId: string,
+    rows: Array<{
+      assetId: string;
+      agentId: string;
+      typeId: string;
+      gsxFlowId: string;
+      name: string;
+      description: string;
+      content: string;
+      sourceUrl: string;
+      metadata: Record<string, string>;
+    }>
+  ): Promise<Array<{ id: string; created: boolean }>> {
+    if (rows.length === 0) return [];
+    const cypher = CYPHER.UPSERT_GSX_FLOW_AGENTS.replace('__TYPE_LABEL__', sanitizeAgentTypeLabel('workflow'));
+    const out: Array<{ id: string; created: boolean }> = [];
+    // Chunked so one bot with hundreds of flows stays one bounded request.
+    for (let i = 0; i < rows.length; i += 100) {
+      const chunk = rows.slice(i, i + 100).map((r) => ({
+        assetId: r.assetId,
+        agentId: r.agentId,
+        typeId: r.typeId,
+        gsxFlowId: r.gsxFlowId,
+        name: r.name.trim().slice(0, MAX_ITEM_TITLE_LENGTH) || r.gsxFlowId,
+        description: r.description.slice(0, MAX_ITEM_DESCRIPTION_LENGTH),
+        content: r.content,
+        sourceUrl: r.sourceUrl,
+        metadata: stringifyMetadata(r.metadata),
+      }));
+      const res = await this.run(cypher, {
+        spaceId,
+        gsxBotId,
+        rows: chunk,
+        creatorId: null,
+        now: nowIso(),
+        viewerId: this.viewerParam(),
+      });
+      if (res.length === 0 && chunk.length > 0) {
+        throw new SpacesError({
+          code: 'SPACES_FORBIDDEN',
+          message: 'The synced Space is not writable by the viewer.',
+          remediation: 'Only the Space creator can sync flows into it.',
+        });
+      }
+      for (const row of res) out.push({ id: String(row['id']), created: row['created'] === true });
+    }
+    return out;
+  }
+
+  async listGsxFlowAgents(spaceId: string): Promise<Array<{ assetId: string; gsxFlowId: string }>> {
+    const rows = await this.run(CYPHER.LIST_GSX_FLOW_AGENTS, { spaceId });
+    return rows
+      .map((r) => ({ assetId: String(r['assetId'] ?? ''), gsxFlowId: String(r['gsxFlowId'] ?? '') }))
+      .filter((r) => r.assetId.length > 0 && r.gsxFlowId.length > 0);
+  }
+
+  async retireGsxFlowAgent(assetId: string): Promise<boolean> {
+    const rows = await this.run(CYPHER.RETIRE_GSX_FLOW_AGENT, { assetId, now: nowIso() });
+    return rows.length > 0;
   }
 
   private async run(

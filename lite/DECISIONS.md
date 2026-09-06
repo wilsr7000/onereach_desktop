@@ -2001,3 +2001,90 @@ SmartScreen warning).
 **Space events, descriptions, log summaries (same day, robb's asks).** (1) *Space events.* A Space event is an activity commit (item added / updated / edited / restored, by whom, when), the same stream the Home tab reads. `calendar/space-events.ts` narrows that query to a time range and keeps the ADR-084 predicate verbatim (an edgeless commit is visible only to its author or through a Space the viewer can see); grouping per local day and per Space is pure. Every day cell with events carries a link ("3 events · 2 Spaces") that opens a modal listing how many and by Space, then each event; closable by ×, Escape and the backdrop, focus returned to the link. The Spaces button opens the Spaces window (no deep link to a Space exists yet). (2) *Descriptions.* The flow's Designer description travels through both projections, the schedule index and every pane; a flow without one is told so. (3) *Log summaries.* Past runs in the detail pane carry a "Get log summary" button; nothing is fetched until it is clicked. The deployer's `GET /flows/<id>/logs?start&end` (discovery `deployer`, paged with `next`) answers events keyed by `requestId`, one per execution, with START / END / REPORT (billed duration, peak memory) / vital lines. `calendar/logs.ts` summarises deterministically (executions, billed time, memory, steps, errors, END seen) and a Claude pass adds a three-sentence narrative when a key is configured, never instead of the numbers. Windows are the run's minute before to fifteen minutes after (or the next run), capped at seven days; results cache five minutes.
 
 **Rejected.** Keeping the hosted link (dead); bundling `@or-sdk/*` into the kernel (asar guard, supply-chain caution after the August scope hit, and the current base rejects the token anyway); inferring schedules from flow names or logs (the step data is the authored truth, the deployment the armed truth).
+
+**Addendum — not armed, arm / disarm, links, views, export (2026-09-05, evening; robb's asks: "Can it show what is in the account but not armed?", "allow the user to arm or disarm", "fetching logs failed", "the playbook and journey map … as buttons", "if flows are part of a space I should see that").**
+
+1. *Not armed is a first-class state.* The snapshot already knew it (authored schedule, no armed deployment); the window now shows it: a header filter (All / Armed / Not armed), dimmed dashed chips for runs that would not fire, an "In this account" list under the day pane with every scheduled flow and its state, and counts in the subtitle. A schedule whose every window has ended is noted in the detail pane; when the platform still holds a trigger for such a flow the note warns (the reporting "5min" flow: window ended 2020-02-01, fires every five minutes regardless — a platform fact, shown, not corrected).
+2. *Arm / disarm goes through the deployer, in the deployer's own words.* `DatahubClient.activateFlow / deactivateFlow / checkDeploy` mirror `@or-sdk/deployer` 1.7.1 exactly: activate `POST /flows/deploy { flowId, flowAlias: v-<now>, interactiveDebug: false, role }`, deactivate `DELETE /flows/deploy { flow: { id }, role }`, then `GET /flows/check/<flowId>/<requestId>` every 2 s (≤ 100 polls) until the answer is neither `status: pending` nor `errorData`. The role is the flow's `data.deploy.role`. Live the first cut sent `{ flowId }` on DELETE and the deployer answered 400 "flow is required" — the SDK source, not the summary of it, is the contract. `setArmed` then drops the cache, re-reads, and returns the refreshed flow; the UI confirms inline (no `window.confirm` in renderers), disables while pending, toasts the outcome or the platform's refusal verbatim. Events: `calendar.set-armed.*` span, `calendar.armed` / `calendar.disarmed`.
+3. *"Fetching logs failed" was the 8 s request budget.* Every datahub call shared `AbortSignal.timeout(8000)`; a day-wide deployer log scan took 8.5 s and was cut. Deployer calls (logs, deploy, check) now get 30 s per request; listings keep 8 s. Live after the change: 9.75 s, 14 lines, 4 executions.
+4. *Where a flow lives and came from (`links.ts`, `flowLinks`).* GSX keeps no pointer from a flow to a playbook or a Space, and on 2026-09-05 no graph node named any flow id. Three legs, each real: (a) **Space by asset** — an `:Asset` in a Space with `flowId = $flowId` or a URL containing it (none exist yet; this is the leg that lights up when flows become Space items); (b) **playbook by build** — the flow-build watcher's KV queue (`flow-build-queue`, `flow-build-queue-archive`; 102 archived slots) names `{ playbookId, flowId }` per slot, the only flow→playbook truth; keys are listed per 30 min and each slot body read once per session, a few at a time — never the 15-second re-read of the 2026-09-04 incident; a playbook the graph lacks gets its title from `riff:sheets`; (c) **journey maps and Spaces by neighbourhood** — journey assets in the flow's Spaces, the playbook's Space, or a Space named like the GSX space (bot label). Every Space passes `SPACE_VISIBLE_FOR` (ADR-084): the "Omni Data" Space that matches robb's GSX space by name is reachable only through an OWNS edge, so it is correctly not offered. Buttons: "In Space · X" / "Near Space · X" (the new deep link), "Open playbook · title" (`spaces.openWiser`), "Open journey map · title" (`spaces.openJourneyMap`). Rejected: matching agents' `gsxEndpoint` to flows' HTTP trigger paths — 14 relative endpoints, 119 trigger paths, zero matches, and no agent asset sits in a Space.
+5. *Deep link into Spaces.* `SPACES_IPC.OPEN` takes `{ spaceId }`; main hands it to a booting Spaces window through `lite:spaces:focusSpace:take` (taken once) or pushes `lite:spaces:focus-space` to a live one; the renderer calls `setActiveScope`. Menu clicks pass a MenuItem, which is not a string and never a deep link.
+6. *Week and Day views* in the Lite window (not the React calendar-ui library, which stays a separate workspace): seven Sunday-first columns and a 24-hour agenda, ← → by the view's unit, the month ± 7 days already loaded so no extra reads. *Export .ics* (`ics.ts`, pure): stable UIDs, UTC stamps, twelve-plus runs on one day collapse into one all-day marker, saved through Electron's save dialog from main.
+7. *Live check (dev app, Dev profile, robb's "HTTP toolkit 1.0.0" in Omni Data).* Filter and account list correct (3 scheduled, 2 armed, 1 not armed); links block answers in ~6 s; log summary in 9.75 s; the disarm → arm round trip is recorded in the session summary with its outcome.
+
+
+## ADR-091: GSX Designer mirrors into Spaces — bots become Spaces, flows become agents
+
+**Date:** 2026-09-05  ·  **Status:** shipped, live-verified
+
+**The ask (robb).** "When I open Spaces and it retrieves spaces from NEON it
+also syncs the spaces in GSX Designer flow builder — the space that flows
+are in. In assets it should list all flows. But as agents."
+
+**What Designer actually has.** What Designer calls a "space" is a **bot**;
+flows live under a bot. The account has 12 bots (Tickets, ElevenLabs Music,
+ProbeBot, mistral step, Interest Modeling, AI Build Tools, Step Building
+Space, ORCoin, Agentic Journey Map, Omni Data, _ReportingAdapters, News
+Feed) holding 415 live flows (AI Build Tools alone has 347). A full flow
+record is ~2.7 MB (its step trees); the data hub honours a `projection`.
+Observed live: the hub **ignores `from` and `size`** on the list routes
+(page 2 repeats page 1; `size=5` returns 347 rows), and the SDK 500s on the
+one bot whose unprojected page is too large.
+
+**Decision.**
+- **Transport.** `lite/spaces/gsx-flows-port.ts` talks to the data hub with
+  plain fetch, using the exact wire format captured from `@or-sdk/flows` /
+  `@or-sdk/bots` 2.7.x against an echo server (`GET <hub>/bots?query=…`,
+  `GET <hub>/flows?query={"botId":…,"isDeleted":false}&projection=[…]`,
+  `Authorization: FLOW <token>`; a page is a bare JSON array). Same token
+  (`/refresh_token`) and discovery (`data-hub-pg`) as the Calendar
+  (ADR-090). The kernel does not bundle the SDK (ADR-047; the asar excludes
+  `@or-sdk/**`). Paging is id-driven: rows dedupe by id and the loop stops
+  when a page adds nothing new — the only rule that survives a hub that
+  ignores offsets. An account without the refresh flow (the rich@ class)
+  aborts quietly on its 404.
+- **Model.** One Space per bot, id `space-gsxbot-<botId>-<viewer hash>` —
+  viewer-scoped because a Space has one creator (ADR-084: creator = writer =
+  sight); `source: 'gsx-designer'`, `gsxBotId`, kind `user` so the window
+  renders it like any Space. Name = the bot's label, or "<label> (GSX)" when
+  a user-made Space already owns the name (live: "Omni Data (GSX)"). One
+  **agent asset** per live flow — the exact shape `createAgent` writes
+  (`:Asset{type:'agent'}` ─REPRESENTS→ `:Agent` ─HAS_TYPE→
+  `:AgentType:Workflow`, BELONGS_TO the Space, CREATED by the viewer) on
+  deterministic ids, with `sourceUrl` = the Designer deep link
+  (`studio.<env>.onereach.ai/flows/<botId>/<flowId>`), a markdown body, and
+  metadata (`gsxFlowId`, `gsxVersion`, `gsxDateModified`, categories). A
+  flow that leaves Designer retires its asset (soft delete); a bot that
+  reappears un-deletes its Space.
+- **Writes are gated like every other write.** `UPDATE_GSX_FLOW_SPACE`,
+  `UPSERT_GSX_FLOW_AGENTS` and `RETIRE_GSX_FLOW_AGENT` carry
+  `SPACE_WRITABLE`; `LIST_GSX_FLOW_AGENTS` carries `SPACE_VISIBLE`;
+  `CREATE_GSX_FLOW_SPACE` (create only when the id is absent) and
+  `SPACE_NAME_TAKEN` (one boolean) are exempt with written reasons in the
+  write-guard and visibility-inventory meta-tests. Agents are written **one
+  batched query per bot** (UNWIND, chunks of 100): the first per-flow
+  version took 127 s for 415 flows; batched, a full sync is ~18 s.
+- **Trigger.** `runGsxFlowSyncNow()` in `spaces/main.ts` fires on every
+  Spaces-window open after the pre-warm, throttled to once per 10 minutes,
+  one run at a time; on-demand via `getSpacesApi().syncGsxFlows()` (no
+  cooldown). A run that changed anything drops the read cache and refetches
+  the Space list so the open window repaints. Signed out / no account / no
+  Designer → resolves `aborted` with a reason; one bot failing is counted
+  and skipped, never retiring that bot's agents.
+
+**Verified live (2026-09-05).** Dry run: 12 bots, 415 flows. Apply: 12
+Spaces created, 415 agents created, all `type:'agent'`, all REPRESENTS +
+HAS_TYPE(:Workflow) + CREATED-by-viewer, 415 distinct ids; per-Space counts
+match Designer (AI Build Tools 347, Step Building Space 22, …). Re-run:
+0 created / 415 updated / 0 retired, 17.7 s. The Tickets Space lists its
+flows as agents with Designer links. Fresh signed-out boot: 47 events,
+0 warn, 0 error (the trigger aborts silently). Unit 4068 + integration 230
+green; the write-guard, visibility-inventory, event-conformance and
+platform-contract meta-tests pass with the new queries/events.
+
+**Consequences / follow-ups.** The 347-agent Space relies on the item
+list's SKIP/LIMIT paging. Retiring is by flow id within a synced Space;
+deleting a whole bot in Designer leaves its Space (with retired agents) —
+a future sweep can retire the Space too. The refresh-token dependency is
+the SDK's own auth path and is the one thing that keeps a personal-account
+user (no flow deployed) from syncing.
