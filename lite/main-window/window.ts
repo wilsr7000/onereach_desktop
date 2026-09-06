@@ -33,6 +33,7 @@ import {
   session as electronSession,
   Notification,
   desktopCapturer,
+  screen,
   shell,
 } from 'electron';
 import type { Rectangle } from 'electron';
@@ -125,7 +126,43 @@ const DEFAULT_WIDTH = 1280;
 const DEFAULT_HEIGHT = 800;
 const MIN_WIDTH = 720;
 const MIN_HEIGHT = 480;
+// The window opens at a size that suits the display (2026-09-06, user:
+// "make the main window a bit larger"): 80% of the work area's width and
+// 85% of its height, never smaller than the old fixed default, and capped
+// so a 6K display still gets a window rather than a wall.
+const INITIAL_WORK_AREA_FRACTION = { width: 0.8, height: 0.85 } as const;
+const INITIAL_MAX = { width: 1680, height: 1050 } as const;
 const BACKGROUND = (): string => windowBackgroundColor();
+
+/**
+ * Initial main-window size for a display work area. Pure; exported for
+ * tests. Falls back to the fixed default when the work area is unknown
+ * or smaller than it.
+ */
+export function initialMainWindowSize(workArea: { width: number; height: number } | null): { width: number; height: number } {
+  if (workArea === null || !(workArea.width > 0) || !(workArea.height > 0)) {
+    return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+  }
+  const fit = (avail: number, fraction: number, floor: number, cap: number, min: number): number => {
+    const wanted = Math.round(avail * fraction);
+    // A display too small for the old default gets the display, minus a margin.
+    if (avail < floor) return Math.max(min, avail - 40);
+    return Math.min(cap, Math.max(floor, wanted));
+  };
+  return {
+    width: fit(workArea.width, INITIAL_WORK_AREA_FRACTION.width, DEFAULT_WIDTH, INITIAL_MAX.width, MIN_WIDTH),
+    height: fit(workArea.height, INITIAL_WORK_AREA_FRACTION.height, DEFAULT_HEIGHT, INITIAL_MAX.height, MIN_HEIGHT),
+  };
+}
+
+function primaryWorkArea(): { width: number; height: number } | null {
+  try {
+    const area = screen.getPrimaryDisplay().workAreaSize;
+    return typeof area?.width === 'number' && typeof area?.height === 'number' ? area : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The IDW Feed shown as the Home-tab CONTENT (deployed to Edison). The
@@ -234,9 +271,10 @@ export function createMainWindow(config: CreateMainWindowConfig): BrowserWindow 
     return mainWindow;
   }
 
+  const initialSize = initialMainWindowSize(primaryWorkArea());
   const win = new BrowserWindow({
-    width: DEFAULT_WIDTH,
-    height: DEFAULT_HEIGHT,
+    width: initialSize.width,
+    height: initialSize.height,
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
     title: PRODUCT_DISPLAY_NAME,
