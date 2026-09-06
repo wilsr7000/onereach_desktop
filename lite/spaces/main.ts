@@ -196,16 +196,15 @@ let gsxFlowSyncInFlight: Promise<GsxFlowSyncResult> | null = null;
  */
 /**
  * The Designer port for the signed-in session — one shape for the sync
- * (ADR-091) and the create-Space mirror (ADR-092). Bots and flows ride
- * the account's FLOW token; views and writes ride the user's own token
- * (the hub refuses the FLOW token there). Null when nobody is signed in.
+ * (ADR-091) and the create-Space mirror (ADR-092). Every route rides the
+ * account's own token (`/refresh_token`), bots, flows, views and writes
+ * alike; the session only decides WHICH account.
  */
 function gsxFlowsPortForSession(accountId: string): FetchGsxFlowsPort {
   return new FetchGsxFlowsPort({
     env: 'edison',
     accountId,
     fetch: (url, init) => fetch(url, init),
-    userToken: () => getAuthApi().getToken('edison'),
   });
 }
 

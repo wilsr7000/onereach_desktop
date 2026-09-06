@@ -2095,12 +2095,14 @@ GSX are called **GSX agent flows** everywhere in Lite from now on (robb:
 **Open in Designer** (`studio.<env>.onereach.ai/flows/<botId>/<flowId>`) and
 **Open view** — the flow's View in Action Desk
 (`actiondesk.<env>.onereach.ai/views/<viewId>?accountId=…`, the link Action
-Desk's own list uses). Views come from the data hub's `/views` route, which
-refuses the account's FLOW token ("auth fail: wrong keyId", verified
-2026-09-05) and takes the signed-in USER token sent raw, the way Studio and
-Action Desk send it; the port lists them once per sweep with the projection
-Action Desk asks for (`flowId`/`botId`, or the SDK's `linkId`/`linkType`)
-and keeps the most recently modified view per flow. The links live in the
+Desk's own list uses). Views come from the data hub's `/views` route on the
+same account token as bots and flows — the `/refresh_token` answer already
+reads "FLOW …" and goes out as-is; prefixing it again is what the hub's
+"auth fail: wrong keyId" means (an afternoon was lost to that on
+2026-09-05). The port lists them once per sweep with the projection Action
+Desk asks for (`flowId`/`botId`, or the SDK's `linkId`/`linkType`) and
+keeps the most recently modified view per flow. Verified live: 20 views, 17
+linked to flows. The links live in the
 agent's metadata (`gsxDesignerUrl`, `gsxViewId`, `gsxViewUrl`,
 `gsxViewLabel`) and in its body; the Spaces detail pane shows both as
 buttons that open the signed-in GSX window (the GSX menu's), never the OS
@@ -2115,18 +2117,20 @@ well as in NEON."
 **What GSX has.** What Designer calls a space is a **bot** (ADR-091). Studio
 creates one with `POST <data hub>/bots/new` carrying
 `{ bot: { id: 'new', data: { label, description, longDescription: '',
-iconUrl: '', deploy: {} } } }` under the signed-in user's token; the hub
-answers the new id. The account's FLOW token is refused on that route
-("wrong keyId", verified live 2026-09-05), as it is for views.
+iconUrl: '', deploy: {} } } }`; the hub answers the new record with its id.
+The account token (`/refresh_token`, sent as-is) is accepted there like
+everywhere else on the hub — verified live 2026-09-05 by creating a
+throwaway bot through the port's exact call and soft-deleting it again.
 
 **Decision.**
 - **Creation mirrors.** `createSpace` (the Spaces API, behind the New Space
   wizard) creates the Space in NEON first, then `gsx-space-mirror.ts`
-  creates the bot of the same name and description in Designer and stamps
-  the Space with it (`gsxBotId`, `gsxBotLabel`; `SET_SPACE_GSX_BOT`, gated
-  on the writer). The create result carries `gsxBotId`; the wizard's toast
-  says "also created as a GSX space in Designer" or why not (signed out,
-  Designer refused — see Logs). Span `spaces.gsxBot.create`.
+  creates the bot of the same name and description in Designer (on the
+  account token) and stamps the Space with it (`gsxBotId`, `gsxBotLabel`;
+  `SET_SPACE_GSX_BOT`, gated on the writer). The create result carries
+  `gsxBotId`; the wizard's toast says "also created as a GSX space in
+  Designer" or why not (signed out, Designer refused — see Logs). Span
+  `spaces.gsxBot.create`.
 - **Best-effort, never blocking.** The Space exists in NEON whatever GSX
   does. Signed out, a hub that refuses, a network that is down: each is a
   reported outcome, not a failed Space. A bot created but a Space that could
@@ -2143,9 +2147,9 @@ answers the new id. The account's FLOW token is refused on that route
 
 **Consequences.** One more hub write on the create path (bounded by a
 20-second request timeout). Two new Space properties (`gsxBotId`,
-`gsxBotLabel`) on user-made Spaces. Live verification from a signed-out
-scratch instance is impossible by construction (both hub routes need the
-user's session); the port's wire format is pinned by tests against Studio's
-captured calls, and the first real creation is verified in the user's
-signed-in app (Designer shows the bot; the graph shows the stamp).
+`gsxBotLabel`) on user-made Spaces. The port's wire format is pinned by
+tests against Studio's captured calls and exercised live against the hub;
+the in-app path (wizard → NEON → Designer → stamp) needs a signed-in Lite
+and is checked in the user's app, from the outside, through NEON and the
+hub's bot list.
 
