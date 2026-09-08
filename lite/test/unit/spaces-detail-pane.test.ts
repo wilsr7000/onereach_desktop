@@ -359,6 +359,15 @@ describe('buildDetailTags', () => {
     expect(chips[1]?.textContent).toBe('real');
   });
 
+  // The human's marks: a tag a person typed wears the hand (.or-hand);
+  // a tag the app wrote on its own (the conversation tap's
+  // `ai-conversation` + provider, the flow sync's kind) stays typeset.
+  it('hands only the tags a person typed', () => {
+    const el = renderer.buildDetailTags(['policy', 'ai-conversation', 'ChatGPT', ' q3 ']);
+    const chips = Array.from(el.querySelectorAll('.spaces-detail-tag'));
+    expect(chips.map((c) => c.classList.contains('or-hand'))).toEqual([true, false, false, true]);
+  });
+
   it('returns an empty container for an empty tag list', () => {
     const el = renderer.buildDetailTags([]);
     expect(el.children.length).toBe(0);

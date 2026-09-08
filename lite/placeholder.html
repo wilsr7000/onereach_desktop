@@ -162,20 +162,17 @@
         text-transform: uppercase;
       }
       /* The human's marks (2026-09-06): a few drops of ink beside the mark,
-         as if the pen paused there â the imperfection the machine cannot fake. */
+         as if the pen paused there. The dots are the kit's .or-ink-splatter
+         (signature.css); this only anchors them at the mark's shoulder. */
       .brand-ink {
         position: absolute;
-        right: -34px;
-        top: -10px;
-        width: 60px;
-        height: 40px;
-        background-color: rgba(var(--or-ink-rgb), 0.55);
+        right: -4px;
+        top: -2px;
+        width: 0;
+        height: 0;
         transform: rotate(-8deg);
         pointer-events: none;
-        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 40' fill='black'%3E%3Ccircle cx='6' cy='30' r='1.6'/%3E%3Ccircle cx='16' cy='34' r='1'/%3E%3Ccircle cx='30' cy='36' r='2'/%3E%3Ccircle cx='44' cy='30' r='1.3'/%3E%3Ccircle cx='52' cy='20' r='0.9'/%3E%3Ccircle cx='56' cy='8' r='1.4'/%3E%3Ccircle cx='40' cy='6' r='1'/%3E%3Ccircle cx='22' cy='10' r='0.8'/%3E%3C/svg%3E") no-repeat center / contain;
-        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 40' fill='black'%3E%3Ccircle cx='6' cy='30' r='1.6'/%3E%3Ccircle cx='16' cy='34' r='1'/%3E%3Ccircle cx='30' cy='36' r='2'/%3E%3Ccircle cx='44' cy='30' r='1.3'/%3E%3Ccircle cx='52' cy='20' r='0.9'/%3E%3Ccircle cx='56' cy='8' r='1.4'/%3E%3Ccircle cx='40' cy='6' r='1'/%3E%3Ccircle cx='22' cy='10' r='0.8'/%3E%3C/svg%3E") no-repeat center / contain;
       }
-
 
       .wordmark {
         margin-top: 8px;
@@ -486,7 +483,7 @@
     <main class="login-shell" aria-label="Onereach Desktop sign-in">
       <section class="brand-panel" aria-label="Welcome">
         <div>
-          <div class="brand-mark" aria-hidden="true"><span class="brand-ink"></span></div>
+          <div class="brand-mark" aria-hidden="true"><span class="brand-ink or-ink-splatter"></span></div>
           <div class="eyebrow">Onereach</div>
           <div class="wordmark">Desktop</div>
           <h1>Your AI workspace, distilled.</h1>

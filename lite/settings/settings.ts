@@ -329,7 +329,7 @@ function buildContentPane(section: SectionDescriptor): HTMLElement {
   eyebrow.textContent = 'Settings';
   header.appendChild(eyebrow);
   const h2 = document.createElement('h2');
-  h2.className = 'pane-title';
+  h2.className = 'pane-title or-ink-underline';
   h2.textContent = section.title;
   header.appendChild(h2);
   pane.appendChild(header);

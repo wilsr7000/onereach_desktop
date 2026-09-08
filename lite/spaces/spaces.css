@@ -11045,84 +11045,49 @@ body {
 
 /* ── The human's marks in Spaces (2026-09-06) ─────────────────────────
    The kit lives in signature.css (.or-ink-underline / .or-hand /
-   .or-sketch / .or-ink-splatter). Here: the Space name wears the ink
-   underline; an objective a person wrote reads in the hand; tags people
-   typed lean like stuck-on labels; an empty grid carries the sketch-lines;
-   the end of the Home feed is a pencilled note. */
+   .or-sketch / .or-ink-splatter); the markup wears the classes and this
+   file only sizes and places them. The Space name wears the ink
+   underline; an objective a person wrote (or kept from a draft) reads in
+   the hand; tags people typed lean like stuck-on labels while
+   machine-written tags stay typeset; an empty grid carries the
+   sketch-lines in its margin. App copy such as the end-of-feed note stays
+   typeset: the machine does not write in the human's hand. */
 
 .spaces-view-header-title.or-ink-underline::after {
   width: clamp(88px, 28%, 180px);
   margin-top: 6px;
 }
 
-.spaces-view-header-sub:not(.spaces-view-header-sub-placeholder) {
-  font-family: var(--or-font-hand);
+.spaces-view-header-sub.or-hand {
   font-size: 15px;
   line-height: 1.4;
-  color: rgba(var(--or-ink-rgb), 0.76);
   display: inline-block;
   transform: rotate(-0.5deg);
   transform-origin: left center;
 }
 
-.spaces-detail-tag {
-  font-family: var(--or-font-hand);
+.spaces-detail-tag.or-hand {
   font-size: 13px;
-  border: 1px dashed rgba(var(--or-ink-rgb), 0.32);
+  border: 1px solid rgba(var(--or-ink-rgb), 0.28);
   border-radius: 10px 12px 9px 11px;
   background: transparent;
-  color: rgba(var(--or-ink-rgb), 0.78);
-  display: inline-block;
   transform: rotate(-1deg);
 }
 
-.spaces-detail-tag:nth-child(even) {
+.spaces-detail-tag.or-hand:nth-child(even) {
   transform: rotate(0.8deg);
-}
-
-.spaces-empty-items {
-  position: relative;
-  overflow: hidden;
-}
-
-.spaces-empty-items::after {
-  content: '';
-  position: absolute;
-  right: 4%;
-  bottom: 6%;
-  width: 168px;
-  height: 184px;
-  background-color: currentColor;
-  opacity: 0.13;
-  pointer-events: none;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 240' fill='none' stroke='black' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M12 26C60 26 60 12 104 12M12 26C60 26 60 40 104 40M12 26C40 26 40 60 104 60'/%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='104' cy='12' r='2.4'/%3E%3Ccircle cx='104' cy='40' r='2.4'/%3E%3Ccircle cx='104' cy='60' r='2.4'/%3E%3Ccircle cx='12' cy='26' r='2.4'/%3E%3C/g%3E%3Cpath d='M20 110l30-22 28 26 30-30 26 20'/%3E%3Cpath d='M18 150v-30M40 150v-46M62 150v-22M84 150v-38M106 150v-16'/%3E%3Cg stroke-width='0.9'%3E%3Ccircle cx='150' cy='30' r='3'/%3E%3Ccircle cx='196' cy='16' r='3'/%3E%3Ccircle cx='200' cy='58' r='3'/%3E%3Ccircle cx='168' cy='74' r='3'/%3E%3Cpath d='M150 30L196 16M150 30L200 58M196 16L168 74M200 58L168 74M150 30L168 74'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 240' fill='none' stroke='black' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M12 26C60 26 60 12 104 12M12 26C60 26 60 40 104 40M12 26C40 26 40 60 104 60'/%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='104' cy='12' r='2.4'/%3E%3Ccircle cx='104' cy='40' r='2.4'/%3E%3Ccircle cx='104' cy='60' r='2.4'/%3E%3Ccircle cx='12' cy='26' r='2.4'/%3E%3C/g%3E%3Cpath d='M20 110l30-22 28 26 30-30 26 20'/%3E%3Cpath d='M18 150v-30M40 150v-46M62 150v-22M84 150v-38M106 150v-16'/%3E%3Cg stroke-width='0.9'%3E%3Ccircle cx='150' cy='30' r='3'/%3E%3Ccircle cx='196' cy='16' r='3'/%3E%3Ccircle cx='200' cy='58' r='3'/%3E%3Ccircle cx='168' cy='74' r='3'/%3E%3Cpath d='M150 30L196 16M150 30L200 58M196 16L168 74M200 58L168 74M150 30L168 74'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
-}
-
-.spaces-empty-items-mark {
-  display: inline-block;
-  transform: rotate(-6deg);
-}
-
-.home-timeline-tail {
-  font-family: var(--or-font-hand);
-  font-size: 15px;
-  color: rgba(var(--or-ink-rgb), 0.6);
-  display: inline-block;
-  transform: rotate(-0.8deg);
 }
 
 /* The empty-state sketch sits in the card's top-right margin, clear of
    the words — a doodle beside the note, not under it. */
-.spaces-empty-items {
+.spaces-empty-items.or-sketch {
   overflow: visible;
 }
 
-.spaces-empty-items::after {
+.spaces-empty-items.or-sketch::before {
   right: -28px;
   bottom: auto;
   top: -18px;
   width: 128px;
   height: 140px;
-  opacity: 0.12;
 }

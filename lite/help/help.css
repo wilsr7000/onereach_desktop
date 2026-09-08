@@ -270,20 +270,5 @@ ul.def-list li:hover {
   }
 }
 
-/* The human's marks (2026-09-06): the page title wears the ink underline. */
-h1 {
-  position: relative;
-}
-
-h1::after {
-  content: '';
-  display: block;
-  width: clamp(72px, 30%, 180px);
-  height: 9px;
-  margin-top: 6px;
-  background-color: rgba(var(--or-ink-rgb), 0.5);
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.5C30 2.5 55 8 84 4.5S128 2 156 6 186 3.5 198 5' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat left center / 100% 100%;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.5C30 2.5 55 8 84 4.5S128 2 156 6 186 3.5 198 5' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat left center / 100% 100%;
-  transform: rotate(-0.7deg);
-  transform-origin: left center;
-}
+/* The human's marks (2026-09-06): the page title wears the ink underline
+   via the kit class in the markup (h1.or-ink-underline, signature.css). */

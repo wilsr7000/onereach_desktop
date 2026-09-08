@@ -127,20 +127,34 @@ wherever a person's presence belongs — four marks in one vocabulary,
 defined once in `lite/signature.css`:
 
 - **`.or-ink-underline`** — an ink stroke that wobbles under a hero title
-  (the Space name, the Help page title, the Settings title). A mask, so it
-  takes the ink token; tilted under a degree.
+  (the Space name, the Help page title, each Settings pane title). A mask,
+  so it takes the ink token; tilted under a degree. The element becomes
+  inline-block so the stroke's width follows the title, not the column.
+  Hero titles only (24px and up): at label size it reads as a squiggle,
+  which is why the 15px Settings header label stays plain.
 - **`.or-hand`** (+ `.or-hand-tilt`) — the hand face at a hair of tilt for
-  what a person wrote: a Space's objective, tags in the detail pane, the
-  "You are all caught up." note at the end of the feed.
+  what a person wrote: a Space's objective (a draft they kept counts as
+  theirs), tags a person typed in the detail pane. Tags the app writes on
+  its own (`ai-conversation`, provider names, the flow sync's kind) stay
+  typeset — `isMachineTag` in spaces.ts decides.
 - **`.or-sketch`** — the shapes plans take (a hierarchy, a line, some bars,
-  a network, a dot field) drawn in one thin pen at ~13%, in the margin of
+  a network, a dot field) drawn in one thin pen at 13%, in the margin of
   an empty surface — beside the words, never under them.
-- **`.or-ink-splatter`** / the boot page's `.brand-ink` — a few drops of
-  ink beside a mark, as if the pen paused there.
+- **`.or-ink-splatter`** — a few drops of ink beside a mark, as if the pen
+  paused there (the boot page's `.brand-ink` span only anchors it).
 
 Rules that keep it a touch: tilts stay under a degree (tags may lean a
 whole one); the hand face is for short things people wrote, never for
-typeset prose; strokes are masks painted with `--or-ink-rgb`, so they
-follow the theme; machine marks (New, AI, kind pills) stay typeset. Pages
-that carry a mask need `img-src 'self' data:` in their CSP — the Help and
-boot pages learned that the hard way.
+typeset prose or the app's own copy — "You are all caught up." is the
+machine talking, so it stays typeset; strokes are masks painted with
+`--or-ink-rgb`, so they follow the theme; machine marks (New, AI, kind
+pills) stay typeset. The kit is defined once, in signature.css, and the
+markup wears the classes — a page sizes and places a mark in its own
+stylesheet but never copies a mask, so every stroke has one opacity
+(underline 0.5, sketch 0.13, splatter 0.55, hand ink 0.74). The masks
+are `data:` images, so every page that links signature.css needs
+`img-src 'self' data:` in its CSP — the Help and boot pages learned that
+the hard way, and `csp-data-images.test.ts` now keeps it true for all of
+them. On a machine without a hand face installed (`--or-font-hand` ends
+in `system-ui, sans-serif`), the hand falls back to typeset rather than
+to a generic cursive.

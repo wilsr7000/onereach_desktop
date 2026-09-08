@@ -7210,6 +7210,10 @@ function buildSpaceObjectiveRow(space: RendererSpace): HTMLElement {
   const hasDescription =
     typeof space.description === 'string' && space.description.length > 0;
   if (hasDescription) {
+    // The objective is the person's words (a draft they kept counts as
+    // theirs), so it reads in the hand — the one place on the header the
+    // machine did not typeset.
+    sub.classList.add('or-hand');
     sub.textContent = space.description ?? '';
     sub.title = 'Click to edit the objective for this space';
     // Visible affordance: a pencil chip that fades in on hover/focus —
@@ -10320,7 +10324,9 @@ function buildFilteredEmptyState(): HTMLElement {
 
 function buildEmptyItemsState(scopeId: string): HTMLElement {
   const wrap = document.createElement('div');
-  wrap.className = 'spaces-empty-items';
+  // Nothing here yet: the card carries the sketch-lines (signature.css
+  // .or-sketch), the shapes a plan takes before anyone has drawn it.
+  wrap.className = 'spaces-empty-items or-sketch';
   const mark = document.createElement('span');
   mark.className = 'spaces-empty-items-mark';
   mark.setAttribute('aria-hidden', 'true');
@@ -12617,6 +12623,35 @@ export function buildDetailMeta(
  * When neither tags NOR an `onTagAdd` callback are present, returns
  * an empty container (caller can skip appending).
  */
+/**
+ * Tags the app writes on its own (the conversation tap stamps
+ * `ai-conversation` plus the provider; the flow sync stamps its kind).
+ * They are machine labels, so they stay typeset; only a tag a person
+ * typed wears the hand (`.or-hand`).
+ */
+const MACHINE_TAGS: ReadonlySet<string> = new Set([
+  'ai-conversation',
+  'ai-memory',
+  'memory-export',
+  'gsx-agent-flow',
+  'gsx-flow',
+  'chatgpt',
+  'openai',
+  'claude',
+  'anthropic',
+  'gemini',
+  'google',
+  'copilot',
+  'perplexity',
+  'grok',
+  'mistral',
+  'deepseek',
+]);
+
+export function isMachineTag(tag: string): boolean {
+  return MACHINE_TAGS.has(tag.trim().toLowerCase());
+}
+
 export function buildDetailTags(
   tags: ReadonlyArray<string>,
   edit?: DetailEditCallbacks
@@ -12626,7 +12661,7 @@ export function buildDetailTags(
   for (const tag of tags) {
     if (typeof tag !== 'string' || tag.trim().length === 0) continue;
     const chip = document.createElement('span');
-    chip.className = 'spaces-detail-tag';
+    chip.className = isMachineTag(tag) ? 'spaces-detail-tag' : 'spaces-detail-tag or-hand';
 
     const label = document.createElement('span');
     label.className = 'spaces-detail-tag-label';

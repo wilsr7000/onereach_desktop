@@ -51,6 +51,16 @@ describe('the empty-Space state', () => {
     expect(text).not.toContain('will show up here');
   });
 
+  // The human's marks: an empty surface carries the sketch-lines (the
+  // kit's .or-sketch from signature.css) — the markup wears the class,
+  // the stylesheet never copies the mask.
+  it('carries the sketch-lines while there is nothing yet', () => {
+    const build = handle().buildEmptyItems;
+    if (build === undefined) return;
+    expect(build('space-1').classList.contains('or-sketch')).toBe(true);
+    expect(build('__uncategorized__').classList.contains('or-sketch')).toBe(true);
+  });
+
   // The triage lane is genuinely passive — items ARRIVE there. A
   // "add" button would be a lie about how the surface works.
   it('gives the uncategorized inbox no add button', () => {
