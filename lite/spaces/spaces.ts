@@ -6890,7 +6890,7 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
   }
 
   const title = document.createElement('h2');
-  title.className = 'spaces-view-header-title';
+  title.className = 'spaces-view-header-title or-ink-underline';
   if (state.activeScopeId === UNCATEGORIZED_SPACE_ID) {
     title.textContent = 'Uncategorized';
   } else {

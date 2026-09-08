@@ -429,6 +429,90 @@ textarea:focus {
   50% { transform: scale(1.045); opacity: 1; }
 }
 
+/* ── The human's marks — a touch of the hand, throughout (2026-09-06) ──
+   The user, looking at the Cap Chew poster: "I love the hand-sketched
+   parts … I like the imperfectness of it." Four marks, one vocabulary,
+   used sparingly where a person's presence belongs:
+     .or-ink-underline  an ink stroke that wobbles under a hero title
+     .or-hand           the hand face at a hair of tilt, for what people wrote
+     .or-sketch         faint sketch-lines where there is nothing yet
+     .or-ink-splatter   a few drops of ink beside the app's mark
+   Every stroke is a mask, so it takes the ink token; nothing here paints
+   a literal colour. Tilts stay under a degree — a hand, not a tumble. */
+
+.or-ink-underline {
+  position: relative;
+}
+
+.or-ink-underline::after {
+  content: '';
+  display: block;
+  width: clamp(72px, 34%, 200px);
+  height: 9px;
+  margin-top: 5px;
+  background-color: rgba(var(--or-ink-rgb), 0.52);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.5C30 2.5 55 8 84 4.5S128 2 156 6 186 3.5 198 5' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat left center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.5C30 2.5 55 8 84 4.5S128 2 156 6 186 3.5 198 5' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat left center / 100% 100%;
+  transform: rotate(-0.7deg);
+  transform-origin: left center;
+  pointer-events: none;
+}
+
+.or-hand {
+  font-family: var(--or-font-hand);
+  color: rgba(var(--or-ink-rgb), 0.74);
+  letter-spacing: 0.01em;
+}
+
+.or-hand-tilt {
+  display: inline-block;
+  transform: rotate(-0.8deg);
+  transform-origin: left center;
+}
+
+.or-hand-tilt:nth-child(even) {
+  transform: rotate(0.6deg);
+}
+
+/* Sketch-lines: a hierarchy, a line, some bars, a network, a dot field —
+   the shapes plans take, drawn in one thin pen. Sits in a corner of an
+   empty surface at fourteen percent. */
+.or-sketch {
+  position: relative;
+}
+
+.or-sketch::before {
+  content: '';
+  position: absolute;
+  right: 6%;
+  bottom: 8%;
+  width: 176px;
+  height: 192px;
+  background-color: currentColor;
+  opacity: 0.14;
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 240' fill='none' stroke='black' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M12 26C60 26 60 12 104 12M12 26C60 26 60 40 104 40M12 26C40 26 40 60 104 60'/%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='104' cy='12' r='2.4'/%3E%3Ccircle cx='104' cy='40' r='2.4'/%3E%3Ccircle cx='104' cy='60' r='2.4'/%3E%3Ccircle cx='12' cy='26' r='2.4'/%3E%3C/g%3E%3Cpath d='M20 110l30-22 28 26 30-30 26 20'/%3E%3Cpath d='M18 150v-30M40 150v-46M62 150v-22M84 150v-38M106 150v-16'/%3E%3Cg stroke-width='0.9'%3E%3Ccircle cx='150' cy='30' r='3'/%3E%3Ccircle cx='196' cy='16' r='3'/%3E%3Ccircle cx='200' cy='58' r='3'/%3E%3Ccircle cx='168' cy='74' r='3'/%3E%3Cpath d='M150 30L196 16M150 30L200 58M196 16L168 74M200 58L168 74M150 30L168 74'/%3E%3C/g%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='16' cy='210' r='1'/%3E%3Ccircle cx='26' cy='210' r='1.4'/%3E%3Ccircle cx='36' cy='210' r='1.9'/%3E%3Ccircle cx='46' cy='210' r='2.4'/%3E%3Ccircle cx='56' cy='210' r='2.9'/%3E%3Ccircle cx='16' cy='222' r='1.3'/%3E%3Ccircle cx='26' cy='222' r='1.8'/%3E%3Ccircle cx='36' cy='222' r='2.3'/%3E%3Ccircle cx='46' cy='222' r='2.8'/%3E%3Ccircle cx='56' cy='222' r='3.3'/%3E%3Ccircle cx='16' cy='234' r='1.6'/%3E%3Ccircle cx='26' cy='234' r='2.1'/%3E%3Ccircle cx='36' cy='234' r='2.6'/%3E%3Ccircle cx='46' cy='234' r='3.1'/%3E%3Ccircle cx='56' cy='234' r='3.6'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 220 240' fill='none' stroke='black' stroke-width='1.1' stroke-linecap='round'%3E%3Cpath d='M12 26C60 26 60 12 104 12M12 26C60 26 60 40 104 40M12 26C40 26 40 60 104 60'/%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='104' cy='12' r='2.4'/%3E%3Ccircle cx='104' cy='40' r='2.4'/%3E%3Ccircle cx='104' cy='60' r='2.4'/%3E%3Ccircle cx='12' cy='26' r='2.4'/%3E%3C/g%3E%3Cpath d='M20 110l30-22 28 26 30-30 26 20'/%3E%3Cpath d='M18 150v-30M40 150v-46M62 150v-22M84 150v-38M106 150v-16'/%3E%3Cg stroke-width='0.9'%3E%3Ccircle cx='150' cy='30' r='3'/%3E%3Ccircle cx='196' cy='16' r='3'/%3E%3Ccircle cx='200' cy='58' r='3'/%3E%3Ccircle cx='168' cy='74' r='3'/%3E%3Cpath d='M150 30L196 16M150 30L200 58M196 16L168 74M200 58L168 74M150 30L168 74'/%3E%3C/g%3E%3Cg fill='black' stroke='none'%3E%3Ccircle cx='16' cy='210' r='1'/%3E%3Ccircle cx='26' cy='210' r='1.4'/%3E%3Ccircle cx='36' cy='210' r='1.9'/%3E%3Ccircle cx='46' cy='210' r='2.4'/%3E%3Ccircle cx='56' cy='210' r='2.9'/%3E%3Ccircle cx='16' cy='222' r='1.3'/%3E%3Ccircle cx='26' cy='222' r='1.8'/%3E%3Ccircle cx='36' cy='222' r='2.3'/%3E%3Ccircle cx='46' cy='222' r='2.8'/%3E%3Ccircle cx='56' cy='222' r='3.3'/%3E%3Ccircle cx='16' cy='234' r='1.6'/%3E%3Ccircle cx='26' cy='234' r='2.1'/%3E%3Ccircle cx='36' cy='234' r='2.6'/%3E%3Ccircle cx='46' cy='234' r='3.1'/%3E%3Ccircle cx='56' cy='234' r='3.6'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+}
+
+/* Ink drops beside a mark, as if the pen paused there. */
+.or-ink-splatter {
+  position: relative;
+}
+
+.or-ink-splatter::after {
+  content: '';
+  position: absolute;
+  right: -30px;
+  top: -8px;
+  width: 60px;
+  height: 40px;
+  background-color: rgba(var(--or-ink-rgb), 0.6);
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 40' fill='black'%3E%3Ccircle cx='6' cy='30' r='1.6'/%3E%3Ccircle cx='16' cy='34' r='1'/%3E%3Ccircle cx='30' cy='36' r='2'/%3E%3Ccircle cx='44' cy='30' r='1.3'/%3E%3Ccircle cx='52' cy='20' r='0.9'/%3E%3Ccircle cx='56' cy='8' r='1.4'/%3E%3Ccircle cx='40' cy='6' r='1'/%3E%3Ccircle cx='22' cy='10' r='0.8'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 40' fill='black'%3E%3Ccircle cx='6' cy='30' r='1.6'/%3E%3Ccircle cx='16' cy='34' r='1'/%3E%3Ccircle cx='30' cy='36' r='2'/%3E%3Ccircle cx='44' cy='30' r='1.3'/%3E%3Ccircle cx='52' cy='20' r='0.9'/%3E%3Ccircle cx='56' cy='8' r='1.4'/%3E%3Ccircle cx='40' cy='6' r='1'/%3E%3Ccircle cx='22' cy='10' r='0.8'/%3E%3C/svg%3E") no-repeat center / contain;
+}
+
 .toast,
 .result:not(.hidden) {
   background:

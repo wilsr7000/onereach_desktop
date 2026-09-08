@@ -2252,3 +2252,21 @@ body {
 .ai-keywalk-steps code { font-family: var(--or-font-mono); font-size: 12.5px; }
 .ai-keywalk-link { color: var(--or-accent); text-decoration: underline; text-decoration-style: dashed; text-underline-offset: 3px; margin-left: 4px; }
 @media (prefers-reduced-motion: reduce) { .hand-note { transform: none; } }
+
+/* The human's marks (2026-09-06): the Settings title wears the ink underline. */
+.settings-header-title {
+  position: relative;
+}
+
+.settings-header-title::after {
+  content: '';
+  display: block;
+  width: clamp(64px, 40%, 140px);
+  height: 8px;
+  margin-top: 4px;
+  background-color: rgba(var(--or-ink-rgb), 0.5);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.5C30 2.5 55 8 84 4.5S128 2 156 6 186 3.5 198 5' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat left center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 9' preserveAspectRatio='none'%3E%3Cpath d='M2 5.5C30 2.5 55 8 84 4.5S128 2 156 6 186 3.5 198 5' fill='none' stroke='black' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat left center / 100% 100%;
+  transform: rotate(-0.7deg);
+  transform-origin: left center;
+}
