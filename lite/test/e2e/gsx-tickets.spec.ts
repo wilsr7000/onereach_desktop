@@ -131,12 +131,22 @@ test('gsx → tickets: a click loads the account’s Tickets app in the GSX wind
 
   // Register the wait BEFORE the click so a fast open can't slip past it.
   const since = new Date().toISOString();
-  const windowPromise = app.waitForEvent('window', { timeout: 15_000 });
   await clickMenuItemUnder(app, 'GSX', 'Tickets');
-  const page = await windowPromise;
+
+  // Find the window by where it went, not by being the next window to
+  // appear: at startup the sign-in flow opens a window of its own, and in
+  // a full e2e run that one can be the first "window" event — the spec
+  // then waited 20 s on the wrong page (release tier, 2026-09-07).
+  let page: Page | undefined;
+  const deadline = Date.now() + 20_000;
+  while (page === undefined && Date.now() < deadline) {
+    page = app.windows().find((w) => w.url().startsWith(TICKETS_APP_ORIGIN));
+    if (page === undefined) await new Promise((r) => setTimeout(r, 250));
+  }
+  expect(page, 'a window at the Tickets app within 20 s').toBeDefined();
+  if (page === undefined) return;
 
   // The deployment — over https, no platform host, no account parameter.
-  await page.waitForURL((url) => url.href.startsWith(TICKETS_APP_ORIGIN), { timeout: 20_000, waitUntil: 'commit' });
   expect(page.url()).toBe(TICKETS_APP_URL);
 
   // The menu logged the link it opened.
