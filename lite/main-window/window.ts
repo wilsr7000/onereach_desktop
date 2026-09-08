@@ -127,14 +127,15 @@ const DEFAULT_HEIGHT = 800;
 const MIN_WIDTH = 720;
 const MIN_HEIGHT = 480;
 // The window opens at a size that suits the display (2026-09-06, user:
-// "make the main window a bit larger"): 80% of the work area's width and
-// 85% of its height, never smaller than 1360×850 (so a 14-inch laptop
-// sees the difference too — 80% of its work area is the old 1280), and
-// capped so a 6K display still gets a window rather than a wall. A
-// display too small for that keeps a 40 px margin all round.
-const INITIAL_WORK_AREA_FRACTION = { width: 0.8, height: 0.85 } as const;
+// "make the main window a bit larger", then "make the main window open
+// larger"): 90% of the work area in each direction, never smaller than
+// 1360×850 (so a 14-inch laptop sees the difference too — 90% of its
+// work area is barely that), and capped so a 6K display still gets a
+// window rather than a wall. A display too small for that keeps a 40 px
+// margin all round.
+const INITIAL_WORK_AREA_FRACTION = { width: 0.9, height: 0.9 } as const;
 const INITIAL_FLOOR = { width: 1360, height: 850 } as const;
-const INITIAL_MAX = { width: 1680, height: 1050 } as const;
+const INITIAL_MAX = { width: 2200, height: 1350 } as const;
 const INITIAL_MARGIN_PX = 40;
 const BACKGROUND = (): string => windowBackgroundColor();
 
