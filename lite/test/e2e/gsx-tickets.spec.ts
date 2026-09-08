@@ -136,7 +136,7 @@ test('gsx → tickets: a click loads the account’s Tickets app in the GSX wind
   const page = await windowPromise;
 
   // The deployment — over https, no platform host, no account parameter.
-  await page.waitForURL((url) => url.href.startsWith(TICKETS_APP_ORIGIN), { timeout: 20_000 });
+  await page.waitForURL((url) => url.href.startsWith(TICKETS_APP_ORIGIN), { timeout: 20_000, waitUntil: 'commit' });
   expect(page.url()).toBe(TICKETS_APP_URL);
 
   // The menu logged the link it opened.
