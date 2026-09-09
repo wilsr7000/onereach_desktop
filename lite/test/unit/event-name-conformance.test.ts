@@ -44,6 +44,7 @@ import { ONBOARDING_EVENTS } from '../../onboarding/events.js';
 import { TOTP_EVENTS } from '../../totp/events.js';
 import { AI_EVENTS } from '../../ai/events.js';
 import { GSX_EVENTS } from '../../gsx/events.js';
+import { CONVERT_EVENTS } from '../../convert/events.js';
 
 const liteRoot = path.resolve(__dirname, '..', '..');
 
@@ -71,6 +72,12 @@ const MODULES: ModuleSpec[] = [
     name: 'kv',
     sourceFiles: ['kv/client.ts'],
     events: KV_EVENTS,
+  },
+  {
+    // ADR-100 — one span per run, emitted by the api.ts wrapper.
+    name: 'convert',
+    sourceFiles: ['convert/api.ts'],
+    events: CONVERT_EVENTS,
   },
   {
     name: 'bug-report',

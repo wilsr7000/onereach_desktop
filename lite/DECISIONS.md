@@ -2446,3 +2446,21 @@ its two guards), `spaces-sidebar-tree` (tree, collapse, fold on top level,
 archived section, unseen parent), `spaces-archive`, `spaces-tidy` (plan
 validation, rejected-move memory, apply mapping, cadence), and the visibility
 inventory and schema audit over the seven new Cypher constants.
+
+## ADR-100: File conversion lives in Lite as plain converters, offered to agents over MCP (2026-09-09)
+
+**Ask (robb, same day as ADR-098):** "We also have a lot of file conversion individual APIs — would be great to test those and then migrate them and make them available through MCP as well."
+
+**What exists.** The full app's `lib/conversion-service.js` auto-discovers 67 converter agents (`lib/converters/*.js`), each a `BaseConverterAgent` with an LLM plan → execute → evaluate → retry loop, a BFS format graph, and an async job manager. Three entry points, one dead: the documented HTTP routes (`lib/conversion-routes.js`) are never mounted; IPC `convert:*` reaches only the full app's own windows. Tested: `npm run test:converters` and the service/route suites — 70 files, all green on 2026-09-09. About thirty converters are thin wrappers over one library or pure code; the rest shell out to ffmpeg / poppler from `$PATH`, render through an Electron `BrowserWindow`, or are prompt pipelines (transcription, OCR, summaries).
+
+**Decision.** A Lite module, `lite/convert/`, ports the deterministic converters as plain functions: `{ spec, execute(input, strategy, options) }` with the ORIGINAL strategy ids and semantics, chosen explicitly by the caller instead of planned by a model, `stats` where the original wrote `metadata`, `warnings` where it raised soft issues. A registry keeps the format graph (formats + aliases; a pair with no direct converter runs the shortest pipeline — the full app's resolver rule); a service validates (25 MB cap, typed `ConvertError`s), resolves, runs, reports; `api.ts` (Rule 11/12) wraps it in one `convert.run` span per run. No LLM loop: a wrong strategy is a typed error with the list of right ones, not a retry.
+
+**MCP.** `lite/mcp/convert-mcp.ts` is a stdio server on the spaces-mcp pattern (McpServer + StdioServerTransport, bundled standalone by esbuild with the libraries inlined, no Electron): `convert_capabilities` (formats, converters, strategies, options, reachable pairs), `convert_pipeline` (the steps a pair would take), `convert_text` (text in, text out, optional report). Typed errors come back as error envelopes carrying the code and the remediation. Registered for Claude with `claude mcp add onereach-convert -- node dist-lite/build/convert-mcp.js`.
+
+**Tranche 1 (this cut) — text formats:** csv/tsv ↔ json, csv → md/html, json → md/html, json ↔ yaml (js-yaml), md ↔ html (marked, turndown), md/html → text, text → md, ipynb → md/py, md → ipynb, code → html (highlight.js core with a fixed language set) and code → md. `xml-json` is NOT ported: `fast-xml-parser` is not installed in this checkout, so the full app's converter cannot run either.
+
+**Later tranches, in order.** Office in/out (`exceljs` already loads for the spreadsheet preview; `mammoth`, `docx`, `pptxgenjs`, `adm-zip` — each an electron-builder exclude to lift); `pdf-to-text` (`pdf-parse`); the Electron-rendered ones (html/md/url → pdf/image — need a headless window owner in Lite main and an HTTP or IPC path since the MCP process has no Electron); `sharp` image ops (native; externalize like keytar); the ffmpeg family last (a binary strategy first — the full app relies on bare `$PATH`); the prompt pipelines route through `lite/ai/`, not a port of the 900-line retry loop.
+
+**Verified.** Typecheck, dep-check, the Rule 12 conformance contracts, per-converter strategy tests mirroring the originals, registry BFS tests, MCP tool tests over a fake server, and the built bundle driven over real stdio JSON-RPC (initialize → tools/list → tools/call).
+
+**Rejected.** Reusing `local-api-mcp`'s HTTP catalog (it targets the full app's ports; conversion needs no server); porting `BaseConverterAgent` (its value is the LLM loop, which the ports deliberately drop); one converter that sniffs direction (json/yaml is two converters with their own strategies).

@@ -1330,6 +1330,67 @@ export const MANIFEST: Manifest = {
       "readme": "# Calendar — scheduled flows (ADR-090)\n\nThe GSX menu's **Calendar** opens this window: the signed-in account's scheduled flows on a month grid, with a day pane and a detail pane that opens the flow in GSX Designer. It replaced a link to `calendar.<env>.onereach.ai`, a host that does not exist.\n\n**What \"scheduled\" means.** A flow is scheduled when its canvas carries the platform's **Schedule execution** step (template `5d352cdd-…`). At activation the step hands the Event Manager its schedule events — Quartz cron expressions (`expressions`), a time zone, a start and an end, recurring or once — and the Event Manager fires the flow. The Event Manager publishes no listing, so the Calendar reads the flow definitions, the same data the step registers.\n\n**How it reads GSX** (`datahub.ts`, plain fetch, no SDK dependency): the account token from `em.<env>.api.onereach.ai/http/<account>/refresh_token` (the source the full app and the podscan tools use), the `data-hub-pg` service from discovery, then `/bots` and `/flows?query={\"botId\":…}`. `schedule.ts` finds the step and its events; `cron.ts` evaluates the expressions in their time zone (5–7 Quartz fields, lists, ranges, steps, names, `L`, `n#k`).\n\n## API\n\n`export interface CalendarApi`\n\n- `snapshot({ refresh? })` — every scheduled flow (bots, flows, events, per-bot errors), cached 5 minutes.\n- `occurrences({ fromMs, toMs, refresh? })` — runs within the window (≤ 400 days), ascending, capped at 20,000.\n- `status()` — signed-in state, cache age, last error; no network.\n- `openFlow({ flowId, botId })` — the flow in Lite's GSX window (`studio.<env>.onereach.ai/flows/<bot>/<flow>`).\n- `openWindow()` — open or focus the Calendar.\n- `setArmed({ flowId, botId, armed })` — arm (activate) or disarm (deactivate) a scheduled flow through the deployer, polling its check route until the platform reports done; resolves with the refreshed flow. The payloads are the deployer SDK's own: activate `POST /flows/deploy { flowId, flowAlias, interactiveDebug: false, role }`, deactivate `DELETE /flows/deploy { flow: { id }, role }` (a bare flowId is a 400), `role` from `flow.data.deploy.role`.\n- `flowLinks({ flowId, botLabel?, refresh? })` — where a flow lives and came from: Spaces it is an item in (the ADR-091 Designer mirror's agent asset with `gsxFlowId`, or any asset with `flowId` or a URL naming the flow), the playbook that built it (the flow-build watcher's KV queue names `{ playbookId, flowId }` per slot; slot bodies are read once per session), and journey maps in those Spaces or in a Space named like the GSX space. Every Space passes the ADR-084 sight rule, so a button is offered only for what the viewer may open.\n\nEvents (`events.ts`): `calendar.snapshot.*`, `calendar.space-events.*`, `calendar.flow-logs.*`, `calendar.set-armed.*`, `calendar.flow-links.*` spans; `calendar.open-window`, `calendar.open-flow`, `calendar.armed`, `calendar.disarmed`, `calendar.export-ics`.\n\n## The schedule index\n\n`index.ts` remembers, per flow id, the version (and modified time) last examined and what it showed: no schedule, or the parsed events. A cold space is read once with the bulk projection (main-tree steps); afterwards a scan lists only flow heads (`FLOW_HEAD_PROJECTION`, a few KB per space) and fetches a body only when a version is new. Flows that vanish from a space that listed fine are dropped; a space that fails to list keeps its entries. The index lives in a local file under userData and is mirrored to the account's KV (`calendar` / `schedule-index:<accountId>`) so a platform-side feed regenerator can share it (`index-store.ts`). Steady state: bots + heads, zero bodies.\n\n## Space events and log summaries\n\n- `spaceEvents({ fromMs, toMs, timeZone, refresh? })` — activity commits the viewer may see (sight-filtered like the Home tab), grouped per local day and per Space; the day link and the events modal read it. Unavailable without NEON; the calendar still shows flows.\n- `flowLogSummary({ flowId, botId, fromMs, toMs, refresh? })` — on demand only: the deployer's log events for the run window, summarised (executions by request id, billed duration and peak memory from REPORT lines, END seen, steps, errors) plus a model narrative when configured. Cached five minutes.\n- Flow descriptions ride along in both projections and the schedule index and show in the detail and day panes.\n\n## Armed and not armed, arm / disarm, views, export (2026-09-05, evening)\n\n- **Not armed is visible.** The header filter (All / Armed / Not armed) picks whose runs the grid shows; runs of a flow that is not armed are drawn dimmed with a dashed edge and say so in their tooltip. Under the day pane, \"In this account\" lists every scheduled flow with its state (armed / active · no trigger / not armed) and opens its detail on click.\n- **Arm / Disarm** sits in the detail pane with an inline confirmation (no `window.confirm` in renderers); while the platform works the buttons are disabled and the question says so; on success the calendar reloads and toasts, on refusal the platform's message is the toast. A flow whose every schedule window has ended is told so before arming — and warned when the platform still holds a trigger for it.\n- **Space, playbook & journey map** buttons appear in the detail pane when `flowLinks` finds any: \"In Space · X\" (the flow is an item there), \"Near Space · X\" (the playbook's Space or a Space named like the GSX space), \"Open playbook · title\" (WISER, `spaces.openWiser`), \"Open journey map · title\" (Journey Map Builder). None → one plain line.\n- **Deep link to a Space.** The events modal's \"Open Space\" and the Space buttons call `spaces.open({ spaceId })`; main hands the id to a Spaces window that is still booting (`takePendingFocus`) or pushes `lite:spaces:focus-space` to a live one, and the Spaces renderer lands on that Space.\n- **Week and Day views** (Month / Week / Day toggle; ← → move by the view's unit): seven Sunday-first columns with every run in time order, and a 24-hour agenda with runs grouped per hour. Both keep the Space-events link.\n- **Export .ics** saves the runs in view (respecting the filter) through a save dialog: one VEVENT per run with a stable UID (`flowId.eventId.atMs`), UTC stamps, the flow description; a (flow, event) that fires more than twelve times on one day becomes a single all-day marker (\"×288, every 5 min\"). Pure builder in `ics.ts`.\n- **Grey means it will not fire.** Every scheduled run is drawn. A run of an armed flow keeps its series colour; a run of a flow that is not armed is plain grey. The authored end date is advisory: the platform keeps firing an armed flow past it (observed live: the _ReportingAdapters \"5min\" flow, window ended 2020-02-01, fires every five minutes), so runs after the end are produced, flagged `pastWindow`, and explained in the tooltip. The subtitle counts runs that fire and grey runs separately. Occurrence cap 60,000 per window.\n- **Rollup in a day cell.** One line per flow — the name, then the number (`×288`) or the time of a single run — at most three, then `+N more · M runs` (each flow's count in its tooltip). The event name appears only when one flow has several series that day. Cells are at least 118 px tall and the grid scrolls when the window is short.\n- **Flows first.** The grid paints from the datahub as soon as it answers; Space events land when the graph answers (or not: a hanging graph — observed 2026-09-06, `RETURN 1` took the server's full 29 s — leaves the grid alone).\n- **Timeouts.** Listings keep the 8 s budget; deployer calls (logs, deploy, check) get 30 s — a day-wide log scan took 9.8 s live and used to be cut at 8.\n"
     },
     {
+      "slug": "convert",
+      "title": "Convert",
+      "summary": "Convert API — the module's public surface (Rule 11 / Rule 12, ADR-100).\n\nWraps {@link ConvertService} with the app's spans so every run shows up\nin /logs?category=convert as `convert.run.start|finish|fail`. The MCP\nserver (`lite/mcp/convert-mcp.ts`) runs the same service without this\nwrapper, in its own process.",
+      "surface": {
+        "interfaceName": "ConvertApi",
+        "interfaceDescription": "",
+        "methods": [
+          {
+            "name": "convert",
+            "signature": "convert(req: ConvertRequest): Promise<ConvertResult>",
+            "description": "Convert text between formats; resolves a pipeline when no direct converter exists.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "pipeline",
+            "signature": "pipeline(from: string, to: string): PipelinePlan",
+            "description": "The steps a from → to conversion would take. Throws for unknown or unreachable formats.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "capabilities",
+            "signature": "capabilities(): Capabilities",
+            "description": "Formats, converters, strategies, reachable pairs.",
+            "tags": [],
+            "examples": []
+          },
+          {
+            "name": "onEvent",
+            "signature": "onEvent(handler: (event: ConvertEvent) => void): () => void;",
+            "description": "Subscribe to typed convert events (ADR-032).",
+            "tags": [],
+            "examples": []
+          }
+        ]
+      },
+      "events": {
+        "constantName": "CONVERT_EVENTS",
+        "count": 3,
+        "entries": [
+          {
+            "constantKey": "RUN_START",
+            "name": "convert.run.start",
+            "description": ""
+          },
+          {
+            "constantKey": "RUN_FINISH",
+            "name": "convert.run.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "RUN_FAIL",
+            "name": "convert.run.fail",
+            "description": ""
+          }
+        ]
+      },
+      "readme": "# `lite/convert/` -- File conversion, in the app and over MCP\n\nThe full Onereach app carries 67 file-conversion agents (`lib/converters/`)\nbehind an LLM plan / execute / evaluate loop, an HTTP surface that was never\nmounted, and an IPC surface only its own windows reach. Lite ports the\ndeterministic converters as plain functions with the same strategies —\nchosen explicitly, not by a model — and offers them to agents as an MCP\nserver (ADR-100).\n\n## Usage\n\nIn the app:\n\n```ts\nimport { getConvertApi } from '../convert/api.js';\n\nconst result = await getConvertApi().convert({ input: markdown, from: 'md', to: 'html', strategy: 'styled' });\nresult.output;      // the HTML page\nresult.steps;       // [{ converterId: 'md-to-html', strategy: 'styled', durationMs, stats }]\nresult.mimeType;    // 'text/html'\n```\n\nFor Claude Code / Claude Desktop, the built server is\n`dist-lite/build/convert-mcp.js` (bundled by `npm run lite:build`, no\nElectron, no external modules):\n\n```\nclaude mcp add onereach-convert -- node /path/to/dist-lite/build/convert-mcp.js\n```\n\nTools: `convert_capabilities` (formats, converters, strategies, reachable\npairs — start here), `convert_pipeline` (the steps a from → to pair would\ntake), `convert_text` (text in, text out, optional report).\n\n## Formats\n\n`md` (markdown), `html` (htm), `text` (txt, plain), `csv`, `tsv`, `json`,\n`yaml` (yml), `ipynb` (jupyter, notebook), `py` (python), `code`. Aliases fold\nin `normalizeFormat`; a pair with no direct converter runs the shortest\npipeline through the format graph (BFS, the full app's PipelineResolver rule).\n\n## Converters\n\n| id | from → to | engine | strategies |\n|---|---|---|---|\n| `code-to-html` | code → html | highlight.js | highlight (default), themed, fragment |\n| `code-to-md` | code → md | pure | fenced (default) |\n| `csv-to-html` | csv, tsv → html | pure | table (default), styled, sortable |\n| `csv-to-json` | csv, tsv → json | pure | auto-type (default), string-only, nested |\n| `csv-to-md` | csv, tsv → md | pure | simple (default), aligned |\n| `html-to-md` | html → md | turndown | turndown (default), semantic, clean |\n| `html-to-text` | html → text | pure | strip, readable (default), article |\n| `json-to-csv` | json → csv | pure | flat (default), top-level |\n| `json-to-html` | json → html | pure | table (default), tree, pretty |\n| `json-to-md` | json → md | pure | table (default), yaml-block, list |\n| `json-to-yaml` | json → yaml | js-yaml |  |\n| `jupyter-to-md` | ipynb → md | pure | flat (default), sectioned, with-output |\n| `jupyter-to-python` | ipynb → py | pure | code-only (default), with-comments, executable |\n| `md-to-html` | md → html | marked | standard, enhanced (default), styled |\n| `md-to-jupyter` | md → ipynb | pure | auto-cell (default), strict-fence, annotated |\n| `md-to-text` | md → text | pure | strip (default), readable, outline |\n| `text-to-md` | text → md | pure | minimal, structure (default) |\n| `yaml-to-json` | yaml → json | js-yaml |  |\n\nEvery converter is `{ spec, execute(input, strategy, options) }` in\n`converters/`, registered in `converters/index.ts`. Adding one is adding a\nfile and a line there, plus a row above and a test in\n`lite/test/unit/convert-converters.test.ts`.\n\n## Limits\n\nInputs above 25 MB are refused (`CONVERT_TOO_LARGE`). Everything is in-memory\ntext; binary formats (PDF, Office, media) are later tranches and will take\nbase64.\n\n## Error catalog\n\n| Code | Meaning | Remediation |\n|---|---|---|\n| `CONVERT_INVALID_INPUT` | `input` is not a string | Pass text |\n| `CONVERT_TOO_LARGE` | Input over the cap | Split the content |\n| `CONVERT_UNKNOWN_FORMAT` | `from` / `to` not a known format or alias | Use an id from `convert_capabilities` |\n| `CONVERT_NO_PATH` | No converter chain reaches `to` from `from` | Check the reachable pairs |\n| `CONVERT_UNKNOWN_STRATEGY` | Strategy not offered by the converter that runs | Use one of its strategies |\n| `CONVERT_FAILED` | The converter threw on this input | Check the input really is the source format |\n\n## Events\n\n`convert.run.start` / `convert.run.finish` / `convert.run.fail` — one span per\n`convert()` through the api (formats, pipeline, byte counts, duration). The\nMCP server emits nothing; its report is the record.\n\n## Test coverage\n\n`convert-api.test.ts` (Rule 12 conformance + spans), `convert-registry.test.ts`\n(aliases, validation, BFS), `convert-converters.test.ts` (every converter's\nstrategies), `convert-mcp.test.ts` (tools, schemas, error envelopes).\n\n## Borrowed pattern\n\n`lite/mcp/spaces-mcp.ts` for the server shape; `lib/conversion-service.js`\nfor the registry + pipeline resolution; each `lib/converters/<id>.js` for the\nstrategy semantics the port preserves.\n"
+    },
+    {
       "slug": "discovery",
       "title": "Discovery",
       "summary": "Discovery module -- PUBLIC API.\n\nThe only file other lite modules should import from in this module.\nPer ADR-019 / Rule 11 in `lite/LITE-RULES.md`, cross-module imports\ngo through `<module>/api.ts` -- never reach into `store.ts` or any\nother internal file.\n\nWraps `@or-sdk/discovery` so other modules can resolve OneReach\nservice URLs (KV, Flows, Bots, etc.) without importing the SDK.\n\nUsage from another module (main process only):\n\n  import { getDiscoveryApi } from '../discovery/api.js';\n  const url = await getDiscoveryApi().resolve('key-value-storage');\n\nTests: `_setDiscoveryApiForTesting(stub)` to inject a custom\nimplementation, `_resetDiscoveryApiForTesting()` to clear the\nsingleton.",
@@ -3839,7 +3900,7 @@ export const MANIFEST: Manifest = {
       },
       "events": {
         "constantName": "SPACES_EVENTS",
-        "count": 146,
+        "count": 155,
         "entries": [
           {
             "constantKey": "CHECKLISTS_CREATE_START",
@@ -4019,6 +4080,51 @@ export const MANIFEST: Manifest = {
           {
             "constantKey": "LIST_SPACES_FAIL",
             "name": "spaces.listSpaces.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "ARCHIVE_SPACE_START",
+            "name": "spaces.archive.start",
+            "description": ""
+          },
+          {
+            "constantKey": "ARCHIVE_SPACE_FINISH",
+            "name": "spaces.archive.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "ARCHIVE_SPACE_FAIL",
+            "name": "spaces.archive.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "UNARCHIVE_SPACE_START",
+            "name": "spaces.unarchive.start",
+            "description": ""
+          },
+          {
+            "constantKey": "UNARCHIVE_SPACE_FINISH",
+            "name": "spaces.unarchive.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "UNARCHIVE_SPACE_FAIL",
+            "name": "spaces.unarchive.fail",
+            "description": ""
+          },
+          {
+            "constantKey": "TIDY_EVIDENCE_START",
+            "name": "spaces.tidyEvidence.start",
+            "description": ""
+          },
+          {
+            "constantKey": "TIDY_EVIDENCE_FINISH",
+            "name": "spaces.tidyEvidence.finish",
+            "description": ""
+          },
+          {
+            "constantKey": "TIDY_EVIDENCE_FAIL",
+            "name": "spaces.tidyEvidence.fail",
             "description": ""
           },
           {
@@ -5112,5 +5218,5 @@ export const MANIFEST: Manifest = {
       "reason": "Internal-only registry pattern (no public api.ts). Builds the application menu from menu/seed.ts via menu/registry.ts. Events: menu.click, menu.click.failed."
     }
   ],
-  "generatedAt": "2026-09-09T21:19:05.391Z"
+  "generatedAt": "2026-09-09T21:55:41.731Z"
 } as const;

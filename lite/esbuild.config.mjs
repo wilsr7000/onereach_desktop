@@ -375,10 +375,24 @@ const localApiMcpOptions = {
   external: [],
 };
 
+// Convert MCP server (ADR-100): the file converters as tools. Same
+// policy — a standalone node program, pure-JS deps (marked, turndown,
+// js-yaml, highlight.js) bundled in, nothing external.
+const convertMcpOptions = {
+  ...commonOptions,
+  entryPoints: [resolve(__dirname, 'mcp/convert-mcp.ts')],
+  outfile: resolve(outDir, 'convert-mcp.js'),
+  platform: 'node',
+  target: 'node20',
+  format: 'cjs',
+  external: [],
+};
+
 const allConfigs = [
   mainProcessOptions,
   spacesMcpOptions,
   localApiMcpOptions,
+  convertMcpOptions,
   preloadOptions,
   wiserPreloadOptions, journeyMapPreloadOptions,
   bugReportModalOptions,

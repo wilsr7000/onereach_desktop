@@ -17,7 +17,7 @@ describe('API docs manifest', () => {
   it('covers every documented module', () => {
     const slugs = MANIFEST.modules.map((m) => m.slug).sort();
     expect(slugs).toEqual(
-      ['ai', 'ai-run-times', 'auth', 'bug-report', 'calendar', 'discovery', 'downloads', 'event-bus', 'files', 'gsx', 'health', 'idw', 'keychain', 'kv', 'logging', 'main-window', 'neon', 'onboarding', 'registry', 'settings', 'spaces', 'telemetry', 'tools', 'totp', 'university'].sort()
+      ['ai', 'ai-run-times', 'auth', 'bug-report', 'calendar', 'convert', 'discovery', 'downloads', 'event-bus', 'files', 'gsx', 'health', 'idw', 'keychain', 'kv', 'logging', 'main-window', 'neon', 'onboarding', 'registry', 'settings', 'spaces', 'telemetry', 'tools', 'totp', 'university'].sort()
     );
   });
 
