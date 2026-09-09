@@ -139,6 +139,21 @@ export function packagedFeedState(): PackagedFeedState | null {
   return _packagedFeedState;
 }
 
+/** Shown when a check is refused because this install can never download an update. */
+export const FEED_UNUSABLE_MESSAGE =
+  'This copy of the app cannot download updates: the app bundle has no usable update descriptor and one could not be written to your user data folder. Reinstall the current release from the GitHub releases page; updates work normally from there.';
+
+/**
+ * Why no update check should run, or null. The check runner's preflight
+ * (index.ts) asks this for every caller — menu, renderer IPC, periodic.
+ * Only a packaged app whose descriptor is 'unwritable' or 'error'
+ * refuses; 'bundle', 'written', dev runs and pre-init all allow.
+ */
+export function feedRefusalMessage(state: PackagedFeedState | null, isPackaged: boolean): string | null {
+  if (!isPackaged || state === null) return null;
+  return state.descriptor === 'unwritable' || state.descriptor === 'error' ? FEED_UNUSABLE_MESSAGE : null;
+}
+
 /**
  * ADR-101 — make the packaged updater independent of the packager:
  * provider from code; descriptor from code when the bundle's is missing
@@ -163,7 +178,6 @@ export function applyPackagedFeed(
   // guard is installed before anything below can fail, so the 'error'
   // state refuses as well, and a refusal is raised as the updater's
   // 'error' event — the lifecycle's dialog lives there.
-  const originalDownload = autoUpdater.downloadUpdate.bind(autoUpdater);
   const refuse = (message: string): never => {
     const err = new Error(message);
     try {
@@ -173,21 +187,29 @@ export function applyPackagedFeed(
     }
     throw err;
   };
-  autoUpdater.downloadUpdate = async (): Promise<unknown> => {
-    if (state.descriptor === 'unwritable' || state.descriptor === 'error') {
-      return refuse(
-        'Updates cannot be downloaded on this install: the app bundle has no usable update descriptor and one could not be written. Reinstall from the releases page.'
-      );
-    }
-    if (state.descriptor === 'written' && refresh !== null) {
-      try {
-        refresh();
-      } catch (err) {
-        return refuse(`Updates cannot be downloaded: the update descriptor could not be refreshed (${(err as Error).message}).`);
+  try {
+    const originalDownload = autoUpdater.downloadUpdate.bind(autoUpdater);
+    autoUpdater.downloadUpdate = async (): Promise<unknown> => {
+      if (state.descriptor === 'unwritable' || state.descriptor === 'error') {
+        return refuse(
+          'Updates cannot be downloaded on this install: the app bundle has no usable update descriptor and one could not be written. Reinstall from the releases page.'
+        );
       }
-    }
-    return originalDownload();
-  };
+      if (state.descriptor === 'written' && refresh !== null) {
+        try {
+          refresh();
+        } catch (err) {
+          return refuse(`Updates cannot be downloaded: the update descriptor could not be refreshed (${(err as Error).message}).`);
+        }
+      }
+      return originalDownload();
+    };
+  } catch (err) {
+    // An updater without a callable downloadUpdate: nothing to guard, nothing to feed. Never throw (see above).
+    state.descriptor = 'error';
+    log.error('updater: packaged feed setup failed — the updater has no downloadUpdate to guard', { error: (err as Error).message });
+    return state;
+  }
   try {
     const fs = packaged.fs ?? nodeFs();
     const bundled = path.join(packaged.resourcesPath, 'app-update.yml');

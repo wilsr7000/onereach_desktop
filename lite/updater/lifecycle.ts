@@ -183,7 +183,8 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
           if (res.response === 0) {
             void deps.ui.openReleasesPage();
           }
-        });
+        })
+        .catch((err: unknown) => log.warn('updater: gave-up dialog failed', { error: (err as Error).message }));
       return;
     }
 
@@ -204,7 +205,8 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
             deps.emitStatus({ status: 'error', info: { error: (err as Error).message } });
           });
         }
-      });
+      })
+      .catch((err: unknown) => log.warn('updater: update-available dialog failed', { error: (err as Error).message }));
   });
 
   // ------------------------------------------------------------------
@@ -214,13 +216,15 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
     log.info('updater: update-not-available');
     deps.emitStatus({ status: 'not-available', info });
     if (deps.checkRunner.wasLastManual()) {
-      void deps.ui.showMessageBox({
-        type: 'info',
-        title: 'No Updates Available',
-        message: 'You are running the latest version',
-        detail: `Current version: ${deps.getCurrentVersion()}`,
-        buttons: ['OK'],
-      });
+      void deps.ui
+        .showMessageBox({
+          type: 'info',
+          title: 'No Updates Available',
+          message: 'You are running the latest version',
+          detail: `Current version: ${deps.getCurrentVersion()}`,
+          buttons: ['OK'],
+        })
+        .catch((err: unknown) => log.warn('updater: no-updates dialog failed', { error: (err as Error).message }));
     }
   });
 
@@ -279,7 +283,8 @@ export function attachLifecycle(deps: LifecycleDeps): LifecycleHandle {
           if (res.response === 0) {
             void deps.ui.openReleasesPage();
           }
-        });
+        })
+        .catch((err: unknown) => log.warn('updater: check-failed dialog failed', { error: (err as Error).message }));
     }
   });
 

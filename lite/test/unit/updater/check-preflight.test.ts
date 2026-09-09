@@ -7,7 +7,8 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { createCheckRunner } from '../../../updater/check.js';
-import type { AutoUpdaterLike } from '../../../updater/init.js';
+import { initAutoUpdater, packagedFeedState, feedRefusalMessage, FEED_UNUSABLE_MESSAGE, type AutoUpdaterLike, type PackagedFs } from '../../../updater/init.js';
+import { feedDescriptorYaml } from '../../../updater/feed.js';
 
 function fake(checkForUpdates: () => Promise<unknown>): AutoUpdaterLike {
   return {
@@ -24,6 +25,61 @@ function fake(checkForUpdates: () => Promise<unknown>): AutoUpdaterLike {
     quitAndInstall: vi.fn(),
   };
 }
+
+/** A packaged fs: `files` is the bundle; writes land in `written` unless `readOnly`. */
+function packagedFs(files: Record<string, string>, readOnly = false): PackagedFs {
+  const written = new Map<string, string>();
+  return {
+    existsSync: (p) => p in files || written.has(p),
+    readFileSync: (p) => files[p] ?? written.get(p) ?? '',
+    mkdirSync: () => undefined,
+    writeFileSync: (p, data) => {
+      if (readOnly) throw new Error('read-only');
+      written.set(p, data);
+    },
+  };
+}
+
+const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined };
+const RES = '/App.app/Contents/Resources';
+
+describe('the refusal composed with the runner, the way index.ts wires it', () => {
+  it("a packaged app whose bundle carries the feed ('bundle') is allowed: the check runs", async () => {
+    const checkForUpdates = vi.fn(async () => null);
+    const updater = fake(checkForUpdates);
+    updater.setFeedURL = () => undefined;
+    initAutoUpdater({ loadAutoUpdater: () => updater, logger: quiet, packaged: { resourcesPath: RES, userDataPath: '/ud', fs: packagedFs({ [`${RES}/app-update.yml`]: feedDescriptorYaml() }) } });
+    expect(packagedFeedState()?.descriptor).toBe('bundle');
+    const emitStatus = vi.fn();
+    const runner = createCheckRunner({ autoUpdater: updater, emitStatus, preflight: () => feedRefusalMessage(packagedFeedState(), true) });
+    await runner.check({ manual: true });
+    expect(checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(emitStatus).toHaveBeenCalledWith({ status: 'checking' });
+  });
+  it("'written' is allowed too; 'unwritable' refuses every caller with the message; dev and pre-init allow", async () => {
+    const checkForUpdates = vi.fn(async () => null);
+    const written = fake(checkForUpdates);
+    written.setFeedURL = () => undefined;
+    initAutoUpdater({ loadAutoUpdater: () => written, logger: quiet, packaged: { resourcesPath: RES, userDataPath: '/ud', fs: packagedFs({}) } });
+    expect(packagedFeedState()?.descriptor).toBe('written');
+    expect(feedRefusalMessage(packagedFeedState(), true)).toBeNull();
+
+    const unwritable = fake(checkForUpdates);
+    unwritable.setFeedURL = () => undefined;
+    initAutoUpdater({ loadAutoUpdater: () => unwritable, logger: quiet, packaged: { resourcesPath: RES, userDataPath: '/ud', fs: packagedFs({}, true) } });
+    expect(packagedFeedState()?.descriptor).toBe('unwritable');
+    const emitStatus = vi.fn();
+    const runner = createCheckRunner({ autoUpdater: unwritable, emitStatus, preflight: () => feedRefusalMessage(packagedFeedState(), true) });
+    for (const manual of [true, false]) {
+      await runner.check({ manual });
+      expect(emitStatus).toHaveBeenLastCalledWith({ status: 'error', info: { error: FEED_UNUSABLE_MESSAGE } });
+    }
+    expect(checkForUpdates).not.toHaveBeenCalled();
+    expect(feedRefusalMessage(packagedFeedState(), false)).toBeNull();
+    expect(feedRefusalMessage(null, true)).toBeNull();
+    expect(feedRefusalMessage({ feedFromCode: false, descriptor: 'error' }, true)).toBe(FEED_UNUSABLE_MESSAGE);
+  });
+});
 
 describe('check runner preflight', () => {
   it('a refusal emits the error status, never calls checkForUpdates, records manual, and hands the caller the manual flag', async () => {

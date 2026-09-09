@@ -113,15 +113,22 @@ describe('after-pack hook', () => {
     await expect(hook(envSigned.context, { WIN_CSC_LINK: 'file:///cert.pfx' })).rejects.toThrow(/win\.publisherName/);
     fs.rmSync(envSigned.out, { recursive: true, force: true });
 
-    // Second review pass: every signing option app-builder-lib knows, not only the store-certificate ones.
-    for (const win of [{ certificateFile: 'cert.pfx' }, { certificatePassword: 'x' }, { sign: './sign.js' }, { signtoolOptions: {} }]) {
+    // Second review pass: every certificate source app-builder-lib knows, not only the store-certificate ones.
+    for (const win of [{ certificateFile: 'cert.pfx' }, { sign: './sign.js' }, { signtoolOptions: {} }]) {
       const b = winBundle(win);
       await expect(hook(b.context, {}), JSON.stringify(win)).rejects.toThrow(/win\.publisherName/);
       fs.rmSync(b.out, { recursive: true, force: true });
     }
-    for (const env of [{ CSC_LINK: 'file:///c.pfx' }, { CSC_KEY_PASSWORD: 'p' }, { WIN_CSC_KEY_PASSWORD: 'p' }]) {
+    for (const env of [{ CSC_LINK: 'file:///c.pfx' }, { CSC_LINK: 'file:///c.pfx', CSC_KEY_PASSWORD: 'p' }]) {
       const b = winBundle({});
       await expect(hook(b.context, env), JSON.stringify(env)).rejects.toThrow(/win\.publisherName/);
+      fs.rmSync(b.out, { recursive: true, force: true });
+    }
+    // Third review pass: a password alone signs nothing, and CSC_KEY_PASSWORD is the macOS variable — a Windows build in a mac-signing shell must not trip.
+    for (const [win, env] of [[{}, { CSC_KEY_PASSWORD: 'mac-password' }], [{}, { WIN_CSC_KEY_PASSWORD: 'p' }], [{ certificatePassword: 'x' }, {}]] as Array<[Record<string, unknown>, Record<string, string>]>) {
+      const b = winBundle(win);
+      await hook(b.context, env);
+      expect(fs.readFileSync(b.target, 'utf8'), JSON.stringify([win, env])).toBe(feedDescriptorYaml());
       fs.rmSync(b.out, { recursive: true, force: true });
     }
 
@@ -204,6 +211,7 @@ describe('updater init', () => {
   it('index.ts hands the packaged paths to initAutoUpdater (behaviour is covered in updater/init.test.ts)', () => {
     const index = fs.readFileSync(path.join(liteRoot, 'updater/index.ts'), 'utf8');
     expect(index).toContain('if (app.isPackaged) initOpts.packaged = { resourcesPath: process.resourcesPath, userDataPath };');
-    expect(index).toContain("import { packagedFeedState } from './init.js';");
+    expect(index).toContain("import { feedRefusalMessage, packagedFeedState } from './init.js';");
+    expect(index).toContain('feedRefusalMessage(packagedFeedState(), app.isPackaged)');
   });
 });

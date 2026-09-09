@@ -62,22 +62,14 @@ function publishConfig(context) {
 function windowsPublisher(context, env) {
   const win = context.packager.config.win || {};
   const names = Array.isArray(win.publisherName) ? win.publisherName : typeof win.publisherName === 'string' ? [win.publisherName] : [];
-  // Every way app-builder-lib can be told to sign a Windows build: the
-  // config-file options (certificateFile/certificatePassword, a store
+  // Every way app-builder-lib can be told WHAT to sign a Windows build
+  // with: a certificate file (config or CSC_LINK / WIN_CSC_LINK), a store
   // certificate by subject or SHA-1, a custom sign function, signtool
-  // options) and the environment (CSC_LINK / WIN_CSC_LINK and their
-  // key passwords).
+  // options. A password on its own signs nothing — and CSC_KEY_PASSWORD
+  // is the macOS variable too, so a Windows build in a mac-signing shell
+  // must not trip on it (third review pass).
   const signing = Boolean(
-    env.WIN_CSC_LINK ||
-      env.CSC_LINK ||
-      env.CSC_KEY_PASSWORD ||
-      env.WIN_CSC_KEY_PASSWORD ||
-      win.certificateFile ||
-      win.certificatePassword ||
-      win.certificateSubjectName ||
-      win.certificateSha1 ||
-      win.sign ||
-      win.signtoolOptions
+    env.WIN_CSC_LINK || env.CSC_LINK || win.certificateFile || win.certificateSubjectName || win.certificateSha1 || win.sign || win.signtoolOptions
   );
   if (names.length > 0) return names;
   if (signing) {

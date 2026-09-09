@@ -272,6 +272,18 @@ describe('packaged feed (ADR-101)', () => {
     expect(fake.download).not.toHaveBeenCalled();
     expect(fake.emit).toHaveBeenCalledWith('error', expect.any(Error));
   });
+  it('an updater without a callable downloadUpdate degrades to the error state instead of throwing (third review pass)', () => {
+    const fake = packagedFake();
+    (fake as { downloadUpdate: unknown }).downloadUpdate = undefined;
+    const log = quietLog();
+    let result: ReturnType<typeof applyPackagedFeed> | null = null;
+    expect(() => {
+      result = applyPackagedFeed(fake, packagedOpts(fakeFs()), log);
+    }).not.toThrow();
+    expect(result).toEqual({ feedFromCode: false, descriptor: 'error' });
+    expect(fake.setFeedURL).not.toHaveBeenCalled();
+    expect(log.error).toHaveBeenCalledTimes(1);
+  });
   it('an updater without emit (or without an error listener) still gets the rejection', async () => {
     const fake = packagedFake();
     delete (fake as { emit?: unknown }).emit;

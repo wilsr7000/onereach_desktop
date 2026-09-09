@@ -49,7 +49,7 @@ export {
 } from './events.js';
 
 import { releasesUrl } from './feed.js';
-import { packagedFeedState } from './init.js';
+import { feedRefusalMessage, packagedFeedState } from './init.js';
 
 /** The releases page — derived from the same feed constants the updater uses (ADR-101). */
 export const RELEASES_URL = releasesUrl();
@@ -130,7 +130,8 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
           })
           .then((res) => {
             if (res.response === 0) void shell.openExternal(RELEASES_URL);
-          });
+          })
+          .catch((err: unknown) => log.warn('updater: fallback dialog failed', { error: (err as Error).message }));
       },
     });
     return {
@@ -229,13 +230,7 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
   // fail hours later. Every check (menu, renderer IPC, periodic) is
   // refused up front; a manual one gets a dialog, where the person is
   // looking.
-  const FEED_UNUSABLE =
-    'This copy of the app cannot download updates: the app bundle has no usable update descriptor and one could not be written to your user data folder. Reinstall the current release from the GitHub releases page; updates work normally from there.';
-  const feedRefusal = (): string | null => {
-    const state = packagedFeedState();
-    if (!app.isPackaged || state === null) return null;
-    return state.descriptor === 'unwritable' || state.descriptor === 'error' ? FEED_UNUSABLE : null;
-  };
+  const feedRefusal = (): string | null => feedRefusalMessage(packagedFeedState(), app.isPackaged);
   const checkRunner = createCheckRunner({
     autoUpdater,
     emitStatus,
