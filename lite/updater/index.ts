@@ -48,7 +48,10 @@ export {
   type UpdaterIpcGetStateEvent,
 } from './events.js';
 
-export const RELEASES_URL = 'https://github.com/wilsr7000/Onereach_Lite_Desktop_App/releases';
+import { releasesUrl } from './feed.js';
+
+/** The releases page — derived from the same feed constants the updater uses (ADR-101). */
+export const RELEASES_URL = releasesUrl();
 
 export const IPC_CHECK = 'lite:updater:check';
 export const IPC_INSTALL = 'lite:updater:install';
@@ -106,6 +109,8 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
   const initOpts: Parameters<typeof initAutoUpdater>[0] = { logger: log };
   if (opts.loadAutoUpdater !== undefined) initOpts.loadAutoUpdater = opts.loadAutoUpdater;
   if (opts.devUpdateConfigPath !== undefined) initOpts.devUpdateConfigPath = opts.devUpdateConfigPath;
+  // ADR-101 — a packaged app never depends on the packager for its feed.
+  if (app.isPackaged) initOpts.packaged = { resourcesPath: process.resourcesPath, userDataPath };
   const autoUpdater = initAutoUpdater(initOpts);
 
   if (autoUpdater === null) {

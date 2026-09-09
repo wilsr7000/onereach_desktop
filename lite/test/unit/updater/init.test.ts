@@ -3,7 +3,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { initAutoUpdater, type AutoUpdaterLike } from '../../../updater/init.js';
+import { initAutoUpdater, applyPackagedFeed, type AutoUpdaterLike, type PackagedFs } from '../../../updater/init.js';
+import { LITE_UPDATE_FEED, feedDescriptorYaml, releasesUrl } from '../../../updater/feed.js';
 
 function makeFakeUpdater(): AutoUpdaterLike {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
@@ -87,5 +88,92 @@ describe('initAutoUpdater', () => {
       devUpdateConfigPath: '/tmp/this-file-does-not-exist-' + Math.random().toString(36),
     });
     expect(fake.updateConfigPath).toBeNull();
+  });
+});
+
+
+// ─── ADR-101: the feed lives in code ─────────────────────────────────────
+
+function fakeFs(existing: Set<string>): PackagedFs & { written: Map<string, string>; dirs: string[] } {
+  const written = new Map<string, string>();
+  const dirs: string[] = [];
+  return {
+    written,
+    dirs,
+    existsSync: (p) => existing.has(p) || written.has(p),
+    mkdirSync: (p) => dirs.push(p),
+    writeFileSync: (p, data) => {
+      written.set(p, data);
+    },
+  };
+}
+
+function quietLog(): {
+  info: ReturnType<typeof vi.fn<(msg: string, data?: unknown) => void>>;
+  warn: ReturnType<typeof vi.fn<(msg: string, data?: unknown) => void>>;
+  error: ReturnType<typeof vi.fn<(msg: string, data?: unknown) => void>>;
+} {
+  return {
+    info: vi.fn((_msg: string, _data?: unknown): void => undefined),
+    warn: vi.fn((_msg: string, _data?: unknown): void => undefined),
+    error: vi.fn((_msg: string, _data?: unknown): void => undefined),
+  };
+}
+
+describe('packaged feed (ADR-101)', () => {
+  it('sets the provider from code and leaves a bundle that has its descriptor alone', () => {
+    const fake = makeFakeUpdater();
+    const setFeedURL = vi.fn();
+    fake.setFeedURL = setFeedURL;
+    const fs = fakeFs(new Set(['/App.app/Contents/Resources/app-update.yml']));
+    const log = quietLog();
+    const result = applyPackagedFeed(fake, { resourcesPath: '/App.app/Contents/Resources', userDataPath: '/ud', fs }, log);
+    expect(result).toEqual({ feedFromCode: true, descriptor: 'bundle' });
+    expect(setFeedURL).toHaveBeenCalledWith({ ...LITE_UPDATE_FEED });
+    expect(fs.written.size).toBe(0);
+    expect(fake.updateConfigPath).toBeNull();
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('writes the descriptor under userData and points the updater at it when the bundle has none', () => {
+    const fake = makeFakeUpdater();
+    fake.setFeedURL = vi.fn();
+    const fs = fakeFs(new Set());
+    const log = quietLog();
+    const result = applyPackagedFeed(fake, { resourcesPath: '/App.app/Contents/Resources', userDataPath: '/ud', fs }, log);
+    expect(result).toEqual({ feedFromCode: true, descriptor: 'written' });
+    expect(fake.updateConfigPath).toBe('/ud/app-update.yml');
+    expect(fs.written.get('/ud/app-update.yml')).toBe(feedDescriptorYaml());
+    expect(fs.dirs).toEqual(['/ud']);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('still sets the provider when the fallback cannot be written, and says so', () => {
+    const fake = makeFakeUpdater();
+    fake.setFeedURL = vi.fn();
+    const fs = fakeFs(new Set());
+    fs.writeFileSync = () => {
+      throw new Error('read-only');
+    };
+    const log = quietLog();
+    const result = applyPackagedFeed(fake, { resourcesPath: '/r', userDataPath: '/ud', fs }, log);
+    expect(result).toEqual({ feedFromCode: true, descriptor: 'unwritable' });
+    expect(log.error).toHaveBeenCalledTimes(1);
+  });
+
+  it('initAutoUpdater applies the packaged feed only when told the app is packaged', () => {
+    const packagedFake = makeFakeUpdater();
+    packagedFake.setFeedURL = vi.fn();
+    initAutoUpdater({ loadAutoUpdater: () => packagedFake, logger: quietLog(), packaged: { resourcesPath: '/r', userDataPath: '/ud', fs: fakeFs(new Set(['/r/app-update.yml'])) } });
+    expect(packagedFake.setFeedURL).toHaveBeenCalledTimes(1);
+    const devFake = makeFakeUpdater();
+    devFake.setFeedURL = vi.fn();
+    initAutoUpdater({ loadAutoUpdater: () => devFake, logger: quietLog() });
+    expect(devFake.setFeedURL).not.toHaveBeenCalled();
+  });
+
+  it('the descriptor and the releases page name the same feed', () => {
+    expect(feedDescriptorYaml()).toBe('owner: wilsr7000\nrepo: Onereach_Lite_Desktop_App\nprovider: github\nupdaterCacheDirName: onereach-lite-updater\n');
+    expect(releasesUrl()).toBe('https://github.com/wilsr7000/Onereach_Lite_Desktop_App/releases');
   });
 });

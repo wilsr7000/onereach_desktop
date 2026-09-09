@@ -137,6 +137,7 @@
     },
     "provisioningProfile": "lite/build/Onereach_Lite_DeveloperID.provisionprofile"
   },
+  "afterPack": "lite/scripts/after-pack-update-descriptor.cjs",
   "afterSign": "scripts/notarize.js",
   "win": {
     "icon": "assets/icon-win.png",

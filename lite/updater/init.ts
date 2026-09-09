@@ -15,6 +15,7 @@
  */
 
 import * as path from 'node:path';
+import { LITE_UPDATE_FEED, feedDescriptorYaml } from './feed.js';
 
 /**
  * The subset of electron-updater's autoUpdater we use. Typed as an
@@ -34,6 +35,8 @@ export interface AutoUpdaterLike {
    */
   forceDevUpdateConfig?: boolean;
   getFeedURL?: () => string | null | undefined;
+  /** electron-updater: set the provider from code instead of app-update.yml. */
+  setFeedURL?: (options: Record<string, unknown>) => void;
   on: (event: string, listener: (...args: unknown[]) => void) => unknown;
   off?: (event: string, listener: (...args: unknown[]) => void) => unknown;
   removeAllListeners?: (event?: string) => unknown;
@@ -61,6 +64,80 @@ export interface InitUpdaterOptions {
    * electron-updater from disk.
    */
   loadAutoUpdater?: () => AutoUpdaterLike;
+  /**
+   * ADR-101 — set when the app is packaged. The feed is set from code
+   * (`LITE_UPDATE_FEED`) so the provider never depends on the bundle's
+   * `app-update.yml`; when that file is missing (a `--dir` build copied
+   * into /Applications) the descriptor is written under userData and
+   * pointed at, so the download cache dir resolves too.
+   */
+  packaged?: {
+    resourcesPath: string;
+    userDataPath: string;
+    /** Filesystem seam for tests. */
+    fs?: PackagedFs;
+  };
+}
+
+/** The three filesystem calls the packaged path needs. */
+export interface PackagedFs {
+  existsSync: (p: string) => boolean;
+  mkdirSync: (p: string, opts: { recursive: boolean }) => unknown;
+  writeFileSync: (p: string, data: string, encoding: 'utf8') => void;
+}
+
+/**
+ * ADR-101 — make the packaged updater independent of the packager:
+ * provider from code, descriptor from code when the bundle has none.
+ * Returns what it did (for the log and for tests).
+ */
+export function applyPackagedFeed(
+  autoUpdater: AutoUpdaterLike,
+  packaged: NonNullable<InitUpdaterOptions['packaged']>,
+  log: NonNullable<InitUpdaterOptions['logger']>
+): { feedFromCode: boolean; descriptor: 'bundle' | 'written' | 'unwritable' } {
+  const fs = packaged.fs ?? nodeFs();
+  const bundled = path.join(packaged.resourcesPath, 'app-update.yml');
+  let descriptor: 'bundle' | 'written' | 'unwritable' = 'bundle';
+  if (!fs.existsSync(bundled)) {
+    // electron-updater reads updaterCacheDirName from the descriptor at
+    // download time (configOnDisk), so a provider alone is not enough.
+    const fallback = path.join(packaged.userDataPath, 'app-update.yml');
+    try {
+      fs.mkdirSync(packaged.userDataPath, { recursive: true });
+      fs.writeFileSync(fallback, feedDescriptorYaml(), 'utf8');
+      autoUpdater.updateConfigPath = fallback;
+      descriptor = 'written';
+      log.warn('updater: bundle has no app-update.yml — descriptor written from code', {
+        bundled,
+        fallback,
+        note: 'this bundle was not produced by the release pipeline (a --dir build?); updates still work',
+      });
+    } catch (err) {
+      descriptor = 'unwritable';
+      log.error('updater: bundle has no app-update.yml and the fallback could not be written', {
+        bundled,
+        fallback,
+        error: (err as Error).message,
+      });
+    }
+  }
+  let feedFromCode = false;
+  if (typeof autoUpdater.setFeedURL === 'function') {
+    autoUpdater.setFeedURL({ ...LITE_UPDATE_FEED });
+    feedFromCode = true;
+  }
+  return { feedFromCode, descriptor };
+}
+
+function nodeFs(): PackagedFs {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+  const fs = require('node:fs') as typeof import('node:fs');
+  return {
+    existsSync: (p) => fs.existsSync(p),
+    mkdirSync: (p, opts) => fs.mkdirSync(p, opts),
+    writeFileSync: (p, data, encoding) => fs.writeFileSync(p, data, encoding),
+  };
 }
 
 /**
@@ -110,6 +187,11 @@ export function initAutoUpdater(opts: InitUpdaterOptions = {}): AutoUpdaterLike 
     });
   }
 
+  // ADR-101 — packaged builds take the feed from code, always.
+  let packagedFeed: ReturnType<typeof applyPackagedFeed> | null = null;
+  if (opts.packaged !== undefined) {
+    packagedFeed = applyPackagedFeed(autoUpdater, opts.packaged, log);
+  }
   let feedUrl = '<default-from-publish-config>';
   try {
     feedUrl = autoUpdater.getFeedURL?.() ?? feedUrl;
@@ -118,6 +200,9 @@ export function initAutoUpdater(opts: InitUpdaterOptions = {}): AutoUpdaterLike 
   }
   log.info('updater: initialized', {
     feedUrl,
+    ...(packagedFeed !== null
+      ? { feedFromCode: packagedFeed.feedFromCode, descriptor: packagedFeed.descriptor, feed: `${LITE_UPDATE_FEED.provider}:${LITE_UPDATE_FEED.owner}/${LITE_UPDATE_FEED.repo}` }
+      : {}),
     autoDownload: autoUpdater.autoDownload,
     autoInstallOnAppQuit: autoUpdater.autoInstallOnAppQuit,
     allowDowngrade: autoUpdater.allowDowngrade,
