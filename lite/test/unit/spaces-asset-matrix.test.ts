@@ -66,6 +66,20 @@ const SUPPORTED_ASSETS: AssetCase[] = [
   // carries the real URL.
   { kind: 'document', mimeType: 'application/pdf', binary: true, expectAction: 'Open in browser' },
   { kind: 'other', mimeType: 'application/zip', binary: true },
+  // ADR-098 — the registry kinds. Inline-content kinds render from
+  // title + metadata + content head; uploaded decks and design files
+  // are binaries whose preview must at least offer the file.
+  { kind: 'tool', binary: false },
+  { kind: 'presentation', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', binary: true },
+  { kind: 'code', binary: false },
+  { kind: 'data', binary: false },
+  { kind: 'design', mimeType: 'application/x-sketch', binary: true },
+  { kind: 'flow', binary: false },
+  { kind: 'notebook', binary: false },
+  { kind: 'styleguide', binary: false },
+  { kind: 'conversation', binary: false },
+  { kind: 'meeting', binary: false },
+  { kind: 'monitor', binary: false },
 ];
 
 function makeItem(c: AssetCase): Record<string, unknown> {

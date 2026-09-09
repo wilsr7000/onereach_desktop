@@ -199,6 +199,21 @@ export const ITEM_KINDS = [
   'knowledge',
   'journey',
   'other',
+  // ADR-098 — the kinds the full Onereach app's Spaces knows and Lite
+  // used to flatten into `document` / `other`. Each has a row in the
+  // registry (`asset-kinds.ts`): label, glyph, creation modes, typed
+  // metadata fields, file recognition, aliases for read-side mapping.
+  'tool',
+  'presentation',
+  'code',
+  'data',
+  'design',
+  'flow',
+  'notebook',
+  'styleguide',
+  'conversation',
+  'meeting',
+  'monitor',
 ] as const;
 
 export type ItemKind = (typeof ITEM_KINDS)[number];
@@ -576,6 +591,13 @@ export interface ItemUpdatePatch {
    */
   content?: string;
   /**
+   * External address for link-based kinds (web link, video / slides /
+   * design links, monitors) — ADR-098. Trimmed; must be an http(s) URL
+   * or the empty string, which clears it. Capped at
+   * `MAX_ITEM_SOURCE_URL_LENGTH`.
+   */
+  sourceUrl?: string;
+  /**
    * Optional editor id (a `:Person.id`). When provided, the SDK
    * MERGEs a `[:LAST_EDITED]->(:Person {id})` edge so the detail
    * pane can attribute the change. Null/missing skips the edge.
@@ -587,6 +609,8 @@ export interface ItemUpdatePatch {
 export const MAX_ITEM_TITLE_LENGTH = 200 as const;
 /** Max description length enforced client-side. */
 export const MAX_ITEM_DESCRIPTION_LENGTH = 4000 as const;
+/** ADR-098 — cap on `:Asset.sourceUrl` set through `items.update`. */
+export const MAX_ITEM_SOURCE_URL_LENGTH = 2048 as const;
 /** Max content body length enforced client-side. ~50 pages of Markdown. */
 export const MAX_ITEM_CONTENT_LENGTH = 200_000 as const;
 /** Max tag name length (single tag). */

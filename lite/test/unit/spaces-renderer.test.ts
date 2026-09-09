@@ -215,7 +215,7 @@ describe('buildItemCard (content-forward asset tile)', () => {
   it('renders title, kind label, and time', () => {
     const card = handle().buildItemCard(baseItem({ title: 'A spec doc' }), false);
     expect(card.querySelector('.spaces-card-title')?.textContent).toBe('A spec doc');
-    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Doc');
+    expect(card.querySelector('.spaces-card-kind')?.textContent).toBe('Document');
     expect(card.querySelector('.spaces-card-time')?.textContent).toMatch(/just now|m ago/);
   });
 
@@ -948,7 +948,7 @@ describe('video tile frame grab', () => {
     const rendered = card.querySelector('.spaces-card-title')?.textContent ?? '';
     // Format: "<Kind label> · <short id>"; for `baseItem`'s default
     // kind / id this resolves to "Doc · i1".
-    expect(rendered.startsWith('Doc · ')).toBe(true);
+    expect(rendered.startsWith('Document · ')).toBe(true);
     expect(rendered).not.toBe('(untitled)');
   });
 
@@ -1098,7 +1098,7 @@ describe('buildDetailPane', () => {
       () => undefined
     );
     expect(pane.querySelector('.spaces-detail-title')?.textContent).toBe('A doc');
-    expect(pane.querySelector('.spaces-card-kind')?.textContent).toBe('Doc');
+    expect(pane.querySelector('.spaces-card-kind')?.textContent).toBe('Document');
     expect(pane.querySelector('.spaces-detail-meta')?.textContent).toMatch(
       /Updated/
     );

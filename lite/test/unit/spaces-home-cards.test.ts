@@ -869,7 +869,7 @@ describe('generateItemTitle', () => {
         kind: 'document',
         id: '402abae3-5ea4-9651-5760-deadbeefcafe',
       })
-    ).toBe('Doc · 402aba');
+    ).toBe('Document · 402aba');
   });
 
   it('derives a title from a URL path segment + host', () => {
@@ -889,7 +889,7 @@ describe('generateItemTitle', () => {
         sourceUrl: 'https://claude.ai/',
         id: 'asset-2',
       })
-    ).toBe('URL · claude.ai');
+    ).toBe('Web link · claude.ai');
   });
 
   it('strips a leading "www." from the host', () => {
@@ -899,7 +899,7 @@ describe('generateItemTitle', () => {
         sourceUrl: 'https://www.example.com/',
         id: 'asset-x',
       })
-    ).toBe('URL · example.com');
+    ).toBe('Web link · example.com');
   });
 
   it('walks back through the URL path to skip id-shaped trailing segments', () => {
@@ -935,7 +935,7 @@ describe('generateItemTitle', () => {
         fileKey: 'uploads/5b4375227558baa82b0846ff0a8d8490.bin',
         id: '5b4375227558baa82b0846ff0a8d8490',
       })
-    ).toBe('Doc · 5b4375');
+    ).toBe('Document · 5b4375');
   });
 
   it('lifts the first ~6 words of an excerpt for text-kind items', () => {
@@ -960,7 +960,7 @@ describe('generateItemTitle', () => {
   });
 
   it('always returns a non-empty string, even with minimal input', () => {
-    expect(renderer.generateItemTitle({ kind: 'document' })).toBe('Doc');
+    expect(renderer.generateItemTitle({ kind: 'document' })).toBe('Document');
     expect(renderer.generateItemTitle({})).toBe('Other');
   });
 });

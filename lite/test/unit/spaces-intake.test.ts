@@ -98,7 +98,8 @@ describe('wiring pins — the drop paths cannot regress to files[0]', () => {
     expect(i).toBeGreaterThan(-1);
     const seg = src.slice(i, i + 2200);
     expect(seg).toContain('openBatchIntakeWizard(plan, spaceId)');
-    expect(seg).toContain('handleNewAssetFileSelection(plan[0]!.file)');
+    // ADR-098: the single-file drop lands where its kind says (receiveDialogFile), still never files[0].
+    expect(seg).toContain('receiveDialogFile(plan[0]!.file)');
   });
 
   it('Electron cannot navigate away on a missed drop — the window guard exists', () => {

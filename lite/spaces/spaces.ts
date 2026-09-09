@@ -29,6 +29,37 @@
  */
 
 import { PRODUCT_DISPLAY_NAME } from '../product.js';
+// ADR-098 — the asset-kind registry and the surfaces that derive from it.
+import {
+  inferKindFromFile as inferKindFromFileSpec,
+  isMediaKind,
+  kindGlyph as registryKindGlyph,
+  kindLabel as registryKindLabel,
+  kindSpec,
+  reclassifiableKinds,
+  sniffJsonKind,
+  typedMetadataKeys,
+} from './asset-kinds.js';
+import {
+  buildRegistryDetailBlock,
+  buildRegistryTilePreview,
+  registryBlockOwnsContent,
+} from './asset-previews.js';
+import { buildKindDetails } from './asset-details.js';
+import {
+  buildCreatePayload,
+  builtinPaneFor,
+  deriveBodyMetadata,
+  isRegistryMode,
+  readRegistryDraft,
+  registryMode,
+  renderKindBar,
+  renderKindPicker,
+  renderRegistryPane,
+  setRegistryFile,
+  tearDownRegistryPane,
+  validateRegistryDraft,
+} from './asset-forms.js';
 import { UNCATEGORIZED_SPACE_ID } from './scope.js';
 import { riffStageLabel } from './riff-summary.js';
 import { collectDroppedFiles, expandZips, planIntake, type IntakeItem } from './intake.js';
@@ -1405,18 +1436,11 @@ function openSpacesPalette(): void {
 /** Compact monochrome glyph per item kind for tree + result rows. */
 export function itemKindGlyph(kind: string): string {
   switch (kind) {
-    case 'ticket': return '◫';
-    case 'agent': return '✦';
-    case 'playbook': return '▤';
-    case 'transcript': return '“';
-    case 'journey': return '➔';
-    case 'knowledge': return '◆';
-    case 'image': return '▣';
-    case 'video': return '▶';
-    case 'audio': return '♪';
+    // Two non-kind values the tree also draws.
     case 'doc': return '▤';
     case 'app': return '⌘';
-    default: return '▪';
+    // ADR-098 — every kind's glyph lives in the registry.
+    default: return registryKindGlyph(kind);
   }
 }
 
@@ -8599,7 +8623,7 @@ export function buildItemCard(
 
 /** Image, video and audio lead with their picture; every other kind leads with its title. */
 export function isMediaTileKind(kind: string): boolean {
-  return kind === 'image' || kind === 'video' || kind === 'audio';
+  return isMediaKind(kind);
 }
 
 /**
@@ -8723,6 +8747,10 @@ function buildAssetTilePreview(item: RendererItemSummary): HTMLElement {
   const preview = document.createElement('div');
   preview.className = `spaces-card-preview spaces-card-preview-${item.kind}`;
   preview.setAttribute('aria-hidden', 'true');
+
+  // ADR-098 — registry kinds (and linked media with no file) paint
+  // their own preview; the classic kinds keep their branches below.
+  if (buildRegistryTilePreview(item, preview)) return preview;
 
   switch (item.kind) {
     case 'image':
@@ -10465,6 +10493,7 @@ function renderDetail(opts: RenderDetailOpts): void {
     onContentSave: (next) => commitItemUpdate(item.id, { content: next }),
     onDescriptionSave: (next) =>
       commitItemUpdate(item.id, { description: next }),
+    onSourceUrlSave: (next) => commitItemUpdate(item.id, { sourceUrl: next }),
   };
   aside.appendChild(buildDetailPane(item, onClose, 'rendered', editCallbacks));
 
@@ -11142,6 +11171,8 @@ interface RendererDetailEditCallbacks {
   /** Save the Markdown / text content body. Triggered by the Edit
    *  affordance in the detail content block. */
   onContentSave: (next: string) => Promise<void>;
+  /** ADR-098 — save a link-based kind's address ('' clears it). */
+  onSourceUrlSave?: (next: string) => Promise<void>;
   /** Save the asset description. Empty string clears it. Reaches every
    *  kind via the meta strip's editable subtitle row. */
   onDescriptionSave: (next: string) => Promise<void>;
@@ -11155,7 +11186,7 @@ interface RendererDetailEditCallbacks {
  */
 async function commitItemUpdate(
   itemId: string,
-  patch: { title?: string; description?: string; content?: string; type?: string }
+  patch: { title?: string; description?: string; content?: string; type?: string; sourceUrl?: string }
 ): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) throw new Error('Bridge unavailable');
@@ -11409,21 +11440,18 @@ export interface DetailEditCallbacks {
    * Pass an empty string to clear.
    */
   onDescriptionSave?: (next: string) => Promise<void>;
+  /**
+   * ADR-098 — link-based kinds edit their address from the Details
+   * section. Empty string clears it.
+   */
+  onSourceUrlSave?: (next: string) => Promise<void>;
 }
 
-const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = [
-  { id: 'document', label: 'Doc' },
-  { id: 'image', label: 'Image' },
-  { id: 'url', label: 'URL' },
-  { id: 'text', label: 'Text' },
-  { id: 'audio', label: 'Audio' },
-  { id: 'video', label: 'Video' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'transcript', label: 'Transcript' },
-  { id: 'knowledge', label: 'Knowledge' },
-  { id: 'journey', label: 'Journey' },
-  { id: 'other', label: 'Other' },
-];
+// ADR-098 — the reclassify dropdown offers every kind the registry
+// marks reclassifiable (playbooks and tickets are owned elsewhere).
+const EDITABLE_ITEM_KINDS: ReadonlyArray<{ id: string; label: string }> = reclassifiableKinds().map(
+  (spec) => ({ id: spec.id, label: spec.label })
+);
 
 /**
  * A safe, extension-bearing filename for downloading an item. Uses the
@@ -11449,10 +11477,25 @@ export function downloadFilenameForItem(item: RendererItem): string {
   let ext = byMime[mime] ?? '';
   if (ext === '' && mime.includes('/')) ext = mime.split('/')[1]?.split(';')[0] ?? '';
   if (ext === '') {
-    // Inline knowledge/playbook/transcript/text render as markdown.
-    ext = ['knowledge', 'playbook', 'transcript', 'journey'].includes(item.kind)
+    // Inline knowledge/playbook/transcript/text render as markdown;
+    // ADR-098 kinds download as what they are.
+    const language = String((item.metadata ?? {})['language'] ?? '');
+    const codeExt: Record<string, string> = {
+      javascript: 'js', typescript: 'ts', python: 'py', sql: 'sql', shell: 'sh', html: 'html', css: 'css',
+      json: 'json', yaml: 'yaml', go: 'go', rust: 'rs', java: 'java', kotlin: 'kt', swift: 'swift',
+      c: 'c', cpp: 'cpp', csharp: 'cs', ruby: 'rb', php: 'php', r: 'r',
+    };
+    ext = ['knowledge', 'playbook', 'transcript', 'journey', 'meeting', 'tool', 'monitor', 'conversation'].includes(item.kind)
       ? 'md'
-      : 'txt';
+      : item.kind === 'notebook'
+        ? 'ipynb'
+        : item.kind === 'styleguide' || item.kind === 'flow'
+          ? 'json'
+          : item.kind === 'data'
+            ? 'csv'
+            : item.kind === 'code'
+              ? (codeExt[language] ?? 'txt')
+              : 'txt';
   }
   return /\.[a-z0-9]{1,8}$/i.test(base) ? base : `${base}.${ext}`;
 }
@@ -11777,6 +11820,10 @@ export function buildDetailPane(
     // <audio> / <video> instead of dumping the base64 blob into the
     // Markdown renderer.
       wrap.appendChild(buildBinaryPreview(item, content));
+    } else if (registryBlockOwnsContent(item.kind)) {
+      // ADR-098 — code / data / notebook / style guide / conversation:
+      // the kind's block renders the body; "✎ Edit" edits the source.
+      wrap.appendChild(buildRegistrySourceBlock(item, content, edit?.onContentSave));
     } else {
       const language = detectTextPreviewLanguage(item.mimeType, item.title);
       if (language === 'csv' || language === 'tsv') {
@@ -11838,9 +11885,14 @@ export function buildDetailPane(
     wrap.appendChild(chips);
   }
 
+  // ADR-098 — the kind's typed fields, edited with typed controls;
+  // the raw table below keeps everything else.
+  const kindDetails = buildKindDetails(item, edit);
+  if (kindDetails !== null) wrap.appendChild(kindDetails);
+
   // Metadata section: always rendered so users can add fields even
   // when the bag is empty.
-  wrap.appendChild(buildDetailMetadata(item, edit));
+  wrap.appendChild(buildDetailMetadata(item, edit, { exclude: typedMetadataKeys(item.kind) }));
 
   // ── Activity slot (Phase 3c): empty container that `loadItemActivity`
   //    populates with `buildDetailActivity(events)` once the per-asset
@@ -11938,7 +11990,8 @@ export function formatIngestStatus(
 
 export function buildDetailMetadata(
   item: RendererItem,
-  edit?: DetailMetadataCallbacks
+  edit?: DetailMetadataCallbacks,
+  opts: { exclude?: ReadonlySet<string> } = {}
 ): HTMLElement {
   const wrap = document.createElement('section');
   wrap.className = 'spaces-detail-metadata';
@@ -11958,7 +12011,9 @@ export function buildDetailMetadata(
   wrap.appendChild(headingRow);
 
   const meta = item.metadata ?? {};
-  const keys = Object.keys(meta);
+  // ADR-098 — keys the typed Details section already shows stay out
+  // of the raw table.
+  const keys = Object.keys(meta).filter((k) => !(opts.exclude?.has(k) ?? false));
   if (keys.length === 0 && edit?.onMetadataAdd === undefined) {
     const empty = document.createElement('p');
     empty.className = 'spaces-detail-metadata-empty';
@@ -12767,6 +12822,80 @@ function buildAddTagAffordance(onAdd: (tag: string) => Promise<void>): HTMLEleme
  * For non-text kinds the caller typically skips this; we still
  * render gracefully if `content` is present.
  */
+/** ADR-098 — the renderers the registry's detail blocks borrow. */
+function registryPreviewDeps(): {
+  renderMarkdown: (source: string) => HTMLElement;
+  codePreview: (source: string, language: string) => HTMLElement;
+  csvPreview: (source: string) => HTMLElement;
+} {
+  return {
+    renderMarkdown,
+    codePreview: (source, language) => buildCodePreview(source, language),
+    csvPreview: (source) => buildCsvPreview(source),
+  };
+}
+
+/**
+ * ADR-098 — the content block for kinds whose registry block renders
+ * the body (code, data, notebook, style guide, conversation): the
+ * block's view, a Source toggle, and "✎ Edit" into the same textarea
+ * editor every Markdown body uses. Saving re-mounts the rail.
+ */
+function buildRegistrySourceBlock(
+  item: RendererItem,
+  content: string,
+  onSave: ((next: string) => Promise<void>) | undefined
+): HTMLElement {
+  const block = document.createElement('div');
+  block.className = 'spaces-detail-content-block spaces-detail-content-block-kind';
+  block.setAttribute('data-mode', 'rendered');
+  const toggleRow = document.createElement('div');
+  toggleRow.className = 'spaces-detail-content-toggle';
+  const viewBtn = document.createElement('button');
+  viewBtn.type = 'button';
+  viewBtn.className = 'spaces-detail-toggle-btn is-active';
+  viewBtn.textContent = 'Preview';
+  viewBtn.setAttribute('data-mode', 'rendered');
+  const sourceBtn = document.createElement('button');
+  sourceBtn.type = 'button';
+  sourceBtn.className = 'spaces-detail-toggle-btn';
+  sourceBtn.textContent = 'Source';
+  sourceBtn.setAttribute('data-mode', 'source');
+  toggleRow.appendChild(viewBtn);
+  toggleRow.appendChild(sourceBtn);
+  let editBtn: HTMLButtonElement | null = null;
+  if (onSave !== undefined) {
+    editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'spaces-detail-toggle-btn spaces-detail-edit-btn';
+    editBtn.textContent = '✎ Edit';
+    editBtn.title = 'Edit the source';
+    editBtn.setAttribute('aria-label', 'Edit content');
+    toggleRow.appendChild(editBtn);
+  }
+  block.appendChild(toggleRow);
+  const body = document.createElement('div');
+  body.className = 'spaces-detail-content';
+  const pretty = (): HTMLElement =>
+    buildRegistryDetailBlock(item, registryPreviewDeps()) ?? renderSource(content);
+  body.appendChild(pretty());
+  block.appendChild(body);
+  const setMode = (next: DetailPreviewMode): void => {
+    block.setAttribute('data-mode', next);
+    viewBtn.classList.toggle('is-active', next === 'rendered');
+    sourceBtn.classList.toggle('is-active', next === 'source');
+    body.replaceChildren(next === 'rendered' ? pretty() : renderSource(content));
+  };
+  viewBtn.addEventListener('click', () => setMode('rendered'));
+  sourceBtn.addEventListener('click', () => setMode('source'));
+  if (editBtn !== null && onSave !== undefined) {
+    editBtn.addEventListener('click', () => {
+      enterContentEditMode(block, toggleRow, body, content, onSave);
+    });
+  }
+  return block;
+}
+
 export function buildDetailContent(
   source: string,
   initialMode: DetailPreviewMode,
@@ -12993,39 +13122,10 @@ export function buildDetailEmptyContentHint(item: {
   sub.className = 'spaces-detail-empty-sub';
 
   const kind = typeof item.kind === 'string' ? item.kind : '';
-  switch (kind) {
-    case 'text':
-    case 'document':
-      headline.textContent = 'No text content saved for this item.';
-      sub.textContent =
-        'Once a transcript, note, or document body lands on this asset (graph property `:Asset.content`), it appears here.';
-      break;
-    case 'image':
-      headline.textContent = 'No image attached.';
-      sub.textContent =
-        'When an image fileKey is set (graph property `:Asset.url`), a preview appears here.';
-      break;
-    case 'video':
-      headline.textContent = 'No video attached.';
-      sub.textContent =
-        'When a video fileKey is set, a player appears here.';
-      break;
-    case 'audio':
-      headline.textContent = 'No audio attached.';
-      sub.textContent =
-        'When an audio fileKey is set, a player appears here.';
-      break;
-    case 'url':
-      headline.textContent = 'No external URL saved.';
-      sub.textContent =
-        'When `:Asset.sourceUrl` is set, the link appears here.';
-      break;
-    default:
-      headline.textContent = 'This asset has no content yet.';
-      sub.textContent =
-        'Add a transcript, file, or link to make it useful. Authors and tags can be set independently.';
-      break;
-  }
+  // ADR-098 — every kind's empty copy lives in the registry.
+  const empty = kindSpec(kind).empty;
+  headline.textContent = empty.headline;
+  sub.textContent = empty.sub;
 
   wrap.appendChild(headline);
   wrap.appendChild(sub);
@@ -14547,6 +14647,13 @@ function buildDetailTypeBlock(item: RendererItem): HTMLElement | null {
   }
   if (item.kind === 'playbook') {
     return buildDetailPlaybookBlock(item);
+  }
+  // ADR-098 — registry kinds bring their own hero (embeds, cards,
+  // facts). Kinds whose block IS the content are rendered from the
+  // content branch instead, so the body is not painted twice.
+  if (!registryBlockOwnsContent(item.kind)) {
+    const registryBlock = buildRegistryDetailBlock(item, registryPreviewDeps());
+    if (registryBlock !== null) return registryBlock;
   }
   if (typeof item.sourceUrl === 'string' && item.sourceUrl.length > 0) {
     const sourceWrap = document.createElement('div');
@@ -16296,24 +16403,9 @@ export function buildDiscoverySummary(results: DiscoveryResults): {
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
-const KIND_LABELS: Readonly<Record<string, string>> = {
-  document: 'Doc',
-  image: 'Image',
-  url: 'URL',
-  text: 'Text',
-  audio: 'Audio',
-  video: 'Video',
-  playbook: 'Playbook',
-  ticket: 'Ticket',
-  agent: 'Agent',
-  transcript: 'Transcript',
-  knowledge: 'Knowledge',
-  journey: 'Journey',
-  other: 'Other',
-};
-
+/** ADR-098 — the registry names every kind; unknown reads as "Other". */
 function kindLabel(kind: string): string {
-  return KIND_LABELS[kind] ?? 'Other';
+  return registryKindLabel(kind);
 }
 
 /**
@@ -16382,6 +16474,18 @@ function messageFrom(err: unknown): string {
 (window as unknown as {
   __spacesRendererForTesting?: unknown;
 }).__spacesRendererForTesting = {
+  // ADR-098 — asset kinds.
+  buildKindDetails,
+  buildRegistryTilePreview,
+  buildRegistryDetailBlock,
+  renderKindPicker,
+  switchNewAssetMode,
+  openNewAssetDialog,
+  closeNewAssetDialog,
+  receiveDialogFile,
+  readRegistryDraft,
+  buildCreatePayload,
+  submitNewAsset,
   groupBucketBySpace,
   focusItemTile,
   safeCssColor,
@@ -18080,7 +18184,14 @@ async function runItemsSearch(): Promise<void> {
 
 // ─── Sprint 1: new-asset modal + drag-drop upload + delete action ───────
 
-let newAssetMode: 'text' | 'upload' | 'agent' | 'knowledge' | 'existing' = 'text';
+/**
+ * ADR-098 — the dialog's mode is a KIND id (`text`, `presentation`,
+ * `tool`…), `existing` (file an asset from another Space), or `picker`
+ * (step one: choosing). Kinds with a hand-built pane (text, document,
+ * other, agent, knowledge) show it; every other kind gets the
+ * generated registry pane.
+ */
+let newAssetMode: string = 'picker';
 let newAssetFile: File | null = null;
 
 /** The reachability endpoint kinds shown in the add-agent dialog. */
@@ -18157,7 +18268,6 @@ function wireNewAssetDialog(): void {
   const cancel = document.getElementById('spaces-new-asset-cancel');
   const close = document.getElementById('spaces-new-asset-close');
   const backdrop = document.getElementById('spaces-new-asset-backdrop');
-  const tabs = document.querySelectorAll<HTMLButtonElement>('[data-asset-tab]');
   const fileInput = document.getElementById('spaces-new-asset-file-input');
   const dropzone = document.getElementById('spaces-new-asset-dropzone');
 
@@ -18180,13 +18290,11 @@ function wireNewAssetDialog(): void {
       if (ev.target === backdrop) closeNewAssetDialog();
     });
   }
-  tabs.forEach((tab) => {
-    tab.addEventListener('click', () => {
-      const mode = tab.getAttribute('data-asset-tab');
-      if (mode !== 'text' && mode !== 'upload' && mode !== 'agent' && mode !== 'knowledge' && mode !== 'existing') return;
-      switchNewAssetMode(mode);
-    });
-  });
+  // ADR-098 — the kind picker replaces the tab strip.
+  const picker = document.getElementById('spaces-new-asset-picker');
+  if (picker !== null) {
+    renderKindPicker(picker, { onPick: (mode) => switchNewAssetMode(mode) });
+  }
   if (fileInput instanceof HTMLInputElement) {
     fileInput.addEventListener('change', () => {
       const file = fileInput.files?.[0] ?? null;
@@ -18267,7 +18375,7 @@ function wireNewAssetDialog(): void {
         const single =
           collected.length === 1 && plan.length === 1 && plan[0]!.file === collected[0]!.file;
         if (single) {
-          handleNewAssetFileSelection(plan[0]!.file);
+          receiveDialogFile(plan[0]!.file);
           return;
         }
         // A folder / zip / multi-file drop outgrows this dialog — hand
@@ -18619,16 +18727,79 @@ function handleNewAssetFileSelection(file: File | null): void {
   }
 }
 
-function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge' | 'existing'): void {
+function switchNewAssetMode(mode: string): void {
   newAssetMode = mode;
-  document.querySelectorAll<HTMLElement>('[data-asset-tab]').forEach((tab) => {
-    const isActive = tab.getAttribute('data-asset-tab') === mode;
-    tab.classList.toggle('is-active', isActive);
-    tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
-  });
+  const picker = document.getElementById('spaces-new-asset-picker');
+  const bar = document.getElementById('spaces-new-asset-kindbar');
+  const form = document.getElementById('spaces-new-asset-form');
+  const titleField = document.getElementById('spaces-new-asset-title-input')?.closest('.spaces-new-asset-field');
+  const submit = document.getElementById('spaces-new-asset-submit');
+
+  // Step one: choosing. The form stays out of the way until a kind is picked.
+  if (mode === 'picker') {
+    if (picker !== null) picker.hidden = false;
+    if (bar !== null) bar.hidden = true;
+    if (form !== null) form.hidden = true;
+    tearDownRegistryPane();
+    const filter = picker?.querySelector<HTMLInputElement>('.spaces-kindpicker-filter') ?? null;
+    if (filter !== null) {
+      filter.value = '';
+      filter.dispatchEvent(new Event('input'));
+      requestAnimationFrame(() => filter.focus());
+    }
+    return;
+  }
+
+  // Step two: the kind's form under a bar that says what was picked.
+  if (picker !== null) picker.hidden = true;
+  if (bar !== null) {
+    bar.hidden = false;
+    renderKindBar(bar, mode, () => switchNewAssetMode('picker'));
+  }
+  if (form !== null) form.hidden = false;
+  const paneName = builtinPaneFor(mode) ?? 'registry';
   document.querySelectorAll<HTMLElement>('[data-asset-pane]').forEach((pane) => {
-    pane.hidden = pane.getAttribute('data-asset-pane') !== mode;
+    pane.hidden = pane.getAttribute('data-asset-pane') !== paneName;
   });
+  if (titleField instanceof HTMLElement) titleField.hidden = mode === 'existing';
+  const registryPane = document.getElementById('spaces-new-asset-registry-pane');
+  if (paneName === 'registry' && registryPane !== null) {
+    const uploadPane = document.querySelector<HTMLElement>('[data-asset-pane="upload"]');
+    renderRegistryPane(registryPane, mode, {
+      onFile: (file) => {
+        // Auto-fill the title with the filename if empty.
+        const titleInput = document.getElementById('spaces-new-asset-title-input');
+        if (file !== null && titleInput instanceof HTMLInputElement && titleInput.value.trim().length === 0) {
+          titleInput.value = file.name;
+        }
+      },
+      // "Looks like a deck — file it as Slides": keep the file / link
+      // the user already gave us across the switch.
+      onSuggestKind: (kind) => {
+        const link = document.getElementById('spaces-kindform-link');
+        const linkValue = link instanceof HTMLInputElement ? link.value : '';
+        const body = document.getElementById('spaces-kindform-body');
+        const bodyValue = body instanceof HTMLTextAreaElement ? body.value : '';
+        const file = builtinPaneFor(kind) === null ? (registryFileForSwitch()) : null;
+        switchNewAssetMode(kind);
+        if (file !== null) setRegistryFile(file);
+        const nextLink = document.getElementById('spaces-kindform-link');
+        if (nextLink instanceof HTMLInputElement && linkValue.length > 0) {
+          nextLink.value = linkValue;
+          nextLink.dispatchEvent(new Event('input'));
+        }
+        const nextBody = document.getElementById('spaces-kindform-body');
+        if (nextBody instanceof HTMLTextAreaElement && bodyValue.length > 0) {
+          nextBody.value = bodyValue;
+          nextBody.dispatchEvent(new Event('input'));
+        }
+      },
+      shareControls: uploadPane?.querySelector<HTMLElement>('.spaces-share') ?? null,
+      shareControlsHome: uploadPane ?? null,
+    });
+  } else {
+    tearDownRegistryPane();
+  }
   // First visit to the Agent tab primes the library with the
   // alphabetical head so the picker never opens empty.
   if (mode === 'agent' && !agentLibraryLoadedOnce) {
@@ -18637,8 +18808,10 @@ function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge' | 'e
   }
   // The Existing tab adds per-row (no Create step) — the submit button
   // is meaningless there, so disable it for the duration.
-  const submit = document.getElementById('spaces-new-asset-submit');
-  if (submit instanceof HTMLButtonElement) submit.disabled = mode === 'existing';
+  if (submit instanceof HTMLButtonElement) {
+    submit.disabled = mode === 'existing';
+    submit.textContent = mode === 'existing' ? 'Create asset' : `Add ${kindSpec(mode).label.toLowerCase()}`;
+  }
   if (mode === 'existing') {
     const search = document.getElementById('spaces-new-asset-existing-search');
     if (search instanceof HTMLInputElement && search.value.trim().length === 0) {
@@ -18647,6 +18820,36 @@ function switchNewAssetMode(mode: 'text' | 'upload' | 'agent' | 'knowledge' | 'e
         buildAgentLibraryStatus('Type to search assets across every Space you can see.')
       );
     }
+  }
+  requestAnimationFrame(() => {
+    const titleInput = document.getElementById('spaces-new-asset-title-input');
+    if (mode !== 'existing' && titleInput instanceof HTMLInputElement) titleInput.focus();
+  });
+}
+
+/** The file the registry pane holds, before a kind switch tears it down. */
+function registryFileForSwitch(): File | null {
+  const draft = readRegistryDraft();
+  return draft?.file ?? null;
+}
+
+/**
+ * ADR-098 — a dropped or browsed file lands where its kind says: an
+ * upload-capable registry kind already open keeps it; otherwise the
+ * file's kind is read (a .pptx is Slides, a .py is Code, a .zip is a
+ * File) and the dialog jumps straight to that kind's form.
+ */
+function receiveDialogFile(file: File): void {
+  if (isRegistryMode(newAssetMode) && (kindSpec(newAssetMode).create?.modes.includes('upload') ?? false)) {
+    setRegistryFile(file);
+    return;
+  }
+  const kind = inferKindFromFileSpec(file);
+  switchNewAssetMode(kind);
+  if (builtinPaneFor(kind) === 'upload') {
+    handleNewAssetFileSelection(file);
+  } else {
+    setRegistryFile(file);
   }
 }
 
@@ -19043,13 +19246,13 @@ function openNewAssetDialog(presetFile: File | null = null): void {
   }
   // If a file was preset (via items-region drag-drop), switch to upload
   // mode and seed the chip + title.
+  // ADR-098 — a dropped file skips the picker (its kind is read from
+  // the file); otherwise step one is choosing what to add.
   if (presetFile !== null) {
-    handleNewAssetFileSelection(presetFile);
-    switchNewAssetMode('upload');
+    receiveDialogFile(presetFile);
   } else {
-    switchNewAssetMode('text');
+    switchNewAssetMode('picker');
   }
-  requestAnimationFrame(() => titleInput.focus());
 }
 
 function closeNewAssetDialog(): void {
@@ -19058,6 +19261,7 @@ function closeNewAssetDialog(): void {
   backdrop.hidden = true;
   backdrop.setAttribute('aria-hidden', 'true');
   newAssetFile = null;
+  tearDownRegistryPane();
 }
 
 /**
@@ -19114,6 +19318,10 @@ async function createAssetFromUploadFile(
     creatorName: string | null;
     /** Per-space dedupe: hash → existing title. Duplicates are refused. */
     knownHashes?: ReadonlyMap<string, string>;
+    /** ADR-098 — the kind the user picked; inferred from the file when absent. */
+    kind?: string;
+    /** ADR-098 — typed fields from the dialog, merged over the extracted ones. */
+    extraMetadata?: Record<string, unknown>;
   }
 ): Promise<UploadCreateOk | UploadCreateFail> {
   const { spaceId, title, creatorId, creatorName } = opts;
@@ -19159,7 +19367,7 @@ async function createAssetFromUploadFile(
         const transcriptEligible = /\.(vtt|srt|txt|text|md|markdown)$/i.test(file.name);
         const transcript = transcriptEligible ? convertTranscript(text) : null;
         const content = transcript !== null ? transcript.markdown : text;
-        const kind = transcript !== null ? 'transcript' : 'document';
+        const kind = transcript !== null ? 'transcript' : inlineKindFor(file, text, opts.kind);
         const mimeType =
           transcript !== null ? 'text/markdown' : file.type !== '' ? file.type : '';
         const meta: Record<string, unknown> = {
@@ -19175,11 +19383,15 @@ async function createAssetFromUploadFile(
                   : {}),
               }
             : {}),
+          // ADR-098 — what the body implies (lines, rows, cells, tokens…)
+          // and what the user typed in the kind's details.
+          ...deriveBodyMetadata(kind, content, file.name),
+          ...(opts.extraMetadata ?? {}),
         };
         const envelope = await bridge.items.create({
           spaceId,
           title,
-          kind,
+          kind: kind as LiteSpaceItemKind,
           content,
           ...(mimeType !== '' ? { mimeType } : {}),
           metadata: meta,
@@ -19209,12 +19421,9 @@ async function createAssetFromUploadFile(
       // only the fileKey on the graph node. This is what makes the
       // asset readable from every app on the account.
       const bytes = await file.arrayBuffer();
-      const kind = inferKindFromMime(file.type) as
-        | 'image'
-        | 'video'
-        | 'audio'
-        | 'document'
-        | 'other';
+      // ADR-098 — the picked kind wins; otherwise the file says what it
+      // is (a .pptx is Slides, a .fig is Design, a .zip is a File).
+      const kind = (opts.kind ?? inferKindFromFileSpec(file)) as LiteSpaceItemKind;
       // Sharing choices. Both are opt-in; omitted entirely when the
       // user left the defaults alone, so a private upload sends no
       // visibility flag at all and cannot be misread downstream.
@@ -19227,7 +19436,11 @@ async function createAssetFromUploadFile(
         fileName: file.name,
         mimeType: file.type,
         bytes,
-        metadata: { contentSha256, ...(metadata as Record<string, unknown>) },
+        metadata: {
+          contentSha256,
+          ...(metadata as Record<string, unknown>),
+          ...(opts.extraMetadata ?? {}),
+        },
         ...(creatorId !== null ? { creatorId } : {}),
           ...(creatorName !== null ? { creatorName } : {}),
         ...(isPublic ? { isPublic: true } : {}),
@@ -19255,7 +19468,7 @@ async function submitNewAsset(): Promise<void> {
   if (!(titleInput instanceof HTMLInputElement) || error === null) return;
   const title = titleInput.value.trim();
   // Agents may omit the title — the AI suggests a name during conversion.
-  if (title.length === 0 && newAssetMode !== 'agent') {
+  if (title.length === 0 && newAssetMode !== 'agent' && !isRegistryMode(newAssetMode)) {
     showDialogError(error, 'Please enter a title.');
     return;
   }
@@ -19417,7 +19630,17 @@ async function submitNewAsset(): Promise<void> {
         mimeType: 'text/markdown',
         hasContent: true,
       };
-    } else if (newAssetMode === 'upload' && newAssetFile !== null) {
+    } else if (isRegistryMode(newAssetMode)) {
+      // ADR-098 — every registry kind: paste / upload / link / form.
+      const outcome = await submitRegistryAsset({ spaceId, title, creatorId, creatorName });
+      if (outcome.ok === false) {
+        showDialogError(error, outcome.message);
+        if (submit instanceof HTMLButtonElement) submit.disabled = false;
+        return;
+      }
+      if (outcome.note !== null) showToast(outcome.note);
+      createdEnrich = outcome.enrich;
+    } else if (builtinPaneFor(newAssetMode) === 'upload' && newAssetFile !== null) {
       const result = await createAssetFromUploadFile(newAssetFile, {
         spaceId,
         title,
@@ -19491,8 +19714,9 @@ async function submitNewAsset(): Promise<void> {
     // confirmation can restate what was actually done. Publishing a
     // file is worth confirming in words -- a bare "Created" leaves the
     // user with no signal that the thing is now world-readable.
-    const sharedPublicly = newAssetMode === 'upload' && isNewAssetPublic();
-    const sharedExpiry = newAssetMode === 'upload' ? newAssetExpiryIso() : undefined;
+    const usedShareControls = builtinPaneFor(newAssetMode) === 'upload' || registryMode() === 'upload';
+    const sharedPublicly = usedShareControls && isNewAssetPublic();
+    const sharedExpiry = usedShareControls ? newAssetExpiryIso() : undefined;
     closeNewAssetDialog();
     showToast(buildCreatedToast(title, sharedPublicly, sharedExpiry));
     await loadItems();
@@ -19514,13 +19738,74 @@ async function submitNewAsset(): Promise<void> {
   }
 }
 
-function inferKindFromMime(mime: string): string {
-  if (typeof mime !== 'string' || mime.length === 0) return 'other';
-  if (mime.startsWith('image/')) return 'image';
-  if (mime.startsWith('audio/')) return 'audio';
-  if (mime.startsWith('video/')) return 'video';
-  if (mime === 'application/pdf' || mime.startsWith('text/')) return 'document';
-  return 'other';
+/**
+ * ADR-098 — the kind of a text-like upload that lands inline: the
+ * picked kind, else a JSON shape the registry recognises (notebook,
+ * style guide, conversation, flow, journey), else the file's extension
+ * (code, data, transcript…), else the classic document.
+ */
+function inlineKindFor(file: File, text: string, override: string | undefined): string {
+  if (override !== undefined && override.length > 0 && override !== 'other') return override;
+  if (/\.json$/i.test(file.name)) {
+    const sniffed = sniffJsonKind(text);
+    if (sniffed !== null) return sniffed;
+  }
+  const inferred = inferKindFromFileSpec(file);
+  return inferred === 'other' || inferred === 'text' ? 'document' : inferred;
+}
+
+/**
+ * ADR-098 — create one asset from the registry pane (paste / upload /
+ * link / form). Uploads run the one upload pipeline with the picked
+ * kind; everything else is a single `items.create`.
+ */
+async function submitRegistryAsset(opts: {
+  spaceId: string;
+  title: string;
+  creatorId: string | null;
+  creatorName: string | null;
+}): Promise<UploadCreateOk | UploadCreateFail> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return { ok: false, message: 'Bridge unavailable.' };
+  const draft = readRegistryDraft();
+  if (draft === null) return { ok: false, message: 'Pick what to add first.' };
+  const problem = validateRegistryDraft(draft);
+  if (problem !== null) return { ok: false, message: problem };
+  const payload = buildCreatePayload(draft, opts.title);
+  if (payload.file !== undefined) {
+    return createAssetFromUploadFile(payload.file, {
+      spaceId: opts.spaceId,
+      title: payload.title,
+      creatorId: opts.creatorId,
+      creatorName: opts.creatorName,
+      knownHashes: knownSpaceHashes(),
+      kind: payload.kind,
+      extraMetadata: payload.metadata,
+    });
+  }
+  const envelope = await bridge.items.create({
+    spaceId: opts.spaceId,
+    title: payload.title,
+    kind: payload.kind as LiteSpaceItemKind,
+    ...(payload.content !== undefined ? { content: payload.content } : {}),
+    ...(payload.sourceUrl !== undefined ? { sourceUrl: payload.sourceUrl } : {}),
+    ...(payload.mimeType !== undefined ? { mimeType: payload.mimeType } : {}),
+    metadata: payload.metadata as Record<string, LiteMetadataValue>,
+    ...(opts.creatorId !== null ? { creatorId: opts.creatorId } : {}),
+    ...(opts.creatorName !== null ? { creatorName: opts.creatorName } : {}),
+  });
+  if (envelope.ok === false) return { ok: false, message: envelope.error.message };
+  return {
+    ok: true,
+    enrich: {
+      id: envelope.value.id,
+      kind: payload.kind,
+      ...(payload.mimeType !== undefined ? { mimeType: payload.mimeType } : {}),
+      hasContent: payload.hasContent,
+    },
+    note: null,
+    contentSha256: '',
+  };
 }
 
 /**

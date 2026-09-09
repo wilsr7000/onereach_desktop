@@ -184,3 +184,17 @@ and description become a Designer bot (`createBot` on the port —
 with it (`SET_SPACE_GSX_BOT`). The Designer sync then fills that Space
 (`SPACE_BY_GSX_BOT_ID`) instead of minting a mirror. Best-effort: the Space
 exists in NEON whatever GSX answers; the wizard's toast says which.
+
+## Asset kinds (ADR-098)
+
+Every kind Spaces can hold is one row in `asset-kinds.ts` — label, glyph, accent, family, creation modes, typed metadata fields, file recognition, read-side aliases, empty-state copy. `ITEM_KINDS` (types.ts) is the union; the registry, the bridge typings and the SDK's schema annotation are pinned to it by `spaces-asset-kinds.test.ts`. Adding a kind is adding a row (plus a matrix-test row).
+
+- `asset-kinds.ts` — the registry: `kindSpec`, `kindLabel`, `kindGlyph`, `normalizeKind` (the full app's `assetType` / `fileCategory` / `jsonSubtype` words → Lite kinds), `inferKindFromFile` (name pattern → extension → MIME), `sniffJsonKind` (notebook / style guide / conversation / journey / flow by shape), `creatableKinds`, `reclassifiableKinds`, `kindFields`, `typedMetadataKeys`.
+- `link-embeds.ts` — `describeLink(url)`: provider, id, embed URL, implied kind for YouTube, Vimeo, Loom, Google Slides/Docs/Sheets, Keynote, Canva, Pitch, Figma, Sketch, XD, GitHub, GSX Designer flows, direct media files. Only these embed URLs are ever framed.
+- `asset-fields.ts` — format / parse / control per field type (`text`, `multiline`, `url`, `number`, `select`, `boolean`, `datetime`, `list`, `duration`). Durations are seconds in the bag; bare typed numbers are minutes.
+- `asset-forms.ts` — the Add-asset dialog's kind picker (grouped, filterable, arrow-walkable), the generated pane per kind (paste / upload / link / form), `readRegistryDraft` → `validateRegistryDraft` → `buildCreatePayload`, and `deriveBodyMetadata` (lines, rows, cells, tokens, turns, stages, steps).
+- `asset-details.ts` — the "<Kind> details" section of the detail rail: typed fields edited in place through the metadata callbacks; a Link row edits `sourceUrl` (`items.update` accepts `sourceUrl`, http(s) only, `''` clears).
+- `asset-previews.ts` — tile previews and detail blocks for the registry kinds (embeds, cards, facts; notebook cells, swatches, threads, tables through injected renderers). `registryBlockOwnsContent(kind)` says which kinds render their own body (code, data, notebook, style guide, conversation) — those get the Preview / Source / Edit block instead of the Markdown one.
+- `asset-kinds.css` — styles for all of the above, shipped beside `spaces.css`.
+
+Kinds: `text, code, data, styleguide, conversation` (write) · `document, image, video, audio, presentation, design, notebook, flow, other` (files) · `url, monitor` (links) · `agent, tool, knowledge` (capabilities) · `journey, meeting, transcript` (structured) · `playbook, ticket` (made elsewhere). Hand-built panes remain for text, document/other (upload), agent, knowledge and the existing-asset search; everything else is generated.

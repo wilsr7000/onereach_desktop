@@ -110,8 +110,11 @@ import {
   MAX_ITEM_TITLE_LENGTH,
   MAX_ITEM_DESCRIPTION_LENGTH,
   MAX_ITEM_CONTENT_LENGTH,
+  MAX_ITEM_SOURCE_URL_LENGTH,
   MAX_ITEM_TAG_LENGTH,
+  ITEM_KINDS as ITEM_KIND_LIST,
 } from './types.js';
+import { normalizeKind } from './asset-kinds.js';
 import type { SpaceScope } from './scope.js';
 import { CHECKLIST_MODES, CHECKLIST_OBLIGATIONS, MAX_CHECKLIST_ITEMS,
   MAX_ASSET_VERSIONS } from './types.js';
@@ -495,8 +498,19 @@ const SPACE_MEMBER = `(a:Asset OR a:Playbook OR a:Note)`;
 const MEMBER_KIND = `CASE
              WHEN a:Playbook THEN 'playbook'
              WHEN a:Note THEN 'text'
+             WHEN a:Meeting THEN 'meeting'
+             WHEN a:Transcript THEN 'transcript'
+             WHEN a:Recording THEN 'video'
              ELSE coalesce(a.type, a.assetType, 'other')
            END`;
+
+/**
+ * ADR-098 — kinds whose inline `content` the list projections head
+ * (first 280 chars) so their tiles can show structure without a
+ * getItem round-trip: the four that always did, plus the structured
+ * kinds whose bodies are code, rows, tokens, messages, or notes.
+ */
+const CONTENT_HEAD_KINDS = `['playbook', 'transcript', 'knowledge', 'journey', 'code', 'data', 'styleguide', 'conversation', 'meeting', 'tool', 'flow', 'notebook', 'monitor']`;
 
 /**
  * ADR-060 — cross-writer recency. The graph's timestamps come in every
@@ -695,7 +709,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
+           CASE WHEN coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -754,7 +768,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
+           CASE WHEN coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -824,6 +838,9 @@ export const CYPHER = {
         a.description = coalesce($description, a.description),
         a.content = coalesce($content, a.content),
         a.type = coalesce($type, a.type),
+        a.sourceUrl = CASE WHEN $clearSourceUrl THEN NULL
+                           WHEN $sourceUrl IS NULL THEN a.sourceUrl
+                           ELSE $sourceUrl END,
         a.updatedAt = $now
     WITH a
     OPTIONAL MATCH (a)-[:HAS_VERSION]->(m:AssetVersion)
@@ -1168,7 +1185,7 @@ export const CYPHER = {
                        OR trim(a.content) = '' THEN NULL
                   ELSE left(a.content, 280) END
            ) AS excerpt,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
+           CASE WHEN coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -1280,7 +1297,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
+           CASE WHEN coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -1982,7 +1999,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
+           CASE WHEN coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -2770,7 +2787,7 @@ export const CYPHER = {
            ) AS excerpt,
            CASE WHEN trim(coalesce(a.description, '')) = '' THEN NULL
                 ELSE a.description END AS description,
-           CASE WHEN coalesce(a.type, a.assetType) IN ['playbook', 'transcript', 'knowledge', 'journey']
+           CASE WHEN coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}
                      AND a.content IS NOT NULL
                      AND NOT a.content STARTS WITH 'data:'
                 THEN left(a.content, 280) ELSE NULL END AS contentHead,
@@ -3120,7 +3137,7 @@ export const CYPHER = {
         sp.lite_annotated_at = $nowMs
     MERGE (as:Schema {entity: 'Asset'})
     SET as.lite_properties =
-          'type: ItemKind (document|image|url|text|audio|video|playbook|ticket|agent|transcript|knowledge|journey|other; ' +
+          'type: ItemKind (document|image|url|text|audio|video|playbook|ticket|agent|transcript|knowledge|journey|other|tool|presentation|code|data|design|flow|notebook|styleguide|conversation|meeting|monitor — ADR-098; other writers use assetType/fileCategory words that map through lite/spaces/asset-kinds.ts aliases; ' +
           'legacy rows carry assetType) · name = title · content: inline body (markdown/text) · description · ' +
           'mimeType (camelCase; the registry key mime_type was never written) · url: storage key · size · ' +
           'metadata: JSON string · sourceUrl · deletedAt: ISO tombstone · createdAt/updatedAt: ISO · ' +
@@ -6944,21 +6961,10 @@ function toTagList(v: unknown): string[] {
   return out;
 }
 
-const ITEM_KINDS: ReadonlySet<ItemKind> = new Set([
-  'document',
-  'image',
-  'url',
-  'text',
-  'audio',
-  'video',
-  'playbook',
-  'ticket',
-  'agent',
-  'transcript',
-  'knowledge',
-  'journey',
-  'other',
-]);
+// ADR-098 — derived from the union's runtime list, never hand-copied:
+// a mirror here is how a new kind could validate on one side of the
+// bridge and be refused on the other.
+const ITEM_KINDS: ReadonlySet<ItemKind> = new Set(ITEM_KIND_LIST);
 
 /**
  * Turn a raw `agentType` string into a safe Cypher label
@@ -7031,8 +7037,15 @@ function parseAgentEndpoints(raw: unknown): AgentEndpoint[] {
   }
 }
 
+/**
+ * ADR-098 — a kind as any writer spelled it. Lite's own ids pass
+ * through; the full app's `assetType` / `fileCategory` / `jsonSubtype`
+ * words (`presentation`, `data-source`, `web-monitor`, `style-guide`,
+ * `chatbot-conversation`, `html`, `pdf`…) resolve through the registry's
+ * aliases; anything else is `other`.
+ */
 function toItemKind(v: unknown): ItemKind {
-  return typeof v === 'string' && (ITEM_KINDS as Set<string>).has(v) ? (v as ItemKind) : 'other';
+  return normalizeKind(v);
 }
 
 const TICKET_STATUS_SET: ReadonlySet<TicketStatus> = new Set<TicketStatus>([
@@ -7282,6 +7295,8 @@ function validateUpdatePatch(
   description: string | null;
   content: string | null;
   type: string | null;
+  sourceUrl: string | null;
+  clearSourceUrl: boolean;
   editorId: string | null;
 } {
   const out = {
@@ -7289,6 +7304,8 @@ function validateUpdatePatch(
     description: null as string | null,
     content: null as string | null,
     type: null as string | null,
+    sourceUrl: null as string | null,
+    clearSourceUrl: false,
     editorId: null as string | null,
   };
   if (patch === null || typeof patch !== 'object') {
@@ -7358,6 +7375,31 @@ function validateUpdatePatch(
       });
     }
     out.type = patch.type;
+  }
+  if (patch.sourceUrl !== undefined) {
+    // ADR-098 — link-based kinds edit their address in place. Empty
+    // clears; anything else must be an http(s) URL, which is what a
+    // tile, an embed, and the OS browser can all act on.
+    if (typeof patch.sourceUrl !== 'string') {
+      throw new SpacesError({
+        code: 'SPACES_INVALID_INPUT',
+        message: 'sourceUrl must be a string',
+        context: { sourceUrl: typeof patch.sourceUrl },
+      });
+    }
+    const trimmed = patch.sourceUrl.trim();
+    if (trimmed.length === 0) {
+      out.clearSourceUrl = true;
+    } else {
+      if (trimmed.length > MAX_ITEM_SOURCE_URL_LENGTH || !/^https?:\/\/[^\s]+$/i.test(trimmed)) {
+        throw new SpacesError({
+          code: 'SPACES_INVALID_INPUT',
+          message: `sourceUrl must be an http(s) URL of at most ${MAX_ITEM_SOURCE_URL_LENGTH} chars`,
+          context: { length: trimmed.length, max: MAX_ITEM_SOURCE_URL_LENGTH },
+        });
+      }
+      out.sourceUrl = trimmed;
+    }
   }
   if (patch.editorId !== undefined) {
     if (typeof patch.editorId !== 'string') {

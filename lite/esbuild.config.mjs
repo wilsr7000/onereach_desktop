@@ -59,6 +59,7 @@ const ASSETS_TO_COPY = [
   { from: 'lite/learn/learn.css', to: 'learn.css' },
   { from: 'lite/assets/capchewlogo.jpg', to: 'capchewlogo.jpg' },
   { from: 'lite/spaces/spaces.css', to: 'spaces.css' },
+  { from: 'lite/spaces/asset-kinds.css', to: 'asset-kinds.css' },
   // boot-chat.html / boot-chat.css were retired when the chat surface
   // moved inline into chrome.html — the module source lives at
   // lite/boot-chat/ and is imported by chrome.ts, but the page is no

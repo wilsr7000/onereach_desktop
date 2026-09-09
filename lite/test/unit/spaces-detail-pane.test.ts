@@ -16,6 +16,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { reclassifiableKinds } from '../../spaces/asset-kinds.js';
 
 interface RendererItemProvenance {
   kind: string;
@@ -424,7 +425,7 @@ describe('buildDetailPane', () => {
       baseItem({ title: 'Engineering brief', kind: 'document', size: 1234 }),
       () => undefined
     );
-    expect(el.querySelector('.spaces-card-kind')?.textContent).toBe('Doc');
+    expect(el.querySelector('.spaces-card-kind')?.textContent).toBe('Document');
     expect(el.querySelector('.spaces-detail-title')?.textContent).toBe('Engineering brief');
     expect(el.querySelector('.spaces-detail-meta')?.textContent).toContain('1.2 KB');
     expect(el.querySelector<HTMLButtonElement>('.spaces-detail-close')).not.toBeNull();
@@ -731,24 +732,12 @@ describe('buildKindReclassify', () => {
     expect(el.getAttribute('data-current-kind')).toBe('document');
   });
 
-  it('includes the editable kind options (doc, image, url, text, audio, video, agent, transcript, other)', () => {
+  it('includes every reclassifiable kind from the registry (ADR-098), in registry order', () => {
     const el = renderer.buildKindReclassify(baseItem({ kind: 'text' }), async () => undefined);
     const values = Array.from(el.querySelectorAll<HTMLOptionElement>('option')).map(
       (o) => o.value
     );
-    expect(values).toEqual([
-      'document',
-      'image',
-      'url',
-      'text',
-      'audio',
-      'video',
-      'agent',
-      'transcript',
-      'knowledge',
-      'journey',
-      'other',
-    ]);
+    expect(values).toEqual(reclassifiableKinds().map((s) => s.id));
   });
 
   it('calls onTypeChange with the new kind on change', async () => {

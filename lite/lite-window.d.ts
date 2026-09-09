@@ -627,7 +627,19 @@ type LiteSpaceItemKind =
   | 'transcript'
   | 'knowledge'
   | 'journey'
-  | 'other';
+  | 'other'
+  // ADR-098 — mirrors ITEM_KINDS in lite/spaces/types.ts (pinned by a test).
+  | 'tool'
+  | 'presentation'
+  | 'code'
+  | 'data'
+  | 'design'
+  | 'flow'
+  | 'notebook'
+  | 'styleguide'
+  | 'conversation'
+  | 'meeting'
+  | 'monitor';
 
 type LiteSpaceKind = 'user' | 'shared';
 
@@ -861,7 +873,10 @@ interface LiteSpacesItemsBridge {
     patch: {
       title?: string;
       description?: string;
+      content?: string;
       type?: LiteSpaceItemKind;
+      /** ADR-098 — link-based kinds edit their address; '' clears it. */
+      sourceUrl?: string;
       editorId?: string;
     }
   ): Promise<LiteSpacesIpcResult<LiteSpaceItem>>;

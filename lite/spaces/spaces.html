@@ -4,11 +4,12 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob:; object-src 'self' data: blob:; frame-src 'self' data: blob:"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: blob: https:; media-src 'self' data: blob: https:; object-src 'self' data: blob:; frame-src 'self' data: blob: https:"
     />
     <title>Spaces</title>
     <link rel="stylesheet" href="./signature.css" />
     <link rel="stylesheet" href="./spaces.css" />
+    <link rel="stylesheet" href="./asset-kinds.css" />
   </head>
   <body>
     <!--
@@ -183,58 +184,15 @@
           >×</button>
         </header>
 
-        <div class="spaces-new-asset-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            class="spaces-new-asset-tab is-active"
-            data-asset-tab="text"
-            aria-selected="true"
-          >
-            <span class="spaces-new-asset-tab-icon" aria-hidden="true">¶</span>
-            <span>Paste text</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="spaces-new-asset-tab"
-            data-asset-tab="upload"
-            aria-selected="false"
-          >
-            <span class="spaces-new-asset-tab-icon" aria-hidden="true">↑</span>
-            <span>Upload file</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="spaces-new-asset-tab"
-            data-asset-tab="agent"
-            aria-selected="false"
-          >
-            <span class="spaces-new-asset-tab-icon" aria-hidden="true">◈</span>
-            <span>Add agent</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="spaces-new-asset-tab"
-            data-asset-tab="knowledge"
-            aria-selected="false"
-          >
-            <span class="spaces-new-asset-tab-icon" aria-hidden="true">⬡</span>
-            <span>Knowledge</span>
-          </button>
-          <button
-            type="button"
-            role="tab"
-            class="spaces-new-asset-tab"
-            data-asset-tab="existing"
-            aria-selected="false"
-          >
-            <span class="spaces-new-asset-tab-icon" aria-hidden="true">⧉</span>
-            <span>Existing</span>
-          </button>
-        </div>
+        <!--
+          ADR-098 — step one is the KIND PICKER (every kind the registry
+          knows, grouped and filterable); step two is the kind bar above
+          the form. The five hand-built tabs became cards; the panes they
+          drove keep their ids and switch the same way. A dropped file
+          skips the picker: its kind is read from the file.
+        -->
+        <div id="spaces-new-asset-picker" class="spaces-new-asset-picker"></div>
+        <div id="spaces-new-asset-kindbar" class="spaces-kindbar" hidden></div>
 
         <form id="spaces-new-asset-form" class="spaces-new-asset-form">
           <div class="spaces-new-asset-field">
@@ -438,6 +396,9 @@
             />
             <div id="spaces-new-asset-existing-results" class="spaces-agent-results" role="listbox"></div>
           </div>
+
+          <!-- ADR-098 — the generated pane for registry kinds (paste / upload / link / form). -->
+          <div class="spaces-new-asset-field" data-asset-pane="registry" id="spaces-new-asset-registry-pane" hidden></div>
 
           <div id="spaces-new-asset-error" class="spaces-modal-error" hidden></div>
 
