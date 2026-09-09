@@ -23,7 +23,7 @@ const liteRoot = path.resolve(here, '../..');
 const FAKE_WORKER = `
 const { parentPort, workerData } = require('node:worker_threads');
 const { req } = workerData;
-if (req.input === 'hang') { for (;;) {} }
+if (req.input.startsWith('hang')) { for (;;) {} }
 if (req.input === 'crash') { throw new Error('boom'); }
 if (req.input === 'silent-exit') { process.exit(3); }
 if (req.input === 'converr') {
@@ -78,6 +78,12 @@ describe('WorkerConvertService with a fake worker', () => {
     expect(elapsed).toBeGreaterThanOrEqual(900);
     expect(elapsed).toBeLessThan(4000);
   });
+  it('the budget covers handing the input to the thread: a large hung request is still stopped near the budget', async () => {
+    const service = new WorkerConvertService({ workerPath: fakeWorker, timeoutMs: 1000 });
+    const t0 = performance.now();
+    await expect(service.convert({ input: 'hang' + 'x'.repeat(8 * 1024 * 1024), ...md })).rejects.toMatchObject({ code: CONVERT_ERROR_CODES.TIMEOUT });
+    expect(performance.now() - t0).toBeLessThan(3000);
+  });
   it('a crash and a silent exit both become CONVERT_FAILED with the reason', async () => {
     const service = new WorkerConvertService({ workerPath: fakeWorker, timeoutMs: 5000 });
     await expect(service.convert({ input: 'crash', ...md })).rejects.toMatchObject({ code: CONVERT_ERROR_CODES.FAILED, message: /worker failed: boom/ });
@@ -124,6 +130,15 @@ describe('WorkerConvertService with the real worker bundle', () => {
     expect(typeof r.output).toBe('string');
     expect(performance.now() - t0).toBeLessThan(8000);
   }, 20000);
+  it('code-to-html converts AT its declared cap with automatic detection inside the 512 MB worker heap', async () => {
+    const service = new WorkerConvertService({ workerPath: realWorker, timeoutMs: 20000 });
+    const unit = 'def f(x):\n    return [i * 2 for i in range(x) if i % 3 == 0]  # comment\nclass A(B):\n    v = {"k": 1, "s": "str"}\n';
+    const input = unit.repeat(Math.ceil(MARKUP_INPUT_BYTES / Buffer.byteLength(unit))).slice(0, MARKUP_INPUT_BYTES);
+    expect(Buffer.byteLength(input)).toBe(MARKUP_INPUT_BYTES);
+    const r = await service.convert({ input, from: 'code', to: 'html', strategy: 'fragment' });
+    expect(r.steps[0]?.stats).toMatchObject({ language: 'python', autoDetected: true });
+    expect(r.outputBytes).toBeGreaterThan(MARKUP_INPUT_BYTES);
+  }, 30000);
   it("a converter's cap and a ConvertError cross the worker boundary with their codes", async () => {
     const service = new WorkerConvertService({ workerPath: realWorker, timeoutMs: 10000 });
     await expect(service.convert({ input: 'a'.repeat(MARKUP_INPUT_BYTES + 1), from: 'md', to: 'html' })).rejects.toMatchObject({

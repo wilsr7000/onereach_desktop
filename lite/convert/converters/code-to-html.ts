@@ -173,6 +173,9 @@ ${THEMES[page.theme] ?? GITHUB_THEME_CSS}
 </html>`;
 }
 
+/** How much of the input automatic language detection reads. */
+export const DETECT_SAMPLE_CHARS = 64 * 1024;
+
 export const codeToHtml: Converter = {
   spec: {
     id: 'code-to-html',
@@ -207,9 +210,14 @@ export const codeToHtml: Converter = {
       language = wanted.id;
       highlighted = hljs.highlight(input, { language, ignoreIllegals: true });
     } else {
-      const auto = hljs.highlightAuto(input);
+      // Detect on a prefix, highlight once. highlightAuto runs every
+      // registered grammar over the whole input and keeps the results
+      // long enough to OOM a 512 MB worker inside the 2 MB cap (second
+      // review pass); the first 64 KB decide the language just as well.
+      const sample = input.length > DETECT_SAMPLE_CHARS ? input.slice(0, DETECT_SAMPLE_CHARS) : input;
+      const auto = hljs.highlightAuto(sample);
       language = auto.language ?? 'plaintext';
-      highlighted = auto;
+      highlighted = sample === input ? auto : { ...hljs.highlight(input, { language, ignoreIllegals: true }), relevance: auto.relevance };
     }
     const code = `<pre><code class="hljs language-${escapeHtml(language)}">${highlighted.value}</code></pre>`;
     const lines = input.split('\n').length;

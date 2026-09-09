@@ -86,8 +86,11 @@ tranches and will take base64.
 **Wall-clock budget.** The MCP server runs every conversion in a worker thread
 (`worker.ts`, bundled to `convert-worker.js` beside the server, which refuses
 to start without it) with a kill timer — `CONVERT_TIMEOUT_MS`, default 20 s,
-1 s to 120 s — and a 512 MB heap. Over budget: the worker is terminated and the
-caller gets `CONVERT_TIMEOUT`; out of memory: `CONVERT_FAILED`. The server
+1 s to 120 s — and a 512 MB heap. The timer is armed before the worker is
+constructed, so handing the input to the thread counts against the budget;
+the JSON-RPC parse and schema check before that are the transport's and are
+not budgeted. Over budget: the worker is terminated and the caller gets
+`CONVERT_TIMEOUT`; out of memory: `CONVERT_FAILED`. The server
 itself never runs a conversion, so one hostile input cannot wedge it
 (Amendment 1: the review did exactly that with 2 MB of `<script`, before the
 scans were made linear and the worker added). Inside the app the api runs
@@ -107,6 +110,14 @@ in-process; the caps are its budget.
   `&lt;script&gt;`, never a live tag.
 - **Linear scans** (`scan.ts`): every tag or marker pass walks the text once;
   `convert-hostile.test.ts` holds a budget for each shape the review measured.
+  The case fold the scans match on is ASCII-only and length-stable
+  (`asciiLower`), so an offset found in the folded copy always lands on the
+  same character of the original — `toLowerCase()` grows on U+0130 and let a
+  tag through behind a run of İ.
+- **`code-to-html` detects on a prefix.** highlight.js's automatic detection
+  runs every grammar over the input; on 64 KB it decides the language, then
+  the whole input is highlighted once. At the 2 MB cap that is about a second
+  inside the worker heap; the old path ran out of memory there.
 - **Options** are merged over the declared defaults; prototype-shaped keys are
   dropped. Options given to a multi-step pipeline reach every step and say so
   in a warning, like a strategy does.

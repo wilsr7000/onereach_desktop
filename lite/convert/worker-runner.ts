@@ -116,20 +116,21 @@ export class WorkerConvertService implements ConvertRunner {
     return new Promise<ConvertResult>((resolve, reject) => {
       const timeoutMs = this.timeoutMs;
       let settled = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const worker = new Worker(this.opts.workerPath, {
-        workerData: { req },
-        resourceLimits: { maxOldGenerationSizeMb: this.maxOldGenerationSizeMb },
-      });
+      let worker: Worker | null = null;
       const finish = (outcome: () => void): void => {
         if (settled) return;
         settled = true;
-        if (timer !== undefined) clearTimeout(timer);
-        void worker.terminate();
+        clearTimeout(timer);
+        if (worker !== null) void worker.terminate();
         outcome();
       };
       const context = { from: req.from, to: req.to, inputBytes, timeoutMs };
-      timer = setTimeout(() => {
+      // The budget starts before the worker exists, so the structured
+      // clone of the input into the thread counts against it (second
+      // review pass: a 20 MB request spent seconds there, outside the
+      // timer). What happens before this call — the JSON-RPC parse and
+      // the schema check — is the transport's and is not budgeted.
+      const timer = setTimeout(() => {
         finish(() =>
           reject(
             new ConvertError({
@@ -141,6 +142,25 @@ export class WorkerConvertService implements ConvertRunner {
           )
         );
       }, timeoutMs);
+      try {
+        worker = new Worker(this.opts.workerPath, {
+          workerData: { req },
+          resourceLimits: { maxOldGenerationSizeMb: this.maxOldGenerationSizeMb },
+        });
+      } catch (err) {
+        finish(() =>
+          reject(
+            new ConvertError({
+              code: CONVERT_ERROR_CODES.FAILED,
+              message: `conversion worker could not start: ${(err as Error).message}`,
+              remediation: 'The worker bundle beside the server is missing or broken (run npm run lite:build).',
+              context,
+              cause: err,
+            })
+          )
+        );
+        return;
+      }
       worker.once('message', (reply: WorkerReply) => {
         finish(() => {
           if (reply.ok) resolve(reply.result);

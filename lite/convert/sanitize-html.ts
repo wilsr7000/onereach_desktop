@@ -13,11 +13,15 @@
  *
  * Linear, by construction: one walk, quote-aware, and a tag that runs
  * into the next `<` is abandoned there, so no region is scanned twice.
- * Output that needed no change is byte-identical to the input.
+ * Output that needed no change is byte-identical to the input. The
+ * case fold used for matching is ASCII-only and length-stable, so an
+ * offset found in the folded copy always lands on the same character
+ * of the original (a `toLowerCase()` copy grows on U+0130 and let a
+ * tag through behind a run of İ).
  */
 
 import { decodeEntities } from './html-entities.js';
-import { ForwardSearch, findClosingTag } from './scan.js';
+import { ForwardSearch, asciiLower, findClosingTag } from './scan.js';
 
 const GLOBAL_ATTRS: ReadonlySet<string> = new Set(['class', 'id', 'title', 'lang', 'dir', 'align']);
 
@@ -196,7 +200,8 @@ function renderTag(tag: ParsedTag): string {
 export function sanitizeHtml(html: string): string {
   if (!html.includes('<')) return html;
   const len = html.length;
-  const lower = html.toLowerCase();
+  // Length-stable fold: offsets found in `lower` index `html` (see asciiLower).
+  const lower = asciiLower(html);
   const search = new ForwardSearch(lower);
   const parts: string[] = [];
   let i = 0;

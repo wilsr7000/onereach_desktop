@@ -15,13 +15,13 @@ import { CONVERT_ERROR_CODES } from '../../convert/errors.js';
 import { MAX_INPUT_BYTES, MARKUP_INPUT_BYTES, TEXT_SCAN_INPUT_BYTES, type Converter } from '../../convert/types.js';
 import { decodeEntities } from '../../convert/html-entities.js';
 import { sanitizeHtml, isSafeUrl } from '../../convert/sanitize-html.js';
-import { ForwardSearch, removeElements, stripTags, replaceBracketed, elementContent } from '../../convert/scan.js';
+import { ForwardSearch, asciiLower, removeElements, stripTags, replaceBracketed, elementContent } from '../../convert/scan.js';
 import { htmlToText, stripAllTags, readableText, extractMainContent, textIssues } from '../../convert/converters/html-to-text.js';
 import { stripMarkdown, stripInline, strippedIssues } from '../../convert/converters/md-to-text.js';
 import { mdToHtml, titleFromMarkdown } from '../../convert/converters/md-to-html.js';
 import { htmlToMd, markdownIssues } from '../../convert/converters/html-to-md.js';
 import { codeToMd, detectLanguage } from '../../convert/converters/code-to-md.js';
-import { codeToHtml } from '../../convert/converters/code-to-html.js';
+import { codeToHtml, DETECT_SAMPLE_CHARS } from '../../convert/converters/code-to-html.js';
 import { IMPORT_PATTERN } from '../../convert/converters/jupyter-to-python.js';
 import { delimited } from '../../convert/converters/delimited.js';
 import { jsonToCsv, escapeCsvField, outputDelimiter } from '../../convert/converters/json-to-csv.js';
@@ -118,6 +118,44 @@ describe('the linear scans keep the regex semantics', () => {
     expect(replaceBracketed('[a[b](c)', '[', ']', '(', ')')).toBe('a[b');
     expect(replaceBracketed('[a]( b )', '[', ']', '(', ')')).toBe('a');
     expect(stripMarkdown('[![alt](img.png)](https://x.io)')).toBe('alt');
+  });
+});
+
+describe('the case fold keeps every offset (second review pass)', () => {
+  it('asciiLower is length-stable where toLowerCase is not, and equal to it on ASCII', () => {
+    for (const s of ['İ', 'İ'.repeat(30) + '<SCRIPT>', 'ß', 'ǅ', 'é', '😀<B>', 'ΣΑΣ', 'ﬀ', 'K']) {
+      expect(asciiLower(s).length, JSON.stringify(s)).toBe(s.length);
+    }
+    expect('İ'.toLowerCase().length).toBe(2);
+    expect(asciiLower('<A HREF="X">Y</A>')).toBe('<a href="x">y</a>');
+    expect(asciiLower('İ<B>')).toBe('İ<b>');
+    expect(asciiLower('plain')).toBe('plain');
+  });
+  it('a run of İ before a tag no longer lets the tag through the sanitiser or the strippers', async () => {
+    const dotted = 'İ'.repeat(30);
+    expect(sanitizeHtml(dotted + '<script>alert(1)</script>')).toBe(dotted);
+    expect(sanitizeHtml('İ'.repeat(25) + '<img src=x onerror="alert(1)">')).toBe('İ'.repeat(25) + '<img src="x">');
+    expect(sanitizeHtml('İ'.repeat(5) + '<SCRIPT>x</SCRIPT><B>b</B>')).toBe('İ'.repeat(5) + '<b>b</b>');
+    for (const n of [1, 17, 18, 25, 30, 200]) {
+      const out = sanitizeHtml('x'.repeat(3) + 'İ'.repeat(n) + '<script>alert(1)</script><p>ok</p>');
+      expect(out, `${n} İ`).not.toMatch(/<script/i);
+      expect(out, `${n} İ`).toContain('<p>ok</p>');
+    }
+    const md = await mdToHtml.execute('x\n\n' + 'İ'.repeat(25) + '<script>alert(1)</script>', 'enhanced', {});
+    expect(md.output).not.toMatch(/<script/i);
+    expect(md.stats).toMatchObject({ sanitized: true });
+    const styled = await mdToHtml.execute('x\n\n' + 'İ'.repeat(18) + '<img src=x onerror=alert(1)>', 'styled', {});
+    expect(styled.output).not.toMatch(/onerror/i);
+    for (const strategy of ['strip', 'readable', 'article']) {
+      const r = await htmlToText.execute(dotted + '<script>SECRET</script>tail', strategy, {});
+      expect(r.output, strategy).not.toContain('SECRET');
+      expect(r.output, strategy).toContain('tail');
+    }
+    expect(stripAllTags(dotted + '<b>bold</b>')).toBe(dotted + 'bold');
+    expect(stripTags('İ'.repeat(7) + '<i>x</i>')).toBe('İ'.repeat(7) + 'x');
+    expect(removeElements('İ'.repeat(9) + '<style>p{}</style>after', ['style'])).toBe('İ'.repeat(9) + 'after');
+    expect(extractMainContent('İ'.repeat(12) + '<article>A</article>')).toBe('A');
+    expect(readableText('İ'.repeat(4) + '<p>a</p><p>b</p>')).toBe('İ'.repeat(4) + 'a\n\nb');
   });
 });
 
@@ -298,6 +336,15 @@ describe('the format graph is honest', () => {
     expect(outputDelimiter(undefined, 'tsv')).toBe('\t');
     expect(outputDelimiter('\\t', 'csv')).toBe('\t');
     expect(outputDelimiter(undefined, 'csv')).toBe(',');
+  });
+  it('code-to-html detects the language on a prefix and highlights once, so the whole input is never highlighted 19 times', async () => {
+    const unit = 'def f(x):\n    return [i * 2 for i in range(x) if i % 3 == 0]  # comment\n';
+    const big = unit.repeat(Math.ceil((DETECT_SAMPLE_CHARS * 2) / unit.length));
+    const r = await codeToHtml.execute(big, 'fragment', {});
+    expect(r.stats).toMatchObject({ language: 'python', autoDetected: true });
+    expect(r.output.split('\n').length).toBeGreaterThan(DETECT_SAMPLE_CHARS / unit.length);
+    const small = await codeToHtml.execute(unit, 'fragment', {});
+    expect(small.stats).toMatchObject({ language: 'python', autoDetected: true });
   });
   it('a py source is fenced and highlighted as Python without being told', async () => {
     const md = await codeToMd.execute('print(1)', 'fenced', {}, { from: 'py', to: 'md', ...step });

@@ -14,6 +14,19 @@
  * is proportional to the input whatever it contains.
  */
 
+/**
+ * A case-fold that keeps every offset: only A–Z change, one code unit
+ * each. `toLowerCase()` is not length-stable — U+0130 (İ) becomes two
+ * code units — and an offset found in a longer copy, used to slice the
+ * original, drifts by one per İ until a tag lands in the drift and is
+ * emitted verbatim (the second review pass reproduced a live <script>
+ * behind 25 İ). Tag and attribute names are ASCII, so this fold is all
+ * the matching needs; `asciiLower(s).length === s.length` always.
+ */
+export function asciiLower(s: string): string {
+  return /[A-Z]/.test(s) ? s.replace(/[A-Z]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 32)) : s;
+}
+
 /** indexOf with memory: each needle is searched forward once. */
 export class ForwardSearch {
   private readonly memo = new Map<string, { at: number; from: number }>();
@@ -76,7 +89,7 @@ export interface TagToken {
  * a `<` with no `>` anywhere after it is text, and so is `<>`.
  */
 export function forEachTag(html: string, onTag: (tag: TagToken) => void, onText: (start: number, end: number) => void): void {
-  const lower = html.toLowerCase();
+  const lower = asciiLower(html);
   const search = new ForwardSearch(lower);
   let i = 0;
   while (i < html.length) {
@@ -126,7 +139,7 @@ export function stripTags(html: string): string {
  */
 export function removeElements(html: string, names: readonly string[], removeComments = true): string {
   if (!html.includes('<')) return html;
-  const lower = html.toLowerCase();
+  const lower = asciiLower(html);
   const search = new ForwardSearch(lower);
   const wanted = new Set(names.map((n) => n.toLowerCase()));
   const parts: string[] = [];
@@ -178,7 +191,7 @@ export function findClosingTag(lower: string, search: ForwardSearch, name: strin
  * opener has one either, so the search stops there.
  */
 export function elementContent(html: string, name: string, check?: (tagText: string) => boolean): string | null {
-  const lower = html.toLowerCase();
+  const lower = asciiLower(html);
   const search = new ForwardSearch(lower);
   const opener = '<' + name;
   let at = 0;
