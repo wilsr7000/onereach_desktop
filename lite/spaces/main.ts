@@ -556,8 +556,18 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
           await api.renameSpace(id, name);
         },
         createSpace: async (name, description) => (await api.createSpace({ name, description })).id,
-        listItemIds: async (spaceId) =>
-          (await api.items.list({ kind: 'space', spaceId }, { limit: 500 })).map((it) => it.id),
+        // Every item, paged: a merge that moved the first page and archived
+        // the rest would report done while half the Space stayed behind.
+        listItemIds: async (spaceId) => {
+          const ids: string[] = [];
+          const page = 200;
+          for (let offset = 0; offset < 10_000; offset += page) {
+            const rows = await api.items.list({ kind: 'space', spaceId }, { limit: page, offset });
+            for (const row of rows) ids.push(row.id);
+            if (rows.length < page) break;
+          }
+          return ids;
+        },
         moveItem: async (itemId, fromSpaceId, toSpaceId) => {
           await api.items.moveToSpace(itemId, fromSpaceId, toSpaceId);
         },

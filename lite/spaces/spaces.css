@@ -11102,16 +11102,21 @@ body {
 .spaces-row-space.is-nested {
   position: relative;
   padding-left: calc(8px + var(--nest-depth, 1) * 14px);
+  /* One guide per ancestor, painted from the row's own background so the
+     lines run unbroken past deeper siblings and meet at row edges. */
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(var(--or-ink-rgb), 0.12) 0 1px,
+    transparent 1px 14px
+  );
+  background-position: 11px 0;
+  background-size: calc(var(--nest-depth, 1) * 14px) 100%;
+  background-repeat: no-repeat;
 }
 
-.spaces-row-space.is-nested::before {
-  content: '';
-  position: absolute;
-  left: calc(var(--nest-depth, 1) * 14px - 3px);
-  top: 2px;
-  bottom: 2px;
-  width: 1px;
-  background: rgba(var(--or-ink-rgb), 0.12);
+/* A parent keeps its right edge free for the fold pill and the ⋯. */
+.spaces-row-space.has-nested {
+  padding-right: 34px;
 }
 
 .spaces-row-nest-toggle {
@@ -11119,7 +11124,6 @@ body {
   position: relative;
   z-index: 1;
   flex: 0 0 auto;
-  transition: margin-right 120ms ease;
   min-width: 22px;
   height: 18px;
   padding: 0 6px;
@@ -11140,12 +11144,6 @@ body {
 
 .spaces-row-nest-toggle[aria-expanded='false']::before {
   content: '▸ ';
-}
-
-/* The ⋯ trigger appears in the last 28px on hover: step left to leave it room. */
-.spaces-row:hover .spaces-row-nest-toggle,
-.spaces-row:focus-within .spaces-row-nest-toggle {
-  margin-right: 26px;
 }
 
 .spaces-row-nest-toggle:hover,
@@ -11169,9 +11167,26 @@ body {
   opacity: 0.45;
 }
 
+/* The Tidy up button in the Spaces header: an icon with a count of the
+   moves waiting for a decision — a count, not a tag. */
+.spaces-tidy-button {
+  position: relative;
+}
+
 .spaces-tidy-badge {
-  min-width: 16px;
+  position: absolute;
+  top: -4px;
+  right: -6px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 7px;
+  background: var(--or-accent);
+  color: var(--or-bg-elevated);
+  font-size: 9.5px;
+  line-height: 14px;
   text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .spaces-tidy-backdrop {
@@ -11239,6 +11254,11 @@ body {
   color: var(--or-text-muted-solid);
 }
 
+.spaces-tidy-status.is-error {
+  color: var(--or-danger-deep, var(--or-danger));
+  font-size: 12.5px;
+}
+
 .spaces-tidy-summary {
   margin: 0;
   padding: 10px 12px;
@@ -11252,18 +11272,28 @@ body {
 .spaces-tidy-list {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 0 0 6px;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-height: 60px;
+  -webkit-mask-image: linear-gradient(to top, transparent 0, black 14px);
+  mask-image: linear-gradient(to top, transparent 0, black 14px);
 }
 
 .spaces-tidy-empty {
-  padding: 24px 0;
+  position: relative;
+  padding: 28px 0 28px;
   text-align: center;
   color: var(--or-text-muted-solid);
+}
+
+.spaces-tidy-empty.or-sketch::before {
+  right: 6%;
+  bottom: -4px;
+  width: 96px;
+  height: 104px;
 }
 
 .spaces-tidy-move {
@@ -11277,16 +11307,19 @@ body {
   background: var(--or-bg-surface);
 }
 
+/* Accepted is a promise: pencil. Applied is ink: crisp. */
 .spaces-tidy-move.is-accepted {
+  border-style: dashed;
   border-color: rgba(var(--or-accent-rgb), 0.55);
 }
 
 .spaces-tidy-move.is-rejected {
-  opacity: 0.55;
+  opacity: 0.75;
 }
 
 .spaces-tidy-move.is-applied {
-  border-style: dashed;
+  border-style: solid;
+  border-color: rgba(var(--or-accent-rgb), 0.55);
 }
 
 .spaces-tidy-kind {
@@ -11364,8 +11397,21 @@ body {
     to top,
     var(--or-accent) 0,
     var(--or-accent) calc(var(--tidy-confidence, 0.5) * 100%),
-    rgba(var(--or-ink-rgb), 0.08) calc(var(--tidy-confidence, 0.5) * 100%)
+    rgba(var(--or-ink-rgb), 0.18) calc(var(--tidy-confidence, 0.5) * 100%)
   );
+}
+
+.spaces-tidy-kind-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.spaces-tidy-confidence-text {
+  font-size: 10.5px;
+  color: var(--or-text-muted-solid);
+  font-variant-numeric: tabular-nums;
 }
 
 .spaces-tidy-decide {
@@ -11418,4 +11464,35 @@ body {
   font-size: 11px;
   color: var(--or-text-muted-solid);
   text-align: right;
+}
+
+/* ADR-099 — an archived Space says so on its header, with the way back. */
+.spaces-view-header-archived {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spaces-view-header-archived-pill {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(var(--or-ink-rgb), 0.18);
+  color: var(--or-text-muted-solid);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.spaces-view-header-archived-back {
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--or-accent);
+  background: transparent;
+  color: var(--or-accent);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.spaces-view-header-archived-back:hover {
+  background: rgba(var(--or-accent-rgb), 0.1);
 }

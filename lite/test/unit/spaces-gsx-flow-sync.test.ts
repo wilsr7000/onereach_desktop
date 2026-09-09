@@ -458,33 +458,37 @@ describe('a Space created in Lite that became the bot (ADR-092)', () => {
 
 describe('ADR-099: account-level mirrors', () => {
   interface Rec098 {
-    grants: Array<[string, string]>;
     nests: Array<[string, string, boolean, string | null]>;
     folds: Array<[string, string]>;
     archived: Array<[string, string]>;
     groupUpserts: number;
     warns: string[];
+    agentBatches: number;
   }
   function make(over: {
     bots?: GsxBot[];
     created?: boolean;
     group?: { id: string; name: string } | null | Error;
-    fold?: { folded: boolean; agentsRetired: number; itemsMoved: number };
+    fold?: { folded: boolean; agentsRetired: number; itemsKept: number };
     mirrors?: Array<{ id: string; gsxBotId: string }>;
     ping?: boolean;
     dryRun?: boolean;
     withoutOptional?: boolean;
+    /** Another person's sync keeps the mirror: this person holds read sight only. */
+    readOnly?: boolean;
+    flows?: GsxFlow[];
   } = {}): { deps: GsxFlowSyncDeps; rec: Rec098 } {
-    const rec: Rec098 = { grants: [], nests: [], folds: [], archived: [], groupUpserts: 0, warns: [] };
+    const rec: Rec098 = { nests: [], folds: [], archived: [], groupUpserts: 0, warns: [], agentBatches: 0 };
     const created = over.created ?? true;
     const base: GsxFlowSyncClient = {
       async upsertGsxFlowSpace(input) {
-        return { id: input.id, created };
+        return over.readOnly === true ? { id: input.id, created: false, writable: false } : { id: input.id, created };
       },
       async spaceNameTaken() {
         return false;
       },
       async upsertGsxFlowAgents(_s, _b, rows) {
+        rec.agentBatches += 1;
         return rows.map((r) => ({ id: r.assetId, created: true }));
       },
       async listGsxFlowAgents() {
@@ -496,10 +500,6 @@ describe('ADR-099: account-level mirrors', () => {
       ...(over.ping !== undefined ? { async ping() { return over.ping === true; } } : {}),
     };
     const optional: Partial<GsxFlowSyncClient> = over.withoutOptional === true ? {} : {
-      async grantSelfGsxMirrorAccess(spaceId, gsxBotId) {
-        rec.grants.push([spaceId, gsxBotId]);
-        return true;
-      },
       async upsertGroupSpace(input) {
         rec.groupUpserts += 1;
         if (over.group instanceof Error) throw over.group;
@@ -511,7 +511,7 @@ describe('ADR-099: account-level mirrors', () => {
       },
       async foldLegacyGsxMirror(legacyId, targetId) {
         rec.folds.push([legacyId, targetId]);
-        return over.fold ?? { folded: false, agentsRetired: 0, itemsMoved: 0 };
+        return over.fold ?? { folded: false, agentsRetired: 0, itemsKept: 0 };
       },
       async listGsxMirrorSpaces() {
         return over.mirrors ?? [];
@@ -528,7 +528,7 @@ describe('ADR-099: account-level mirrors', () => {
           return over.bots ?? [bot('b1', 'Tickets')];
         },
         async listFlows() {
-          return [];
+          return over.flows ?? [];
         },
       },
       log: {
@@ -555,24 +555,47 @@ describe('ADR-099: account-level mirrors', () => {
       ['space-gsxbot-b1', GSX_DESIGNER_GROUP.id, false, null],
       ['space-gsxbot-b2', GSX_DESIGNER_GROUP.id, false, null],
     ]);
-    expect(rec.grants).toEqual([]); // the creator needs no grant
   });
 
-  it('an EXISTING mirror (someone else synced first) grants the person sight and is not re-nested', async () => {
-    const { deps, rec } = make({ created: false });
+  it('an EXISTING mirror the person keeps (creator) refreshes and is not re-nested', async () => {
+    const { deps, rec } = make({ created: false, flows: [flow('f1', 'b1', 'Create a Ticket')] });
     const r = await runGsxFlowSync(deps);
     expect(r.spacesUpdated).toBe(1);
-    expect(rec.grants).toEqual([['space-gsxbot-b1', 'b1']]);
+    expect(rec.agentBatches).toBe(1);
     expect(rec.nests).toEqual([]);
     expect(rec.groupUpserts).toBe(0);
   });
 
-  it('convergence: this person\'s legacy viewer-suffixed copy is folded into the account Space and counted', async () => {
-    const { deps, rec } = make({ fold: { folded: true, agentsRetired: 38, itemsMoved: 1 } });
+  it("another person's mirror: this person holds READ sight and writes nothing into it", async () => {
+    const { deps, rec } = make({ readOnly: true, flows: [flow('f1', 'b1', 'Create a Ticket')], fold: { folded: true, agentsRetired: 3, itemsKept: 0 } });
+    const r = await runGsxFlowSync(deps);
+    expect(r.spacesUpdated).toBe(1);
+    expect(r.agentsCreated).toBe(0);
+    expect(rec.agentBatches).toBe(0);
+    expect(rec.nests).toEqual([]);
+    expect(rec.folds).toEqual([]); // the fold follows a fill this person did not do
+    expect(r.legacyFolded).toBe(0);
+  });
+
+  it('convergence: this person\'s legacy viewer-suffixed copy is folded AFTER the account Space is filled, and counted', async () => {
+    const order: string[] = [];
+    const { deps, rec } = make({ fold: { folded: true, agentsRetired: 38, itemsKept: 1 }, flows: [flow('f1', 'b1', 'Create a Ticket')] });
+    const client = deps.client;
+    const upsertAgents = client.upsertGsxFlowAgents.bind(client);
+    client.upsertGsxFlowAgents = async (...args) => {
+      order.push('agents');
+      return upsertAgents(...args);
+    };
+    const fold = client.foldLegacyGsxMirror!.bind(client);
+    client.foldLegacyGsxMirror = async (...args) => {
+      order.push('fold');
+      return fold(...args);
+    };
     const r = await runGsxFlowSync(deps);
     expect(rec.folds).toEqual([[legacyGsxSyncIds('robb@onereach.com', 'b1').spaceId, 'space-gsxbot-b1']]);
+    expect(order).toEqual(['agents', 'fold']);
     expect(r.legacyFolded).toBe(1);
-    const again = make({ fold: { folded: false, agentsRetired: 0, itemsMoved: 0 } });
+    const again = make({ fold: { folded: false, agentsRetired: 0, itemsKept: 0 } });
     expect((await runGsxFlowSync(again.deps)).legacyFolded).toBe(0);
   });
 
@@ -599,9 +622,8 @@ describe('ADR-099: account-level mirrors', () => {
   });
 
   it('dry run touches nothing new either', async () => {
-    const { deps, rec } = make({ dryRun: true, created: false, fold: { folded: true, agentsRetired: 1, itemsMoved: 0 }, mirrors: [{ id: 'x', gsxBotId: 'gone' }] });
+    const { deps, rec } = make({ dryRun: true, created: false, fold: { folded: true, agentsRetired: 1, itemsKept: 0 }, mirrors: [{ id: 'x', gsxBotId: 'gone' }] });
     const r = await runGsxFlowSync(deps);
-    expect(rec.grants).toEqual([]);
     expect(rec.nests).toEqual([]);
     expect(rec.folds).toEqual([]);
     expect(rec.archived).toEqual([]);

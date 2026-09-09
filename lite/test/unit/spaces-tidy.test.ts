@@ -88,6 +88,13 @@ describe('buildTidyPrompt', () => {
     const payload = JSON.parse(user) as { spaces: Array<{ id: string; writable: boolean; sample: string[] }>; previouslyRejected: string[]; nameOverlaps: unknown[]; topLevelRows: number };
     expect(payload.spaces.map((s) => s.id)).toContain('pay');
     expect(payload.spaces.find((s) => s.id === 'theirs')?.writable).toBe(false);
+    // People never cross to the provider by name: the same person is the
+    // same label everywhere, the viewer is "viewer", and no email survives.
+    expect(user).not.toContain('@');
+    const pay2 = payload.spaces.find((s) => s.id === 'pay2') as unknown as { members: string[]; createdBy: string };
+    expect(pay2.members).toEqual(['person-2']);
+    expect(pay2.createdBy).toBe('viewer');
+    expect((payload.spaces.find((s) => s.id === 'theirs') as unknown as { createdBy: string }).createdBy).toBe('person-2');
     expect(payload.spaces.find((s) => s.id === 'pay')?.sample[0]).toBe('Refund policy [doc; policy]');
     expect(payload.previouslyRejected).toEqual(['Archive "test 2 space"']);
     expect(payload.nameOverlaps.length).toBeGreaterThan(0);
@@ -133,6 +140,8 @@ describe('parseTidyPlan', () => {
         { kind: 'archive', spaceId: 'nope', reason: 'x' }, // unknown
         { kind: 'archive', spaceId: 'grp', reason: 'x' }, // a group the app keeps
         { kind: 'archive', spaceId: 'old', reason: 'x' }, // already archived
+        { kind: 'rename', spaceId: 'old', name: 'Older', reason: 'x' }, // archived: only unnest may touch it
+        { kind: 'nest', spaceId: 'old', parentId: 'pay', reason: 'x' }, // archived child
         { kind: 'nest', spaceId: 'grp', parentId: 'mirror', reason: 'x' }, // cycle: mirror is inside grp
         { kind: 'nest', spaceId: 'mirror', parentId: 'grp', reason: 'x' }, // already inside
         { kind: 'unnest', spaceId: 'pay', parentId: 'grp', reason: 'x' }, // not inside
@@ -146,7 +155,7 @@ describe('parseTidyPlan', () => {
     });
     const plan = parseTidyPlan(raw, ctx);
     expect(plan.moves).toEqual([]);
-    expect(plan.dropped).toHaveLength(13);
+    expect(plan.dropped).toHaveLength(15);
     expect(plan.dropped.join('\n')).toMatch(/not writable/);
     expect(plan.dropped.join('\n')).toMatch(/cycle/);
     expect(plan.dropped.join('\n')).toMatch(/group the app keeps/);
@@ -318,13 +327,52 @@ describe('TidyEngine', () => {
     expect(second.plan?.moves.map((m) => m.kind)).toEqual(['nest']);
   });
 
-  it('an applied move never comes back; an undecided one does', async () => {
+  it('an applied move never comes back; an accepted-but-unapplied or undecided one does', async () => {
     const h = makeEngine(() => answer);
     await h.engine.plan('manual');
     h.engine.decide('nest:pay2>pay', 'accepted');
+    h.engine.decide('archive:idle', 'accepted'); // will fail to apply (graph said no)
     await h.engine.apply();
     const second = await h.engine.plan('manual');
     expect(second.plan?.moves.map((m) => m.key)).toEqual(['archive:idle']);
+  });
+
+  it('one apply at a time; a plan requested mid-apply waits for it', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const h = makeEngine(() => answer);
+    h.engine.state();
+    (h.engine as unknown as { deps: TidyEngineDeps }).deps.ports.nest = async () => {
+      await gate;
+      h.calls.push('nest');
+    };
+    await h.engine.plan('manual');
+    h.engine.decide('nest:pay2>pay', 'accepted');
+    const first = h.engine.apply();
+    const second = h.engine.apply();
+    const planned = h.engine.plan('manual');
+    expect(second).toBe(first);
+    expect(planned).toBe(first);
+    release();
+    await first;
+    expect(h.calls.filter((c) => c === 'nest')).toHaveLength(1);
+  });
+
+  it('the store belongs to one person: a different signed-in person starts clean, settings stay', async () => {
+    const h = makeEngine(() => answer);
+    h.engine.settings({ cadenceDays: 3 });
+    await h.engine.plan('manual');
+    expect(h.engine.state().plan?.moves).toHaveLength(2);
+    const deps = (h.engine as unknown as { deps: TidyEngineDeps }).deps;
+    deps.viewerId = () => 'rich@onereach.com';
+    const fresh = h.engine.state();
+    expect(fresh.plan).toBeNull();
+    expect(fresh.pending).toBe(0);
+    expect(fresh.settings.cadenceDays).toBe(3);
+    deps.viewerId = () => null;
+    expect(h.engine.state().plan).toBeNull();
   });
 
   it('signed out: no plan, a plain message', async () => {
@@ -344,7 +392,7 @@ describe('TidyEngine', () => {
     await h.engine.plan('manual');
     fail = true;
     const state = await h.engine.plan('manual');
-    expect(state.error).toBe('rate limited');
+    expect(state.error).toBe('Could not prepare a plan: rate limited');
     expect(state.plan?.moves).toHaveLength(2);
     expect(state.running).toBe(false);
   });

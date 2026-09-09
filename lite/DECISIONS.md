@@ -2337,26 +2337,40 @@ add a row when it matters.
 
 **Decision — four parts, in this order.**
 
-1. **One mirror Space per Designer bot, for the account; sight by explicit
-   grant.** `gsxSyncIds` no longer carries the viewer hash:
+1. **One mirror Space per Designer bot, for the account; READ sight by
+   explicit grant.** `gsxSyncIds` no longer carries the viewer hash:
    `space-gsxbot-<botId>`, `asset-gsxflow-<flowId>`, `agent-gsxflow-<flowId>`,
    `agenttype-gsxflow-<flowId>`. The first person to sync creates the Space
-   (they are its creator, ADR-084 signal one); every person who syncs gets a
-   live `HAS_ACCESS` grant written by the sync (signal two), scoped by
-   construction to Spaces with `source = 'gsx-designer'` and the bot the sync
-   just listed under that person's own account token
-   (`GRANT_SELF_GSX_MIRROR`). Nothing is inferred: the grant exists because
-   Designer already shows that person that bot. `upsertGsxFlowSpace` runs
-   update → create → grant-then-update so a second syncer lands on the first
-   syncer's Space instead of minting a copy. ADR-092's precedence stands: a
-   Space the viewer made in Lite that became the bot keeps the flows.
-   **Convergence**: each person's next sync folds their own legacy
-   viewer-suffixed mirror (`legacyGsxSyncIds`) into the account Space — items
-   a person added by hand move over, the legacy synced agents retire, the
-   legacy Space is soft-deleted with `supersededBy` — so the two existing sets
-   (robb's 12, Rich's 14) collapse to one set over the next two syncs, no
-   migration script, no one else's Space touched (the fold is gated on the
-   legacy Space being writable by the person folding it).
+   (they are its creator, ADR-084 signal one) and their sync keeps it
+   filled. Every later syncer gets a live `HAS_ACCESS` grant with
+   `role = 'reader'`, written ON CREATE only by the sync (signal two) and
+   scoped by construction to `source = 'gsx-designer'` and the bot the
+   sync just listed (`GRANT_SELF_GSX_MIRROR`). Said plainly, because the
+   security review asked for it plainly: the Designer listing is
+   account-level — the token is minted from the account id, so every
+   member sees every bot — and this grant therefore gives every member
+   who syncs sight of every mirror. That is accepted here for exactly one
+   class of Space: a mirror holds only Designer-derived content, which
+   every member can already open in Designer, and nothing a person makes
+   ever lands in a mirror on its own. Readers cannot write into a mirror,
+   archive it, or invite into it; the reader's sync writes nothing
+   (`upsertGsxFlowSpace` returns `writable: false` and the sweep skips
+   that bot's agents). `upsertGsxFlowSpace` runs update → create → grant,
+   so a second syncer lands on the first syncer's Space instead of
+   minting a copy. ADR-092's precedence stands: a Space the viewer made in
+   Lite that became the bot keeps the flows. **Convergence**: each
+   person's next sync, after the account Space holds the bot's agents,
+   retires the synced agents of their own legacy viewer-suffixed mirror
+   (`legacyGsxSyncIds`, `FOLD_LEGACY_GSX_MIRROR`). Items a person added by
+   hand stay theirs: a legacy Space with hand-made items is not deleted —
+   it stops being a mirror (`source` and `gsxBotId` cleared, a note in its
+   description) and lives on as an ordinary Space of theirs; one with
+   nothing hand-made is soft-deleted with `supersededBy`. Nothing private
+   ever moves into the shared mirror. The two existing sets (robb's 12,
+   Rich's 14) collapse to one set over the next two syncs, no migration
+   script, no one else's Space touched (the fold is gated on the legacy
+   Space being writable by the person folding it; the target is never
+   written).
 
 2. **Nesting the sidebar can see; machine-made Spaces born nested.**
    `LIST_SPACES` projects `parentIds` (the live `NESTED_IN` parents) and the
@@ -2364,7 +2378,9 @@ add a row when it matters.
    (ADR-085's DAG), indented, with a collapse toggle per parent that
    remembers its state; sort applies within each level; the ADR-069 fold
    counts top-level rows only; a parent the viewer cannot see makes the child
-   top-level (sight is never widened). Lite's own writers put what they make
+   top-level (sight is never widened: `parentIds` is gated on the PARENT
+   with `SPACE_VISIBLE_FOR('par')`, so an unseen parent's id — Lite's ids
+   are semantic — never crosses IPC). Lite's own writers put what they make
    inside a group Space it owns: the Designer sync nests each NEW mirror
    under **GSX Designer** (`space-group-gsx-designer`), the conversation
    capture nests each "<Provider> Conversations" Space under
@@ -2381,10 +2397,14 @@ add a row when it matters.
    `archivedReason`) take a Space out of the sidebar's working set into an
    **Archived** section (collapsed, counted) without touching its items,
    members or search. The sync, after a sweep that listed Designer completely
-   and was not cut off by an outage, archives the viewer's mirrors whose
-   `gsxBotId` no longer exists in Designer (`reason: gsx-bot-gone`) — the gap
-   ADR-091 documented ("bots are never retired"). An empty bot listing never
-   archives anything.
+   and was not cut off by an outage, archives the mirrors the viewer
+   CREATED whose `gsxBotId` no longer exists in Designer (`reason:
+   gsx-bot-gone`) — the gap ADR-091 documented ("bots are never retired").
+   Creator only, so one member's narrower view never archives a Space
+   another member keeps; an empty bot listing never archives anything; and
+   the refresh half of the sync (`UPDATE_GSX_FLOW_SPACE`) brings such a
+   mirror back when its bot reappears, while an archive a person chose is
+   left alone.
 
 4. **The groomer (Tidy up).** `lite/spaces/tidy.ts` gathers evidence for
    every Space the viewer can see — objective, kind, source, creator, item
@@ -2399,15 +2419,22 @@ add a row when it matters.
    25 moves. **The person leaves the marks**: nothing runs until accepted,
    per move or as a plan; applied moves go through the existing API
    (`nestSpace`, `unnestSpace`, `archiveSpace`, `renameSpace`, `createSpace`,
-   `moveAssetToSpace`). Decisions persist (`spaces-tidy.json` in userData):
-   a rejected move is not proposed again and is listed to the model as such;
-   the next pass starts from the current shape. Cadence: a plan is prepared
-   in the background every 7 days, or when the top level passes 20 rows, or
-   on demand from the Spaces window ("Tidy up…" under the New Space caret,
-   with a count when moves are waiting). Model: the `powerful` chat profile
-   of the configured provider (Claude → Fable 5.1, the default; OpenAI →
-   GPT-5.2), `feature: 'spaces-tidy'`, JSON mode; the profile is a setting
-   of the groomer, not of chat.
+   `moveAssetToSpace`, every one carrying its own guard at execution time;
+   merges page through every item). Decisions persist (`spaces-tidy.json`
+   in userData, scoped to the signed-in person — another person starts
+   clean, and signed out shows nothing): a rejected move is not proposed
+   again and is listed to the model as such; a move that actually ran
+   never comes back; one accepted but never applied is proposed again; an
+   archived Space is touched only to take it out of a parent. People
+   never cross to the model provider by name — each Person id becomes
+   `person-N` for the prompt, the viewer is `viewer`, and the member
+   warning on a merge is computed in the app. Cadence: a plan is prepared
+   in the background every 7 days, or when the top level passes 20 rows,
+   or on demand from the Spaces window ("Tidy up" in the SPACES header,
+   beside the sort control, with a count when moves are waiting). Model:
+   the `powerful` chat profile of the configured provider (Claude → Fable
+   5.1, the default; OpenAI → GPT-5.2), `feature: 'spaces-tidy'`, JSON
+   mode; the profile is a setting of the groomer, not of chat.
 
 **Consequences.** Per-person mirror copies stop multiplying (N bots × M
 people becomes N). Nesting becomes visible, so ADR-085's picker finally has a

@@ -92,17 +92,6 @@
             <span class="spaces-new-menu-item-title">Shared Space <span class="spaces-new-menu-item-badge">AI</span></span>
             <span class="spaces-new-menu-item-hint">Agents keep a playbook, tickets and checklists in step</span>
           </button>
-          <!-- ADR-099 — the groomer: proposes, never acts. -->
-          <button
-            type="button"
-            id="spaces-tidy-button"
-            class="spaces-new-menu-item"
-            role="menuitem"
-            title="Review a plan to group, merge, rename and archive Spaces — nothing moves until you say so"
-          >
-            <span class="spaces-new-menu-item-title">Tidy up… <span id="spaces-tidy-badge" class="spaces-new-menu-item-badge spaces-tidy-badge" hidden></span></span>
-            <span class="spaces-new-menu-item-hint">A plan to group, merge and archive — you decide each move</span>
-          </button>
         </div>
       </div>
     </header>
@@ -559,6 +548,18 @@
                   <option value="name">A→Z</option>
                   <option value="recent">Recent</option>
                 </select>
+                <!-- ADR-099 — the groomer: proposes, never acts. Lives with
+                     the list it tidies; the count is moves waiting for you. -->
+                <button
+                  type="button"
+                  id="spaces-tidy-button"
+                  class="spaces-toolbar-icon-button spaces-tidy-button"
+                  title="Tidy up — a plan to group, merge, rename and archive Spaces; you decide each move"
+                  aria-label="Tidy up"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 4.6L18.4 9l-4.6 1.8L12 15.4l-1.8-4.6L5.6 9l4.6-1.4z"/><path d="M5 17l.9 2.1L8 20l-2.1.9L5 23l-.9-2.1L2 20l2.1-.9z"/><path d="M19 15l.7 1.6 1.6.7-1.6.7L19 19.6l-.7-1.6-1.6-.7 1.6-.7z"/></svg>
+                  <span id="spaces-tidy-badge" class="spaces-tidy-badge" hidden></span>
+                </button>
                 <button
                   type="button"
                   id="spaces-sidebar-collapse-all"

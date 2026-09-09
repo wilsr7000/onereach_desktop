@@ -39,10 +39,14 @@ interface StoredDecision {
   at: string;
   /** A one-line description, so a rejected move can be shown to the model as words. */
   summary: string;
+  /** Set once the move actually ran — only then is it never proposed again. */
+  applied?: boolean;
 }
 
 interface TidyStore {
   settings: TidySettings;
+  /** Whose plan and decisions these are; a different person starts clean (settings stay). */
+  viewerId: string | null;
   lastRunAt: string | null;
   plan: TidyPlan | null;
   decisions: Record<string, StoredDecision>;
@@ -71,7 +75,7 @@ export interface TidyEngineDeps {
 }
 
 function emptyStore(): TidyStore {
-  return { settings: { ...DEFAULT_TIDY_SETTINGS }, lastRunAt: null, plan: null, decisions: {} };
+  return { settings: { ...DEFAULT_TIDY_SETTINGS }, viewerId: null, lastRunAt: null, plan: null, decisions: {} };
 }
 
 function readStore(configDir: string | null): TidyStore {
@@ -80,7 +84,9 @@ function readStore(configDir: string | null): TidyStore {
     const raw = JSON.parse(readFileSync(join(configDir, TIDY_STORE_FILENAME), 'utf8')) as Partial<TidyStore>;
     const store = emptyStore();
     store.settings = normalizeTidySettings(raw.settings);
-    store.lastRunAt = typeof raw.lastRunAt === 'string' ? raw.lastRunAt : null;
+    store.viewerId = typeof raw.viewerId === 'string' && raw.viewerId.length > 0 ? raw.viewerId : null;
+    store.lastRunAt =
+      typeof raw.lastRunAt === 'string' && Number.isFinite(Date.parse(raw.lastRunAt)) ? raw.lastRunAt : null;
     store.plan = raw.plan !== null && typeof raw.plan === 'object' && Array.isArray((raw.plan as TidyPlan).moves) ? (raw.plan as TidyPlan) : null;
     store.decisions = raw.decisions !== null && typeof raw.decisions === 'object' ? (raw.decisions as Record<string, StoredDecision>) : {};
     return store;
@@ -105,12 +111,38 @@ export class TidyEngine {
   private timer: ReturnType<typeof setInterval> | null = null;
   private firstTick: ReturnType<typeof setTimeout> | null = null;
   private inFlight: Promise<TidyState> | null = null;
+  private applying: Promise<TidyState> | null = null;
 
   constructor(private readonly deps: TidyEngineDeps) {
     this.store = readStore(deps.configDir);
   }
 
+  /**
+   * The store belongs to one person. Signed out → nothing to show (the
+   * file keeps the last person's plan for when they return); a different
+   * person → plan, decisions and last run start clean, settings stay.
+   */
+  private scopeToViewer(): boolean {
+    const viewer = this.deps.viewerId();
+    if (viewer === null || viewer.length === 0) return false;
+    if (this.store.viewerId === viewer) return true;
+    this.store = { ...emptyStore(), settings: this.store.settings, viewerId: viewer };
+    this.lastError = undefined;
+    this.persist();
+    return true;
+  }
+
   state(): TidyState {
+    if (!this.scopeToViewer()) {
+      return {
+        settings: { ...this.store.settings },
+        lastRunAt: null,
+        running: this.running,
+        plan: null,
+        pending: 0,
+        ...(this.lastError !== undefined ? { error: this.lastError } : {}),
+      };
+    }
     const plan = this.store.plan;
     const pending = plan === null ? 0 : plan.moves.filter((m) => m.decision === 'undecided' && m.applied !== true).length;
     return {
@@ -124,6 +156,7 @@ export class TidyEngine {
   }
 
   settings(patch?: Partial<TidySettings>): TidySettings {
+    this.scopeToViewer();
     if (patch !== undefined) {
       this.store.settings = normalizeTidySettings(patch, this.store.settings);
       this.persist();
@@ -132,9 +165,10 @@ export class TidyEngine {
     return { ...this.store.settings };
   }
 
-  /** Prepare a plan now. Concurrent calls share one run. */
+  /** Prepare a plan now. Concurrent calls share one run; an apply in progress is left alone. */
   plan(trigger: 'manual' | 'scheduled'): Promise<TidyState> {
     if (this.inFlight !== null) return this.inFlight;
+    if (this.applying !== null) return this.applying;
     this.inFlight = this.runPlan(trigger).finally(() => {
       this.inFlight = null;
     });
@@ -147,6 +181,7 @@ export class TidyEngine {
       this.lastError = 'Sign in to Onereach to tidy up your Spaces.';
       return this.state();
     }
+    this.scopeToViewer();
     this.running = true;
     this.lastError = undefined;
     this.deps.broadcast(this.state());
@@ -172,10 +207,11 @@ export class TidyEngine {
         feature: TIDY_FEATURE,
       });
       const parsed = parseTidyPlan(answer.content, { evidence, rejectedKeys });
-      // A move already applied from an earlier plan never comes back.
+      // A move that actually RAN never comes back; one accepted but never
+      // applied (panel closed, or it failed) is proposed again.
       const applied = new Set(
         Object.entries(this.store.decisions)
-          .filter(([, d]) => d.decision === 'accepted')
+          .filter(([, d]) => d.applied === true)
           .map(([k]) => k)
       );
       const moves = parsed.moves.filter((m) => !applied.has(m.key));
@@ -190,17 +226,20 @@ export class TidyEngine {
       };
       this.store.lastRunAt = now.toISOString();
       this.persist();
+      // Counts and kinds only: Space names and people stay out of the log
+      // (logs ride bug reports).
       this.deps.log.info('spaces-tidy: plan ready', {
         trigger,
         model: answer.model,
         spaces: evidence.length,
         moves: moves.length,
+        kinds: moves.map((m) => m.kind),
         dropped: parsed.dropped.length,
-        ...(parsed.dropped.length > 0 ? { droppedWhy: parsed.dropped.slice(0, 10) } : {}),
       });
     } catch (err) {
-      this.lastError = err instanceof Error ? err.message : String(err);
-      this.deps.log.warn('spaces-tidy: plan failed', { trigger, error: this.lastError });
+      const reason = err instanceof Error ? err.message : String(err);
+      this.lastError = `Could not prepare a plan: ${reason}`;
+      this.deps.log.warn('spaces-tidy: plan failed', { trigger, error: reason });
     } finally {
       this.running = false;
       this.deps.broadcast(this.state());
@@ -209,6 +248,7 @@ export class TidyEngine {
   }
 
   decide(moveKey: string, decision: TidyDecision): TidyState {
+    if (!this.scopeToViewer()) return this.state();
     const plan = this.store.plan;
     const move = plan?.moves.find((m) => m.key === moveKey);
     if (plan === null || move === undefined) return this.state();
@@ -227,8 +267,18 @@ export class TidyEngine {
     return this.state();
   }
 
-  /** Run every accepted, not-yet-applied move, in a safe order; failures stay on the move. */
-  async apply(): Promise<TidyState> {
+  /** Run every accepted, not-yet-applied move, in a safe order; failures stay on the move. One run at a time. */
+  apply(): Promise<TidyState> {
+    if (this.applying !== null) return this.applying;
+    if (this.inFlight !== null) return this.inFlight;
+    this.applying = this.runApply().finally(() => {
+      this.applying = null;
+    });
+    return this.applying;
+  }
+
+  private async runApply(): Promise<TidyState> {
+    if (!this.scopeToViewer()) return this.state();
     const plan = this.store.plan;
     if (plan === null) return this.state();
     const todo = applyOrder(plan.moves.filter((m) => m.decision === 'accepted' && m.applied !== true));
@@ -241,10 +291,17 @@ export class TidyEngine {
         await applyTidyMove(move, this.deps.ports);
         move.applied = true;
         delete move.error;
+        const decision = this.store.decisions[move.key];
+        this.store.decisions[move.key] = {
+          decision: 'accepted',
+          at: decision?.at ?? new Date().toISOString(),
+          summary: decision?.summary ?? describeMove(move),
+          applied: true,
+        };
         ok += 1;
       } catch (err) {
         move.error = err instanceof Error ? err.message : String(err);
-        this.deps.log.warn('spaces-tidy: move failed', { move: describeMove(move), error: move.error });
+        this.deps.log.warn('spaces-tidy: move failed', { key: move.key, kind: move.kind, error: move.error });
       }
       this.persist();
     }

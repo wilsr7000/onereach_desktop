@@ -38,7 +38,12 @@ export interface GsxFlowSyncClient {
     gsxBotId: string;
     name: string;
     description: string;
-  }): Promise<{ id: string; created: boolean }>;
+  }): Promise<{
+    id: string;
+    created: boolean;
+    /** ADR-099 — false when the person only holds READ sight of another creator's mirror. */
+    writable?: boolean;
+  }>;
   /** True when a NON-synced Space already uses this name (case-insensitive). */
   spaceNameTaken(name: string, exceptSpaceId: string): Promise<boolean>;
   /** One batched write per bot (UNWIND); returns one row per flow. */
@@ -72,8 +77,6 @@ export interface GsxFlowSyncClient {
    * the circuit-breaker alone.
    */
   ping?(): Promise<boolean>;
-  /** ADR-099 — sight for the person syncing, scoped to the mirror of a bot they just listed. */
-  grantSelfGsxMirrorAccess?(spaceId: string, gsxBotId: string): Promise<boolean>;
   /** ADR-099 — the group Space new mirrors are born inside; null when a person deleted it. */
   upsertGroupSpace?(input: {
     id: string;
@@ -89,11 +92,11 @@ export interface GsxFlowSyncClient {
     inheritsPermissions: boolean,
     inheritsUntil: string | null
   ): Promise<unknown>;
-  /** ADR-099 convergence — fold this person's legacy viewer-suffixed mirror into the account Space. */
+  /** ADR-099 convergence — retire this person's legacy viewer-suffixed mirror (their own items stay theirs). */
   foldLegacyGsxMirror?(
     legacyId: string,
     targetId: string
-  ): Promise<{ folded: boolean; agentsRetired: number; itemsMoved: number }>;
+  ): Promise<{ folded: boolean; agentsRetired: number; itemsKept: number }>;
   /** ADR-099 — the viewer's writable mirrors, for orphan detection after a complete sweep. */
   listGsxMirrorSpaces?(): Promise<Array<{ id: string; gsxBotId: string }>>;
   /** ADR-099 — archive a mirror whose bot left Designer. */
@@ -409,7 +412,7 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       // stay the user's, and no mirror Space is minted.
       const own =
         typeof deps.client.spaceByGsxBotId === 'function' ? await deps.client.spaceByGsxBotId(bot.id) : null;
-      let space: { id: string; created: boolean };
+      let space: { id: string; created: boolean; writable?: boolean };
       if (own !== null) {
         space = { id: own.id, created: false };
       } else {
@@ -433,11 +436,6 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       else result.spacesUpdated += 1;
 
       if (own === null && deps.dryRun !== true) {
-        // ADR-099 — one mirror per bot: a person who did not create it is
-        // granted sight (explicit; Designer already shows them the bot).
-        if (!space.created && typeof deps.client.grantSelfGsxMirrorAccess === 'function') {
-          await deps.client.grantSelfGsxMirrorAccess(space.id, bot.id);
-        }
         // Born nested — only when CREATED: a person who pulls a mirror out
         // of the group is not fought on the next sweep.
         if (space.created && typeof deps.client.nestSpace === 'function') {
@@ -453,23 +451,13 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
             }
           }
         }
-        // Convergence — this person's pre-ADR-099 private copy folds into
-        // the account Space (a no-op once it is gone).
-        if (typeof deps.client.foldLegacyGsxMirror === 'function') {
-          const legacyId = legacyGsxSyncIds(viewer, bot.id).spaceId;
-          if (legacyId !== space.id) {
-            const fold = await deps.client.foldLegacyGsxMirror(legacyId, space.id);
-            if (fold.folded) {
-              result.legacyFolded += 1;
-              deps.log.info('spaces', 'gsx-flow-sync: legacy mirror folded into the account Space', {
-                legacyId,
-                spaceId: space.id,
-                agentsRetired: fold.agentsRetired,
-                itemsMoved: fold.itemsMoved,
-              });
-            }
-          }
-        }
+      }
+
+      // ADR-099 — another person's sync keeps this mirror: this person
+      // holds read sight and writes nothing into it.
+      if (space.writable === false) {
+        botSpan.finish({ readOnly: true });
+        continue;
       }
 
       let flows;
@@ -544,6 +532,26 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       for (const row of existing) {
         if (seen.has(row.gsxFlowId)) continue;
         if (await deps.client.retireGsxFlowAgent(row.assetId)) result.agentsRetired += 1;
+      }
+      // ADR-099 convergence — only once the account Space holds this
+      // bot's agents: this person's pre-ADR-099 private copy retires its
+      // synced agents (a no-op once it is gone); their own items stay
+      // theirs in a Space that stops being a mirror.
+      if (own === null && deps.dryRun !== true && typeof deps.client.foldLegacyGsxMirror === 'function') {
+        const legacyId = legacyGsxSyncIds(viewer, bot.id).spaceId;
+        if (legacyId !== space.id) {
+          const fold = await deps.client.foldLegacyGsxMirror(legacyId, space.id);
+          if (fold.folded) {
+            result.legacyFolded += 1;
+            deps.log.info('spaces', 'gsx-flow-sync: legacy mirror folded', {
+              legacyId,
+              spaceId: space.id,
+              agentsRetired: fold.agentsRetired,
+              itemsKept: fold.itemsKept,
+              keptAsOwnSpace: fold.itemsKept > 0,
+            });
+          }
+        }
       }
       botSpan.finish({ flows: live.length });
     } catch (err) {

@@ -556,11 +556,14 @@ export const CYPHER = {
          CASE WHEN coalesce(memberActivityMs, 0) > ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')}
               THEN memberActivityMs
               ELSE ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')} END AS lastActivityMs
-    // ADR-099 — the live NESTED_IN parents, so the sidebar can draw the
-    // tree from one listing (a parent the viewer cannot see is simply
-    // absent from the list; the child then reads as top-level).
+    // ADR-099 — the live NESTED_IN parents the viewer can SEE, so the
+    // sidebar can draw the tree from one listing. Gated on the parent
+    // like ADR-085's listings: an unseen parent's id never crosses IPC
+    // (Lite's ids are semantic — a mirror id names its bot); the child
+    // then reads as top-level.
     OPTIONAL MATCH (s)-[:NESTED_IN]->(par:Space)
       WHERE par.deletedAt IS NULL
+        AND ${SPACE_VISIBLE_FOR('par')}
     WITH s, itemCount, lastActivityMs, collect(DISTINCT par.id) AS parentIds
     // ADR-069 — the viewer's pin mark (human override for the attention
     // tiers). Absent viewer identity simply never matches.
@@ -2442,6 +2445,12 @@ export const CYPHER = {
         s.source = 'gsx-designer',
         s.updatedAt = $now,
         s.deletedAt = null
+    // ADR-099 — a mirror the sync archived because its bot had left
+    // Designer comes back when the bot does; an archive a person chose
+    // is left alone.
+    FOREACH (_ IN CASE WHEN coalesce(s.archivedReason, '') = 'gsx-bot-gone' THEN [1] ELSE [] END |
+      REMOVE s.archivedAt, s.archivedBy, s.archivedReason
+    )
     RETURN s.id AS id
   `,
   /**
@@ -2527,11 +2536,16 @@ export const CYPHER = {
     RETURN s.id AS id, coalesce(s.name, s.id) AS name
   `,
   /**
-   * ADR-099 — the sync's grant to the person syncing, scoped by
-   * construction: only a Designer mirror (`source = 'gsx-designer'`) of
-   * the bot the sync just listed under that person's own account token.
-   * That is the explicit signal ADR-084 asks for — Designer already shows
-   * them the bot; the Space is its shadow.
+   * ADR-099 — READ sight for the person syncing, scoped by construction:
+   * only a Designer mirror (`source = 'gsx-designer'`) of a bot the sync
+   * just listed. The Designer listing is ACCOUNT-level (the token is
+   * minted from the account id, so every member sees every bot), and the
+   * mirror holds only Designer-derived content, so the grant exposes
+   * nothing a member cannot already open in Designer. It is a reader
+   * grant: the creator keeps the mirror in sync, nobody else writes into
+   * it or invites into it. A hand-made item never lands in a mirror by
+   * itself (see FOLD_LEGACY_GSX_MIRROR). ON CREATE only — a grant a
+   * person made is never downgraded.
    */
   GRANT_SELF_GSX_MIRROR: `
     MATCH (s:Space {id: $spaceId})
@@ -2542,52 +2556,65 @@ export const CYPHER = {
     MERGE (p:Person {id: $viewerId})
       ON CREATE SET p.name = $viewerId, p.email = $viewerId, p.createdAt = $now
     MERGE (p)-[r:HAS_ACCESS]->(s)
-      ON CREATE SET r.grantedAt = $now, r.grantedBy = 'gsx-flow-sync'
+      ON CREATE SET r.grantedAt = $now, r.grantedBy = 'gsx-flow-sync', r.role = 'reader'
     RETURN s.id AS id
   `,
-  /** ADR-099 — the viewer's writable Designer mirrors, for orphan detection after a complete sweep. */
+  /**
+   * ADR-099 — the Designer mirrors this person CREATED, for orphan
+   * detection after a complete sweep. Creator only, on purpose: one
+   * member's narrower view must never archive a Space another member
+   * keeps in sync.
+   */
   LIST_GSX_MIRROR_SPACES: `
     MATCH (s:Space)
       WHERE s.deletedAt IS NULL
         AND s.archivedAt IS NULL
         AND coalesce(s.source, '') = 'gsx-designer'
         AND s.gsxBotId IS NOT NULL
+        AND $viewerId <> ''
+        AND coalesce(s.createdBy, '') = $viewerId
         AND ${SPACE_WRITABLE}
     RETURN s.id AS id, s.gsxBotId AS gsxBotId
   `,
   /**
    * ADR-099 convergence — fold a legacy viewer-suffixed mirror (ADR-091
-   * ids) into the account-level Space: the legacy synced agents retire
-   * (their account-level twins exist), anything a person added by hand
-   * moves over, and the legacy Space is soft-deleted with a pointer to
-   * its successor. Both ends must be writable by the person folding —
-   * their own legacy copy, the shared account Space.
+   * ids) into the account-level Space. The legacy SYNCED agents retire
+   * (their account-level twins exist). Anything the person added by hand
+   * stays theirs: a legacy Space with hand-made items is not deleted, it
+   * stops being a mirror (source and gsxBotId cleared) and lives on as an
+   * ordinary Space of theirs; one with nothing hand-made is soft-deleted
+   * with a pointer to its successor. Nothing private ever moves into the
+   * shared mirror by itself. Gated on the legacy end only — the person's
+   * own copy; the target is never written here.
    */
   FOLD_LEGACY_GSX_MIRROR: `
     MATCH (legacy:Space {id: $legacyId})
       WHERE legacy.deletedAt IS NULL
         AND coalesce(legacy.source, '') = 'gsx-designer'
+        AND legacy.id <> $targetId
         AND ${SPACE_WRITABLE_FOR('legacy')}
-    MATCH (target:Space {id: $targetId})
-      WHERE target.deletedAt IS NULL
-        AND legacy.id <> target.id
-        AND ${SPACE_WRITABLE_FOR('target')}
     OPTIONAL MATCH (a)-[:BELONGS_TO]->(legacy)
-      WHERE a.deletedAt IS NULL
-    WITH legacy, target,
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
+    WITH legacy,
          [x IN collect(a) WHERE coalesce(x.source, '') = 'gsx-designer'] AS synced,
          [x IN collect(a) WHERE coalesce(x.source, '') <> 'gsx-designer'] AS handMade
     FOREACH (x IN synced | SET x.deletedAt = $now, x.updatedAt = $now)
-    FOREACH (x IN handMade | MERGE (x)-[:BELONGS_TO]->(target))
-    WITH legacy, target, size(synced) AS agentsRetired, handMade
-    OPTIONAL MATCH (moved)-[old:BELONGS_TO]->(legacy)
-      WHERE moved IN handMade
-    DELETE old
-    WITH DISTINCT legacy, target, agentsRetired, size(handMade) AS itemsMoved
-    SET legacy.deletedAt = $now,
-        legacy.supersededBy = $targetId,
-        legacy.updatedAt = $now
-    RETURN legacy.id AS id, agentsRetired AS agentsRetired, itemsMoved AS itemsMoved
+    WITH legacy, size(synced) AS agentsRetired, size(handMade) AS itemsKept
+    FOREACH (_ IN CASE WHEN itemsKept > 0 THEN [1] ELSE [] END |
+      SET legacy.source = null,
+          legacy.gsxBotId = null,
+          legacy.supersededBy = $targetId,
+          legacy.description = coalesce(legacy.description, '') + $keptNote,
+          legacy.updatedAt = $now
+    )
+    FOREACH (_ IN CASE WHEN itemsKept = 0 THEN [1] ELSE [] END |
+      SET legacy.deletedAt = $now,
+          legacy.supersededBy = $targetId,
+          legacy.updatedAt = $now
+    )
+    RETURN legacy.id AS id, agentsRetired AS agentsRetired, itemsKept AS itemsKept
   `,
   /**
    * ADR-099 — what the groomer reads: every Space the viewer can see,
@@ -2617,6 +2644,7 @@ export const CYPHER = {
          count(DISTINCT m) AS memberCount
     OPTIONAL MATCH (s)-[:NESTED_IN]->(par:Space)
       WHERE par.deletedAt IS NULL
+        AND ${SPACE_VISIBLE_FOR('par')}
     WITH s, itemCount, lastActivityMs, items, members, memberCount,
          collect(DISTINCT par.id) AS parentIds
     RETURN s.id AS id,
@@ -6361,7 +6389,7 @@ export class SdkSpacesClient {
     gsxBotId: string;
     name: string;
     description: string;
-  }): Promise<{ id: string; created: boolean }> {
+  }): Promise<{ id: string; created: boolean; writable?: boolean }> {
     const params = {
       id: input.id,
       gsxBotId: input.gsxBotId,
@@ -6377,12 +6405,12 @@ export class SdkSpacesClient {
     if (updated[0] !== undefined) return { id: String(updated[0]['id']), created: false };
     const created = await this.run(CYPHER.CREATE_GSX_FLOW_SPACE, params);
     if (created[0] !== undefined) return { id: String(created[0]['id']), created: true };
-    // ADR-099 — the Space exists and belongs to another person's sync:
-    // the mirror is per BOT now, so this person is granted sight (the bot
-    // is theirs in Designer) and the refresh runs again as a member.
+    // ADR-099 — the Space exists and another person's sync keeps it: the
+    // mirror is per BOT now, so this person gets READ sight (Designer
+    // already shows them the bot) and touches nothing in it — the
+    // creator's sync refreshes the agents.
     if (await this.grantSelfGsxMirrorAccess(input.id, input.gsxBotId)) {
-      const asMember = await this.run(CYPHER.UPDATE_GSX_FLOW_SPACE, params);
-      if (asMember[0] !== undefined) return { id: String(asMember[0]['id']), created: false };
+      return { id: input.id, created: false, writable: false };
     }
     throw new SpacesError({
       code: 'SPACES_FORBIDDEN',
@@ -6432,22 +6460,28 @@ export class SdkSpacesClient {
       .filter((r) => r.id.length > 0 && r.gsxBotId.length > 0);
   }
 
-  /** ADR-099 convergence — fold a legacy viewer-suffixed mirror into the account Space. */
+  /**
+   * ADR-099 convergence — retire a legacy viewer-suffixed mirror's synced
+   * agents; the Space is soft-deleted unless the person put their own
+   * items in it, in which case it stays theirs (no longer a mirror).
+   */
   async foldLegacyGsxMirror(
     legacyId: string,
     targetId: string
-  ): Promise<{ folded: boolean; agentsRetired: number; itemsMoved: number }> {
+  ): Promise<{ folded: boolean; agentsRetired: number; itemsKept: number }> {
     const rows = await this.run(CYPHER.FOLD_LEGACY_GSX_MIRROR, {
       legacyId,
       targetId,
       now: nowIso(),
+      keptNote:
+        '\n\nKept as your own Space: these are items you added by hand before the Designer mirrors became shared (the synced agent flows now live in the shared mirror).',
     });
     const row = rows[0];
-    if (row === undefined) return { folded: false, agentsRetired: 0, itemsMoved: 0 };
+    if (row === undefined) return { folded: false, agentsRetired: 0, itemsKept: 0 };
     return {
       folded: true,
       agentsRetired: optNumber(row, 'agentsRetired') ?? 0,
-      itemsMoved: optNumber(row, 'itemsMoved') ?? 0,
+      itemsKept: optNumber(row, 'itemsKept') ?? 0,
     };
   }
 

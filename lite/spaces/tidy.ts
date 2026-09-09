@@ -220,7 +220,7 @@ Rules you must follow:
 4. Prefer few, high-confidence moves over many. At most ${MAX_TIDY_MOVES}. Do not propose a move that appears in the "previously rejected" list, or anything equivalent to it.
 5. Respect what is already there: a Space with a parent is organized; a group Space (source "lite-group") is a frame the app keeps; a Designer mirror (source "gsx-designer") belongs under the GSX Designer group unless the person moved it.
 6. Every move carries a reason of one or two sentences that names the evidence (item titles, dates, overlapping names, member lists) and a confidence between 0 and 1.
-7. Write in plain English, no headings, no emoji. Names are the person's; quote them exactly.
+7. Write in plain English, no headings, no emoji. Names are the person's; quote them exactly. People appear as person-1, person-2 … (the same label means the same person across Spaces; "viewer" is the person you are advising); never guess who they are.
 
 Answer with JSON only, in this shape:
 {"summary": "one or two sentences on the shape of the problem and the plan", "moves": [
@@ -233,6 +233,19 @@ Answer with JSON only, in this shape:
 ]}`;
 
 export function buildTidyPrompt(input: TidyPromptInput): { system: string; user: string } {
+  // People never cross to the model provider by name: each Person id
+  // becomes person-N for this prompt, the same label everywhere it
+  // appears, so overlap still reads while identities stay in the app.
+  const people = new Map<string, string>();
+  const alias = (id: string): string => {
+    if (id.length === 0) return '';
+    const seen = people.get(id);
+    if (seen !== undefined) return seen;
+    const label = id === input.viewerId ? 'viewer' : `person-${people.size + 1}`;
+    people.set(id, label);
+    return label;
+  };
+  alias(input.viewerId);
   const spaces = input.evidence.map((e) => {
     const row: Record<string, unknown> = {
       id: e.id,
@@ -240,12 +253,12 @@ export function buildTidyPrompt(input: TidyPromptInput): { system: string; user:
       objective: e.description.slice(0, 280),
       kind: e.kind,
       source: e.source.length > 0 ? e.source : undefined,
-      createdBy: e.createdBy,
+      createdBy: alias(e.createdBy),
       createdAt: e.createdAt.slice(0, 10),
       lastActivity: e.lastActivity.slice(0, 10),
       items: e.itemCount,
       sample: e.items.slice(0, 12).map((it) => (it.tags.length > 0 ? `${it.title} [${it.kind}; ${it.tags.slice(0, 4).join(', ')}]` : `${it.title} [${it.kind}]`)),
-      members: e.members,
+      members: e.members.map(alias),
       memberCount: e.memberCount,
       parents: e.parentIds,
       writable: e.writable,
@@ -257,7 +270,7 @@ export function buildTidyPrompt(input: TidyPromptInput): { system: string; user:
   const user = JSON.stringify(
     {
       today: input.now.toISOString().slice(0, 10),
-      viewer: input.viewerId,
+      viewer: 'viewer',
       topLevelRows: topLevelCount(input.evidence),
       spaces,
       nameOverlaps: nameOverlaps(input.evidence),
@@ -332,7 +345,7 @@ export function parseTidyPlan(
   const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0.5);
   const strs = (v: unknown, max: number): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map((x) => x.trim().slice(0, 200)).slice(0, max) : [];
-  const writableSpace = (id: string, what: string): TidySpaceEvidence | null => {
+  const writableSpace = (id: string, what: string, allowArchived = false): TidySpaceEvidence | null => {
     const e = byId.get(id);
     if (e === undefined) {
       dropped.push(`${what}: unknown Space ${id}`);
@@ -340,6 +353,11 @@ export function parseTidyPlan(
     }
     if (!e.writable) {
       dropped.push(`${what}: ${e.name} is not writable by the viewer`);
+      return null;
+    }
+    // Rule 2: an archived Space is touched only to take it out of a parent.
+    if (e.archived && !allowArchived) {
+      dropped.push(`${what}: ${e.name} is archived`);
       return null;
     }
     return e;
@@ -391,7 +409,7 @@ export function parseTidyPlan(
         break;
       }
       case 'unnest': {
-        const child = writableSpace(str(m['spaceId']), 'unnest');
+        const child = writableSpace(str(m['spaceId']), 'unnest', true);
         const parent = byId.get(str(m['parentId']));
         if (child === null) break;
         if (parent === undefined || !child.parentIds.includes(parent.id)) {
@@ -433,10 +451,6 @@ export function parseTidyPlan(
       case 'archive': {
         const target = writableSpace(str(m['spaceId']), 'archive');
         if (target === null) break;
-        if (target.archived) {
-          dropped.push(`archive: ${target.name} is already archived`);
-          break;
-        }
         if (target.source === 'lite-group') {
           dropped.push(`archive: ${target.name} is a group the app keeps`);
           break;

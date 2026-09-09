@@ -2070,14 +2070,23 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
         const envelope = wasArchived
           ? await bridge.unarchiveSpace(space.id)
           : await bridge.archiveSpace(space.id, 'manual');
-        showToast(
-          envelope.ok
-            ? wasArchived
-              ? `"${space.name}" is back in the sidebar`
-              : `"${space.name}" archived — it stays searchable under Archived`
-            : envelope.error.message
-        );
-        if (envelope.ok) await loadSpaces();
+        if (!envelope.ok) {
+          showToast(envelope.error.message);
+          return;
+        }
+        if (wasArchived) showToast(`"${space.name}" is back in the sidebar`);
+        else
+          showToast(`"${space.name}" archived — search still finds it`, {
+            undoLabel: 'Undo',
+            onUndo: () => {
+              void (async () => {
+                const back = await bridge.unarchiveSpace(space.id);
+                if (back.ok) await loadSpaces();
+                else showToast(back.error.message);
+              })();
+            },
+          });
+        await loadSpaces();
       })();
     },
     deleteSpace: () => {
@@ -4131,6 +4140,7 @@ function renderSpaceList(): void {
     // (2026-08-08 review): refresh them on this branch too.
     renderRecentSpaces();
     renderPinnedSpaces();
+    renderArchivedSpaces();
     return;
   }
   // Sort BEFORE row construction so the DOM order matches state.
@@ -6104,14 +6114,15 @@ function renderArchivedSpaces(): void {
     li.setAttribute('role', 'button');
     li.setAttribute('tabindex', '0');
     const reason = space.archivedReason ?? '';
-    li.title =
+    const why =
       reason === 'gsx-bot-gone'
         ? 'Archived: its GSX Designer bot no longer exists'
         : reason.startsWith('merged-into:')
           ? 'Archived: merged into another Space'
           : reason === 'tidy'
             ? 'Archived by Tidy up'
-            : 'Archived — right-click to bring it back';
+            : 'Archived';
+    li.title = `${why} — open the ⋯ menu or right-click to bring it back`;
     li.addEventListener('contextmenu', (ev) => openSpaceContextMenu(ev, space));
     const dot = document.createElement('span');
     dot.className = 'spaces-row-dot';
@@ -6122,8 +6133,50 @@ function renderArchivedSpaces(): void {
     name.className = 'spaces-row-name';
     name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
     li.appendChild(name);
+    // The same ⋯ every other row has — the discoverable way back.
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'spaces-row-menu-trigger';
+    trigger.setAttribute('aria-label', `Open menu for ${space.name || 'this space'}`);
+    trigger.setAttribute('data-row-menu-trigger', space.id);
+    trigger.textContent = '⋯';
+    li.appendChild(trigger);
     list.appendChild(li);
   }
+}
+
+/** ADR-099 — on an archived Space's header: say so, and offer the way back in place. */
+function buildSpaceArchivedRow(space: RendererSpace): HTMLElement {
+  const row = document.createElement('div');
+  row.className = 'spaces-view-header-archived';
+  const pill = document.createElement('span');
+  pill.className = 'spaces-view-header-archived-pill';
+  pill.textContent = 'Archived';
+  const reason = space.archivedReason ?? '';
+  pill.title =
+    reason === 'gsx-bot-gone'
+      ? 'Its GSX Designer bot no longer exists'
+      : reason.startsWith('merged-into:')
+        ? 'Merged into another Space'
+        : reason === 'tidy'
+          ? 'Archived by Tidy up'
+          : 'Out of the working set; search still finds it';
+  row.appendChild(pill);
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'spaces-view-header-archived-back';
+  back.textContent = 'Bring it back';
+  back.addEventListener('click', () => {
+    void (async () => {
+      const bridge = window.lite?.spaces;
+      if (bridge === undefined) return;
+      const envelope = await bridge.unarchiveSpace(space.id);
+      showToast(envelope.ok ? `"${space.name}" is back in the sidebar` : envelope.error.message);
+      if (envelope.ok) await loadSpaces();
+    })();
+  });
+  row.appendChild(back);
+  return row;
 }
 
 // ─── ADR-099: Tidy up — the groomer's plan, decided by a person ─────────
@@ -6131,6 +6184,8 @@ function renderArchivedSpaces(): void {
 let tidyState: LiteSpacesTidyState | null = null;
 let tidyDialog: HTMLElement | null = null;
 let tidyBackdrop: HTMLElement | null = null;
+/** Which control to hand focus back to after a decision repaints the list. */
+let tidyFocusKey: { key: string; control: 'accept' | 'skip' } | null = null;
 
 function wireTidy(): void {
   const button = document.getElementById('spaces-tidy-button');
@@ -6163,6 +6218,13 @@ function renderTidyBadge(): void {
   const pending = tidyState?.pending ?? 0;
   badge.textContent = pending > 0 ? String(pending) : '';
   badge.hidden = pending === 0;
+  const waiting = `${pending} move${pending === 1 ? '' : 's'} waiting for you`;
+  badge.title = waiting;
+  badge.setAttribute('aria-label', waiting);
+  const button = document.getElementById('spaces-tidy-button');
+  if (button !== null) {
+    button.setAttribute('aria-label', pending > 0 ? `Tidy up — ${waiting}` : 'Tidy up');
+  }
 }
 
 /** The title of a move, in the words a person reads it back in. */
@@ -6172,11 +6234,11 @@ export function tidyMoveTitle(move: LiteSpacesTidyMove): string {
 
 const TIDY_KIND_LABEL: Record<LiteSpacesTidyMove['kind'], string> = {
   nest: 'Group',
-  unnest: 'Take out',
+  unnest: 'Ungroup',
   merge: 'Merge',
   archive: 'Archive',
   rename: 'Rename',
-  'create-parent': 'New parent',
+  'create-parent': 'New group',
 };
 
 function ensureTidyDialog(): HTMLElement {
@@ -6191,6 +6253,7 @@ function ensureTidyDialog(): HTMLElement {
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-labelledby', 'spaces-tidy-title');
+  dialog.setAttribute('tabindex', '-1');
   backdrop.appendChild(dialog);
   backdrop.addEventListener('click', (ev) => {
     if (ev.target === backdrop) closeTidyPanel();
@@ -6203,8 +6266,12 @@ function ensureTidyDialog(): HTMLElement {
 }
 
 function closeTidyPanel(): void {
-  if (tidyBackdrop !== null) tidyBackdrop.hidden = true;
-  if (tidyDialog !== null) tidyDialog.hidden = true;
+  // Remove, do not hide: closeOnEscape's listener retires with the
+  // backdrop, and the next open builds a fresh, re-armed dialog (the
+  // same contract every other backdrop in this file keeps).
+  tidyBackdrop?.remove();
+  tidyBackdrop = null;
+  tidyDialog = null;
 }
 
 async function openTidyPanel(): Promise<void> {
@@ -6212,44 +6279,72 @@ async function openTidyPanel(): Promise<void> {
   if (tidyBackdrop !== null) tidyBackdrop.hidden = false;
   dialog.hidden = false;
   renderTidyPanel();
+  dialog.focus();
   const bridge = window.lite?.spaces;
   if (bridge === undefined || typeof bridge.tidyLatest !== 'function') return;
-  // Always re-read on open: a background pass may have landed since.
-  const envelope = await bridge.tidyLatest();
-  if (envelope.ok) applyTidyState(envelope.value);
-  dialog.querySelector<HTMLElement>('[data-tidy-primary]')?.focus();
+  try {
+    // Always re-read on open: a background pass may have landed since.
+    const envelope = await bridge.tidyLatest();
+    if (envelope.ok) applyTidyState(envelope.value);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
 }
 
 async function tidyRunPlan(): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
-  const envelope = await bridge.tidyPlan();
-  if (envelope.ok) applyTidyState(envelope.value);
-  else showToast(envelope.error.message);
+  try {
+    const envelope = await bridge.tidyPlan();
+    if (envelope.ok) applyTidyState(envelope.value);
+    else showToast(envelope.error.message);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
 }
 
 async function tidyDecideMove(key: string, decision: 'accepted' | 'rejected' | 'undecided'): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
-  const envelope = await bridge.tidyDecide(key, decision);
-  if (envelope.ok) applyTidyState(envelope.value);
-  else showToast(envelope.error.message);
+  try {
+    const envelope = await bridge.tidyDecide(key, decision);
+    if (!envelope.ok) {
+      showToast(envelope.error.message);
+      return;
+    }
+    tidyFocusKey = { key, control: decision === 'rejected' ? 'skip' : 'accept' };
+    applyTidyState(envelope.value);
+  } catch (err) {
+    showToast(messageFrom(err));
+  }
 }
 
 async function tidyApplyAccepted(): Promise<void> {
   const bridge = window.lite?.spaces;
   if (bridge === undefined) return;
-  const envelope = await bridge.tidyApply();
-  if (!envelope.ok) {
-    showToast(envelope.error.message);
-    return;
+  // Count what THIS call ran, not every move ever applied in the plan.
+  const before = new Set(
+    (tidyState?.plan?.moves ?? []).filter((m) => m.decision === 'accepted' && m.applied !== true).map((m) => m.key)
+  );
+  try {
+    const envelope = await bridge.tidyApply();
+    if (!envelope.ok) {
+      showToast(envelope.error.message);
+      return;
+    }
+    applyTidyState(envelope.value);
+    const moves = (envelope.value.plan?.moves ?? []).filter((m) => before.has(m.key));
+    const done = moves.filter((m) => m.applied === true).length;
+    const failed = moves.length - done;
+    showToast(
+      failed > 0
+        ? `${done} applied, ${failed} failed — the reason is on each move`
+        : `${done} move${done === 1 ? '' : 's'} applied`
+    );
+    await loadSpaces();
+  } catch (err) {
+    showToast(messageFrom(err));
   }
-  applyTidyState(envelope.value);
-  const moves = envelope.value.plan?.moves ?? [];
-  const failed = moves.filter((m) => m.decision === 'accepted' && m.applied !== true && typeof m.error === 'string').length;
-  const done = moves.filter((m) => m.applied === true).length;
-  showToast(failed > 0 ? `${done} applied, ${failed} could not be — see the plan` : `${done} move${done === 1 ? '' : 's'} applied`);
-  await loadSpaces();
 }
 
 function tidyRelativeTime(iso: string | null): string {
@@ -6258,10 +6353,10 @@ function tidyRelativeTime(iso: string | null): string {
   if (!Number.isFinite(then)) return 'earlier';
   const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
   if (mins < 2) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 60) return `${mins}m ago`;
   const hours = Math.round(mins / 60);
-  if (hours < 36) return `${hours} h ago`;
-  return `${Math.round(hours / 24)} d ago`;
+  if (hours < 36) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
 }
 
 /** Paint the panel from `tidyState`. Everything the machine says is typeset; the person's choices are buttons. */
@@ -6292,18 +6387,20 @@ function renderTidyPanel(): void {
   const lede = document.createElement('p');
   lede.className = 'spaces-tidy-lede';
   lede.textContent =
-    'A plan to group, merge, rename and archive your Spaces. Nothing moves until you accept it, one move at a time or all at once. Permissions never change.';
+    'A plan to group, merge, rename and archive your Spaces. Nothing moves until you accept it, one move at a time or all at once. Skip drops a move for good; it will not be proposed again. Permissions never change.';
   dialog.appendChild(lede);
 
   const status = document.createElement('p');
   status.className = 'spaces-tidy-status';
   if (running) status.textContent = 'Reading your Spaces and thinking it over…';
-  else if (state?.error !== undefined) status.textContent = state.error;
-  else if (plan === null) status.textContent = 'No plan yet.';
+  else if (state?.error !== undefined) {
+    status.classList.add('is-error');
+    status.textContent = state.error;
+  } else if (plan === null) status.textContent = 'No plan yet.';
   else
     status.textContent =
       `Prepared ${tidyRelativeTime(plan.createdAt)} from ${plan.spaceCount} Space${plan.spaceCount === 1 ? '' : 's'}, ` +
-      `${plan.topLevelCount} at the top level · ${plan.model}`;
+      `${plan.topLevelCount} at the top level`;
   dialog.appendChild(status);
 
   if (plan !== null && plan.summary.length > 0) {
@@ -6318,7 +6415,7 @@ function renderTidyPanel(): void {
   const moves = plan?.moves ?? [];
   if (plan !== null && moves.length === 0 && !running) {
     const empty = document.createElement('li');
-    empty.className = 'spaces-tidy-empty';
+    empty.className = 'spaces-tidy-empty or-sketch';
     empty.textContent = 'Nothing to tidy. Your Spaces are in good shape.';
     list.appendChild(empty);
   }
@@ -6328,10 +6425,18 @@ function renderTidyPanel(): void {
     if (move.applied === true) li.classList.add('is-applied');
     li.setAttribute('data-tidy-key', move.key);
 
+    const kindCol = document.createElement('div');
+    kindCol.className = 'spaces-tidy-kind-col';
     const kind = document.createElement('span');
     kind.className = `spaces-tidy-kind spaces-tidy-kind-${move.kind}`;
     kind.textContent = TIDY_KIND_LABEL[move.kind];
-    li.appendChild(kind);
+    kindCol.appendChild(kind);
+    const pct = document.createElement('span');
+    pct.className = 'spaces-tidy-confidence-text or-tnum';
+    pct.textContent = `${Math.round(move.confidence * 100)}%`;
+    pct.title = 'How sure the groomer is';
+    kindCol.appendChild(pct);
+    li.appendChild(kindCol);
 
     const body = document.createElement('div');
     body.className = 'spaces-tidy-body';
@@ -6438,6 +6543,15 @@ function renderTidyPanel(): void {
       : `Runs every ${settings.cadenceDays} day${settings.cadenceDays === 1 ? '' : 's'}, or when the top level passes ${settings.topLevelThreshold} · ${settings.profile === 'powerful' ? 'strongest model' : 'standard model'}`;
   footer.appendChild(cadence);
   dialog.appendChild(footer);
+
+  // A decision repaints the list; hand focus back to the control that
+  // took it so the keyboard never falls out to the page.
+  if (tidyFocusKey !== null) {
+    const { key, control } = tidyFocusKey;
+    tidyFocusKey = null;
+    const selector = `[data-tidy-key="${CSS.escape(key)}"] .spaces-tidy-${control}`;
+    (dialog.querySelector<HTMLElement>(selector) ?? dialog.querySelector<HTMLElement>('[data-tidy-primary]') ?? dialog).focus();
+  }
 }
 
 // ─── ADR-085: nested Spaces ─────────────────────────────────────────
@@ -6705,7 +6819,9 @@ async function openNestSpacePicker(space: RendererSpace): Promise<void> {
     /* the server refuses duplicates and cycles anyway */
   }
   list.replaceChildren();
-  const candidates = state.spaces.filter((s) => s.id !== space.id && !parentIds.has(s.id));
+  // ADR-099 — an archived Space is out of the working set; nesting under
+  // it would make the child vanish from the tree with a success toast.
+  const candidates = state.spaces.filter((s) => s.id !== space.id && !parentIds.has(s.id) && !isArchivedSpace(s));
   if (candidates.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'spaces-member-picker-empty';
@@ -7414,6 +7530,7 @@ function buildSpaceHeader(opts: { busy: boolean }): HTMLElement {
     meta = document.createElement('div');
     meta.className = 'spaces-view-header-meta';
     meta.appendChild(buildSpaceVisibilityRow(space));
+    if (isArchivedSpace(space)) meta.appendChild(buildSpaceArchivedRow(space));
     meta.appendChild(buildSpaceMembersStrip(space));
     meta.appendChild(buildSpaceNestingRow(space));
     mountPresenceStrip(meta);
@@ -11339,6 +11456,7 @@ async function loadSpaceSuggestions(
   // are already filed under is noise.
   const candidates = state.spaces
     .filter((sp) => !memberIds.has(sp.id))
+    .filter((sp) => !isArchivedSpace(sp)) // ADR-099 — never file into the archive
     .filter((sp) => !restrictedOnly || isRestrictedSpace(sp))
     .map((sp) => ({
       id: sp.id,

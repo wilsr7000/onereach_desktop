@@ -62,9 +62,10 @@ const EXEMPT: Record<string, string> = {
     'the caller becomes its creator or gets a grant; the group holds nothing of its own, so the ' +
     'grant exposes only the frame — the same class as ENSURE_MEETINGS_SPACE',
   GRANT_SELF_GSX_MIRROR:
-    'the Designer sync granting the person syncing sight of a mirror Space (source gsx-designer) of ' +
-    'a bot they just listed under their own account token — Designer already shows them the bot; ' +
-    'matches only that source and that gsxBotId, so it cannot reach any other Space',
+    'the Designer sync granting the person syncing READ sight (role reader, ON CREATE only) of a ' +
+    'mirror Space (source gsx-designer) of a bot the account-level Designer listing shows every ' +
+    'member; the mirror holds only Designer-derived content and hand-made items never move into ' +
+    'it by themselves; matches only that source and that gsxBotId, so it cannot reach any other Space',
   ENSURE_VERSION_SCHEMA: 'registry documentation, not user data',
   MERGE_PERSON: 'identity plumbing — a Person node is not Space content',
   CREATE_ASSET_UNCATEGORIZED:
