@@ -15,7 +15,7 @@
  */
 
 import { kindSpec, kindGlyph } from './asset-kinds.js';
-import { describeLink } from './link-embeds.js';
+import { describeLink, safeEmbedUrl } from './link-embeds.js';
 import { formatFieldValue } from './asset-fields.js';
 
 export interface PreviewItem {
@@ -499,8 +499,14 @@ export function buildRegistryTilePreview(item: PreviewItem, preview: HTMLElement
 
 const D = 'spaces-detail-kind';
 
-/** A provider embed inside a fixed-ratio frame. */
-function embedFrame(url: string, title: string, ratioClass: string): HTMLElement {
+/**
+ * A provider embed inside a fixed-ratio frame — or null when the
+ * address is not one the allowlist admits. Every iframe in the Spaces
+ * window is born here, so the allowlist cannot be bypassed by a caller.
+ */
+function embedFrame(candidate: string, title: string, ratioClass: string): HTMLElement | null {
+  const url = safeEmbedUrl(candidate);
+  if (url === null) return null;
   const wrap = el('div', `${D}-embed ${ratioClass}`);
   const iframe = document.createElement('iframe');
   iframe.src = url;
@@ -545,7 +551,9 @@ export function buildRegistryDetailBlock(item: PreviewItem, deps: PreviewDeps = 
       // for LINKED videos: a provider embed when one is known, else a
       // player for a direct file, else the link.
       if (link === null) return null;
-      const embed = str(m['video_embed_url']) || (link.embedUrl ?? '');
+      // The recogniser's embed (derived from the address the user set)
+      // beats the metadata copy, which any writer can change.
+      const embed = link.embedUrl ?? safeEmbedUrl(m['video_embed_url']) ?? '';
       if (link.provider === 'video-file') {
         const video = document.createElement('video');
         video.controls = true;
@@ -554,7 +562,8 @@ export function buildRegistryDetailBlock(item: PreviewItem, deps: PreviewDeps = 
         video.className = 'spaces-detail-video';
         wrap.appendChild(video);
       } else if (embed.length > 0) {
-        wrap.appendChild(embedFrame(embed, item.title, 'is-16x9'));
+        const frame = embedFrame(embed, item.title, 'is-16x9');
+        if (frame !== null) wrap.appendChild(frame);
       }
       wrap.appendChild(linkCard(link.url, `Open on ${link.providerLabel}`, null));
       return wrap;
@@ -584,14 +593,20 @@ export function buildRegistryDetailBlock(item: PreviewItem, deps: PreviewDeps = 
       return wrap;
     }
     case 'presentation': {
-      const embed = str(m['presentation_embed_url']) || (link?.embedUrl ?? '');
-      if (embed.length > 0) wrap.appendChild(embedFrame(embed, item.title, 'is-16x9'));
+      const embed = link?.embedUrl ?? safeEmbedUrl(m['presentation_embed_url']) ?? '';
+      if (embed.length > 0) {
+        const frame = embedFrame(embed, item.title, 'is-16x9');
+        if (frame !== null) wrap.appendChild(frame);
+      }
       if (link !== null) wrap.appendChild(linkCard(link.url, `Open in ${link.providerLabel}`, null));
       return wrap.children.length > 0 ? wrap : null;
     }
     case 'design': {
-      const embed = str(m['design_embed_url']) || (link?.embedUrl ?? '');
-      if (embed.length > 0) wrap.appendChild(embedFrame(embed, item.title, 'is-4x3'));
+      const embed = link?.embedUrl ?? safeEmbedUrl(m['design_embed_url']) ?? '';
+      if (embed.length > 0) {
+        const frame = embedFrame(embed, item.title, 'is-4x3');
+        if (frame !== null) wrap.appendChild(frame);
+      }
       if (link !== null) wrap.appendChild(linkCard(link.url, `Open in ${link.providerLabel}`, null));
       return wrap.children.length > 0 ? wrap : null;
     }

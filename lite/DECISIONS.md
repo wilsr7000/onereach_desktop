@@ -2311,6 +2311,8 @@ add a row when it matters.
 
 **Follow-ups.** Sharing controls (public / expiry) reach registry uploads by adopting the upload pane's block; a dedicated block per pane would read cleaner. Replace-file for uploaded kinds (today: re-link or re-add). A `monitor` runs nowhere in Lite — the kind records the intent for the full app. Enrichment eligibility still keys on text content or image/PDF MIME; a linked video's transcript is a natural next input.
 
+- **Amendment (2026-09-09, pre-release security review):** a metadata embed URL (`video_embed_url`, `presentation_embed_url`, `design_embed_url`) used to win over the recogniser and land in `iframe.src` unchecked, while the CSP had been widened to `frame-src https:` — so any member who can write an asset's metadata (`items.setMetadata` is on IPC; other apps write `Asset.metadata`) could make the Spaces window frame an arbitrary https page. Now: `EMBED_HOSTS` in link-embeds.ts is the only set of hosts ever framed (the providers' embed endpoints), `safeEmbedUrl` gates every frame at the one place iframes are made, the recogniser's embed (derived from the address the user set) beats the metadata copy, and spaces.html's `frame-src` lists exactly those hosts — pinned by `spaces-embed-csp.test.ts`. `media-src https:` stays: direct media links play from their own hosts, the same exposure `img-src https:` has carried since before this ADR.
+
 ## ADR-099: Spaces at scale — one mirror per bot, nesting the sidebar can see, archive, and a groomer that proposes but never acts (2026-09-09)
 
 - **Date**: 2026-09-09

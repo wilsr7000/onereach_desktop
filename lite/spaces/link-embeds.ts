@@ -76,6 +76,42 @@ const VIDEO_EXT = /\.(mp4|webm|mov|m4v|ogv)(\?.*)?$/i;
 const AUDIO_EXT = /\.(mp3|wav|m4a|aac|ogg|oga|flac|opus)(\?.*)?$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|avif|bmp)(\?.*)?$/i;
 
+/**
+ * The only hosts the Spaces window will ever put in an <iframe>: the
+ * embed endpoints of the providers describeLink() knows. Mirrored
+ * verbatim in spaces.html's `frame-src` (pinned by
+ * spaces-embed-csp.test.ts). A metadata value naming any other host is
+ * never framed — Asset.metadata is writable by every member of a Space
+ * and by other apps (2026-09-09 pre-release review of ADR-098).
+ */
+export const EMBED_HOSTS: readonly string[] = [
+  'www.youtube-nocookie.com',
+  'player.vimeo.com',
+  'www.loom.com',
+  'docs.google.com',
+  'www.canva.com',
+  'pitch.com',
+  'www.figma.com',
+];
+
+/**
+ * An address safe to frame: https, on an allowlisted embed host. Null
+ * for everything else, including plain http and lookalike hosts.
+ */
+export function safeEmbedUrl(candidate: unknown): string | null {
+  if (typeof candidate !== 'string') return null;
+  const url = normalizeHttpUrl(candidate);
+  if (url === null) return null;
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:') return null;
+  return EMBED_HOSTS.includes(u.hostname.toLowerCase()) ? url : null;
+}
+
 /** Normalise a typed address: trim, default the scheme, reject non-http. */
 export function normalizeHttpUrl(raw: string): string | null {
   const t = (raw ?? '').trim();

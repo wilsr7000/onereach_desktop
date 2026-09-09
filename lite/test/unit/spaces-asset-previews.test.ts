@@ -107,6 +107,20 @@ describe('buildRegistryDetailBlock', () => {
     expect(el.querySelector('a')?.textContent).toBe('Open on YouTube');
   });
 
+  it('never frames a metadata embed URL off the allowlist; the recogniser beats metadata', () => {
+    // No source link, hostile metadata: no iframe at all.
+    const hostile = buildRegistryDetailBlock({ id: '1', title: 'x', kind: 'presentation', metadata: { presentation_embed_url: 'https://evil.example.com/embed' } }, deps);
+    expect(hostile === null || hostile.querySelector('iframe') === null).toBe(true);
+    // No source link, allowlisted metadata: framed.
+    const fromMeta = buildRegistryDetailBlock({ id: '1', title: 'x', kind: 'presentation', metadata: { presentation_embed_url: 'https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/embed' } }, deps) as HTMLElement;
+    expect(fromMeta.querySelector('iframe')?.getAttribute('src')).toBe('https://docs.google.com/presentation/d/1AbCdEfGhIjKlMnOp/embed');
+    // A real YouTube link with poisoned metadata: the recogniser's embed wins.
+    const poisoned = buildRegistryDetailBlock({ id: '1', title: 'x', kind: 'video', sourceUrl: 'https://youtu.be/dQw4w9WgXcQ', metadata: { video_embed_url: 'https://evil.example.com/embed' } }, deps) as HTMLElement;
+    expect(poisoned.querySelector('iframe')?.getAttribute('src')).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+    const design = buildRegistryDetailBlock({ id: '1', title: 'x', kind: 'design', metadata: { design_embed_url: 'https://evil.example.com/embed' } }, deps);
+    expect(design === null || design.querySelector('iframe') === null).toBe(true);
+  });
+
   it('a direct video file gets a player; a deck with an embed gets a frame', () => {
     const file = buildRegistryDetailBlock({ id: '1', title: 'x', kind: 'video', sourceUrl: 'https://cdn.x.io/clip.mp4' }, deps) as HTMLElement;
     expect(file.querySelector('video')?.getAttribute('src')).toBe('https://cdn.x.io/clip.mp4');
