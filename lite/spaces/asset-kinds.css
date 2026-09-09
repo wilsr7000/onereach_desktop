@@ -29,7 +29,7 @@
   top: 0;
   z-index: 2;
   padding-top: 8px;
-  background: var(--or-bg-elevated, var(--or-bg-surface));
+  background: var(--or-bg-elevated);
 }
 
 .spaces-kindpicker-filter {
@@ -433,9 +433,9 @@
   position: absolute;
   inset: 0;
   border-radius: 6px;
-  background: var(--or-bg-raised, #fff);
+  background: var(--or-bg-raised);
   border: 1px solid rgba(var(--or-ink-rgb), 0.12);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--or-shadow-sm);
 }
 
 .spaces-card-kindpreview-deck-slide:nth-child(1) {
@@ -543,7 +543,7 @@
   text-align: center;
   border-radius: 8px;
   overflow: hidden;
-  background: var(--or-bg-raised, #fff);
+  background: var(--or-bg-raised);
   border: 1px solid rgba(var(--or-ink-rgb), 0.12);
 }
 
@@ -553,7 +553,7 @@
   letter-spacing: 0.6px;
   text-transform: uppercase;
   padding: 2px 0;
-  color: #fff;
+  color: var(--or-on-accent);
   background: rgb(var(--tile-accent, var(--or-accent-rgb)));
 }
 
@@ -583,7 +583,7 @@
   flex: 1 1 auto;
   min-height: 56px;
   border-radius: 8px;
-  background: var(--or-bg-raised, #fff);
+  background: var(--or-bg-raised);
   border: 1px solid rgba(var(--or-ink-rgb), 0.12);
   overflow: hidden;
 }
@@ -1016,7 +1016,7 @@
   padding: 6px 9px;
   border-radius: 7px;
   border: 1px solid rgba(var(--or-ink-rgb), 0.14);
-  background: var(--or-bg-raised, #fff);
+  background: var(--or-bg-raised);
   color: var(--or-text-primary);
   width: 100%;
   box-sizing: border-box;
@@ -1049,7 +1049,7 @@
 .spaces-detail-kinddetails-save {
   background: var(--or-accent);
   border-color: var(--or-accent);
-  color: var(--or-on-accent, #fff);
+  color: var(--or-on-accent);
 }
 
 .spaces-detail-kinddetails-save:disabled {
@@ -1088,6 +1088,6 @@
 .spaces-card-kindpreview-linked-video:has(.spaces-card-kindpreview-poster) .spaces-card-kindpreview-title,
 .spaces-card-kindpreview-linked-video:has(.spaces-card-kindpreview-poster) .spaces-card-kindpreview-sub,
 .spaces-card-kindpreview-linked-video:has(.spaces-card-kindpreview-poster) .spaces-card-kindpreview-facts {
-  color: #fff;
+  color: var(--or-on-accent);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }

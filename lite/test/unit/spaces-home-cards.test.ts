@@ -1026,22 +1026,15 @@ describe('buildDetailEmptyContentHint', () => {
     }
   });
 
-  it('mentions the right graph property in the kind-specific sub-text', () => {
-    // text / document → :Asset.content
-    const text = renderer.buildDetailEmptyContentHint({ kind: 'text' });
-    expect(text.querySelector('.spaces-detail-empty-sub')?.textContent).toContain(
-      ':Asset.content'
-    );
-    // image → :Asset.url (the fileKey field)
-    const image = renderer.buildDetailEmptyContentHint({ kind: 'image' });
-    expect(image.querySelector('.spaces-detail-empty-sub')?.textContent).toContain(
-      ':Asset.url'
-    );
-    // url → :Asset.sourceUrl
-    const url = renderer.buildDetailEmptyContentHint({ kind: 'url' });
-    expect(url.querySelector('.spaces-detail-empty-sub')?.textContent).toContain(
-      ':Asset.sourceUrl'
-    );
+  it('tells the person what to do next, in plain words (ADR-098 review: no graph internals)', () => {
+    const sub = (kind: string): string =>
+      renderer.buildDetailEmptyContentHint({ kind }).querySelector('.spaces-detail-empty-sub')?.textContent ?? '';
+    expect(sub('text')).toContain('Paste or upload a note');
+    expect(sub('image')).toContain('Upload an image');
+    expect(sub('url')).toContain('Add the address');
+    for (const kind of ['text', 'image', 'url', 'agent', 'document']) {
+      expect(sub(kind)).not.toMatch(/:Asset\.|fileKey/);
+    }
   });
 
   it('falls back to a generic copy for unknown kinds', () => {

@@ -15,6 +15,7 @@ import { ITEM_KINDS } from '../../spaces/types.js';
 import {
   ASSET_KINDS,
   FAMILY_ORDER,
+  contentHeadKinds,
   creatableKinds,
   inferKindFromFile,
   inferKindFromMime,
@@ -27,6 +28,8 @@ import {
   sniffJsonKind,
   typedMetadataKeys,
 } from '../../spaces/asset-kinds.js';
+
+import { CONTENT_HEAD_KINDS } from '../../spaces/sdk-client.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -100,6 +103,24 @@ describe('asset-kind registry — every row is complete', () => {
     const ids = creatableKinds().map((s) => s.id);
     for (const required of ['tool', 'presentation', 'video', 'code', 'data', 'design', 'flow', 'notebook', 'styleguide', 'conversation', 'meeting', 'monitor', 'url']) {
       expect(ids).toContain(required);
+    }
+  });
+
+  it('glyphs are unique — two kinds must never look the same in the tree or the picker', () => {
+    const glyphs = ASSET_KINDS.map((s) => s.glyph);
+    expect(new Set(glyphs).size).toBe(glyphs.length);
+  });
+
+  it('the SDK heads inline content for exactly the registry kinds flagged contentHead', () => {
+    const flagged = contentHeadKinds();
+    for (const k of ['playbook', 'transcript', 'knowledge', 'journey', 'code', 'data', 'notebook', 'conversation']) expect(flagged).toContain(k);
+    for (const k of ['image', 'video', 'audio', 'url', 'other', 'document', 'text']) expect(flagged).not.toContain(k);
+    expect(CONTENT_HEAD_KINDS).toBe(`[${flagged.map((k) => `'${k}'`).join(', ')}]`);
+  });
+
+  it('empty-state copy speaks to people, never in graph property names', () => {
+    for (const spec of ASSET_KINDS) {
+      expect(`${spec.empty.headline} ${spec.empty.sub}`, spec.id).not.toMatch(/:Asset\.|fileKey|graph property/);
     }
   });
 

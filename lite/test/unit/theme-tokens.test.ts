@@ -32,6 +32,7 @@ const read = (rel: string): string => readFileSync(resolve(liteRoot, rel), 'utf-
 export const THEMED_SHEETS = [
   'signature.css',
   'spaces/spaces.css',
+  'spaces/asset-kinds.css',
   'settings/settings.css',
   'main-window/chrome.css',
   'learn/learn.css',

@@ -19,8 +19,7 @@ import { describe, it, expect } from 'vitest';
 import {
   SdkSpacesClient,
   CYPHER,
-  type SpacesQueryFn,
-} from '../../spaces/sdk-client.js';
+  type SpacesQueryFn, CONTENT_HEAD_KINDS } from '../../spaces/sdk-client.js';
 import { SpacesError } from '../../spaces/errors.js';
 import { UNCATEGORIZED_SPACE_ID } from '../../spaces/scope.js';
 
@@ -162,9 +161,8 @@ describe('CYPHER source strings', () => {
       // carry `description` for all kinds plus a playbook-only
       // `contentHead` (excerpt alone would collapse them).
       expect(q).toMatch(/AS description,/);
-      expect(q).toMatch(
-        /coalesce\(a\.type, a\.assetType\) IN \['playbook', 'transcript', 'knowledge', 'journey', 'code', 'data'/
-      );
+      // ADR-098 — the IN-list derives from the registry's contentHead flag.
+      expect(q).toContain(`coalesce(a.type, a.assetType) IN ${CONTENT_HEAD_KINDS}`);
       // Agent tiles need the behavioral type + endpoints without a
       // full getItem round-trip.
       expect(q).toMatch(/AS tileAgentType,/);

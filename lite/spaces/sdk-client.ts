@@ -115,7 +115,7 @@ import {
   MAX_ITEM_TAG_LENGTH,
   ITEM_KINDS as ITEM_KIND_LIST,
 } from './types.js';
-import { normalizeKind } from './asset-kinds.js';
+import { contentHeadKinds, normalizeKind } from './asset-kinds.js';
 import type { SpaceScope } from './scope.js';
 import { CHECKLIST_MODES, CHECKLIST_OBLIGATIONS, MAX_CHECKLIST_ITEMS,
   MAX_ASSET_VERSIONS } from './types.js';
@@ -508,10 +508,14 @@ const MEMBER_KIND = `CASE
 /**
  * ADR-098 — kinds whose inline `content` the list projections head
  * (first 280 chars) so their tiles can show structure without a
- * getItem round-trip: the four that always did, plus the structured
- * kinds whose bodies are code, rows, tokens, messages, or notes.
+ * getItem round-trip. Derived from the registry's `contentHead` flag
+ * (review, 2026-09-09: a hand-copied list here let a new kind ship
+ * with no head in five projections) and pinned by
+ * spaces-asset-kinds.test.ts.
  */
-const CONTENT_HEAD_KINDS = `['playbook', 'transcript', 'knowledge', 'journey', 'code', 'data', 'styleguide', 'conversation', 'meeting', 'tool', 'flow', 'notebook', 'monitor']`;
+export const CONTENT_HEAD_KINDS = `[${contentHeadKinds()
+  .map((k) => `'${k}'`)
+  .join(', ')}]`;
 
 /**
  * ADR-060 — cross-writer recency. The graph's timestamps come in every

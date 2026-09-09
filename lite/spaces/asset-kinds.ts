@@ -131,6 +131,12 @@ export interface AssetKindSpec {
   reclassifiable: boolean;
   /** Inline `content` renders as code, not markdown. */
   contentIsCode: boolean;
+  /**
+   * The list projections head this kind's inline `content` (first 280
+   * chars as `contentHead`) so tiles can show structure without a
+   * getItem round-trip. The SDK's Cypher IN-list derives from this flag.
+   */
+  contentHead: boolean;
   /** Metadata keys shown as a facts line on the tile / detail card. */
   facts: readonly string[];
   /** Copy for the detail rail when the asset has nothing renderable. */
@@ -230,10 +236,11 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['wordCount'],
     empty: {
-      headline: 'No text content saved for this item.',
-      sub: 'Once a note or document body lands on this asset (graph property `:Asset.content`), it appears here.',
+      headline: 'Nothing written here yet.',
+      sub: 'Paste or upload a note and it appears here.',
     },
   },
   {
@@ -269,6 +276,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: true,
+    contentHead: true,
     facts: ['language', 'lineCount'],
     empty: {
       headline: 'No source saved for this item.',
@@ -315,6 +323,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: true,
+    contentHead: true,
     facts: ['rowCount', 'columnCount'],
     empty: {
       headline: 'No rows saved for this item.',
@@ -348,6 +357,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: true,
+    contentHead: true,
     facts: ['styleguide_colors', 'styleguide_fonts'],
     empty: {
       headline: 'No tokens saved for this style guide.',
@@ -357,7 +367,7 @@ const SPECS: readonly AssetKindSpec[] = [
   {
     id: 'conversation',
     label: 'Conversation',
-    glyph: '❝',
+    glyph: '◒',
     accent: '20, 184, 166',
     family: 'write',
     hint: 'A chat with an AI assistant, exported or pasted',
@@ -382,6 +392,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['conversation_provider', 'conversation_messages'],
     empty: {
       headline: 'No messages saved for this conversation.',
@@ -392,7 +403,7 @@ const SPECS: readonly AssetKindSpec[] = [
   {
     id: 'document',
     label: 'Document',
-    glyph: '▤',
+    glyph: '▯',
     accent: '100, 116, 139',
     family: 'files',
     hint: 'PDF, Word, Pages, HTML, plain text',
@@ -426,6 +437,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['pageCount', 'wordCount'],
     empty: {
       headline: 'No document attached.',
@@ -459,10 +471,11 @@ const SPECS: readonly AssetKindSpec[] = [
     media: true,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['width', 'height'],
     empty: {
       headline: 'No image attached.',
-      sub: 'When an image fileKey is set (graph property `:Asset.url`), a preview appears here.',
+      sub: 'Upload an image and it previews here.',
     },
   },
   {
@@ -494,6 +507,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: true,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['durationSeconds', 'video_provider'],
     empty: {
       headline: 'No video attached.',
@@ -525,6 +539,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: true,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['durationSeconds'],
     empty: {
       headline: 'No audio attached.',
@@ -568,6 +583,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['slide_count', 'presentation_provider'],
     empty: {
       headline: 'No deck attached.',
@@ -577,7 +593,7 @@ const SPECS: readonly AssetKindSpec[] = [
   {
     id: 'design',
     label: 'Design',
-    glyph: '◈',
+    glyph: '✎',
     accent: '244, 63, 94',
     family: 'files',
     hint: 'Figma, Sketch, XD, Photoshop, Illustrator',
@@ -614,6 +630,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['design_tool', 'design_status'],
     empty: {
       headline: 'No design file attached.',
@@ -641,6 +658,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['notebook_language', 'notebook_cells'],
     empty: {
       headline: 'No notebook attached.',
@@ -685,6 +703,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: true,
+    contentHead: true,
     facts: ['flow_env', 'flow_step_count'],
     empty: {
       headline: 'No flow saved for this item.',
@@ -709,6 +728,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['filename'],
     empty: {
       headline: 'This asset has no content yet.',
@@ -746,16 +766,17 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['link_domain'],
     empty: {
-      headline: 'No external URL saved.',
-      sub: 'When `:Asset.sourceUrl` is set, the link appears here.',
+      headline: 'No link saved.',
+      sub: 'Add the address and it appears here.',
     },
   },
   {
     id: 'monitor',
     label: 'Web monitor',
-    glyph: '◴',
+    glyph: '◎',
     accent: '74, 158, 255',
     family: 'links',
     hint: 'Watch a page for changes',
@@ -789,6 +810,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['monitor_interval', 'monitor_change_count'],
     empty: {
       headline: 'Nothing watched yet.',
@@ -818,10 +840,11 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: false,
     facts: ['agent_status'],
     empty: {
       headline: 'No definition saved for this agent.',
-      sub: 'Its OKF body lands in `:Asset.content` and renders here.',
+      sub: 'Its OKF body renders here once it is set.',
     },
   },
   {
@@ -866,6 +889,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['tool_type', 'tool_status'],
     empty: {
       headline: 'No notes saved for this tool.',
@@ -891,6 +915,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['knowledge_endpoint'],
     empty: {
       headline: 'Nothing recorded about what this model knows.',
@@ -923,6 +948,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['journey_persona', 'journey_stage_count'],
     empty: {
       headline: 'No stages saved for this journey.',
@@ -957,6 +983,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['meeting_at', 'meeting_attendees'],
     empty: {
       headline: 'No notes saved for this meeting.',
@@ -984,6 +1011,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: true,
     contentIsCode: false,
+    contentHead: true,
     facts: ['transcript_turns', 'transcript_speakers'],
     empty: {
       headline: 'No transcript body saved.',
@@ -1007,6 +1035,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: false,
     contentIsCode: false,
+    contentHead: true,
     facts: [],
     empty: {
       headline: 'This playbook has no plan text yet.',
@@ -1029,6 +1058,7 @@ const SPECS: readonly AssetKindSpec[] = [
     media: false,
     reclassifiable: false,
     contentIsCode: false,
+    contentHead: false,
     facts: [],
     empty: {
       headline: 'This ticket has no body.',
@@ -1216,6 +1246,11 @@ export function sniffJsonKind(text: string): ItemKind | null {
   if (has('journeyData') || (has('stages') && has('persona'))) return 'journey';
   if (has('trees') || (has('flowId') && has('botId')) || (has('steps') && has('templateId'))) return 'flow';
   return null;
+}
+
+/** Kinds whose inline content the list projections head (`contentHead`), in registry order. */
+export function contentHeadKinds(): readonly ItemKind[] {
+  return SPECS.filter((s) => s.contentHead).map((s) => s.id);
 }
 
 /** The `ItemKind` union and this table must agree — pinned by tests. */
