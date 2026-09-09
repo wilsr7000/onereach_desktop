@@ -49,6 +49,7 @@ export {
 } from './events.js';
 
 import { releasesUrl } from './feed.js';
+import { packagedFeedState } from './init.js';
 
 /** The releases page — derived from the same feed constants the updater uses (ADR-101). */
 export const RELEASES_URL = releasesUrl();
@@ -302,6 +303,27 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
       // explicitly so dev runs aren't silent. The test harness sets
       // forceDevUpdateConfig=true via LITE_DEV_UPDATE_CONFIG and skips
       // this branch.
+      // ADR-101 — an install whose bundle has no usable update descriptor
+      // and cannot write one: a check would look fine and the download
+      // would fail hours later. Say so here, where the person is looking.
+      const feedState = packagedFeedState();
+      if (app.isPackaged && feedState !== null && (feedState.descriptor === 'unwritable' || feedState.descriptor === 'error')) {
+        void ui
+          .showMessageBox({
+            type: 'warning',
+            title: 'Updates Cannot Be Applied on This Install',
+            message: 'This copy of the app cannot download updates',
+            detail:
+              'The app bundle has no usable update descriptor and one could not be written to your user data folder. Reinstall the current release from the GitHub releases page; updates work normally from there.',
+            buttons: ['Open Releases Page', 'OK'],
+            defaultId: 0,
+            cancelId: 1,
+          })
+          .then((res) => {
+            if (res.response === 0) void ui.openReleasesPage();
+          });
+        return;
+      }
       if (!app.isPackaged && autoUpdater.forceDevUpdateConfig !== true) {
         void ui
           .showMessageBox({

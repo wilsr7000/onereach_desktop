@@ -79,55 +79,155 @@ export interface InitUpdaterOptions {
   };
 }
 
-/** The three filesystem calls the packaged path needs. */
+/** The filesystem calls the packaged path needs. */
 export interface PackagedFs {
   existsSync: (p: string) => boolean;
+  readFileSync: (p: string, encoding: 'utf8') => string;
   mkdirSync: (p: string, opts: { recursive: boolean }) => unknown;
   writeFileSync: (p: string, data: string, encoding: 'utf8') => void;
 }
 
+export type PackagedDescriptorState =
+  /** The bundle's own app-update.yml matches the feed; nothing written. */
+  | 'bundle'
+  /** Missing or drifted in the bundle; written under userData and pointed at. */
+  | 'written'
+  /** Missing/drifted and the userData copy could not be written — checks work, downloads cannot. */
+  | 'unwritable'
+  /** The packaged path threw; the updater runs with whatever the bundle has. */
+  | 'error';
+
+export interface PackagedFeedState {
+  feedFromCode: boolean;
+  descriptor: PackagedDescriptorState;
+  /** Why the userData descriptor was written, when it was. */
+  reason?: 'missing' | 'drift';
+  /** The userData descriptor path, when one is in use. */
+  fallbackPath?: string;
+}
+
+/** Parse the four-key descriptor (`key: value` lines); tolerant of extra keys and comments. */
+export function parseDescriptor(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.length === 0 || line.startsWith('#')) continue;
+    const idx = line.indexOf(':');
+    if (idx <= 0) continue;
+    out[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+  }
+  return out;
+}
+
+/** Does a descriptor name exactly our feed (provider, owner, repo, cache dir)? */
+export function descriptorMatchesFeed(text: string): boolean {
+  const d = parseDescriptor(text);
+  return (
+    d['provider'] === LITE_UPDATE_FEED.provider &&
+    d['owner'] === LITE_UPDATE_FEED.owner &&
+    d['repo'] === LITE_UPDATE_FEED.repo &&
+    d['updaterCacheDirName'] === LITE_UPDATE_FEED.updaterCacheDirName
+  );
+}
+
+let _packagedFeedState: PackagedFeedState | null = null;
+
+/** What the packaged path did at init (null in dev / before init). */
+export function packagedFeedState(): PackagedFeedState | null {
+  return _packagedFeedState;
+}
+
 /**
  * ADR-101 — make the packaged updater independent of the packager:
- * provider from code, descriptor from code when the bundle has none.
- * Returns what it did (for the log and for tests).
+ * provider from code; descriptor from code when the bundle's is missing
+ * or names another feed (the `gsx-power-user-updater` drift class);
+ * the userData descriptor rewritten right before every download, since
+ * it is user-writable and electron-updater reads `updaterCacheDirName`
+ * from it at download time. Never throws: a failure degrades to
+ * `feedFromCode: false` and is reported, because a throw here would
+ * take the IPC handlers and the fallback menu down with it.
  */
 export function applyPackagedFeed(
   autoUpdater: AutoUpdaterLike,
   packaged: NonNullable<InitUpdaterOptions['packaged']>,
   log: NonNullable<InitUpdaterOptions['logger']>
-): { feedFromCode: boolean; descriptor: 'bundle' | 'written' | 'unwritable' } {
-  const fs = packaged.fs ?? nodeFs();
-  const bundled = path.join(packaged.resourcesPath, 'app-update.yml');
-  let descriptor: 'bundle' | 'written' | 'unwritable' = 'bundle';
-  if (!fs.existsSync(bundled)) {
-    // electron-updater reads updaterCacheDirName from the descriptor at
-    // download time (configOnDisk), so a provider alone is not enough.
+): PackagedFeedState {
+  const state: PackagedFeedState = { feedFromCode: false, descriptor: 'bundle' };
+  try {
+    const fs = packaged.fs ?? nodeFs();
+    const bundled = path.join(packaged.resourcesPath, 'app-update.yml');
     const fallback = path.join(packaged.userDataPath, 'app-update.yml');
-    try {
+    let reason: 'missing' | 'drift' | null = null;
+    if (!fs.existsSync(bundled)) {
+      reason = 'missing';
+    } else if (!descriptorMatchesFeed(fs.readFileSync(bundled, 'utf8'))) {
+      reason = 'drift';
+    }
+    const writeFallback = (): boolean => {
       fs.mkdirSync(packaged.userDataPath, { recursive: true });
       fs.writeFileSync(fallback, feedDescriptorYaml(), 'utf8');
-      autoUpdater.updateConfigPath = fallback;
-      descriptor = 'written';
-      log.warn('updater: bundle has no app-update.yml — descriptor written from code', {
-        bundled,
-        fallback,
-        note: 'this bundle was not produced by the release pipeline (a --dir build?); updates still work',
-      });
-    } catch (err) {
-      descriptor = 'unwritable';
-      log.error('updater: bundle has no app-update.yml and the fallback could not be written', {
-        bundled,
-        fallback,
-        error: (err as Error).message,
-      });
+      return true;
+    };
+    if (reason !== null) {
+      state.reason = reason;
+      try {
+        writeFallback();
+        autoUpdater.updateConfigPath = fallback;
+        state.descriptor = 'written';
+        state.fallbackPath = fallback;
+        log.warn(
+          reason === 'missing'
+            ? 'updater: bundle has no app-update.yml — descriptor written from code'
+            : 'updater: bundle app-update.yml names another feed — descriptor written from code',
+          {
+            bundled,
+            fallback,
+            note:
+              reason === 'missing'
+                ? 'this bundle was not produced by the release pipeline (a --dir build?); updates still work'
+                : 'the bundle descriptor is ignored; updates use the feed in lite/updater/feed.ts',
+          }
+        );
+      } catch (err) {
+        state.descriptor = 'unwritable';
+        log.error('updater: bundle app-update.yml is missing or wrong and the fallback could not be written — checks work, downloads cannot', {
+          bundled,
+          fallback,
+          reason,
+          error: (err as Error).message,
+        });
+      }
     }
+    if (typeof autoUpdater.setFeedURL === 'function') {
+      autoUpdater.setFeedURL({ ...LITE_UPDATE_FEED });
+      state.feedFromCode = true;
+    }
+    // Downloads read the descriptor again (updaterCacheDirName decides
+    // where the zip is staged, and install.ts looks there). Refuse when
+    // no trustworthy descriptor exists; rewrite ours first when it does.
+    const originalDownload = autoUpdater.downloadUpdate.bind(autoUpdater);
+    autoUpdater.downloadUpdate = async (): Promise<unknown> => {
+      if (state.descriptor === 'unwritable' || state.descriptor === 'error') {
+        throw new Error(
+          'Updates cannot be downloaded on this install: the app bundle has no usable update descriptor and one could not be written. Reinstall from the releases page.'
+        );
+      }
+      if (state.descriptor === 'written') {
+        try {
+          writeFallback();
+        } catch (err) {
+          throw new Error(`Updates cannot be downloaded: the update descriptor could not be refreshed (${(err as Error).message}).`);
+        }
+      }
+      return originalDownload();
+    };
+  } catch (err) {
+    state.descriptor = 'error';
+    log.error('updater: packaged feed setup failed — running with the bundle descriptor only', {
+      error: (err as Error).message,
+    });
   }
-  let feedFromCode = false;
-  if (typeof autoUpdater.setFeedURL === 'function') {
-    autoUpdater.setFeedURL({ ...LITE_UPDATE_FEED });
-    feedFromCode = true;
-  }
-  return { feedFromCode, descriptor };
+  return state;
 }
 
 function nodeFs(): PackagedFs {
@@ -135,6 +235,7 @@ function nodeFs(): PackagedFs {
   const fs = require('node:fs') as typeof import('node:fs');
   return {
     existsSync: (p) => fs.existsSync(p),
+    readFileSync: (p, encoding) => fs.readFileSync(p, encoding),
     mkdirSync: (p, opts) => fs.mkdirSync(p, opts),
     writeFileSync: (p, data, encoding) => fs.writeFileSync(p, data, encoding),
   };
@@ -187,10 +288,19 @@ export function initAutoUpdater(opts: InitUpdaterOptions = {}): AutoUpdaterLike 
     });
   }
 
-  // ADR-101 — packaged builds take the feed from code, always.
-  let packagedFeed: ReturnType<typeof applyPackagedFeed> | null = null;
+  // ADR-101 — packaged builds take the feed from code — unless a dev
+  // update config is in effect (LITE_DEV_UPDATE_CONFIG: the packaged e2e
+  // tier points the real bundle at a local server; the production feed
+  // must not override it).
+  let packagedFeed: PackagedFeedState | null = null;
+  _packagedFeedState = null;
   if (opts.packaged !== undefined) {
-    packagedFeed = applyPackagedFeed(autoUpdater, opts.packaged, log);
+    if (autoUpdater.forceDevUpdateConfig === true) {
+      log.info('updater: dev update config in effect — feed from code not applied');
+    } else {
+      packagedFeed = applyPackagedFeed(autoUpdater, opts.packaged, log);
+      _packagedFeedState = packagedFeed;
+    }
   }
   let feedUrl = '<default-from-publish-config>';
   try {

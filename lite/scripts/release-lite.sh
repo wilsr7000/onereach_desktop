@@ -241,22 +241,21 @@ LITE_YAML_PATH="dist-lite/${LITE_YAML}"
 declare -a FILES=("${LITE_DMG}" "${LITE_DMG_BMAP}" "${LITE_ZIP}" "${LITE_ZIP_BMAP}" "${LITE_YAML_PATH}")
 
 # ---------------------------------------------------------------------------
-# Updater descriptor gate (2026-09-09, ADR-101): a bundle without
+# Updater descriptor gate (2026-09-09, ADR-101): a bundle without an exact
 # Contents/Resources/app-update.yml can never check for updates — the one
 # installed that day came from a --dir build and died with ENOENT. The
 # afterPack hook writes the file into every bundle; this refuses to ship
-# one where it is missing or names another feed.
-if [ -n "$APP_BUNDLE" ]; then
-    UPDATE_DESCRIPTOR="$APP_BUNDLE/Contents/Resources/app-update.yml"
-    if [ ! -f "$UPDATE_DESCRIPTOR" ]; then
-        echo -e "${RED}✗ ${UPDATE_DESCRIPTOR} is missing — the installed app could never check for updates. Aborting.${NC}"
-        exit 1
-    fi
-    if ! grep -q "repo: Onereach_Lite_Desktop_App" "$UPDATE_DESCRIPTOR" || ! grep -q "updaterCacheDirName: onereach-lite-updater" "$UPDATE_DESCRIPTOR"; then
-        echo -e "${RED}✗ ${UPDATE_DESCRIPTOR} names another feed or cache dir:${NC}"; cat "$UPDATE_DESCRIPTOR"; exit 1
-    fi
-    echo -e "${GREEN}✓ Updater descriptor present: $(tr '\n' ' ' < "$UPDATE_DESCRIPTOR")${NC}"
+# one where it is missing or differs from lite/updater/feed.ts. A missing
+# bundle is itself a failure (review 2026-09-09: an empty find used to skip
+# the gate silently), so look again before giving up.
+if [ -z "$APP_BUNDLE" ]; then
+    APP_BUNDLE=$(find dist-lite -maxdepth 2 -name "*.app" -not -path "*/build/*" 2>/dev/null | head -1)
 fi
+if [ -z "$APP_BUNDLE" ]; then
+    echo -e "${RED}✗ No packaged .app found under ${MAC_OUT_DIR:-dist-lite/mac-arm64} or dist-lite — nothing to gate. Aborting.${NC}"
+    exit 1
+fi
+bash lite/scripts/check-update-descriptor.sh "$APP_BUNDLE" || exit 1
 
 # Packaged-boot sanity (2026-08-07): v0.0.40 shipped an asar missing
 # @anthropic-ai/sdk's runtime dep 'standardwebhooks' — the installed

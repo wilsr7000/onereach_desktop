@@ -37,6 +37,7 @@
  */
 
 import * as fs from 'node:fs';
+import { LITE_UPDATE_FEED } from './feed.js';
 import * as os from 'node:os';
 import { APP_BUNDLE_NAMES } from '../product.js';
 import * as path from 'node:path';
@@ -374,9 +375,12 @@ function spawnInstallHelper(deps: InstallDeps, opts: SpawnHelperOpts): void {
   // explains why that name is frozen).
   const appPath = resolveInstalledAppPath(deps);
   const shipItCache = path.join(homeDir, 'Library/Caches/com.onereach.lite.ShipIt');
+  // ADR-101 — the cache dir name is the feed's, in one place.
   const electronUpdaterCache = path.join(
     homeDir,
-    'Library/Caches/onereach-lite-updater/pending'
+    'Library/Caches',
+    LITE_UPDATE_FEED.updaterCacheDirName,
+    'pending'
   );
   const statusFile = path.join(deps.userDataPath, 'last-install-result.json');
 
