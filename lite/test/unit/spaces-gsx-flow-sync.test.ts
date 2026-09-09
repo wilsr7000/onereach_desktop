@@ -6,12 +6,14 @@ import { describe, it, expect } from 'vitest';
 import {
   runGsxFlowSync,
   gsxSyncIds,
+  legacyGsxSyncIds,
   shortHash,
   designerFlowUrl,
   actionDeskViewUrl,
   viewsByFlow,
   flowAgentContent,
   isGraphOutage,
+  GSX_DESIGNER_GROUP,
   type GsxFlowSyncDeps,
   type GsxFlowSyncClient,
 } from '../../spaces/gsx-flow-sync.js';
@@ -128,14 +130,24 @@ const flow = (id: string, botId: string, label: string, over: Partial<GsxFlow> =
 });
 
 describe('gsxSyncIds', () => {
-  it('derives deterministic, viewer-scoped ids from the GSX ids', () => {
-    const a = gsxSyncIds('robb@onereach.com', 'bot-1', 'flow-9');
-    const b = gsxSyncIds('robb@onereach.com', 'bot-1', 'flow-9');
-    const c = gsxSyncIds('rich@onereach.com', 'bot-1', 'flow-9');
+  // ADR-099 — one mirror per bot for the ACCOUNT: the ids no longer carry
+  // the viewer, so two people syncing land on the same Space.
+  it('derives deterministic, account-level ids from the GSX ids', () => {
+    const a = gsxSyncIds('bot-1', 'flow-9');
+    const b = gsxSyncIds('bot-1', 'flow-9');
     expect(a).toEqual(b);
-    expect(a.spaceId).toBe(`space-gsxbot-bot-1-${shortHash('robb@onereach.com')}`);
-    expect(a.assetId).toBe(`asset-gsxflow-flow-9-${shortHash('robb@onereach.com')}`);
-    expect(a.spaceId).not.toBe(c.spaceId); // one Space per creator
+    expect(a.spaceId).toBe('space-gsxbot-bot-1');
+    expect(a.assetId).toBe('asset-gsxflow-flow-9');
+    expect(a.agentId).toBe('agent-gsxflow-flow-9');
+    expect(a.typeId).toBe('agenttype-gsxflow-flow-9');
+  });
+  it('keeps the ADR-091 viewer-scoped ids only to find the legacy copies', () => {
+    const robb = legacyGsxSyncIds('robb@onereach.com', 'bot-1', 'flow-9');
+    const rich = legacyGsxSyncIds('rich@onereach.com', 'bot-1', 'flow-9');
+    expect(robb.spaceId).toBe(`space-gsxbot-bot-1-${shortHash('robb@onereach.com')}`);
+    expect(robb.assetId).toBe(`asset-gsxflow-flow-9-${shortHash('robb@onereach.com')}`);
+    expect(robb.spaceId).not.toBe(rich.spaceId);
+    expect(robb.spaceId).not.toBe(gsxSyncIds('bot-1').spaceId);
   });
   it('links to Designer', () => {
     expect(designerFlowUrl('edison', 'b', 'f')).toBe('https://studio.edison.onereach.ai/flows/b/f');
@@ -150,7 +162,7 @@ describe('runGsxFlowSync', () => {
     });
     const r = await runGsxFlowSync(deps);
     expect(r).toMatchObject({ bots: 1, spacesCreated: 1, flows: 1, agentsCreated: 1, agentsRetired: 0, botsFailed: 0, aborted: false });
-    const ids = gsxSyncIds('robb@onereach.com', 'b1', 'f1');
+    const ids = gsxSyncIds('b1', 'f1');
     expect(rec.spaces[0]).toMatchObject({ id: ids.spaceId, gsxBotId: 'b1', name: 'Tickets' });
     expect(rec.spaces[0]?.description).toContain('https://studio.edison.onereach.ai/flows/b1');
     const a = rec.agents[0]!;
@@ -162,7 +174,7 @@ describe('runGsxFlowSync', () => {
   });
 
   it('retires agents whose flow left Designer, and only those', async () => {
-    const sid = gsxSyncIds('robb@onereach.com', 'b1').spaceId;
+    const sid = gsxSyncIds('b1').spaceId;
     const { deps, rec } = makeDeps({
       bots: [bot('b1', 'Tickets')],
       flows: { b1: [flow('f1', 'b1', 'Keep')] },
@@ -185,7 +197,7 @@ describe('runGsxFlowSync', () => {
     const { deps, rec } = makeDeps({
       bots: [bot('b1', 'AI Build Tools'), bot('b2', 'Omni Data')],
       flows: { b1: new Error('Internal Server Error'), b2: [flow('f9', 'b2', 'Ingest')] },
-      existing: { [gsxSyncIds('robb@onereach.com', 'b1').spaceId]: [{ assetId: 'a-keep', gsxFlowId: 'f-x' }] },
+      existing: { [gsxSyncIds('b1').spaceId]: [{ assetId: 'a-keep', gsxFlowId: 'f-x' }] },
     });
     const r = await runGsxFlowSync(deps);
     expect(r.botsFailed).toBe(1);
@@ -439,5 +451,180 @@ describe('a Space created in Lite that became the bot (ADR-092)', () => {
     expect(rec.retired).toEqual(['asset-stale']);
     expect(rec.spaces.map((s) => s.gsxBotId)).toEqual(['b2']);
     expect(r).toMatchObject({ spacesCreated: 1, spacesUpdated: 1, agentsRetired: 1 });
+  });
+});
+
+// ─── ADR-099 — one mirror per bot, born nested, convergence, orphans ────
+
+describe('ADR-099: account-level mirrors', () => {
+  interface Rec098 {
+    grants: Array<[string, string]>;
+    nests: Array<[string, string, boolean, string | null]>;
+    folds: Array<[string, string]>;
+    archived: Array<[string, string]>;
+    groupUpserts: number;
+    warns: string[];
+  }
+  function make(over: {
+    bots?: GsxBot[];
+    created?: boolean;
+    group?: { id: string; name: string } | null | Error;
+    fold?: { folded: boolean; agentsRetired: number; itemsMoved: number };
+    mirrors?: Array<{ id: string; gsxBotId: string }>;
+    ping?: boolean;
+    dryRun?: boolean;
+    withoutOptional?: boolean;
+  } = {}): { deps: GsxFlowSyncDeps; rec: Rec098 } {
+    const rec: Rec098 = { grants: [], nests: [], folds: [], archived: [], groupUpserts: 0, warns: [] };
+    const created = over.created ?? true;
+    const base: GsxFlowSyncClient = {
+      async upsertGsxFlowSpace(input) {
+        return { id: input.id, created };
+      },
+      async spaceNameTaken() {
+        return false;
+      },
+      async upsertGsxFlowAgents(_s, _b, rows) {
+        return rows.map((r) => ({ id: r.assetId, created: true }));
+      },
+      async listGsxFlowAgents() {
+        return [];
+      },
+      async retireGsxFlowAgent() {
+        return true;
+      },
+      ...(over.ping !== undefined ? { async ping() { return over.ping === true; } } : {}),
+    };
+    const optional: Partial<GsxFlowSyncClient> = over.withoutOptional === true ? {} : {
+      async grantSelfGsxMirrorAccess(spaceId, gsxBotId) {
+        rec.grants.push([spaceId, gsxBotId]);
+        return true;
+      },
+      async upsertGroupSpace(input) {
+        rec.groupUpserts += 1;
+        if (over.group instanceof Error) throw over.group;
+        return over.group === undefined ? { id: input.id, name: input.name } : over.group;
+      },
+      async nestSpace(childId, parentId, inherit, until) {
+        rec.nests.push([childId, parentId, inherit, until]);
+        return {};
+      },
+      async foldLegacyGsxMirror(legacyId, targetId) {
+        rec.folds.push([legacyId, targetId]);
+        return over.fold ?? { folded: false, agentsRetired: 0, itemsMoved: 0 };
+      },
+      async listGsxMirrorSpaces() {
+        return over.mirrors ?? [];
+      },
+      async archiveSpace(id, reason) {
+        rec.archived.push([id, reason]);
+        return true;
+      },
+    };
+    const deps: GsxFlowSyncDeps = {
+      client: { ...base, ...optional },
+      port: {
+        async listBots() {
+          return over.bots ?? [bot('b1', 'Tickets')];
+        },
+        async listFlows() {
+          return [];
+        },
+      },
+      log: {
+        start: () => ({ finish: () => undefined, fail: () => undefined }),
+        event: () => undefined,
+        info: () => undefined,
+        warn: (_c, m) => {
+          rec.warns.push(m);
+        },
+      },
+      viewerId: () => 'robb@onereach.com',
+      env: 'edison',
+      ...(over.dryRun === true ? { dryRun: true } : {}),
+    };
+    return { deps, rec };
+  }
+
+  it('a NEW mirror is born inside the GSX Designer group, inheritance off; the group is resolved once per sweep', async () => {
+    const { deps, rec } = make({ bots: [bot('b1', 'Tickets'), bot('b2', 'Agents')] });
+    const r = await runGsxFlowSync(deps);
+    expect(r.spacesCreated).toBe(2);
+    expect(rec.groupUpserts).toBe(1);
+    expect(rec.nests).toEqual([
+      ['space-gsxbot-b1', GSX_DESIGNER_GROUP.id, false, null],
+      ['space-gsxbot-b2', GSX_DESIGNER_GROUP.id, false, null],
+    ]);
+    expect(rec.grants).toEqual([]); // the creator needs no grant
+  });
+
+  it('an EXISTING mirror (someone else synced first) grants the person sight and is not re-nested', async () => {
+    const { deps, rec } = make({ created: false });
+    const r = await runGsxFlowSync(deps);
+    expect(r.spacesUpdated).toBe(1);
+    expect(rec.grants).toEqual([['space-gsxbot-b1', 'b1']]);
+    expect(rec.nests).toEqual([]);
+    expect(rec.groupUpserts).toBe(0);
+  });
+
+  it('convergence: this person\'s legacy viewer-suffixed copy is folded into the account Space and counted', async () => {
+    const { deps, rec } = make({ fold: { folded: true, agentsRetired: 38, itemsMoved: 1 } });
+    const r = await runGsxFlowSync(deps);
+    expect(rec.folds).toEqual([[legacyGsxSyncIds('robb@onereach.com', 'b1').spaceId, 'space-gsxbot-b1']]);
+    expect(r.legacyFolded).toBe(1);
+    const again = make({ fold: { folded: false, agentsRetired: 0, itemsMoved: 0 } });
+    expect((await runGsxFlowSync(again.deps)).legacyFolded).toBe(0);
+  });
+
+  it('after a complete sweep, a mirror whose bot left Designer is archived — and only that one', async () => {
+    const { deps, rec } = make({
+      mirrors: [
+        { id: 'space-gsxbot-b1', gsxBotId: 'b1' },
+        { id: 'space-gsxbot-gone', gsxBotId: 'gone' },
+      ],
+    });
+    const r = await runGsxFlowSync(deps);
+    expect(rec.archived).toEqual([['space-gsxbot-gone', 'gsx-bot-gone']]);
+    expect(r.spacesArchived).toBe(1);
+  });
+
+  it('an empty Designer listing or an aborted sweep never archives anything', async () => {
+    const empty = make({ bots: [], mirrors: [{ id: 'space-gsxbot-b1', gsxBotId: 'b1' }] });
+    await runGsxFlowSync(empty.deps);
+    expect(empty.rec.archived).toEqual([]);
+    const down = make({ ping: false, mirrors: [{ id: 'space-gsxbot-b1', gsxBotId: 'b1' }] });
+    const r = await runGsxFlowSync(down.deps);
+    expect(r.aborted).toBe(true);
+    expect(down.rec.archived).toEqual([]);
+  });
+
+  it('dry run touches nothing new either', async () => {
+    const { deps, rec } = make({ dryRun: true, created: false, fold: { folded: true, agentsRetired: 1, itemsMoved: 0 }, mirrors: [{ id: 'x', gsxBotId: 'gone' }] });
+    const r = await runGsxFlowSync(deps);
+    expect(rec.grants).toEqual([]);
+    expect(rec.nests).toEqual([]);
+    expect(rec.folds).toEqual([]);
+    expect(rec.archived).toEqual([]);
+    expect(r.legacyFolded).toBe(0);
+    expect(r.spacesArchived).toBe(0);
+  });
+
+  it('a missing or failing group leaves mirrors top-level and the sync intact', async () => {
+    const gone = make({ group: null });
+    const r1 = await runGsxFlowSync(gone.deps);
+    expect(r1.spacesCreated).toBe(1);
+    expect(gone.rec.nests).toEqual([]);
+    const failing = make({ group: new Error('graph hiccup') });
+    const r2 = await runGsxFlowSync(failing.deps);
+    expect(r2.spacesCreated).toBe(1);
+    expect(failing.rec.nests).toEqual([]);
+    expect(failing.rec.warns.some((w) => w.includes('group Space unavailable'))).toBe(true);
+  });
+
+  it('an older client without the optional methods still syncs (ADR-091 behaviour)', async () => {
+    const { deps, rec } = make({ withoutOptional: true });
+    const r = await runGsxFlowSync(deps);
+    expect(r).toMatchObject({ spacesCreated: 1, aborted: false, legacyFolded: 0, spacesArchived: 0 });
+    expect(rec.nests).toEqual([]);
   });
 });

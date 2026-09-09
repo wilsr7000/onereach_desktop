@@ -11,12 +11,14 @@
  * @internal
  */
 
+import { getTidyEngine, type TidyEngine } from './tidy-engine.js';
+import type { TidyState, TidySettings } from './tidy.js';
 import { ipcMain, type IpcMainInvokeEvent } from 'electron';
 import { getSpacesApi } from './api.js';
 import { runAgenticSearch, type AgenticSearchResult } from './agentic-search.js';
 import { getAiApi } from '../ai/api.js';
 import { getLoggingApi } from '../logging/api.js';
-import type { SpacesError } from './errors.js';
+import { SpacesError } from './errors.js';
 import { resolveSpaceScope } from './scope.js';
 import type {
   AssetVersion,
@@ -120,6 +122,14 @@ export const SPACES_IPC = {
   LIST_PARENT_SPACES: 'lite:spaces:listParentSpaces',
   UPDATE_SPACE: 'lite:spaces:update',
   PIN_SPACE: 'lite:spaces:pin',
+  // ADR-099 — archive (a lifecycle short of delete) and the groomer.
+  ARCHIVE_SPACE: 'lite:spaces:archive',
+  UNARCHIVE_SPACE: 'lite:spaces:unarchive',
+  TIDY_LATEST: 'lite:spaces:tidy:latest',
+  TIDY_PLAN: 'lite:spaces:tidy:plan',
+  TIDY_DECIDE: 'lite:spaces:tidy:decide',
+  TIDY_APPLY: 'lite:spaces:tidy:apply',
+  TIDY_SETTINGS: 'lite:spaces:tidy:settings',
   DELETE_SPACE: 'lite:spaces:delete',
   UNDELETE_SPACE: 'lite:spaces:undelete',
   /** Phase 4 — shared spaces (playbooks + tickets). */
@@ -952,6 +962,114 @@ export function registerSpacesIpc(opts: RegisterOpts): void {
         const pinned = payload?.pinned === true;
         await getSpacesApi().pinSpace(id, pinned);
         return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ADR-099 — archive: a lifecycle short of delete.
+  handleSpacesIpc(
+    SPACES_IPC.ARCHIVE_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown; reason?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        const id = typeof payload?.id === 'string' ? payload.id : '';
+        const reason = typeof payload?.reason === 'string' ? payload.reason.slice(0, 120) : 'manual';
+        await getSpacesApi().archiveSpace(id, reason);
+        return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.UNARCHIVE_SPACE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { id?: unknown }
+    ): Promise<SpacesIpcResult<{ ok: true }>> => {
+      try {
+        await getSpacesApi().unarchiveSpace(typeof payload?.id === 'string' ? payload.id : '');
+        return { ok: true, value: { ok: true } };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+
+  // ADR-099 — the groomer. Every call answers with the whole tidy state
+  // so the renderer never assembles it from pieces.
+  const tidy = (): TidyEngine => {
+    const engine = getTidyEngine();
+    if (engine === null) {
+      throw new SpacesError({
+        code: 'SPACES_NOT_INITIALIZED',
+        message: 'Tidy up is not available until Spaces has started.',
+      });
+    }
+    return engine;
+  };
+  handleSpacesIpc(
+    SPACES_IPC.TIDY_LATEST,
+    async (): Promise<SpacesIpcResult<TidyState>> => {
+      try {
+        return { ok: true, value: tidy().state() };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.TIDY_PLAN,
+    async (): Promise<SpacesIpcResult<TidyState>> => {
+      try {
+        return { ok: true, value: await tidy().plan('manual') };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.TIDY_DECIDE,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { moveKey?: unknown; decision?: unknown }
+    ): Promise<SpacesIpcResult<TidyState>> => {
+      try {
+        const key = typeof payload?.moveKey === 'string' ? payload.moveKey : '';
+        const decision = payload?.decision;
+        if (decision !== 'accepted' && decision !== 'rejected' && decision !== 'undecided') {
+          throw new SpacesError({ code: 'SPACES_INVALID_INPUT', message: 'decision must be accepted, rejected or undecided' });
+        }
+        return { ok: true, value: tidy().decide(key, decision) };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.TIDY_APPLY,
+    async (): Promise<SpacesIpcResult<TidyState>> => {
+      try {
+        return { ok: true, value: await tidy().apply() };
+      } catch (err) {
+        return { ok: false, error: serializeError(err) };
+      }
+    }
+  );
+  handleSpacesIpc(
+    SPACES_IPC.TIDY_SETTINGS,
+    async (
+      _event: IpcMainInvokeEvent,
+      payload?: { patch?: unknown }
+    ): Promise<SpacesIpcResult<TidySettings>> => {
+      try {
+        const raw = payload?.patch;
+        const patch = raw !== null && typeof raw === 'object' ? (raw as Partial<TidySettings>) : undefined;
+        return { ok: true, value: tidy().settings(patch) };
       } catch (err) {
         return { ok: false, error: serializeError(err) };
       }

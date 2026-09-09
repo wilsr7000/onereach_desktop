@@ -110,8 +110,31 @@ async function providerSpaceId(provider: CaptureProvider): Promise<string | null
   }
   const created = await spaces.createSpace({ name: cfg.spaceName, color: cfg.color, iconKey: 'message-square' });
   spaceIdByProvider.set(provider, created.id);
+  // ADR-099 — born nested: a capture Space lands inside the Conversations
+  // group (organization only, inheritance off). Best-effort; the Space
+  // exists whatever happens here.
+  try {
+    const group = await spaces.ensureGroupSpace(CONVERSATIONS_GROUP);
+    if (group !== null) await spaces.nestSpace(created.id, group.id, false, null);
+  } catch (err) {
+    getLoggingApi().warn('idw', 'conversation capture: could not nest the Space in Conversations', {
+      spaceId: created.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
   return created.id;
 }
+
+/** ADR-099 — the group every "<Provider> Conversations" Space is born inside. */
+export const CONVERSATIONS_GROUP = {
+  id: 'space-group-conversations',
+  name: 'Conversations',
+  description:
+    'Conversations Onereach Desktop captured from the AI services you use, one Space per service. ' +
+    'Put your own Spaces anywhere; these stay grouped here unless you move them.',
+  color: '#8a6d3b',
+  iconKey: 'message-square',
+} as const;
 
 /** Writes each reply's full transcript in place — one asset per conversation. */
 export const spacesSink: ConversationSink = {

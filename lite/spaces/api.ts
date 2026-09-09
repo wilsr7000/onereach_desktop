@@ -852,6 +852,25 @@ export interface SpacesApi {
    * cache (the `pinned` flag rides `listSpaces()` rows).
    */
   pinSpace(id: string, pinned: boolean): Promise<void>;
+  /**
+   * ADR-099 — archive: out of the sidebar's working set into the Archived
+   * section; items, members and search untouched. Writer only. `reason`
+   * is recorded (`tidy`, `gsx-bot-gone`, `merged-into:<id>`, …).
+   */
+  archiveSpace(id: string, reason?: string): Promise<void>;
+  unarchiveSpace(id: string): Promise<void>;
+  /**
+   * ADR-099 — one of Lite's own group Spaces (the parent Lite's writers
+   * put what they make inside). MERGEd by a well-known id; null when a
+   * person deleted it, in which case the caller leaves things top-level.
+   */
+  ensureGroupSpace(input: {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    iconKey: string;
+  }): Promise<{ id: string; name: string } | null>;
 
   /**
    * Delete a Space. Defaults to a soft delete (sets `deletedAt`); the
@@ -1208,6 +1227,21 @@ class UninitializedSpacesApi implements SpacesApi {
 
   async pinSpace(_id: string, _pinned: boolean): Promise<void> {
     throw notInitialized('pinSpace');
+  }
+  async archiveSpace(_id: string, _reason?: string): Promise<void> {
+    throw notInitialized('archiveSpace');
+  }
+  async unarchiveSpace(_id: string): Promise<void> {
+    throw notInitialized('unarchiveSpace');
+  }
+  async ensureGroupSpace(_input: {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    iconKey: string;
+  }): Promise<{ id: string; name: string } | null> {
+    throw notInitialized('ensureGroupSpace');
   }
 
   async deleteSpace(_id: string, _opts?: DeleteSpaceOpts): Promise<void> {

@@ -72,6 +72,32 @@ export interface GsxFlowSyncClient {
    * the circuit-breaker alone.
    */
   ping?(): Promise<boolean>;
+  /** ADR-099 — sight for the person syncing, scoped to the mirror of a bot they just listed. */
+  grantSelfGsxMirrorAccess?(spaceId: string, gsxBotId: string): Promise<boolean>;
+  /** ADR-099 — the group Space new mirrors are born inside; null when a person deleted it. */
+  upsertGroupSpace?(input: {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    iconKey: string;
+  }): Promise<{ id: string; name: string } | null>;
+  /** ADR-085 — nest (inheritance off): organization only. */
+  nestSpace?(
+    childId: string,
+    parentId: string,
+    inheritsPermissions: boolean,
+    inheritsUntil: string | null
+  ): Promise<unknown>;
+  /** ADR-099 convergence — fold this person's legacy viewer-suffixed mirror into the account Space. */
+  foldLegacyGsxMirror?(
+    legacyId: string,
+    targetId: string
+  ): Promise<{ folded: boolean; agentsRetired: number; itemsMoved: number }>;
+  /** ADR-099 — the viewer's writable mirrors, for orphan detection after a complete sweep. */
+  listGsxMirrorSpaces?(): Promise<Array<{ id: string; gsxBotId: string }>>;
+  /** ADR-099 — archive a mirror whose bot left Designer. */
+  archiveSpace?(id: string, reason: string): Promise<boolean>;
 }
 
 /**
@@ -139,27 +165,68 @@ export interface GsxFlowSyncResult {
   agentsCreated: number;
   agentsUpdated: number;
   agentsRetired: number;
+  /** ADR-099 — mirrors archived because their bot left Designer. */
+  spacesArchived: number;
+  /** ADR-099 — legacy per-person mirrors folded into account Spaces. */
+  legacyFolded: number;
   aborted: boolean;
   reason?: string;
 }
 
-/** Deterministic, viewer-scoped ids — a Space has exactly one creator. */
-export function gsxSyncIds(viewerId: string, botId: string, flowId?: string): {
+/**
+ * ADR-099 — deterministic, ACCOUNT-level ids: one mirror Space per bot,
+ * one agent per flow, whoever syncs. The first person to sync creates
+ * the Space; everyone after is granted sight (GRANT_SELF_GSX_MIRROR).
+ */
+export function gsxSyncIds(botId: string, flowId?: string): {
+  spaceId: string;
+  assetId: string;
+  agentId: string;
+  typeId: string;
+} {
+  const f = flowId ?? '';
+  return {
+    spaceId: `space-gsxbot-${botId}`,
+    assetId: `asset-gsxflow-${f}`,
+    agentId: `agent-gsxflow-${f}`,
+    typeId: `agenttype-gsxflow-${f}`,
+  };
+}
+
+/**
+ * ADR-091's viewer-scoped ids (`…-<hash of viewer>`), kept only so each
+ * person's sync can find and fold the private copies it minted before
+ * ADR-099. Never used for anything new.
+ */
+export function legacyGsxSyncIds(viewerId: string, botId: string, flowId?: string): {
   spaceId: string;
   assetId: string;
   agentId: string;
   typeId: string;
 } {
   const v = shortHash(viewerId);
-  const spaceId = `space-gsxbot-${botId}-${v}`;
   const f = flowId ?? '';
   return {
-    spaceId,
+    spaceId: `space-gsxbot-${botId}-${v}`,
     assetId: `asset-gsxflow-${f}-${v}`,
     agentId: `agent-gsxflow-${f}-${v}`,
     typeId: `agenttype-gsxflow-${f}-${v}`,
   };
 }
+
+/**
+ * ADR-099 — the group Space Lite's Designer mirrors are born inside.
+ * Inheritance off: the group is organization, never permission.
+ */
+export const GSX_DESIGNER_GROUP = {
+  id: 'space-group-gsx-designer',
+  name: 'GSX Designer',
+  description:
+    'Spaces Onereach Desktop makes on its own: one per GSX Designer bot, filled with that bot\'s agent flows. ' +
+    'Put your own Spaces anywhere; these stay grouped here unless you move them.',
+  color: '#3f78c0',
+  iconKey: 'bot',
+} as const;
 
 /** FNV-1a 32-bit, hex — stable across processes, no crypto needed. */
 export function shortHash(s: string): string {
@@ -247,6 +314,8 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
     agentsCreated: 0,
     agentsUpdated: 0,
     agentsRetired: 0,
+    spacesArchived: 0,
+    legacyFolded: 0,
     aborted: false,
   };
   const span = deps.log.start('spaces.gsxFlowSync');
@@ -309,10 +378,32 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
     }
   }
 
+  // ADR-099 — the group new mirrors are born inside. Resolved once per
+  // sweep, lazily (a sweep that creates nothing never touches it); a
+  // failure leaves mirrors top-level rather than stopping the sync.
+  let groupId: string | null | undefined;
+  const groupSpaceId = async (): Promise<string | null> => {
+    if (groupId !== undefined) return groupId;
+    if (deps.dryRun === true || typeof deps.client.upsertGroupSpace !== 'function') {
+      groupId = null;
+      return null;
+    }
+    try {
+      const group = await deps.client.upsertGroupSpace(GSX_DESIGNER_GROUP);
+      groupId = group?.id ?? null;
+    } catch (err) {
+      groupId = null;
+      deps.log.warn('spaces', 'gsx-flow-sync: group Space unavailable; mirrors stay top-level', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return groupId;
+  };
+
   for (const bot of bots) {
     const botSpan = deps.log.start('spaces.gsxFlowSync.bot', { botId: bot.id });
     try {
-      const ids = gsxSyncIds(viewer, bot.id);
+      const ids = gsxSyncIds(bot.id);
       // ADR-092: a Space the viewer created in Lite that became this bot
       // is the bot's home — its flows go there, its name and description
       // stay the user's, and no mirror Space is minted.
@@ -341,6 +432,46 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       if (space.created) result.spacesCreated += 1;
       else result.spacesUpdated += 1;
 
+      if (own === null && deps.dryRun !== true) {
+        // ADR-099 — one mirror per bot: a person who did not create it is
+        // granted sight (explicit; Designer already shows them the bot).
+        if (!space.created && typeof deps.client.grantSelfGsxMirrorAccess === 'function') {
+          await deps.client.grantSelfGsxMirrorAccess(space.id, bot.id);
+        }
+        // Born nested — only when CREATED: a person who pulls a mirror out
+        // of the group is not fought on the next sweep.
+        if (space.created && typeof deps.client.nestSpace === 'function') {
+          const parent = await groupSpaceId();
+          if (parent !== null) {
+            try {
+              await deps.client.nestSpace(space.id, parent, false, null);
+            } catch (err) {
+              deps.log.warn('spaces', 'gsx-flow-sync: could not nest mirror in the group', {
+                spaceId: space.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+        // Convergence — this person's pre-ADR-099 private copy folds into
+        // the account Space (a no-op once it is gone).
+        if (typeof deps.client.foldLegacyGsxMirror === 'function') {
+          const legacyId = legacyGsxSyncIds(viewer, bot.id).spaceId;
+          if (legacyId !== space.id) {
+            const fold = await deps.client.foldLegacyGsxMirror(legacyId, space.id);
+            if (fold.folded) {
+              result.legacyFolded += 1;
+              deps.log.info('spaces', 'gsx-flow-sync: legacy mirror folded into the account Space', {
+                legacyId,
+                spaceId: space.id,
+                agentsRetired: fold.agentsRetired,
+                itemsMoved: fold.itemsMoved,
+              });
+            }
+          }
+        }
+      }
+
       let flows;
       try {
         flows = await deps.port.listFlows(bot.id);
@@ -360,7 +491,7 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       const seen = new Set<string>();
       const rows: Parameters<GsxFlowSyncClient['upsertGsxFlowAgents']>[2] = [];
       for (const flow of live) {
-        const fids = gsxSyncIds(viewer, bot.id, flow.id);
+        const fids = gsxSyncIds(bot.id, flow.id);
         const url = designerFlowUrl(deps.env, bot.id, flow.id);
         const view = viewByFlow.get(flow.id) ?? null;
         const viewUrl = view !== null ? actionDeskViewUrl(deps.env, view.id, deps.accountId) : null;
@@ -433,6 +564,36 @@ export async function runGsxFlowSync(deps: GsxFlowSyncDeps): Promise<GsxFlowSync
       }
       deps.log.warn('spaces', 'gsx-flow-sync: bot failed', {
         botId: bot.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // ADR-099 — mirrors whose bot left Designer are archived, not kept
+  // forever (the gap ADR-091 documented). Only after a sweep that listed
+  // Designer completely and was not cut off: an aborted sweep or an empty
+  // listing says nothing about any bot.
+  if (
+    !result.aborted &&
+    bots.length > 0 &&
+    deps.dryRun !== true &&
+    typeof deps.client.listGsxMirrorSpaces === 'function' &&
+    typeof deps.client.archiveSpace === 'function'
+  ) {
+    try {
+      const live = new Set(bots.map((b) => b.id));
+      for (const mirror of await deps.client.listGsxMirrorSpaces()) {
+        if (live.has(mirror.gsxBotId)) continue;
+        if (await deps.client.archiveSpace(mirror.id, 'gsx-bot-gone')) {
+          result.spacesArchived += 1;
+          deps.log.info('spaces', 'gsx-flow-sync: mirror archived; its bot left Designer', {
+            spaceId: mirror.id,
+            gsxBotId: mirror.gsxBotId,
+          });
+        }
+      }
+    } catch (err) {
+      deps.log.warn('spaces', 'gsx-flow-sync: orphan check failed', {
         error: err instanceof Error ? err.message : String(err),
       });
     }

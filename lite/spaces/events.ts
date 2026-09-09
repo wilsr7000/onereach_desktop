@@ -62,6 +62,16 @@ export const SPACES_EVENTS = {
   LIST_SPACES_START: 'spaces.listSpaces.start',
   LIST_SPACES_FINISH: 'spaces.listSpaces.finish',
   LIST_SPACES_FAIL: 'spaces.listSpaces.fail',
+  // ─── ADR-099: archive + the groomer's evidence read ───────────────────
+  ARCHIVE_SPACE_START: 'spaces.archive.start',
+  ARCHIVE_SPACE_FINISH: 'spaces.archive.finish',
+  ARCHIVE_SPACE_FAIL: 'spaces.archive.fail',
+  UNARCHIVE_SPACE_START: 'spaces.unarchive.start',
+  UNARCHIVE_SPACE_FINISH: 'spaces.unarchive.finish',
+  UNARCHIVE_SPACE_FAIL: 'spaces.unarchive.fail',
+  TIDY_EVIDENCE_START: 'spaces.tidyEvidence.start',
+  TIDY_EVIDENCE_FINISH: 'spaces.tidyEvidence.finish',
+  TIDY_EVIDENCE_FAIL: 'spaces.tidyEvidence.fail',
   // ─── items.list ──────────────────────────────────────────────────────
   ITEMS_LIST_START: 'spaces.items.list.start',
   ITEMS_LIST_FINISH: 'spaces.items.list.finish',

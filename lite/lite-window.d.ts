@@ -670,6 +670,55 @@ interface LiteSpaceNesting {
   inheritsUntil?: string;
 }
 
+/** ADR-099 — one move the groomer proposes. */
+interface LiteSpacesTidyMove {
+  key: string;
+  kind: 'nest' | 'unnest' | 'merge' | 'archive' | 'rename' | 'create-parent';
+  spaceId?: string;
+  spaceName?: string;
+  parentId?: string;
+  parentName?: string;
+  targetId?: string;
+  targetName?: string;
+  name?: string;
+  childIds?: string[];
+  childNames?: string[];
+  reason: string;
+  evidence: string[];
+  confidence: number;
+  /** Members of a merge source the target lacks — a person's decision, never the groomer's. */
+  membersNotInTarget?: string[];
+  decision: 'accepted' | 'rejected' | 'undecided';
+  applied?: boolean;
+  error?: string;
+}
+
+interface LiteSpacesTidyPlan {
+  createdAt: string;
+  model: string;
+  provider: string;
+  summary: string;
+  topLevelCount: number;
+  spaceCount: number;
+  moves: LiteSpacesTidyMove[];
+}
+
+interface LiteSpacesTidySettings {
+  cadenceDays: number;
+  topLevelThreshold: number;
+  profile: 'powerful' | 'standard';
+}
+
+interface LiteSpacesTidyState {
+  settings: LiteSpacesTidySettings;
+  lastRunAt: string | null;
+  running: boolean;
+  plan: LiteSpacesTidyPlan | null;
+  /** Count of moves still waiting on a decision. */
+  pending: number;
+  error?: string;
+}
+
 interface LiteSpace {
   id: string;
   name: string;
@@ -693,6 +742,13 @@ interface LiteSpace {
   kind?: LiteSpaceKind;
   /** ADR-051 — 'open' (default) or 'restricted' (members-only). */
   visibility?: 'open' | 'restricted';
+  /** ADR-099 — live NESTED_IN parents (the sidebar draws the tree from these). */
+  parentIds?: string[];
+  /** ADR-099 — set while the Space sits in the Archived section. */
+  archivedAt?: string;
+  archivedReason?: string;
+  /** ADR-091/098 — `gsx-designer` (mirror), `lite-group` (Lite's group), absent for a person's Space. */
+  source?: string;
 }
 
 interface LiteSpaceChipRef {
@@ -1246,6 +1302,15 @@ interface LiteSpacesBridge {
    * the human across devices; `pinned` on LiteSpace reflects it.
    */
   pinSpace(id: string, pinned: boolean): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  /** ADR-099 — archive (a lifecycle short of delete) and the groomer. */
+  archiveSpace(id: string, reason?: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  unarchiveSpace(id: string): Promise<LiteSpacesIpcResult<{ ok: true }>>;
+  tidyLatest(): Promise<LiteSpacesIpcResult<LiteSpacesTidyState>>;
+  tidyPlan(): Promise<LiteSpacesIpcResult<LiteSpacesTidyState>>;
+  tidyDecide(moveKey: string, decision: 'accepted' | 'rejected' | 'undecided'): Promise<LiteSpacesIpcResult<LiteSpacesTidyState>>;
+  tidyApply(): Promise<LiteSpacesIpcResult<LiteSpacesTidyState>>;
+  tidySettings(patch?: Partial<LiteSpacesTidySettings>): Promise<LiteSpacesIpcResult<LiteSpacesTidySettings>>;
+  onTidyUpdated(handler: (state: LiteSpacesTidyState) => void): () => void;
   /**
    * Phase 4 — shared spaces. Toggles a Space between 'user' (default,
    * user-managed) and 'shared' (AI-managed dashboard layout).

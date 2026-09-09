@@ -47,6 +47,7 @@ import type { SpacePresenceEntry,
   SpaceNesting } from './types.js';
 import type { Span } from '../logging/events.js';
 import type {
+  TidySpaceEvidence,
   Space,
   Item,
   ItemSummary,
@@ -551,6 +552,12 @@ export const CYPHER = {
          CASE WHEN coalesce(memberActivityMs, 0) > ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')}
               THEN memberActivityMs
               ELSE ${tsMs('coalesce(s.updatedAt, s.updated_at, s.createdAt, s.created_at)')} END AS lastActivityMs
+    // ADR-099 — the live NESTED_IN parents, so the sidebar can draw the
+    // tree from one listing (a parent the viewer cannot see is simply
+    // absent from the list; the child then reads as top-level).
+    OPTIONAL MATCH (s)-[:NESTED_IN]->(par:Space)
+      WHERE par.deletedAt IS NULL
+    WITH s, itemCount, lastActivityMs, collect(DISTINCT par.id) AS parentIds
     // ADR-069 — the viewer's pin mark (human override for the attention
     // tiers). Absent viewer identity simply never matches.
     OPTIONAL MATCH (:Person {id: $viewerId})-[pin:PINNED]->(s)
@@ -566,7 +573,11 @@ export const CYPHER = {
            coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
            coalesce(toString(s.updatedAt), toString(s.updated_at), '') AS updatedAt,
            lastActivityMs AS lastActivityMs,
-           pin IS NOT NULL AS pinned
+           pin IS NOT NULL AS pinned,
+           parentIds AS parentIds,
+           coalesce(toString(s.archivedAt), '') AS archivedAt,
+           coalesce(s.archivedReason, '') AS archivedReason,
+           coalesce(s.source, '') AS source
     ORDER BY toLower(coalesce(s.name, s.id, '')) ASC
   `,
 
@@ -2456,6 +2467,171 @@ export const CYPHER = {
     RETURN s.id AS id, coalesce(s.name, s.id) AS name
     ORDER BY s.createdAt
     LIMIT 1
+  `,
+  /**
+   * ADR-099 — archive: the Space leaves the sidebar's working set for
+   * the Archived section. Items, members and search are untouched; this
+   * is a lifecycle short of delete. Writer only, like every write.
+   */
+  ARCHIVE_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_WRITABLE}
+    SET s.archivedAt = $now,
+        s.archivedBy = $viewerId,
+        s.archivedReason = $reason,
+        s.updatedAt = $now
+    RETURN s.id AS id
+  `,
+  UNARCHIVE_SPACE: `
+    MATCH (s:Space {id: $id})
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_WRITABLE}
+    REMOVE s.archivedAt, s.archivedBy, s.archivedReason
+    SET s.updatedAt = $now
+    RETURN s.id AS id
+  `,
+  /**
+   * ADR-099 — one of Lite's own group Spaces ("GSX Designer",
+   * "Conversations"): the parent Lite's writers put what they make
+   * inside. MERGEd by a well-known id; the first caller is its creator
+   * and every later caller is granted (explicit, ADR-084 signal two —
+   * the group holds nothing of its own, so the grant exposes only the
+   * frame). A group somebody deleted is NOT resurrected: no row comes
+   * back and the caller skips nesting.
+   */
+  UPSERT_GROUP_SPACE: `
+    MERGE (s:Space {id: $id})
+      ON CREATE SET s.name = $name,
+                    s.description = $description,
+                    s.color = $color,
+                    s.iconKey = $iconKey,
+                    s.kind = 'user',
+                    s.visibility = 'restricted',
+                    s.source = 'lite-group',
+                    s.createdBy = $viewerId,
+                    s.createdAt = $now,
+                    s.updatedAt = $now
+    WITH s
+    WHERE s.deletedAt IS NULL
+      AND coalesce(s.source, '') = 'lite-group'
+      AND $viewerId <> ''
+    MERGE (p:Person {id: $viewerId})
+      ON CREATE SET p.name = $viewerId, p.email = $viewerId, p.createdAt = $now
+    MERGE (p)-[r:HAS_ACCESS]->(s)
+      ON CREATE SET r.grantedAt = $now, r.grantedBy = 'lite-group'
+    RETURN s.id AS id, coalesce(s.name, s.id) AS name
+  `,
+  /**
+   * ADR-099 — the sync's grant to the person syncing, scoped by
+   * construction: only a Designer mirror (`source = 'gsx-designer'`) of
+   * the bot the sync just listed under that person's own account token.
+   * That is the explicit signal ADR-084 asks for — Designer already shows
+   * them the bot; the Space is its shadow.
+   */
+  GRANT_SELF_GSX_MIRROR: `
+    MATCH (s:Space {id: $spaceId})
+      WHERE s.deletedAt IS NULL
+        AND coalesce(s.source, '') = 'gsx-designer'
+        AND s.gsxBotId = $gsxBotId
+        AND $viewerId <> ''
+    MERGE (p:Person {id: $viewerId})
+      ON CREATE SET p.name = $viewerId, p.email = $viewerId, p.createdAt = $now
+    MERGE (p)-[r:HAS_ACCESS]->(s)
+      ON CREATE SET r.grantedAt = $now, r.grantedBy = 'gsx-flow-sync'
+    RETURN s.id AS id
+  `,
+  /** ADR-099 — the viewer's writable Designer mirrors, for orphan detection after a complete sweep. */
+  LIST_GSX_MIRROR_SPACES: `
+    MATCH (s:Space)
+      WHERE s.deletedAt IS NULL
+        AND s.archivedAt IS NULL
+        AND coalesce(s.source, '') = 'gsx-designer'
+        AND s.gsxBotId IS NOT NULL
+        AND ${SPACE_WRITABLE}
+    RETURN s.id AS id, s.gsxBotId AS gsxBotId
+  `,
+  /**
+   * ADR-099 convergence — fold a legacy viewer-suffixed mirror (ADR-091
+   * ids) into the account-level Space: the legacy synced agents retire
+   * (their account-level twins exist), anything a person added by hand
+   * moves over, and the legacy Space is soft-deleted with a pointer to
+   * its successor. Both ends must be writable by the person folding —
+   * their own legacy copy, the shared account Space.
+   */
+  FOLD_LEGACY_GSX_MIRROR: `
+    MATCH (legacy:Space {id: $legacyId})
+      WHERE legacy.deletedAt IS NULL
+        AND coalesce(legacy.source, '') = 'gsx-designer'
+        AND ${SPACE_WRITABLE_FOR('legacy')}
+    MATCH (target:Space {id: $targetId})
+      WHERE target.deletedAt IS NULL
+        AND legacy.id <> target.id
+        AND ${SPACE_WRITABLE_FOR('target')}
+    OPTIONAL MATCH (a)-[:BELONGS_TO]->(legacy)
+      WHERE a.deletedAt IS NULL
+    WITH legacy, target,
+         [x IN collect(a) WHERE coalesce(x.source, '') = 'gsx-designer'] AS synced,
+         [x IN collect(a) WHERE coalesce(x.source, '') <> 'gsx-designer'] AS handMade
+    FOREACH (x IN synced | SET x.deletedAt = $now, x.updatedAt = $now)
+    FOREACH (x IN handMade | MERGE (x)-[:BELONGS_TO]->(target))
+    WITH legacy, target, size(synced) AS agentsRetired, handMade
+    OPTIONAL MATCH (moved)-[old:BELONGS_TO]->(legacy)
+      WHERE moved IN handMade
+    DELETE old
+    WITH DISTINCT legacy, target, agentsRetired, size(handMade) AS itemsMoved
+    SET legacy.deletedAt = $now,
+        legacy.supersededBy = $targetId,
+        legacy.updatedAt = $now
+    RETURN legacy.id AS id, agentsRetired AS agentsRetired, itemsMoved AS itemsMoved
+  `,
+  /**
+   * ADR-099 — what the groomer reads: every Space the viewer can see,
+   * with the evidence a person would skim before deciding where it
+   * belongs. One listing; sight-gated like LIST_SPACES; `writable` tells
+   * the groomer which Spaces a move may touch.
+   */
+  TIDY_EVIDENCE: `
+    MATCH (s:Space)
+      WHERE s.deletedAt IS NULL
+        AND ${SPACE_VISIBLE}
+    OPTIONAL MATCH (a)-[:BELONGS_TO]->(s)
+      WHERE ${SPACE_MEMBER}
+        AND a.deletedAt IS NULL
+        AND coalesce(a.isTrashed, false) = false
+    WITH s, count(a) AS itemCount,
+         max(${MEMBER_ACTIVITY_MS}) AS lastActivityMs,
+         collect(DISTINCT {
+           title: coalesce(a.title, a.name, ''),
+           kind: coalesce(a.type, head(labels(a)), ''),
+           tags: coalesce(a.tags, [])
+         })[0..12] AS items
+    OPTIONAL MATCH (m:Person)-[g:HAS_ACCESS]->(s)
+      WHERE (g.expiresUnixMs IS NULL OR g.expiresUnixMs > $nowMs)
+    WITH s, itemCount, lastActivityMs, items,
+         collect(DISTINCT m.id)[0..8] AS members,
+         count(DISTINCT m) AS memberCount
+    OPTIONAL MATCH (s)-[:NESTED_IN]->(par:Space)
+      WHERE par.deletedAt IS NULL
+    WITH s, itemCount, lastActivityMs, items, members, memberCount,
+         collect(DISTINCT par.id) AS parentIds
+    RETURN s.id AS id,
+           coalesce(s.name, s.id) AS name,
+           coalesce(s.description, '') AS description,
+           coalesce(s.kind, 'user') AS kind,
+           coalesce(s.source, '') AS source,
+           coalesce(s.gsxBotId, '') AS gsxBotId,
+           coalesce(s.createdBy, s.created_by_user, '') AS createdBy,
+           coalesce(toString(s.createdAt), toString(s.created_at), '') AS createdAt,
+           coalesce(toString(s.archivedAt), '') AS archivedAt,
+           itemCount AS itemCount,
+           lastActivityMs AS lastActivityMs,
+           items AS items,
+           members AS members,
+           memberCount AS memberCount,
+           parentIds AS parentIds,
+           ${SPACE_WRITABLE} AS writable
+    ORDER BY toLower(coalesce(s.name, s.id, '')) ASC
   `,
   /** Case-insensitive name clash with a Space that is NOT the synced one. */
   SPACE_NAME_TAKEN: `
@@ -6197,10 +6373,107 @@ export class SdkSpacesClient {
     if (updated[0] !== undefined) return { id: String(updated[0]['id']), created: false };
     const created = await this.run(CYPHER.CREATE_GSX_FLOW_SPACE, params);
     if (created[0] !== undefined) return { id: String(created[0]['id']), created: true };
+    // ADR-099 — the Space exists and belongs to another person's sync:
+    // the mirror is per BOT now, so this person is granted sight (the bot
+    // is theirs in Designer) and the refresh runs again as a member.
+    if (await this.grantSelfGsxMirrorAccess(input.id, input.gsxBotId)) {
+      const asMember = await this.run(CYPHER.UPDATE_GSX_FLOW_SPACE, params);
+      if (asMember[0] !== undefined) return { id: String(asMember[0]['id']), created: false };
+    }
     throw new SpacesError({
       code: 'SPACES_FORBIDDEN',
       message: 'A Space with this synced id exists but is not writable by the viewer.',
       remediation: 'Sign in as the Space creator, or remove the stale Space.',
+    });
+  }
+
+  /** ADR-099 — see GRANT_SELF_GSX_MIRROR: scoped to a mirror of the bot just listed. */
+  async grantSelfGsxMirrorAccess(spaceId: string, gsxBotId: string): Promise<boolean> {
+    if (this.viewerParam() === '') return false;
+    const rows = await this.run(CYPHER.GRANT_SELF_GSX_MIRROR, {
+      spaceId,
+      gsxBotId,
+      now: nowIso(),
+    });
+    return rows.length > 0;
+  }
+
+  /** ADR-099 — one of Lite's own group Spaces; null when it was deleted by a person. */
+  async upsertGroupSpace(input: {
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    iconKey: string;
+  }): Promise<{ id: string; name: string } | null> {
+    if (this.viewerParam() === '') return null;
+    const rows = await this.run(CYPHER.UPSERT_GROUP_SPACE, {
+      id: input.id,
+      name: input.name.slice(0, MAX_SPACE_NAME_LENGTH),
+      description: input.description.slice(0, MAX_SPACE_DESC_LENGTH),
+      color: input.color,
+      iconKey: input.iconKey,
+      now: nowIso(),
+    });
+    const row = rows[0];
+    if (row === undefined) return null;
+    return { id: String(row['id']), name: String(row['name'] ?? row['id']) };
+  }
+
+  /** ADR-099 — the viewer's writable Designer mirrors (orphan detection). */
+  async listGsxMirrorSpaces(): Promise<Array<{ id: string; gsxBotId: string }>> {
+    const rows = await this.run(CYPHER.LIST_GSX_MIRROR_SPACES, {});
+    return rows
+      .map((r) => ({ id: String(r['id'] ?? ''), gsxBotId: String(r['gsxBotId'] ?? '') }))
+      .filter((r) => r.id.length > 0 && r.gsxBotId.length > 0);
+  }
+
+  /** ADR-099 convergence — fold a legacy viewer-suffixed mirror into the account Space. */
+  async foldLegacyGsxMirror(
+    legacyId: string,
+    targetId: string
+  ): Promise<{ folded: boolean; agentsRetired: number; itemsMoved: number }> {
+    const rows = await this.run(CYPHER.FOLD_LEGACY_GSX_MIRROR, {
+      legacyId,
+      targetId,
+      now: nowIso(),
+    });
+    const row = rows[0];
+    if (row === undefined) return { folded: false, agentsRetired: 0, itemsMoved: 0 };
+    return {
+      folded: true,
+      agentsRetired: optNumber(row, 'agentsRetired') ?? 0,
+      itemsMoved: optNumber(row, 'itemsMoved') ?? 0,
+    };
+  }
+
+  /** ADR-099 — archive / unarchive (writer only). True when a row changed. */
+  async archiveSpace(id: string, reason: string): Promise<boolean> {
+    return this.withSpan('spaces.archive', async () => {
+      const rows = await this.run(CYPHER.ARCHIVE_SPACE, {
+        id: validateSpaceId(id),
+        reason: reason.slice(0, 120),
+        now: nowIso(),
+      });
+      return rows.length > 0;
+    });
+  }
+
+  async unarchiveSpace(id: string): Promise<boolean> {
+    return this.withSpan('spaces.unarchive', async () => {
+      const rows = await this.run(CYPHER.UNARCHIVE_SPACE, {
+        id: validateSpaceId(id),
+        now: nowIso(),
+      });
+      return rows.length > 0;
+    });
+  }
+
+  /** ADR-099 — the groomer's evidence: every visible Space with what a person would skim. */
+  async tidyEvidence(): Promise<TidySpaceEvidence[]> {
+    return this.withSpan('spaces.tidyEvidence', async () => {
+      const rows = await this.run(CYPHER.TIDY_EVIDENCE, {});
+      return rows.map(toTidySpaceEvidence);
     });
   }
 
@@ -6645,6 +6918,46 @@ function epochToIso(n: number): string | undefined {
   return d.toISOString();
 }
 
+/** ADR-099 — one Space as the groomer sees it. */
+function toTidySpaceEvidence(row: Record<string, unknown>): TidySpaceEvidence {
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.length > 0) : [];
+  const items = Array.isArray(row['items'])
+    ? (row['items'] as unknown[])
+        .map((it) => {
+          const m = it as Record<string, unknown>;
+          return {
+            title: typeof m['title'] === 'string' ? m['title'] : '',
+            kind: typeof m['kind'] === 'string' ? m['kind'] : '',
+            tags: strings(m['tags']),
+          };
+        })
+        .filter((it) => it.title.length > 0)
+    : [];
+  const lastActivityMs = optNumber(row, 'lastActivityMs');
+  return {
+    id: requireString(row, 'id'),
+    name: optString(row, 'name') ?? '',
+    description: optString(row, 'description') ?? '',
+    kind: optString(row, 'kind') ?? 'user',
+    source: optString(row, 'source') ?? '',
+    gsxBotId: optString(row, 'gsxBotId') ?? '',
+    createdBy: optString(row, 'createdBy') ?? '',
+    createdAt: normalizeGraphTimestamp(optString(row, 'createdAt')) ?? '',
+    archived: (optString(row, 'archivedAt') ?? '').length > 0,
+    itemCount: optNumber(row, 'itemCount') ?? 0,
+    lastActivity:
+      lastActivityMs !== undefined && lastActivityMs > 0
+        ? (normalizeGraphTimestamp(lastActivityMs) ?? '')
+        : '',
+    items,
+    members: strings(row['members']),
+    memberCount: optNumber(row, 'memberCount') ?? 0,
+    parentIds: strings(row['parentIds']),
+    writable: row['writable'] === true,
+  };
+}
+
 function toSpace(row: Record<string, unknown>): Space {
   const space: Space = {
     id: requireString(row, 'id'),
@@ -6685,6 +6998,18 @@ function toSpace(row: Record<string, unknown>): Space {
   // live pass: the create result carried it, the list never did.
   const gsxBotId = optString(row, 'gsxBotId');
   if (gsxBotId !== undefined && gsxBotId.length > 0) space.gsxBotId = gsxBotId;
+  // ADR-099 — nesting parents, archive state and writer, for the sidebar.
+  const parentIds = row['parentIds'];
+  if (Array.isArray(parentIds)) {
+    const ids = parentIds.filter((v): v is string => typeof v === 'string' && v.length > 0);
+    if (ids.length > 0) space.parentIds = ids;
+  }
+  const archivedAt = normalizeGraphTimestamp(optString(row, 'archivedAt'));
+  if (archivedAt !== undefined) space.archivedAt = archivedAt;
+  const archivedReason = optString(row, 'archivedReason');
+  if (archivedReason !== undefined && archivedReason.length > 0) space.archivedReason = archivedReason;
+  const source = optString(row, 'source');
+  if (source !== undefined && source.length > 0) space.source = source;
   return space;
 }
 

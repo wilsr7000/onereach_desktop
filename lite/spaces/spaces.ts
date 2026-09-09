@@ -29,6 +29,7 @@
  */
 
 import { PRODUCT_DISPLAY_NAME } from '../product.js';
+import { describeMove, type TidyMove } from './tidy.js';
 // ADR-098 — the asset-kind registry and the surfaces that derive from it.
 import {
   inferKindFromFile as inferKindFromFileSpec,
@@ -406,6 +407,7 @@ function init(): void {
   wireSidebarSort();
   wireMutationsUI();
   wireCacheUpdates();
+  wireTidy();
   // Home is the default scope -- show its region, hide the items
   // region. This ensures first paint matches state even if
   // `setActiveScope` never runs.
@@ -958,7 +960,7 @@ function applySidebarFilter(): void {
   }
   // Spaces list rows.
   const rows = Array.from(
-    document.querySelectorAll<HTMLElement>('#spaces-list-spaces .spaces-row')
+    document.querySelectorAll<HTMLElement>('#spaces-list-spaces .spaces-row, #spaces-list-archived .spaces-row')
   );
   for (const row of rows) {
     const name = row.querySelector<HTMLElement>('.spaces-row-name')?.textContent ?? '';
@@ -1037,7 +1039,8 @@ function wireSidebarSections(): void {
   );
   for (const section of sections) {
     const name = section.getAttribute('data-side-section') ?? '';
-    applySectionCollapsed(section, map[name] === true);
+    // ADR-099 — Archived starts folded; every other section starts open.
+    applySectionCollapsed(section, map[name] === undefined ? name === 'archived' : map[name] === true);
   }
   // Delegated toggle clicks (headers are buttons; the Spaces header's
   // sort <select> lives OUTSIDE the button so it never toggles).
@@ -1197,7 +1200,7 @@ function renderRecentSpaces(): void {
   if (list === null) return;
   const section = list.closest<HTMLElement>('[data-side-section="recent"]');
   list.replaceChildren();
-  const candidates = state.spaces.filter((s) => s.pinned !== true);
+  const candidates = state.spaces.filter((s) => s.pinned !== true && !isArchivedSpace(s));
   const recent = sortSpaces(candidates, 'recent').slice(0, RECENT_SPACES_LIMIT);
   const useful = state.spaces.length >= RECENT_MIN_SPACES && recent.length > 0;
   if (section !== null) section.hidden = !useful;
@@ -1235,7 +1238,7 @@ function renderPinnedSpaces(): void {
   const section = document.querySelector<HTMLElement>('[data-side-section="pinned"]');
   const list = document.getElementById('spaces-list-pinned');
   if (section === null || list === null) return;
-  const pinned = state.spaces.filter((s) => s.pinned === true);
+  const pinned = state.spaces.filter((s) => s.pinned === true && !isArchivedSpace(s));
   if (pinned.length === 0) {
     section.hidden = true;
     list.replaceChildren();
@@ -1716,6 +1719,8 @@ export function buildSpaceContextEntries(
     togglePin: () => void;
     /** ADR-085 — put this Space inside another (optional: older callers/tests omit it). */
     nestInside?: () => void;
+    /** ADR-099 — archive / unarchive (optional: older callers/tests omit it). */
+    archive?: () => void;
   }
 ): CtxEntry[] {
   const isOpen = space.visibility !== 'restricted';
@@ -1772,6 +1777,13 @@ export function buildSpaceContextEntries(
       type: 'action',
       label: 'Put inside a Space…',
       run: () => handlers.nestInside?.(),
+    },
+    // ADR-099 — a lifecycle short of delete: out of the working set,
+    // one click from coming back, still searchable.
+    {
+      type: 'action',
+      label: isArchivedSpace(space) ? 'Unarchive space' : 'Archive space',
+      run: () => handlers.archive?.(),
     },
     {
       type: 'submenu',
@@ -2050,6 +2062,23 @@ function openSpaceContextMenu(event: MouseEvent, space: RendererSpace): void {
     },
     sendToMemory: () => {
       void runMemoryIngest(space.id, space.name);
+    },
+    archive: () => {
+      void (async () => {
+        if (bridge === undefined) return;
+        const wasArchived = isArchivedSpace(space);
+        const envelope = wasArchived
+          ? await bridge.unarchiveSpace(space.id)
+          : await bridge.archiveSpace(space.id, 'manual');
+        showToast(
+          envelope.ok
+            ? wasArchived
+              ? `"${space.name}" is back in the sidebar`
+              : `"${space.name}" archived — it stays searchable under Archived`
+            : envelope.error.message
+        );
+        if (envelope.ok) await loadSpaces();
+      })();
     },
     deleteSpace: () => {
       void performSoftDelete(space.id);
@@ -4061,12 +4090,12 @@ function spacesSidebarSignature(): string {
   const rows = sortSpaces(state.spaces, state.sortMode)
     .map(
       (s) =>
-        `${s.id}:${s.updatedAt ?? ''}:${s.lastActivity ?? ''}:${s.name}:${s.itemCount ?? 0}:${s.visibility ?? ''}:${s.kind ?? ''}:${s.pinned === true ? 'P' : ''}`
+        `${s.id}:${(s.parentIds ?? []).join('+')}:${s.archivedAt ?? ''}:${s.updatedAt ?? ''}:${s.lastActivity ?? ''}:${s.name}:${s.itemCount ?? 0}:${s.visibility ?? ''}:${s.kind ?? ''}:${s.pinned === true ? 'P' : ''}`
     )
     .join('|');
   // Drawer state is part of the paint (ADR-069): toggling More… must
   // repaint even when the data itself didn't change.
-  return `${state.sortMode}§${spacesDrawerOpen ? 'open' : 'closed'}§${rows}`;
+  return `${state.sortMode}§${spacesDrawerOpen ? 'open' : 'closed'}§${[...collapsedNestParents].sort().join(',')}§${rows}`;
 }
 
 function renderSpaceList(): void {
@@ -4107,7 +4136,11 @@ function renderSpaceList(): void {
   // Sort BEFORE row construction so the DOM order matches state.
   // Uncategorized is its own pinned row in a separate list and isn't
   // touched by the sort.
-  const ordered = sortSpaces(state.spaces, state.sortMode);
+  // ADR-099 — the tree the sidebar can see: a child sits under every
+  // visible parent (ADR-085's DAG), archived Spaces go to their own
+  // section, and the fold below counts TOP-LEVEL rows only.
+  const tree = buildSpaceTree(state.spaces, state.sortMode);
+  const ordered = tree.topLevel;
   // ADR-069 — the More… drawer: past the threshold the list shows the
   // working set and folds the long tail behind one row, instead of the
   // sidebar growing without bound. Never fold when the tail would be
@@ -4116,22 +4149,17 @@ function renderSpaceList(): void {
     !spacesDrawerOpen && ordered.length > SPACES_ACTIVE_LIMIT + SPACES_FOLD_SLACK;
   const visible = folded ? ordered.slice(0, SPACES_ACTIVE_LIMIT) : ordered;
   for (const space of visible) {
-    const row = buildSpaceRow(space, space.id === state.activeScopeId);
-    list.appendChild(row);
-    // ADR-071 — exclusive expansion: only the ONE open space renders
-    // its tree; a re-render reproduces the current open state exactly.
-    if (expandedSpaceId === space.id) {
-      list.appendChild(buildSpaceChildren(space.id));
-    }
+    appendSpaceRows(list, space, 0, tree, new Set<string>());
   }
   if (folded) {
     list.appendChild(buildSpacesDrawerRow(ordered.length - SPACES_ACTIVE_LIMIT, true));
   } else if (spacesDrawerOpen && ordered.length > SPACES_ACTIVE_LIMIT + SPACES_FOLD_SLACK) {
     list.appendChild(buildSpacesDrawerRow(0, false));
   }
-  // The Recent + Pinned sections mirror the same state; keep in lockstep.
+  // The Recent + Pinned + Archived sections mirror the same state; keep in lockstep.
   renderRecentSpaces();
   renderPinnedSpaces();
+  renderArchivedSpaces();
   // Re-apply any standing search filter so a load doesn't break the
   // currently-typed query.
   applySidebarFilter();
@@ -5933,6 +5961,485 @@ async function openCreateTicketPrompt(spaceId: string): Promise<void> {
  * Works on any Space from the sidebar's right-click, including one that
  * isn't the active scope, so it fetches rather than reading `state`.
  */
+// ─── ADR-099: nesting the sidebar can see; Archived; Tidy up ──────────
+
+/** ADR-099 — true while the Space sits in the Archived section. */
+export function isArchivedSpace(space: Pick<RendererSpace, 'archivedAt'>): boolean {
+  return typeof space.archivedAt === 'string' && space.archivedAt.length > 0;
+}
+
+const NEST_COLLAPSED_KEY = 'spaces.nest.collapsed';
+/** Parents whose nested Spaces are folded away; remembered per viewer. */
+let collapsedNestParents: Set<string> = readCollapsedNestParents();
+
+function readCollapsedNestParents(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(NEST_COLLAPSED_KEY);
+    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistCollapsedNestParents(): void {
+  try {
+    window.localStorage.setItem(NEST_COLLAPSED_KEY, JSON.stringify([...collapsedNestParents]));
+  } catch {
+    /* private mode, quota — the fold just does not persist */
+  }
+}
+
+/** @internal — tests drive the fold without clicking. */
+export function _setCollapsedNestParentsForTesting(ids: ReadonlyArray<string>): void {
+  collapsedNestParents = new Set(ids);
+  renderedSpacesSignature = null;
+}
+
+export interface SpaceTree {
+  topLevel: RendererSpace[];
+  childrenOf: Map<string, RendererSpace[]>;
+}
+
+/**
+ * ADR-099 — the tree from one listing. A Space with no VISIBLE parent
+ * is top-level (sight is never widened: a parent the viewer cannot see
+ * is simply not in the list). A child sits under every visible parent
+ * (ADR-085 allows several). Archived Spaces are not in the tree at all.
+ * Pure; exported so tests pin the rule without the DOM.
+ */
+export function buildSpaceTree(spaces: ReadonlyArray<RendererSpace>, mode: SpacesSortMode): SpaceTree {
+  const live = spaces.filter((s) => !isArchivedSpace(s));
+  const ids = new Set(live.map((s) => s.id));
+  const childrenOf = new Map<string, RendererSpace[]>();
+  const topLevel: RendererSpace[] = [];
+  for (const space of live) {
+    const parents = (space.parentIds ?? []).filter((p) => p !== space.id && ids.has(p));
+    if (parents.length === 0) {
+      topLevel.push(space);
+      continue;
+    }
+    for (const parent of parents) {
+      const siblings = childrenOf.get(parent) ?? [];
+      siblings.push(space);
+      childrenOf.set(parent, siblings);
+    }
+  }
+  const sorted = new Map<string, RendererSpace[]>();
+  for (const [parent, children] of childrenOf) sorted.set(parent, sortSpaces(children, mode));
+  return { topLevel: sortSpaces(topLevel, mode), childrenOf: sorted };
+}
+
+const NEST_MAX_DEPTH = 6;
+
+/** One row, then its nested Spaces (unless folded), depth-first. */
+function appendSpaceRows(
+  list: HTMLElement,
+  space: RendererSpace,
+  depth: number,
+  tree: SpaceTree,
+  path: ReadonlySet<string>
+): void {
+  const row = buildSpaceRow(space, space.id === state.activeScopeId);
+  if (depth > 0) {
+    row.classList.add('is-nested');
+    row.style.setProperty('--nest-depth', String(depth));
+    row.setAttribute('data-nest-depth', String(depth));
+  }
+  const children = tree.childrenOf.get(space.id) ?? [];
+  const collapsed = collapsedNestParents.has(space.id);
+  if (children.length > 0) {
+    row.classList.add('has-nested');
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'spaces-row-nest-toggle';
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.setAttribute(
+      'aria-label',
+      `${collapsed ? 'Show' : 'Hide'} the ${children.length} Space${children.length === 1 ? '' : 's'} inside ${space.name}`
+    );
+    toggle.title = collapsed ? 'Show the Spaces inside' : 'Hide the Spaces inside';
+    toggle.textContent = String(children.length);
+    toggle.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (collapsedNestParents.has(space.id)) collapsedNestParents.delete(space.id);
+      else collapsedNestParents.add(space.id);
+      persistCollapsedNestParents();
+      renderedSpacesSignature = null;
+      renderSpaceList();
+    });
+    row.appendChild(toggle);
+  }
+  list.appendChild(row);
+  // ADR-071 — exclusive expansion: only the ONE open space renders
+  // its item tree; a re-render reproduces the current open state exactly.
+  if (expandedSpaceId === space.id) {
+    list.appendChild(buildSpaceChildren(space.id));
+  }
+  if (children.length === 0 || collapsed || path.has(space.id) || depth >= NEST_MAX_DEPTH) return;
+  const next = new Set(path);
+  next.add(space.id);
+  for (const child of children) appendSpaceRows(list, child, depth + 1, tree, next);
+}
+
+/** ADR-099 — the Archived section: folded, counted, one click from coming back. */
+function renderArchivedSpaces(): void {
+  const section = document.querySelector<HTMLElement>('[data-side-section="archived"]');
+  const list = document.getElementById('spaces-list-archived');
+  if (section === null || list === null) return;
+  const archived = sortSpaces(state.spaces.filter(isArchivedSpace), 'name');
+  const count = section.querySelector<HTMLElement>('[data-archived-count]');
+  if (count !== null) count.textContent = archived.length > 0 ? String(archived.length) : '';
+  list.replaceChildren();
+  if (archived.length === 0) {
+    section.hidden = true;
+    return;
+  }
+  section.hidden = false;
+  for (const space of archived) {
+    const li = document.createElement('li');
+    li.className = 'spaces-row spaces-row-space spaces-row-archived';
+    if (space.id === state.activeScopeId) li.classList.add('is-active');
+    li.setAttribute('data-scope-id', space.id);
+    li.setAttribute('role', 'button');
+    li.setAttribute('tabindex', '0');
+    const reason = space.archivedReason ?? '';
+    li.title =
+      reason === 'gsx-bot-gone'
+        ? 'Archived: its GSX Designer bot no longer exists'
+        : reason.startsWith('merged-into:')
+          ? 'Archived: merged into another Space'
+          : reason === 'tidy'
+            ? 'Archived by Tidy up'
+            : 'Archived — right-click to bring it back';
+    li.addEventListener('contextmenu', (ev) => openSpaceContextMenu(ev, space));
+    const dot = document.createElement('span');
+    dot.className = 'spaces-row-dot';
+    const safeColor = safeCssColor(space.color);
+    if (safeColor !== null) dot.style.background = safeColor;
+    li.appendChild(dot);
+    const name = document.createElement('span');
+    name.className = 'spaces-row-name';
+    name.textContent = space.name.length > 0 ? space.name : '(unnamed)';
+    li.appendChild(name);
+    list.appendChild(li);
+  }
+}
+
+// ─── ADR-099: Tidy up — the groomer's plan, decided by a person ─────────
+
+let tidyState: LiteSpacesTidyState | null = null;
+let tidyDialog: HTMLElement | null = null;
+let tidyBackdrop: HTMLElement | null = null;
+
+function wireTidy(): void {
+  const button = document.getElementById('spaces-tidy-button');
+  button?.addEventListener('click', () => {
+    void openTidyPanel();
+  });
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined || typeof bridge.tidyLatest !== 'function') return;
+  void bridge
+    .tidyLatest()
+    .then((envelope) => {
+      if (envelope.ok) applyTidyState(envelope.value);
+    })
+    .catch(() => undefined);
+  if (typeof bridge.onTidyUpdated === 'function') {
+    bridge.onTidyUpdated((next) => applyTidyState(next));
+  }
+}
+
+function applyTidyState(next: LiteSpacesTidyState): void {
+  if (next === null || typeof next !== 'object' || typeof next.pending !== 'number') return;
+  tidyState = next;
+  renderTidyBadge();
+  if (tidyDialog !== null && !tidyDialog.hidden) renderTidyPanel();
+}
+
+function renderTidyBadge(): void {
+  const badge = document.getElementById('spaces-tidy-badge');
+  if (badge === null) return;
+  const pending = tidyState?.pending ?? 0;
+  badge.textContent = pending > 0 ? String(pending) : '';
+  badge.hidden = pending === 0;
+}
+
+/** The title of a move, in the words a person reads it back in. */
+export function tidyMoveTitle(move: LiteSpacesTidyMove): string {
+  return describeMove(move as TidyMove);
+}
+
+const TIDY_KIND_LABEL: Record<LiteSpacesTidyMove['kind'], string> = {
+  nest: 'Group',
+  unnest: 'Take out',
+  merge: 'Merge',
+  archive: 'Archive',
+  rename: 'Rename',
+  'create-parent': 'New parent',
+};
+
+function ensureTidyDialog(): HTMLElement {
+  if (tidyDialog !== null) return tidyDialog;
+  const backdrop = document.createElement('div');
+  backdrop.id = 'spaces-tidy-backdrop';
+  backdrop.className = 'spaces-tidy-backdrop';
+  backdrop.hidden = true;
+  const dialog = document.createElement('div');
+  dialog.id = 'spaces-tidy-dialog';
+  dialog.className = 'spaces-tidy-dialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-labelledby', 'spaces-tidy-title');
+  backdrop.appendChild(dialog);
+  backdrop.addEventListener('click', (ev) => {
+    if (ev.target === backdrop) closeTidyPanel();
+  });
+  document.body.appendChild(backdrop);
+  closeOnEscape(backdrop, closeTidyPanel);
+  tidyBackdrop = backdrop;
+  tidyDialog = dialog;
+  return dialog;
+}
+
+function closeTidyPanel(): void {
+  if (tidyBackdrop !== null) tidyBackdrop.hidden = true;
+  if (tidyDialog !== null) tidyDialog.hidden = true;
+}
+
+async function openTidyPanel(): Promise<void> {
+  const dialog = ensureTidyDialog();
+  if (tidyBackdrop !== null) tidyBackdrop.hidden = false;
+  dialog.hidden = false;
+  renderTidyPanel();
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined || typeof bridge.tidyLatest !== 'function') return;
+  // Always re-read on open: a background pass may have landed since.
+  const envelope = await bridge.tidyLatest();
+  if (envelope.ok) applyTidyState(envelope.value);
+  dialog.querySelector<HTMLElement>('[data-tidy-primary]')?.focus();
+}
+
+async function tidyRunPlan(): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const envelope = await bridge.tidyPlan();
+  if (envelope.ok) applyTidyState(envelope.value);
+  else showToast(envelope.error.message);
+}
+
+async function tidyDecideMove(key: string, decision: 'accepted' | 'rejected' | 'undecided'): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const envelope = await bridge.tidyDecide(key, decision);
+  if (envelope.ok) applyTidyState(envelope.value);
+  else showToast(envelope.error.message);
+}
+
+async function tidyApplyAccepted(): Promise<void> {
+  const bridge = window.lite?.spaces;
+  if (bridge === undefined) return;
+  const envelope = await bridge.tidyApply();
+  if (!envelope.ok) {
+    showToast(envelope.error.message);
+    return;
+  }
+  applyTidyState(envelope.value);
+  const moves = envelope.value.plan?.moves ?? [];
+  const failed = moves.filter((m) => m.decision === 'accepted' && m.applied !== true && typeof m.error === 'string').length;
+  const done = moves.filter((m) => m.applied === true).length;
+  showToast(failed > 0 ? `${done} applied, ${failed} could not be — see the plan` : `${done} move${done === 1 ? '' : 's'} applied`);
+  await loadSpaces();
+}
+
+function tidyRelativeTime(iso: string | null): string {
+  if (iso === null) return 'never';
+  const then = Date.parse(iso);
+  if (!Number.isFinite(then)) return 'earlier';
+  const mins = Math.max(0, Math.round((Date.now() - then) / 60000));
+  if (mins < 2) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 36) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+}
+
+/** Paint the panel from `tidyState`. Everything the machine says is typeset; the person's choices are buttons. */
+function renderTidyPanel(): void {
+  const dialog = tidyDialog;
+  if (dialog === null) return;
+  dialog.replaceChildren();
+  const state = tidyState;
+  const plan = state?.plan ?? null;
+  const running = state?.running === true;
+
+  const header = document.createElement('header');
+  header.className = 'spaces-tidy-header';
+  const title = document.createElement('h2');
+  title.id = 'spaces-tidy-title';
+  title.className = 'spaces-tidy-title or-ink-underline';
+  title.textContent = 'Tidy up';
+  header.appendChild(title);
+  const close = document.createElement('button');
+  close.type = 'button';
+  close.className = 'spaces-tidy-close';
+  close.setAttribute('aria-label', 'Close');
+  close.textContent = '×';
+  close.addEventListener('click', closeTidyPanel);
+  header.appendChild(close);
+  dialog.appendChild(header);
+
+  const lede = document.createElement('p');
+  lede.className = 'spaces-tidy-lede';
+  lede.textContent =
+    'A plan to group, merge, rename and archive your Spaces. Nothing moves until you accept it, one move at a time or all at once. Permissions never change.';
+  dialog.appendChild(lede);
+
+  const status = document.createElement('p');
+  status.className = 'spaces-tidy-status';
+  if (running) status.textContent = 'Reading your Spaces and thinking it over…';
+  else if (state?.error !== undefined) status.textContent = state.error;
+  else if (plan === null) status.textContent = 'No plan yet.';
+  else
+    status.textContent =
+      `Prepared ${tidyRelativeTime(plan.createdAt)} from ${plan.spaceCount} Space${plan.spaceCount === 1 ? '' : 's'}, ` +
+      `${plan.topLevelCount} at the top level · ${plan.model}`;
+  dialog.appendChild(status);
+
+  if (plan !== null && plan.summary.length > 0) {
+    const summary = document.createElement('p');
+    summary.className = 'spaces-tidy-summary';
+    summary.textContent = plan.summary;
+    dialog.appendChild(summary);
+  }
+
+  const list = document.createElement('ul');
+  list.className = 'spaces-tidy-list';
+  const moves = plan?.moves ?? [];
+  if (plan !== null && moves.length === 0 && !running) {
+    const empty = document.createElement('li');
+    empty.className = 'spaces-tidy-empty';
+    empty.textContent = 'Nothing to tidy. Your Spaces are in good shape.';
+    list.appendChild(empty);
+  }
+  for (const move of moves) {
+    const li = document.createElement('li');
+    li.className = `spaces-tidy-move is-${move.decision}`;
+    if (move.applied === true) li.classList.add('is-applied');
+    li.setAttribute('data-tidy-key', move.key);
+
+    const kind = document.createElement('span');
+    kind.className = `spaces-tidy-kind spaces-tidy-kind-${move.kind}`;
+    kind.textContent = TIDY_KIND_LABEL[move.kind];
+    li.appendChild(kind);
+
+    const body = document.createElement('div');
+    body.className = 'spaces-tidy-body';
+    const head = document.createElement('div');
+    head.className = 'spaces-tidy-move-title';
+    head.textContent = tidyMoveTitle(move);
+    body.appendChild(head);
+    const reason = document.createElement('p');
+    reason.className = 'spaces-tidy-reason';
+    reason.textContent = move.reason;
+    body.appendChild(reason);
+    if (move.evidence.length > 0) {
+      const ev = document.createElement('div');
+      ev.className = 'spaces-tidy-evidence';
+      for (const item of move.evidence) {
+        const chip = document.createElement('span');
+        chip.className = 'spaces-tidy-evidence-chip';
+        chip.textContent = item;
+        ev.appendChild(chip);
+      }
+      body.appendChild(ev);
+    }
+    if (move.membersNotInTarget !== undefined && move.membersNotInTarget.length > 0) {
+      const warn = document.createElement('p');
+      warn.className = 'spaces-tidy-warn';
+      warn.textContent = `Members of the source not in the target: ${move.membersNotInTarget.join(', ')}. Add them yourself if they should keep access.`;
+      body.appendChild(warn);
+    }
+    if (move.applied === true) {
+      const done = document.createElement('p');
+      done.className = 'spaces-tidy-done';
+      done.textContent = 'Applied';
+      body.appendChild(done);
+    } else if (typeof move.error === 'string' && move.error.length > 0) {
+      const err = document.createElement('p');
+      err.className = 'spaces-tidy-error';
+      err.textContent = `Could not apply: ${move.error}`;
+      body.appendChild(err);
+    }
+    li.appendChild(body);
+
+    const confidence = document.createElement('span');
+    confidence.className = 'spaces-tidy-confidence';
+    confidence.title = `Confidence ${Math.round(move.confidence * 100)}%`;
+    confidence.style.setProperty('--tidy-confidence', String(move.confidence));
+    li.appendChild(confidence);
+
+    if (move.applied !== true) {
+      const decide = document.createElement('div');
+      decide.className = 'spaces-tidy-decide';
+      const accept = document.createElement('button');
+      accept.type = 'button';
+      accept.className = 'spaces-tidy-accept';
+      accept.textContent = move.decision === 'accepted' ? 'Accepted' : 'Accept';
+      accept.setAttribute('aria-pressed', move.decision === 'accepted' ? 'true' : 'false');
+      accept.addEventListener('click', () => {
+        void tidyDecideMove(move.key, move.decision === 'accepted' ? 'undecided' : 'accepted');
+      });
+      const skip = document.createElement('button');
+      skip.type = 'button';
+      skip.className = 'spaces-tidy-skip';
+      skip.textContent = move.decision === 'rejected' ? 'Skipped' : 'Skip';
+      skip.title = 'Not this one — it will not be proposed again';
+      skip.setAttribute('aria-pressed', move.decision === 'rejected' ? 'true' : 'false');
+      skip.addEventListener('click', () => {
+        void tidyDecideMove(move.key, move.decision === 'rejected' ? 'undecided' : 'rejected');
+      });
+      decide.appendChild(accept);
+      decide.appendChild(skip);
+      li.appendChild(decide);
+    }
+    list.appendChild(li);
+  }
+  dialog.appendChild(list);
+
+  const footer = document.createElement('footer');
+  footer.className = 'spaces-tidy-footer';
+  const accepted = moves.filter((m) => m.decision === 'accepted' && m.applied !== true).length;
+  const apply = document.createElement('button');
+  apply.type = 'button';
+  apply.className = 'spaces-tidy-apply';
+  apply.setAttribute('data-tidy-primary', '');
+  apply.textContent = accepted > 0 ? `Apply ${accepted} accepted` : 'Apply accepted';
+  apply.disabled = accepted === 0 || running;
+  apply.addEventListener('click', () => {
+    void tidyApplyAccepted();
+  });
+  footer.appendChild(apply);
+  const run = document.createElement('button');
+  run.type = 'button';
+  run.className = 'spaces-tidy-run';
+  run.textContent = plan === null ? 'Prepare a plan' : 'Run again';
+  run.disabled = running;
+  run.addEventListener('click', () => {
+    void tidyRunPlan();
+  });
+  footer.appendChild(run);
+  const cadence = document.createElement('span');
+  cadence.className = 'spaces-tidy-cadence';
+  const settings = state?.settings;
+  cadence.textContent =
+    settings === undefined
+      ? ''
+      : `Runs every ${settings.cadenceDays} day${settings.cadenceDays === 1 ? '' : 's'}, or when the top level passes ${settings.topLevelThreshold} · ${settings.profile === 'powerful' ? 'strongest model' : 'standard model'}`;
+  footer.appendChild(cadence);
+  dialog.appendChild(footer);
+}
+
 // ─── ADR-085: nested Spaces ─────────────────────────────────────────
 /** A Space seen through a nesting edge, as the bridge returns it. */
 export interface NestedSpaceChip {

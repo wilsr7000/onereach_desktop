@@ -1723,6 +1723,7 @@ describe('space context menu — every action is wired (coverage contract)', () 
       deleteSpace: h('deleteSpace'),
       togglePin: h('togglePin'),
       nestInside: h('nestInside'),
+      archive: h('archive'),
     };
     const entries = mod.buildSpaceContextEntries(
       { id: 's1', name: 'X', visibility: 'open', kind: 'user' } as never,

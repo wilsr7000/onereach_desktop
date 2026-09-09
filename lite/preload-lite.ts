@@ -172,6 +172,15 @@ const SPACES_LIST_CHILD_SPACES = 'lite:spaces:listChildSpaces';
 const SPACES_LIST_PARENT_SPACES = 'lite:spaces:listParentSpaces';
 const SPACES_UPDATE_SPACE = 'lite:spaces:update';
 const SPACES_PIN_SPACE = 'lite:spaces:pin';
+// ADR-099 — archive + the groomer.
+const SPACES_ARCHIVE_SPACE = 'lite:spaces:archive';
+const SPACES_UNARCHIVE_SPACE = 'lite:spaces:unarchive';
+const SPACES_TIDY_LATEST = 'lite:spaces:tidy:latest';
+const SPACES_TIDY_PLAN = 'lite:spaces:tidy:plan';
+const SPACES_TIDY_DECIDE = 'lite:spaces:tidy:decide';
+const SPACES_TIDY_APPLY = 'lite:spaces:tidy:apply';
+const SPACES_TIDY_SETTINGS = 'lite:spaces:tidy:settings';
+const SPACES_TIDY_UPDATED_EVENT = 'lite:spaces:tidy-updated';
 const SPACES_DELETE_SPACE = 'lite:spaces:delete';
 const SPACES_UNDELETE_SPACE = 'lite:spaces:undelete';
 // Cache refresh broadcast: fires when an entry in the main-process
@@ -1034,6 +1043,15 @@ interface SpacesBridge {
   /** ADR-085 — nested Spaces. */
   nestSpace(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpacesIpcResultView<unknown>>;
   unnestSpace(childId: string, parentId: string): Promise<SpacesIpcResultView<unknown>>;
+  /** ADR-099 — archive + the groomer. */
+  archiveSpace(id: string, reason?: string): Promise<SpacesIpcResultView<unknown>>;
+  unarchiveSpace(id: string): Promise<SpacesIpcResultView<unknown>>;
+  tidyLatest(): Promise<SpacesIpcResultView<unknown>>;
+  tidyPlan(): Promise<SpacesIpcResultView<unknown>>;
+  tidyDecide(moveKey: string, decision: 'accepted' | 'rejected' | 'undecided'): Promise<SpacesIpcResultView<unknown>>;
+  tidyApply(): Promise<SpacesIpcResultView<unknown>>;
+  tidySettings(patch?: Record<string, unknown> | null): Promise<SpacesIpcResultView<unknown>>;
+  onTidyUpdated(handler: (state: unknown) => void): () => void;
   setNestInheritance(childId: string, parentId: string, inheritsPermissions: boolean, inheritsUntil?: string | null): Promise<SpacesIpcResultView<unknown>>;
   listChildSpaces(parentId: string): Promise<SpacesIpcResultView<unknown>>;
   listParentSpaces(childId: string): Promise<SpacesIpcResultView<unknown>>;
@@ -1946,6 +1964,33 @@ const spaces: SpacesBridge = {
     ipcRenderer.invoke(SPACES_UNNEST_SPACE, { childId, parentId }) as Promise<
       SpacesIpcResultView<unknown>
     >,
+  // ADR-099 — archive + the groomer.
+  archiveSpace: (id, reason) =>
+    ipcRenderer.invoke(SPACES_ARCHIVE_SPACE, { id, reason: reason ?? 'manual' }) as Promise<
+      SpacesIpcResultView<unknown>
+    >,
+  unarchiveSpace: (id) =>
+    ipcRenderer.invoke(SPACES_UNARCHIVE_SPACE, { id }) as Promise<SpacesIpcResultView<unknown>>,
+  tidyLatest: () => ipcRenderer.invoke(SPACES_TIDY_LATEST) as Promise<SpacesIpcResultView<unknown>>,
+  tidyPlan: () => ipcRenderer.invoke(SPACES_TIDY_PLAN) as Promise<SpacesIpcResultView<unknown>>,
+  tidyDecide: (moveKey, decision) =>
+    ipcRenderer.invoke(SPACES_TIDY_DECIDE, { moveKey, decision }) as Promise<SpacesIpcResultView<unknown>>,
+  tidyApply: () => ipcRenderer.invoke(SPACES_TIDY_APPLY) as Promise<SpacesIpcResultView<unknown>>,
+  tidySettings: (patch) =>
+    ipcRenderer.invoke(SPACES_TIDY_SETTINGS, { patch: patch ?? null }) as Promise<SpacesIpcResultView<unknown>>,
+  onTidyUpdated(handler) {
+    const wrapped = (_event: Electron.IpcRendererEvent, state: unknown): void => {
+      try {
+        handler(state);
+      } catch {
+        /* the renderer's listener failing must not break the bridge */
+      }
+    };
+    ipcRenderer.on(SPACES_TIDY_UPDATED_EVENT, wrapped);
+    return () => {
+      ipcRenderer.removeListener(SPACES_TIDY_UPDATED_EVENT, wrapped);
+    };
+  },
   setNestInheritance: (childId, parentId, inheritsPermissions, inheritsUntil) =>
     ipcRenderer.invoke(SPACES_SET_NEST_INHERITANCE, { childId, parentId, inheritsPermissions, inheritsUntil: inheritsUntil ?? null }) as Promise<
       SpacesIpcResultView<unknown>

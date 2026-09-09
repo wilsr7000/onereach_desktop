@@ -92,6 +92,17 @@
             <span class="spaces-new-menu-item-title">Shared Space <span class="spaces-new-menu-item-badge">AI</span></span>
             <span class="spaces-new-menu-item-hint">Agents keep a playbook, tickets and checklists in step</span>
           </button>
+          <!-- ADR-099 — the groomer: proposes, never acts. -->
+          <button
+            type="button"
+            id="spaces-tidy-button"
+            class="spaces-new-menu-item"
+            role="menuitem"
+            title="Review a plan to group, merge, rename and archive Spaces — nothing moves until you say so"
+          >
+            <span class="spaces-new-menu-item-title">Tidy up… <span id="spaces-tidy-badge" class="spaces-new-menu-item-badge spaces-tidy-badge" hidden></span></span>
+            <span class="spaces-new-menu-item-hint">A plan to group, merge and archive — you decide each move</span>
+          </button>
         </div>
       </div>
     </header>
@@ -579,6 +590,25 @@
               <span class="spaces-skeleton-name"></span>
             </li>
           </ul>
+            </div>
+          </section>
+
+          <!-- ADR-099 — Archived: out of the working set, one click from
+               coming back, still searchable. Hidden until something is
+               archived; collapsed by default. -->
+          <section class="spaces-side-section is-collapsed" data-side-section="archived" hidden>
+            <button
+              type="button"
+              class="spaces-side-header"
+              data-side-toggle="archived"
+              aria-expanded="false"
+            >
+              <span class="spaces-side-chevron" aria-hidden="true">▸</span>
+              <span class="spaces-side-header-label">Archived</span>
+              <span class="spaces-side-header-count" data-archived-count></span>
+            </button>
+            <div class="spaces-side-body">
+              <ul class="spaces-list spaces-side-tree" id="spaces-list-archived"></ul>
             </div>
           </section>
         </div>

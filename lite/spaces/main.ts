@@ -218,7 +218,7 @@ export function runGsxFlowSyncNow(opts: { force?: boolean; dryRun?: boolean } = 
   if (gsxFlowSyncInFlight !== null) return gsxFlowSyncInFlight;
   const aborted = (reason: string): GsxFlowSyncResult => ({
     bots: 0, botsFailed: 0, spacesCreated: 0, spacesUpdated: 0, flows: 0,
-    agentsCreated: 0, agentsUpdated: 0, agentsRetired: 0, aborted: true, reason,
+    agentsCreated: 0, agentsUpdated: 0, agentsRetired: 0, spacesArchived: 0, legacyFolded: 0, aborted: true, reason,
   });
   const now = Date.now();
   if (opts.force !== true && now - gsxFlowSyncLastRunMs < GSX_FLOW_SYNC_COOLDOWN_MS) {
@@ -412,6 +412,20 @@ import {
 } from './identity-store.js';
 import { sanitizeChecklistItems } from './sdk-client.js';
 import { getAiApi } from '../ai/api.js';
+import { TidyEngine, SPACES_TIDY_UPDATED_EVENT, _setTidyEngine } from './tidy-engine.js';
+import { topLevelCount } from './tidy.js';
+
+/** ADR-099 — how often the groomer asks whether a background plan is due. */
+const TIDY_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** userData when Electron is up; null under the unit harness (memory-only store). */
+function safeUserDataDir(): string | null {
+  try {
+    return app.getPath('userData');
+  } catch {
+    return null;
+  }
+}
 
 // ─── Menu wiring ────────────────────────────────────────────────────────
 
@@ -517,6 +531,59 @@ export function initSpaces(opts: InitSpacesOptions): SpacesHandle {
   // that `getSpacesApi()` returns until init runs.
   const api = createPhase0Api(handle);
   _setSpacesApiForTesting(api);
+
+  // ADR-099 — the groomer. Reads through the client (sight-gated), writes
+  // through the API (every guard applies), remembers in userData, and
+  // prepares a plan in the background on the cadence in its settings.
+  if (activeClient !== null) {
+    const client = activeClient;
+    const engine = new TidyEngine({
+      configDir: safeUserDataDir(),
+      evidence: () => client.tidyEvidence(),
+      chat: async (input) => {
+        const res = await getAiApi().chat(input);
+        return { content: res.content, model: res.model, provider: res.provider };
+      },
+      ports: {
+        nest: async (childId, parentId) => {
+          await api.nestSpace(childId, parentId, false, null);
+        },
+        unnest: async (childId, parentId) => {
+          await api.unnestSpace(childId, parentId);
+        },
+        archive: (id, reason) => api.archiveSpace(id, reason),
+        rename: async (id, name) => {
+          await api.renameSpace(id, name);
+        },
+        createSpace: async (name, description) => (await api.createSpace({ name, description })).id,
+        listItemIds: async (spaceId) =>
+          (await api.items.list({ kind: 'space', spaceId }, { limit: 500 })).map((it) => it.id),
+        moveItem: async (itemId, fromSpaceId, toSpaceId) => {
+          await api.items.moveToSpace(itemId, fromSpaceId, toSpaceId);
+        },
+      },
+      viewerId: () => resolveViewerId(),
+      log: {
+        info: (message, data) => log.info(message, data),
+        warn: (message, data) => log.warn(message, data),
+      },
+      broadcast: (state) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (win.isDestroyed()) continue;
+          try {
+            win.webContents.send(SPACES_TIDY_UPDATED_EVENT, state);
+          } catch {
+            /* a closing window */
+          }
+        }
+      },
+    });
+    _setTidyEngine(engine);
+    engine.start(TIDY_CHECK_INTERVAL_MS, async () => {
+      const spaces = await api.listSpaces();
+      return { topLevel: topLevelCount(spaces), spaceCount: spaces.filter((s) => s.archivedAt === undefined).length };
+    });
+  }
 
   // Subscribe to cache refresh events and rebroadcast as IPC to every
   // renderer. The Spaces window listens and triggers a local re-paint
@@ -660,6 +727,7 @@ function teardownInternal(): void {
     clearTimeout(gsxMigrationTimer);
     gsxMigrationTimer = null;
   }
+  _setTidyEngine(null);
   activeClient = null;
   if (!registered) return;
   unregisterSpacesIpc();
@@ -1881,6 +1949,40 @@ function createPhase0Api(handle: SpacesHandle): SpacesApi {
     // per row, so a toggle must invalidate like any space mutation.
     async pinSpace(id: string, pinned: boolean): Promise<void> {
       await client.pinSpace(id, pinned);
+      nukeReadCache();
+    },
+    // ADR-099 — archive is a lifecycle short of delete.
+    async archiveSpace(id: string, reason?: string): Promise<void> {
+      const changed = await client.archiveSpace(id, typeof reason === 'string' && reason.length > 0 ? reason : 'manual');
+      if (!changed) {
+        throw new SpacesError({
+          code: 'SPACES_FORBIDDEN',
+          message: 'Only a writer of this Space can archive it.',
+          context: { id },
+        });
+      }
+      nukeReadCache();
+    },
+    async ensureGroupSpace(input: {
+      id: string;
+      name: string;
+      description: string;
+      color: string;
+      iconKey: string;
+    }): Promise<{ id: string; name: string } | null> {
+      const group = await client.upsertGroupSpace(input);
+      if (group !== null) nukeReadCache();
+      return group;
+    },
+    async unarchiveSpace(id: string): Promise<void> {
+      const changed = await client.unarchiveSpace(id);
+      if (!changed) {
+        throw new SpacesError({
+          code: 'SPACES_FORBIDDEN',
+          message: 'Only a writer of this Space can bring it back.',
+          context: { id },
+        });
+      }
       nukeReadCache();
     },
     async deleteSpace(id: string, opts?: DeleteSpaceOpts): Promise<void> {

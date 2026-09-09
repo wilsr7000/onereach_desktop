@@ -130,6 +130,50 @@ export interface Space {
   kind?: SpaceKind;
   /** ADR-051 — 'open' (default) or 'restricted' (members-only). */
   visibility?: SpaceVisibility;
+  /**
+   * ADR-099 — the live `NESTED_IN` parents (ADR-085 lets a Space sit in
+   * several). Only parents that exist and are not deleted; the sidebar
+   * draws the child under every parent the viewer can see.
+   */
+  parentIds?: string[];
+  /** ADR-099 — set while the Space sits in the Archived section. */
+  archivedAt?: string;
+  /** ADR-099 — why it was archived (`gsx-bot-gone`, `tidy`, `merged-into:<id>`, …). */
+  archivedReason?: string;
+  /**
+   * ADR-091/098 — who wrote the Space: `gsx-designer` for a Designer
+   * mirror, `lite-group` for one of Lite's own group Spaces, absent for
+   * a Space a person made.
+   */
+  source?: string;
+}
+
+/**
+ * ADR-099 — one Space as the groomer reads it: what a person would skim
+ * before deciding where it belongs. Sight-gated like LIST_SPACES;
+ * `writable` marks the Spaces a proposed move may touch.
+ */
+export interface TidySpaceEvidence {
+  id: string;
+  name: string;
+  description: string;
+  kind: string;
+  /** `gsx-designer` (mirror), `lite-group` (Lite's own group), '' (a person's). */
+  source: string;
+  gsxBotId: string;
+  createdBy: string;
+  createdAt: string;
+  archived: boolean;
+  itemCount: number;
+  /** ISO of the newest activity across members, '' when none is timestamped. */
+  lastActivity: string;
+  /** Up to twelve members: title, kind, tags. */
+  items: Array<{ title: string; kind: string; tags: string[] }>;
+  /** Up to eight member Person ids. */
+  members: string[];
+  memberCount: number;
+  parentIds: string[];
+  writable: boolean;
 }
 
 /**

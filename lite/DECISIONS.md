@@ -2310,3 +2310,109 @@ add a row when it matters.
 **Rejected.** Keeping tabs and adding eleven more (does not scale past six); modelling the full app's `fileType`/`fileCategory`/`jsonSubtype` axes directly (they are derivations of files; Lite's kind IS the classification, aliases absorb the words); writing `assetType` alongside `type` for the full app's benefit (its readers also filter `active = true`, which Lite never writes — a bigger contract, ADR-083's territory); moving the classic tile builders out of spaces.ts (1,500 lines of working code moved for symmetry's sake).
 
 **Follow-ups.** Sharing controls (public / expiry) reach registry uploads by adopting the upload pane's block; a dedicated block per pane would read cleaner. Replace-file for uploaded kinds (today: re-link or re-add). A `monitor` runs nowhere in Lite — the kind records the intent for the full app. Enrichment eligibility still keys on text content or image/PDF MIME; a linked video's transcript is a natural next input.
+
+## ADR-099: Spaces at scale — one mirror per bot, nesting the sidebar can see, archive, and a groomer that proposes but never acts (2026-09-09)
+
+- **Date**: 2026-09-09
+- **Status**: Accepted.
+- **The ask (robb)**: "spaces are growing in numbers really fast, we may need
+  a way to manage this, we were at one point supporting spaces in spaces … also
+  regular grooming and evaluation of how to organize might make sense using an
+  LLM to suggest how to group and handle it as the spaces become unwieldy.
+  Remove, add etc to keep the clutter down. Needs to be fable level smart not
+  basic."
+- **What the graph held on 2026-09-09**: 117 live Spaces (126 minus 9 deleted).
+  71 by the Playbooks writer, 27 by robb, 16 by Rich. 26 GSX Designer mirror
+  Spaces — 12 for robb and 14 for Rich, minted within a minute of each
+  person's first sync (ADR-091 keyed the mirror id on the viewer, so every
+  person gets a private copy of every bot). 29 Spaces created in the first
+  nine days of September against 8 in all of August. Zero `NESTED_IN` edges:
+  ADR-085 shipped the model, the API, the header row and the "Put inside a
+  Space…" picker, but the sidebar never drew the hierarchy, so nesting bought
+  nothing visible and nobody used it. Robb's top level: 30 rows, 12 of them
+  mirrors.
+
+**Decision — four parts, in this order.**
+
+1. **One mirror Space per Designer bot, for the account; sight by explicit
+   grant.** `gsxSyncIds` no longer carries the viewer hash:
+   `space-gsxbot-<botId>`, `asset-gsxflow-<flowId>`, `agent-gsxflow-<flowId>`,
+   `agenttype-gsxflow-<flowId>`. The first person to sync creates the Space
+   (they are its creator, ADR-084 signal one); every person who syncs gets a
+   live `HAS_ACCESS` grant written by the sync (signal two), scoped by
+   construction to Spaces with `source = 'gsx-designer'` and the bot the sync
+   just listed under that person's own account token
+   (`GRANT_SELF_GSX_MIRROR`). Nothing is inferred: the grant exists because
+   Designer already shows that person that bot. `upsertGsxFlowSpace` runs
+   update → create → grant-then-update so a second syncer lands on the first
+   syncer's Space instead of minting a copy. ADR-092's precedence stands: a
+   Space the viewer made in Lite that became the bot keeps the flows.
+   **Convergence**: each person's next sync folds their own legacy
+   viewer-suffixed mirror (`legacyGsxSyncIds`) into the account Space — items
+   a person added by hand move over, the legacy synced agents retire, the
+   legacy Space is soft-deleted with `supersededBy` — so the two existing sets
+   (robb's 12, Rich's 14) collapse to one set over the next two syncs, no
+   migration script, no one else's Space touched (the fold is gated on the
+   legacy Space being writable by the person folding it).
+
+2. **Nesting the sidebar can see; machine-made Spaces born nested.**
+   `LIST_SPACES` projects `parentIds` (the live `NESTED_IN` parents) and the
+   sidebar renders a tree: a child sits under every visible parent
+   (ADR-085's DAG), indented, with a collapse toggle per parent that
+   remembers its state; sort applies within each level; the ADR-069 fold
+   counts top-level rows only; a parent the viewer cannot see makes the child
+   top-level (sight is never widened). Lite's own writers put what they make
+   inside a group Space it owns: the Designer sync nests each NEW mirror
+   under **GSX Designer** (`space-group-gsx-designer`), the conversation
+   capture nests each "<Provider> Conversations" Space under
+   **Conversations** (`space-group-conversations`). Group Spaces are ordinary
+   Spaces (`source = 'lite-group'`, `UPSERT_GROUP_SPACE` MERGEs by id, the
+   caller becomes creator or gets a grant) — inheritance OFF, so a group is
+   organization only, exactly ADR-085's default. A mirror is nested only when
+   it is CREATED: a person who pulls it out of the group is not fought on the
+   next sync. The Playbooks writer is not Lite's; its 71 Spaces are the
+   groomer's to propose grouping for.
+
+3. **Archive, and mirrors whose bot is gone.** `archiveSpace` /
+   `unarchiveSpace` (`SPACE_WRITABLE`; `archivedAt`, `archivedBy`,
+   `archivedReason`) take a Space out of the sidebar's working set into an
+   **Archived** section (collapsed, counted) without touching its items,
+   members or search. The sync, after a sweep that listed Designer completely
+   and was not cut off by an outage, archives the viewer's mirrors whose
+   `gsxBotId` no longer exists in Designer (`reason: gsx-bot-gone`) — the gap
+   ADR-091 documented ("bots are never retired"). An empty bot listing never
+   archives anything.
+
+4. **The groomer (Tidy up).** `lite/spaces/tidy.ts` gathers evidence for
+   every Space the viewer can see — objective, kind, source, creator, item
+   count, a sample of item titles and tags, members, last activity, parents,
+   name overlap with other Spaces — and asks the model for a **plan**: a list
+   of moves, each one of `nest`, `unnest`, `merge`, `archive`, `rename`,
+   `create-parent`, with a one-line reason, the evidence it rests on and a
+   confidence. Rules the model is given and the validator enforces: no move
+   may change who can see what (merges list members the target lacks and stop
+   there; grants are a person's act, never the groomer's); only Spaces the
+   viewer can write are moved; ids must exist; nests may not cycle; at most
+   25 moves. **The person leaves the marks**: nothing runs until accepted,
+   per move or as a plan; applied moves go through the existing API
+   (`nestSpace`, `unnestSpace`, `archiveSpace`, `renameSpace`, `createSpace`,
+   `moveAssetToSpace`). Decisions persist (`spaces-tidy.json` in userData):
+   a rejected move is not proposed again and is listed to the model as such;
+   the next pass starts from the current shape. Cadence: a plan is prepared
+   in the background every 7 days, or when the top level passes 20 rows, or
+   on demand from the Spaces window ("Tidy up…" under the New Space caret,
+   with a count when moves are waiting). Model: the `powerful` chat profile
+   of the configured provider (Claude → Fable 5.1, the default; OpenAI →
+   GPT-5.2), `feature: 'spaces-tidy'`, JSON mode; the profile is a setting
+   of the groomer, not of chat.
+
+**Consequences.** Per-person mirror copies stop multiplying (N bots × M
+people becomes N). Nesting becomes visible, so ADR-085's picker finally has a
+reason to be used. Archive gives Spaces a lifecycle short of delete. The
+groomer is advisory by design; the rules it works under are the same
+predicates every other write already carries. Tests: `spaces-gsx-flow-sync`
+(account ids, grant-then-update, born nested, convergence, orphan archive and
+its two guards), `spaces-sidebar-tree` (tree, collapse, fold on top level,
+archived section, unseen parent), `spaces-archive`, `spaces-tidy` (plan
+validation, rejected-move memory, apply mapping, cadence), and the visibility
+inventory and schema audit over the seven new Cypher constants.

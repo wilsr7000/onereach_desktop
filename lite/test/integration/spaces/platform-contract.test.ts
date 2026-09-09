@@ -132,7 +132,14 @@ function buildStubConsumer(): {
     refresh: async () => {
       /* stub: the contract only needs the method to exist */
     },
-    syncGsxFlows: async () => ({ bots: 0, botsFailed: 0, spacesCreated: 0, spacesUpdated: 0, flows: 0, agentsCreated: 0, agentsUpdated: 0, agentsRetired: 0, aborted: true, reason: 'stub' }),
+    archiveSpace: async () => {
+      /* stub */
+    },
+    unarchiveSpace: async () => {
+      /* stub */
+    },
+    ensureGroupSpace: async () => null,
+    syncGsxFlows: async () => ({ bots: 0, botsFailed: 0, spacesCreated: 0, spacesUpdated: 0, flows: 0, agentsCreated: 0, agentsUpdated: 0, agentsRetired: 0, spacesArchived: 0, legacyFolded: 0, aborted: true, reason: 'stub' }),
     learnSignals: async () => ({ spaces: 0, otherMembers: 0, kinds: {} }),
     presenceInSpace: async () => [],
     presenceScope: () => undefined,

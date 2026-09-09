@@ -56,6 +56,15 @@ const EXEMPT: Record<string, string> = {
     'a pin is a per-viewer preference edge, not Space content — a reader ' +
     'organising their own sidebar changes nothing anyone else sees',
   UNPIN_SPACE: 'the inverse of PIN_SPACE; same reasoning',
+  // ADR-099 — the two writes that CREATE explicit sight, scoped by construction:
+  UPSERT_GROUP_SPACE:
+    'bootstrap of one of Lite\'s own group Spaces (source lite-group): MERGEd by a well-known id, ' +
+    'the caller becomes its creator or gets a grant; the group holds nothing of its own, so the ' +
+    'grant exposes only the frame — the same class as ENSURE_MEETINGS_SPACE',
+  GRANT_SELF_GSX_MIRROR:
+    'the Designer sync granting the person syncing sight of a mirror Space (source gsx-designer) of ' +
+    'a bot they just listed under their own account token — Designer already shows them the bot; ' +
+    'matches only that source and that gsxBotId, so it cannot reach any other Space',
   ENSURE_VERSION_SCHEMA: 'registry documentation, not user data',
   MERGE_PERSON: 'identity plumbing — a Person node is not Space content',
   CREATE_ASSET_UNCATEGORIZED:
