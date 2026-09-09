@@ -3,10 +3,16 @@
  * ADR-100). Strategies: standard (CommonMark-ish, no extensions),
  * enhanced (GitHub flavour: tables, task lists, soft breaks become
  * <br>), styled (a complete HTML page with a readable stylesheet).
+ *
+ * Amendment 1: marked has no sanitiser, so raw HTML in the Markdown
+ * reached the output verbatim (a <script> in a styled page). The output
+ * now goes through lite/convert/sanitize-html.ts unless `sanitize` is
+ * false — for input you wrote yourself, never for someone else's.
  */
 
 import { marked } from 'marked';
-import type { Converter, ExecuteResult } from '../types.js';
+import { MARKUP_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
+import { sanitizeHtml } from '../sanitize-html.js';
 
 export const PAGE_STYLE = `  body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -40,7 +46,7 @@ function escapeHtml(s: string): string {
 
 /** The first H1's text, else the first non-empty line, for the page title. */
 export function titleFromMarkdown(md: string): string {
-  const h1 = /^\s*#\s+(.+?)\s*#*\s*$/m.exec(md);
+  const h1 = /^[ \t]*#[ \t]+(.+?)[ \t]*#*[ \t]*$/m.exec(md);
   if (h1 !== null && h1[1] !== undefined) return h1[1].trim();
   const line = md.split(/\r?\n/).map((l) => l.trim()).find((l) => l.length > 0) ?? 'Document';
   return line.replace(/^[#>*_-\s]+/, '').slice(0, 120) || 'Document';
@@ -71,19 +77,30 @@ export const mdToHtml: Converter = {
     from: ['md'],
     to: ['html'],
     engine: 'marked',
+    maxInputBytes: MARKUP_INPUT_BYTES,
     strategies: [
       { id: 'standard', description: 'Markdown without extensions.', when: 'The source is plain Markdown and the HTML goes into another page.' },
       { id: 'enhanced', description: 'GitHub flavour: tables, task lists, strikethrough, line breaks kept.', when: 'The source uses tables or task lists, or was written for GitHub.' },
       { id: 'styled', description: 'A complete HTML document with a readable stylesheet.', when: 'The result should open on its own in a browser.' },
     ],
     defaultStrategy: 'enhanced',
-    options: [{ name: 'title', type: 'string', description: 'Page title for the styled strategy (defaults to the first heading).' }],
+    options: [
+      { name: 'title', type: 'string', description: 'Page title for the styled strategy (defaults to the first heading).' },
+      {
+        name: 'sanitize',
+        type: 'boolean',
+        description: 'Drop scripts, styles, frames, forms, event handlers, inline styles and unsafe URLs from the rendered HTML, raw HTML in the Markdown included. Turn off only for Markdown you wrote yourself.',
+        default: true,
+      },
+    ],
   },
   async execute(input, strategy, options): Promise<ExecuteResult> {
     const gfm = strategy !== 'standard';
-    const body = marked.parse(input, { async: false, gfm, breaks: gfm }) as string;
+    const rendered = marked.parse(input, { async: false, gfm, breaks: gfm }) as string;
+    const sanitized = options['sanitize'] !== false;
+    const body = sanitized ? sanitizeHtml(rendered) : rendered;
     const output = strategy === 'styled' ? wrapPage(body, typeof options['title'] === 'string' && options['title'].length > 0 ? options['title'] : titleFromMarkdown(input)) : body;
     const headings = (body.match(/<h[1-6][\s>]/gi) ?? []).length;
-    return { output, stats: { headings, isDocument: strategy === 'styled' } };
+    return { output, stats: { headings, isDocument: strategy === 'styled', sanitized } };
   },
 };

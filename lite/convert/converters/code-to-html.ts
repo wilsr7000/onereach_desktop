@@ -29,7 +29,7 @@ import sql from 'highlight.js/lib/languages/sql';
 import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
-import type { Converter, ExecuteResult } from '../types.js';
+import { MARKUP_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
 
 /** The languages Lite registers — a deliberate subset so the bundle stays small. Aliases (js, py, html…) come with them. */
 const LANGUAGES: ReadonlyArray<readonly [string, LanguageFn]> = [
@@ -178,9 +178,10 @@ export const codeToHtml: Converter = {
     id: 'code-to-html',
     title: 'Code to HTML',
     description: 'Syntax-highlights source code with highlight.js: a complete page in the GitHub or dark theme, or a bare <pre><code> fragment.',
-    from: ['code'],
+    from: ['code', 'py'],
     to: ['html'],
     engine: 'highlight.js',
+    maxInputBytes: MARKUP_INPUT_BYTES,
     strategies: [
       { id: 'highlight', description: 'A complete page, GitHub theme by default; the language is detected when not given.', when: 'Standard code display that should open on its own.' },
       { id: 'themed', description: 'A complete page, dark theme by default (`theme` picks github or dark).', when: 'The page should match a dark design or a chosen theme.' },
@@ -193,10 +194,10 @@ export const codeToHtml: Converter = {
       { name: 'title', type: 'string', description: 'Page <title> (defaults to "Code — <language>").' },
     ],
   },
-  async execute(input, strategy, options): Promise<ExecuteResult> {
+  async execute(input, strategy, options, context): Promise<ExecuteResult> {
     if (input.trim().length === 0) throw new Error('Input must be a non-empty string of source code');
     const warnings: string[] = [];
-    const wanted = resolveLanguage(options['language']);
+    const wanted = resolveLanguage(options['language'] ?? (context?.from === 'py' ? 'python' : undefined));
     if (wanted.unknown !== null) {
       warnings.push(`Unknown language "${wanted.unknown}"; rendered as plain text (registered: ${listLanguages().join(', ')})`);
     }

@@ -57,21 +57,59 @@ pipeline through the format graph (BFS, the full app's PipelineResolver rule).
 | `jupyter-to-md` | ipynb → md | pure | flat (default), sectioned, with-output |
 | `jupyter-to-python` | ipynb → py | pure | code-only (default), with-comments, executable |
 | `md-to-html` | md → html | marked | standard, enhanced (default), styled |
+| `delimited` | csv ↔ tsv | pure | requote |
 | `md-to-jupyter` | md → ipynb | pure | auto-cell (default), strict-fence, annotated |
 | `md-to-text` | md → text | pure | strip (default), readable, outline |
 | `text-to-md` | text → md | pure | minimal, structure (default) |
 | `yaml-to-json` | yaml → json | js-yaml |  |
 
-Every converter is `{ spec, execute(input, strategy, options) }` in
-`converters/`, registered in `converters/index.ts`. Adding one is adding a
+Every converter is `{ spec, execute(input, strategy, options, context) }` in
+`converters/`, registered in `converters/index.ts` (`context` names the
+formats the step bridges — how `json-to-csv` knows to write tabs for a tsv
+target and `code-to-md` that a `py` source is Python). Adding one is adding a
 file and a line there, plus a row above and a test in
 `lite/test/unit/convert-converters.test.ts`.
 
 ## Limits
 
-Inputs above 25 MB are refused (`CONVERT_TOO_LARGE`). Everything is in-memory
-text; binary formats (PDF, Office, media) are later tranches and will take
-base64.
+Three caps, by engine (`CONVERT_TOO_LARGE` names the converter and the step):
+
+| Cap | Converters | Why |
+|---|---|---|
+| 25 MB | csv/tsv, json, yaml, ipynb parsers | linear parsers; the service cap |
+| 8 MB | `html-to-text`, `md-to-text` | linear tag/marker scans (`scan.ts`) |
+| 2 MB | `md-to-html`, `html-to-md`, `code-to-html`, `code-to-md`, `text-to-md` | regex engines (marked, turndown, highlight.js) whose cost is not plainly linear |
+
+Everything is in-memory text; binary formats (PDF, Office, media) are later
+tranches and will take base64.
+
+**Wall-clock budget.** The MCP server runs every conversion in a worker thread
+(`worker.ts`, bundled to `convert-worker.js` beside the server, which refuses
+to start without it) with a kill timer — `CONVERT_TIMEOUT_MS`, default 20 s,
+1 s to 120 s — and a 512 MB heap. Over budget: the worker is terminated and the
+caller gets `CONVERT_TIMEOUT`; out of memory: `CONVERT_FAILED`. The server
+itself never runs a conversion, so one hostile input cannot wedge it
+(Amendment 1: the review did exactly that with 2 MB of `<script`, before the
+scans were made linear and the worker added). Inside the app the api runs
+in-process; the caps are its budget.
+
+## Safety
+
+- **HTML out is sanitised by default.** `md-to-html` renders raw HTML in the
+  Markdown verbatim (marked has no sanitiser), so its output goes through
+  `sanitize-html.ts`: an allowlist of elements and attributes, `http(s)`,
+  `mailto:`, `tel:` and relative URLs only (`data:image` for images), no
+  scripts, styles, frames, forms, event handlers or inline styles. The option
+  `sanitize: false` keeps the raw render — for Markdown you wrote yourself,
+  never for someone else's. `csv-to-html`, `json-to-html` and `code-to-html`
+  escape their input. Treat any HTML made from untrusted input as untrusted.
+- **Entities decode once** (`html-entities.ts`): `&amp;lt;script&amp;gt;` is
+  `&lt;script&gt;`, never a live tag.
+- **Linear scans** (`scan.ts`): every tag or marker pass walks the text once;
+  `convert-hostile.test.ts` holds a budget for each shape the review measured.
+- **Options** are merged over the declared defaults; prototype-shaped keys are
+  dropped. Options given to a multi-step pipeline reach every step and say so
+  in a warning, like a strategy does.
 
 ## Error catalog
 
@@ -82,7 +120,8 @@ base64.
 | `CONVERT_UNKNOWN_FORMAT` | `from` / `to` not a known format or alias | Use an id from `convert_capabilities` |
 | `CONVERT_NO_PATH` | No converter chain reaches `to` from `from` | Check the reachable pairs |
 | `CONVERT_UNKNOWN_STRATEGY` | Strategy not offered by the converter that runs | Use one of its strategies |
-| `CONVERT_FAILED` | The converter threw on this input | Check the input really is the source format |
+| `CONVERT_FAILED` | The converter threw on this input (or its worker died) | Check the input really is the source format |
+| `CONVERT_TIMEOUT` | The run exceeded its wall-clock budget and was stopped | Convert a smaller excerpt, or raise `CONVERT_TIMEOUT_MS` |
 
 ## Events
 
@@ -93,8 +132,12 @@ MCP server emits nothing; its report is the record.
 ## Test coverage
 
 `convert-api.test.ts` (Rule 12 conformance + spans), `convert-registry.test.ts`
-(aliases, validation, BFS), `convert-converters.test.ts` (every converter's
-strategies), `convert-mcp.test.ts` (tools, schemas, error envelopes).
+(aliases, validation, BFS), `convert-converters*.test.ts` (every converter's
+strategies), `convert-mcp.test.ts` (tools, schemas, error envelopes),
+`convert-hostile.test.ts` (time budgets for hostile inputs, the sanitiser, the
+caps, option safety, the honest format graph), `convert-worker.test.ts` (the
+worker runner: kill timer, crash, error codes across the thread; the real
+bundle end to end).
 
 ## Borrowed pattern
 

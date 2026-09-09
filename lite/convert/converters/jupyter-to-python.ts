@@ -19,7 +19,7 @@ const SHEBANG = '#!/usr/bin/env python3';
  * `from x import y`, an optional trailing comment. The original's pattern
  * stopped at the first token, so `import numpy as np` never hoisted.
  */
-export const IMPORT_PATTERN = /^\s*(import\s+[\w.]+(\s+as\s+\w+)?(\s*,\s*[\w.]+(\s+as\s+\w+)?)*|from\s+\S+\s+import\s+.+?)(\s*#.*)?\s*$/;
+export const IMPORT_PATTERN = /^[ \t]*(?:import[ \t]+[\w.]+(?:[ \t]+as[ \t]+\w+)?(?:[ \t]*,[ \t]*[\w.]+(?:[ \t]+as[ \t]+\w+)?)*[ \t]*(?:#.*)?|from[ \t]+\S+[ \t]+import[ \t]+\S.*)$/;
 
 /** A line that IPython would run, not Python: `%magic`, `%%cell magic`, `!shell`. */
 export const MAGIC_PATTERN = /^\s*[%!]/;

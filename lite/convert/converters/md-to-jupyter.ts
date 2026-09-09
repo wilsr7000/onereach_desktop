@@ -114,7 +114,7 @@ export function annotateCells(cells: NotebookCellOut[]): number {
       else if (/^#{2,3}\s/.test(source)) tags.push('section');
       if (/^\s*[-*]\s/.test(source)) tags.push('list');
       if (/!\[/.test(source)) tags.push('has-images');
-      if (/\[.*?\]\(.*?\)/.test(source)) tags.push('has-links');
+      if (/\[[^\[\]\n]*\]\([^()\n]*\)/.test(source)) tags.push('has-links');
     } else {
       if (/import\s|from\s.*import|require\(/.test(source)) tags.push('imports');
       if (/def\s|function\s|class\s/.test(source)) tags.push('definition');

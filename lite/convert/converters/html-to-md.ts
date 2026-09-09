@@ -11,7 +11,7 @@
  */
 
 import TurndownService from 'turndown';
-import type { Converter, ExecuteResult } from '../types.js';
+import { MARKUP_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
 import { removeNonContent } from './html-to-text.js';
 
 /** A turndown with the original's settings; script, style and title bodies removed rather than rendered as text. */
@@ -93,7 +93,13 @@ function alignMarker(cell: Element): string {
 function tableCell(content: string, node: Node): string {
   const parent = node.parentNode;
   const index = parent === null ? 0 : elementChildren(parent).findIndex((c) => c === node);
-  const text = content.trim().replace(/\s*\n+\s*/g, ' ').replace(/\|/g, '\\|');
+  const text = content
+    .trim()
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .join(' ')
+    .replace(/\|/g, '\\|');
   return (index <= 0 ? '| ' : ' ') + text + ' |';
 }
 
@@ -127,7 +133,7 @@ export function markdownIssues(output: string): string[] {
   if (output.trim().length === 0) return ['the output is empty'];
   const warnings: string[] = [];
   if (BLOCK_TAG.test(output)) warnings.push('block-level HTML tags remain in the output (the source had escaped markup)');
-  if (/<script[\s\S]*?>/i.test(output) || /<style[\s\S]*?>/i.test(output)) warnings.push('script or style tags remain in the output; the "clean" strategy strips them first');
+  if (/<script[^<>]*>/i.test(output) || /<style[^<>]*>/i.test(output)) warnings.push('script or style tags remain in the output; the "clean" strategy strips them first');
   return warnings;
 }
 
@@ -139,6 +145,7 @@ export const htmlToMd: Converter = {
     from: ['html'],
     to: ['md'],
     engine: 'turndown',
+    maxInputBytes: MARKUP_INPUT_BYTES,
     strategies: [
       { id: 'turndown', description: 'Turndown with atx headings, fenced code, dash bullets and asterisk emphasis.', when: 'The input is clean HTML content without much boilerplate.' },
       { id: 'semantic', description: 'Articles sit between dividers, sections and figures get their own spacing, asides become quotes.', when: 'The input uses article, section, aside or figure elements.' },

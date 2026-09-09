@@ -13,9 +13,17 @@ export const CONVERT_ERROR_CODES = {
   NO_PATH: 'CONVERT_NO_PATH',
   UNKNOWN_STRATEGY: 'CONVERT_UNKNOWN_STRATEGY',
   FAILED: 'CONVERT_FAILED',
+  /** The run exceeded its wall-clock budget and was stopped (Amendment 1: conversions run in a worker with a kill timer). */
+  TIMEOUT: 'CONVERT_TIMEOUT',
 } as const;
 
 export type ConvertErrorCode = (typeof CONVERT_ERROR_CODES)[keyof typeof CONVERT_ERROR_CODES];
+
+const CODES: ReadonlySet<string> = new Set(Object.values(CONVERT_ERROR_CODES));
+
+export function isConvertErrorCode(value: unknown): value is ConvertErrorCode {
+  return typeof value === 'string' && CODES.has(value);
+}
 
 export interface ConvertErrorOptions extends Omit<LiteErrorOptions, 'code'> {
   code: ConvertErrorCode;

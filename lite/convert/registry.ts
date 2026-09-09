@@ -147,8 +147,17 @@ export class ConverterRegistry {
   }
 
   capabilities(): Capabilities {
+    const targets = new Set<string>();
+    for (const t of this.edges.values()) for (const to of t.keys()) targets.add(to);
     return {
-      formats: FORMATS.map((f) => ({ id: f.id, aliases: [...f.aliases], mimeType: f.mimeType, title: f.title })),
+      formats: FORMATS.map((f) => ({
+        id: f.id,
+        aliases: [...f.aliases],
+        mimeType: f.mimeType,
+        title: f.title,
+        asSource: (this.edges.get(f.id)?.size ?? 0) > 0,
+        asTarget: targets.has(f.id),
+      })),
       converters: this.all().map((c) => ({
         id: c.spec.id,
         title: c.spec.title,
@@ -159,6 +168,7 @@ export class ConverterRegistry {
         strategies: c.spec.strategies.map((s) => ({ ...s })),
         defaultStrategy: c.spec.defaultStrategy,
         options: (c.spec.options ?? []).map((o) => ({ ...o })),
+        maxInputBytes: c.spec.maxInputBytes ?? null,
       })),
       reachable: this.reachablePairs(),
     };

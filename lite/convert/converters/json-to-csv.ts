@@ -65,9 +65,16 @@ export function formatCsvValue(val: unknown): string {
   return String(val);
 }
 
-/** Quote a field holding a comma, a quote or a line break; quotes inside are doubled. */
-export function escapeCsvField(field: string): string {
-  return /[",\r\n]/.test(field) ? `"${field.replace(/"/g, '""')}"` : field;
+/** Quote a field holding the delimiter, a quote or a line break; quotes inside are doubled. */
+export function escapeCsvField(field: string, delimiter = ','): string {
+  const needsQuotes = field.includes(delimiter) || field.includes('"') || field.includes('\r') || field.includes('\n');
+  return needsQuotes ? `"${field.replace(/"/g, '""')}"` : field;
+}
+
+/** The output delimiter: the option when given ("\\t" spells a tab), else a tab for a tsv target, else a comma. */
+export function outputDelimiter(given: unknown, to: string | undefined): string {
+  if (typeof given === 'string' && given.length > 0) return given === '\\t' ? '\t' : given;
+  return to === 'tsv' ? '\t' : ',';
 }
 
 export interface CsvColumns {
@@ -106,24 +113,26 @@ export const jsonToCsv: Converter = {
     title: 'JSON to CSV',
     description: 'An array of objects becomes rows under a header of their keys; nested objects flattened to dot-notation columns or skipped.',
     from: ['json'],
-    to: ['csv'],
+    to: ['csv', 'tsv'],
     engine: 'pure',
     strategies: [
       { id: 'flat', description: 'Nested objects become dot-notation columns (address.city); arrays stay as JSON text.', when: 'Nothing should be lost — every nested value gets a column.' },
       { id: 'top-level', description: 'Only top-level scalar keys; nested objects and arrays are skipped.', when: 'The records are mostly flat and the nested parts are noise.' },
     ],
     defaultStrategy: 'flat',
+    options: [{ name: 'delimiter', type: 'string', description: 'Field delimiter; "\\t" for a tab. A tsv target uses a tab when omitted, csv a comma.' }],
   },
-  async execute(input, strategy, _options): Promise<ExecuteResult> {
+  async execute(input, strategy, options, context): Promise<ExecuteResult> {
+    const delimiter = outputDelimiter(options['delimiter'], context?.to);
     const items = parseJsonRows(input);
     const { headers, rows, warnings } = selectColumns(items, strategy);
     if (headers.length === 0) throw new Error('No columns to export (no scalar fields found)');
-    const lines = [headers.map(escapeCsvField).join(','), ...rows.map((row) => row.map((v) => escapeCsvField(formatCsvValue(v))).join(','))];
+    const lines = [headers.map((h) => escapeCsvField(h, delimiter)).join(delimiter), ...rows.map((row) => row.map((v) => escapeCsvField(formatCsvValue(v), delimiter)).join(delimiter))];
     const output = lines.join('\n');
     if (headers.length === 1) warnings.push('CSV has a single column');
     return {
       output,
-      stats: { rowCount: rows.length, columnCount: headers.length },
+      stats: { rowCount: rows.length, columnCount: headers.length, delimiter: delimiter === '\t' ? 'tab' : delimiter },
       ...(warnings.length > 0 ? { warnings } : {}),
     };
   },

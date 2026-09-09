@@ -4,81 +4,46 @@
  * together), readable (block tags become line breaks, list items get a
  * dash, boilerplate regions are dropped), article (only the <article>,
  * <main>, role="main" or <body> region, rendered the readable way).
- * Pure regex work — no DOM, no dependencies.
+ *
+ * Amendment 1: the tag work is one linear pass (lite/convert/scan.ts);
+ * the regex version rescanned from every `<script` that had no closer
+ * and took minutes on a megabyte. Entities decode in one pass, so an
+ * `&amp;lt;` never becomes a live `<`.
  */
 
-import type { Converter, ExecuteResult } from '../types.js';
+import { TEXT_SCAN_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
+import { decodeEntities, HTML_ENTITIES } from '../html-entities.js';
+import { elementContent, removeElements, replaceTags, stripTags } from '../scan.js';
 
-/** The named entities the original decoded; numeric references are handled in decodeEntities. */
-export const HTML_ENTITIES: Readonly<Record<string, string>> = {
-  '&amp;': '&',
-  '&lt;': '<',
-  '&gt;': '>',
-  '&quot;': '"',
-  '&#39;': "'",
-  '&apos;': "'",
-  '&nbsp;': ' ',
-  '&ndash;': '–',
-  '&mdash;': '—',
-  '&laquo;': '«',
-  '&raquo;': '»',
-  '&copy;': '©',
-  '&reg;': '®',
-  '&trade;': '™',
-  '&hellip;': '…',
-};
+export { decodeEntities, HTML_ENTITIES };
 
-function codePoint(code: number, fallback: string): string {
-  return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : fallback;
-}
+/** Regions that are page furniture, not content; removed with their bodies by the readable and article strategies. */
+export const NON_CONTENT_ELEMENTS: readonly string[] = ['script', 'style', 'nav', 'footer', 'header', 'aside', 'iframe', 'noscript'];
 
-/** Named entities from the table, then decimal (&#169;) and hex (&#x1F600;) character references. */
-export function decodeEntities(text: string): string {
-  let out = text;
-  for (const [entity, ch] of Object.entries(HTML_ENTITIES)) out = out.split(entity).join(ch);
-  out = out.replace(/&#(\d+);/g, (match, code: string) => codePoint(Number.parseInt(code, 10), match));
-  out = out.replace(/&#x([0-9a-f]+);/gi, (match, code: string) => codePoint(Number.parseInt(code, 16), match));
-  return out;
-}
+const BLOCK_CLOSERS: ReadonlySet<string> = new Set(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'blockquote', 'pre', 'section', 'article', 'aside', 'header', 'footer', 'main']);
 
 /** Scripts, styles and comments gone, every other tag removed, entities decoded, runs of spaces and tabs collapsed. */
 export function stripAllTags(html: string): string {
-  const text = html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<[^>]+>/g, '');
+  const text = stripTags(removeElements(html, ['script', 'style']));
   return decodeEntities(text).replace(/[ \t]+/g, ' ').trim();
 }
 
 /** Script, style, nav, footer, header, aside, iframe, noscript and comment blocks removed. Shared with html-to-md's clean strategy. */
 export function removeNonContent(html: string): string {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<nav[\s\S]*?<\/nav>/gi, '')
-    .replace(/<footer[\s\S]*?<\/footer>/gi, '')
-    .replace(/<header[\s\S]*?<\/header>/gi, '')
-    .replace(/<aside[\s\S]*?<\/aside>/gi, '')
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '');
+  return removeElements(html, NON_CONTENT_ELEMENTS);
 }
 
-const MAIN_REGIONS: readonly RegExp[] = [
-  /<article[\s\S]*?>([\s\S]*?)<\/article>/i,
-  /<main[\s\S]*?>([\s\S]*?)<\/main>/i,
-  /<div[^>]+role=["']main["'][^>]*>([\s\S]*?)<\/div>/i,
-  /<body[\s\S]*?>([\s\S]*?)<\/body>/i,
-];
+const ROLE_MAIN = /role=["']main["']/i;
 
 /** The <article>, else <main>, else <div role="main">, else <body> region; the whole input when none is found. */
 export function extractMainContent(html: string): string {
-  for (const re of MAIN_REGIONS) {
-    const m = re.exec(html);
-    if (m !== null && m[1] !== undefined) return m[1];
-  }
-  return html;
+  return (
+    elementContent(html, 'article') ??
+    elementContent(html, 'main') ??
+    elementContent(html, 'div', (tag) => ROLE_MAIN.test(tag)) ??
+    elementContent(html, 'body') ??
+    html
+  );
 }
 
 /**
@@ -87,13 +52,20 @@ export function extractMainContent(html: string): string {
  * lines are right-trimmed and runs of blank lines collapse to one.
  */
 export function readableText(html: string): string {
-  const spaced = html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|h[1-6]|li|tr|blockquote|pre|section|article|aside|header|footer|main)>/gi, '\n\n')
-    .replace(/<(?:hr)\s*\/?>/gi, '\n---\n')
-    .replace(/<\/(?:td|th)>/gi, '\t')
-    .replace(/<li[^>]*>/gi, '\n- ');
-  return stripAllTags(spaced)
+  const spaced = replaceTags(removeElements(html, ['script', 'style']), (tag) => {
+    if (tag.closing) {
+      if (BLOCK_CLOSERS.has(tag.name)) return '\n\n';
+      if (tag.name === 'td' || tag.name === 'th') return '\t';
+      return '';
+    }
+    if (tag.name === 'br') return '\n';
+    if (tag.name === 'hr') return '\n---\n';
+    if (tag.name === 'li') return '\n- ';
+    return '';
+  });
+  return decodeEntities(spaced)
+    .replace(/[ \t]+/g, ' ')
+    .trim()
     .split('\n')
     .map((line) => line.trimEnd())
     .join('\n')
@@ -105,7 +77,7 @@ export function readableText(html: string): string {
 export function textIssues(output: string): string[] {
   if (output.trim().length === 0) return ['the output is empty'];
   const warnings: string[] = [];
-  if (/<[a-z][\s\S]*?>/i.test(output)) warnings.push('HTML tags remain in the output (the source had escaped markup)');
+  if (/<[a-z][^<>]*>/i.test(output)) warnings.push('HTML tags remain in the output (the source had escaped markup)');
   if (/&(?:amp|lt|gt|quot|nbsp|#\d+);/i.test(output)) warnings.push('undecoded HTML entities remain in the output');
   return warnings;
 }
@@ -118,6 +90,7 @@ export const htmlToText: Converter = {
     from: ['html'],
     to: ['text'],
     engine: 'pure',
+    maxInputBytes: TEXT_SCAN_INPUT_BYTES,
     strategies: [
       { id: 'strip', description: 'Every tag removed and entities decoded; the text runs together.', when: 'A quick text dump is enough and layout does not matter.' },
       { id: 'readable', description: 'Block tags become line breaks and list items get a dash; scripts, styles, nav, header, footer and asides are dropped.', when: 'Someone will read the text and paragraph breaks matter.' },

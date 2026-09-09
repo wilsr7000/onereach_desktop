@@ -388,11 +388,22 @@ const convertMcpOptions = {
   external: [],
 };
 
+// The convert worker (ADR-100 Amendment 1): every conversion runs in a
+// worker thread with a kill timer, so one hostile input cannot wedge the
+// server. Same bundle shape; it must land beside convert-mcp.js, which
+// refuses to start without it.
+const convertWorkerOptions = {
+  ...convertMcpOptions,
+  entryPoints: [resolve(__dirname, 'convert/worker.ts')],
+  outfile: resolve(outDir, 'convert-worker.js'),
+};
+
 const allConfigs = [
   mainProcessOptions,
   spacesMcpOptions,
   localApiMcpOptions,
   convertMcpOptions,
+  convertWorkerOptions,
   preloadOptions,
   wiserPreloadOptions, journeyMapPreloadOptions,
   bugReportModalOptions,

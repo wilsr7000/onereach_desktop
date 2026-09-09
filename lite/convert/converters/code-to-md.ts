@@ -8,7 +8,7 @@
  * are dropped — Lite ports are deterministic.
  */
 
-import type { Converter, ExecuteResult } from '../types.js';
+import { MARKUP_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
 
 /**
  * Detection heuristics, first match wins. The original's order left
@@ -17,14 +17,14 @@ import type { Converter, ExecuteResult } from '../types.js';
  * here are tightened so each language is reachable from its own tells.
  */
 export const LANGUAGE_PATTERNS: ReadonlyArray<{ lang: string; pattern: RegExp }> = [
-  { lang: 'python', pattern: /^\s*(import\s+[\w.]+(\s*,\s*[\w.]+)*(\s+as\s+\w+)?\s*$|from\s+[\w.]+\s+import\s+|def\s+\w+\s*\(|class\s+\w+.*:\s*$)/m },
-  { lang: 'typescript', pattern: /^\s*((export\s+)?(interface\s+\w+|type\s+\w+\s*=|enum\s+\w+)|<[A-Z]\w*>)|:\s*(string|number|boolean)(\[\])?\s*[=,;)|}]/m },
-  { lang: 'rust', pattern: /^\s*(fn\s+\w+|let\s+mut|use\s+\w+::|impl\s+)/m },
-  { lang: 'go', pattern: /^\s*(package\s+\w+\s*$|func\s+\w+|import\s*\()/m },
-  { lang: 'java', pattern: /^\s*(public\s+class|private\s+|protected\s+|package\s+[\w.]+\s*;)/m },
-  { lang: 'javascript', pattern: /^\s*(const\s+|let\s+|var\s+|function\s+|=>|module\.exports|require\(|import\s+.+\s+from\s+['"]|export\s+(default|const|function|class)\s)/m },
-  { lang: 'ruby', pattern: /^\s*(require\s+'|def\s+\w+|class\s+\w+\s*<|end\s*$)/m },
-  { lang: 'cpp', pattern: /^\s*(#include\s*<|namespace\s+\w+|std::)/m },
+  { lang: 'python', pattern: /^[ \t]*(import\s+[\w.]+(\s*,\s*[\w.]+)*(\s+as\s+\w+)?\s*$|from\s+[\w.]+\s+import\s+|def\s+\w+\s*\(|class\s+\w+.*:\s*$)/m },
+  { lang: 'typescript', pattern: /^[ \t]*((export\s+)?(interface\s+\w+|type\s+\w+\s*=|enum\s+\w+)|<[A-Z]\w*>)|:\s*(string|number|boolean)(\[\])?\s*[=,;)|}]/m },
+  { lang: 'rust', pattern: /^[ \t]*(fn\s+\w+|let\s+mut|use\s+\w+::|impl\s+)/m },
+  { lang: 'go', pattern: /^[ \t]*(package\s+\w+\s*$|func\s+\w+|import\s*\()/m },
+  { lang: 'java', pattern: /^[ \t]*(public\s+class|private\s+|protected\s+|package\s+[\w.]+\s*;)/m },
+  { lang: 'javascript', pattern: /^[ \t]*(const\s+|let\s+|var\s+|function\s+|=>|module\.exports|require\(|import\s+.+\s+from\s+['"]|export\s+(default|const|function|class)\s)/m },
+  { lang: 'ruby', pattern: /^[ \t]*(require\s+'|def\s+\w+|class\s+\w+\s*<|end\s*$)/m },
+  { lang: 'cpp', pattern: /^[ \t]*(#include\s*<|namespace\s+\w+|std::)/m },
 ];
 
 export function detectLanguage(code: string): string {
@@ -120,9 +120,10 @@ export const codeToMd: Converter = {
     id: 'code-to-md',
     title: 'Code to Markdown',
     description: 'Wraps source code in a fenced block tagged with its language — given, taken from a filename, or detected.',
-    from: ['code'],
+    from: ['code', 'py'],
     to: ['md'],
     engine: 'pure',
+    maxInputBytes: MARKUP_INPUT_BYTES,
     strategies: [
       { id: 'fenced', description: 'A fenced code block with a language tag, optionally under a title and filename.', when: 'The code goes into a document as is.' },
     ],
@@ -133,14 +134,14 @@ export const codeToMd: Converter = {
       { name: 'title', type: 'string', description: 'An H1 above the block.' },
     ],
   },
-  async execute(input, _strategy, options): Promise<ExecuteResult> {
+  async execute(input, _strategy, options, context): Promise<ExecuteResult> {
     if (input.trim().length === 0) throw new Error('Input must be a non-empty string of source code');
     const code = input.replace(/\n+$/, '');
     const title = optionalString(options['title']);
     const filename = optionalString(options['filename']);
     const given = optionalString(options['language']);
     let language: string;
-    let languageSource: 'option' | 'filename' | 'detected' | 'fallback';
+    let languageSource: 'option' | 'filename' | 'format' | 'detected' | 'fallback';
     const fromFilename = filename !== null ? languageFromFilename(filename) : null;
     if (given !== null) {
       language = given.toLowerCase();
@@ -148,6 +149,9 @@ export const codeToMd: Converter = {
     } else if (fromFilename !== null) {
       language = fromFilename;
       languageSource = 'filename';
+    } else if (context?.from === 'py') {
+      language = 'python';
+      languageSource = 'format';
     } else {
       language = detectLanguage(code);
       languageSource = language === 'plaintext' ? 'fallback' : 'detected';

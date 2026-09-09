@@ -3,17 +3,26 @@
  * Strategies: strip (every marker removed, the words kept), readable
  * (headings in capitals over a rule, lists dashed, quotes barred, code
  * indented), outline (headings indented by depth, each followed by the
- * first sentence under it). Pure regex work.
+ * first sentence under it). Pure text work.
+ *
+ * Amendment 1: images, links, reference links and tags are removed in
+ * linear passes (lite/convert/scan.ts); the `\[([^\]]*)\]\(…\)` regexes
+ * rescanned from every `[` that had no `]` and took 27 s on 400 KB.
  */
 
-import type { Converter, ExecuteResult } from '../types.js';
+import { TEXT_SCAN_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
+import { replaceBracketed, stripTags } from '../scan.js';
+
+/** Images keep their alt text, links and reference links their text — in the order the regexes ran. */
+export function stripLinks(text: string): string {
+  const images = replaceBracketed(text, '![', ']', '(', ')');
+  const links = replaceBracketed(images, '[', ']', '(', ')');
+  return replaceBracketed(links, '[', ']', '[', ']');
+}
 
 /** Inline formatting removed: images and links keep their text, code its content, emphasis and strikethrough their words. */
 export function stripInline(text: string): string {
-  return text
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1')
+  return stripLinks(text)
     .replace(/`([^`]+)`/g, '$1')
     .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
     .replace(/\*\*(.+?)\*\*/g, '$1')
@@ -29,9 +38,7 @@ export function stripMarkdown(text: string): string {
   let result = text;
   result = result.replace(/```[\s\S]*?```/g, (block) => block.replace(/^```\w*\n?/, '').replace(/\n?```$/, ''));
   result = result.replace(/`([^`]+)`/g, '$1');
-  result = result.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
-  result = result.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1');
-  result = result.replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1');
+  result = stripLinks(result);
   result = result.replace(/^#{1,6}\s+/gm, '');
   result = result.replace(/\*\*\*(.+?)\*\*\*/g, '$1');
   result = result.replace(/\*\*(.+?)\*\*/g, '$1');
@@ -45,8 +52,8 @@ export function stripMarkdown(text: string): string {
   // The original's `^[\s]*` let \s cross newlines and ate the blank line before a list; [ \t]* keeps the paragraph break.
   result = result.replace(/^[ \t]*[-*+]\s+/gm, '');
   result = result.replace(/^[ \t]*\d+\.\s+/gm, '');
-  result = result.replace(/<[^>]+>/g, '');
-  result = result.replace(/^\[[^\]]*\]:\s+.*$/gm, '');
+  result = stripTags(result);
+  result = result.replace(/^\[[^\]\n]*\]:\s+.*$/gm, '');
   result = result.replace(/\n{3,}/g, '\n\n');
   return result.trim();
 }
@@ -123,7 +130,7 @@ export function strippedIssues(output: string): string[] {
   const warnings: string[] = [];
   if (/^#{1,6}\s/m.test(output)) warnings.push('heading markers remain in the output');
   if (/\*\*[^*]+\*\*/.test(output) || /__[^_]+__/.test(output)) warnings.push('bold or italic markers remain in the output');
-  if (/\[[^\]]+\]\([^)]+\)/.test(output)) warnings.push('link syntax remains in the output');
+  if (/\[[^\[\]]+\]\([^()]+\)/.test(output)) warnings.push('link syntax remains in the output');
   return warnings;
 }
 
@@ -135,6 +142,7 @@ export const mdToText: Converter = {
     from: ['md'],
     to: ['text'],
     engine: 'pure',
+    maxInputBytes: TEXT_SCAN_INPUT_BYTES,
     strategies: [
       { id: 'strip', description: 'Every marker removed; the words and paragraph breaks stay.', when: 'Clean text with no formatting artefacts is wanted.' },
       { id: 'readable', description: 'Headings in capitals over a rule, lists dashed, quotes barred, code indented.', when: 'Someone will read the text and the hierarchy should still show.' },

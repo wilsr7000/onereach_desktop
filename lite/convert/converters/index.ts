@@ -10,6 +10,7 @@ import { csvToJson } from './csv-to-json.js';
 import { jsonToCsv } from './json-to-csv.js';
 import { csvToMd } from './csv-to-md.js';
 import { csvToHtml } from './csv-to-html.js';
+import { delimited } from './delimited.js';
 import { jsonToMd } from './json-to-md.js';
 import { jsonToHtml } from './json-to-html.js';
 import { jsonToYaml, yamlToJson } from './json-yaml.js';
@@ -30,6 +31,7 @@ export const CONVERTERS: readonly Converter[] = [
   jsonToCsv,
   csvToMd,
   csvToHtml,
+  delimited,
   jsonToMd,
   jsonToHtml,
   jsonToYaml,

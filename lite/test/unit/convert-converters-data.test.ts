@@ -24,7 +24,7 @@ const PEOPLE = JSON.stringify([
 describe('json-to-csv', () => {
   it('declares json → csv with the two deterministic strategies', () => {
     expect(jsonToCsv.spec.from).toEqual(['json']);
-    expect(jsonToCsv.spec.to).toEqual(['csv']);
+    expect(jsonToCsv.spec.to).toEqual(['csv', 'tsv']);
     expect(jsonToCsv.spec.strategies.map((s) => s.id)).toEqual(['flat', 'top-level']);
     expect(jsonToCsv.spec.defaultStrategy).toBe('flat');
   });

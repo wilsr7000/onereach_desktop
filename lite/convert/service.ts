@@ -91,9 +91,26 @@ export class ConvertService {
         `strategy "${requestedStrategy}" applies to a single converter; this conversion runs ${plan.steps.length} steps (${plan.steps.map((s) => s.converterId).join(' → ')}) with their defaults.`
       );
     }
+    const optionKeys = req.options !== null && typeof req.options === 'object' ? Object.keys(req.options) : [];
+    if (optionKeys.length > 0 && plan.steps.length > 1) {
+      warnings.push(
+        `options {${optionKeys.join(', ')}} are offered to every step of this ${plan.steps.length}-step pipeline (${plan.steps.map((s) => s.converterId).join(' → ')}); each converter honours only the options it declares.`
+      );
+    }
     let current = req.input;
-    for (const step of plan.steps) {
+    for (const [index, step] of plan.steps.entries()) {
       const converter = this.registry.get(step.converterId) as Converter;
+      // Amendment 1: a converter's own cap (the markup renderers stop at 2 MB) applies to what reaches it, step by step.
+      const stepCap = Math.min(converter.spec.maxInputBytes ?? Number.POSITIVE_INFINITY, this.maxInputBytes);
+      const stepBytes = index === 0 ? inputBytes : byteLength(current);
+      if (stepBytes > stepCap) {
+        throw new ConvertError({
+          code: CONVERT_ERROR_CODES.TOO_LARGE,
+          message: `${converter.spec.id} takes at most ${stepCap} bytes; ${index === 0 ? 'the input' : `step ${index + 1}'s input`} is ${stepBytes}`,
+          remediation: 'Split the content or convert a smaller excerpt.',
+          context: { converterId: converter.spec.id, inputBytes: stepBytes, max: stepCap, step: index + 1, of: plan.steps.length },
+        });
+      }
       const strategy = plan.steps.length === 1 && requestedStrategy !== null ? requestedStrategy : converter.spec.defaultStrategy;
       if (!converter.spec.strategies.some((s) => s.id === strategy)) {
         throw new ConvertError({
@@ -106,7 +123,7 @@ export class ConvertService {
       const options = mergeOptions(converter, req.options);
       const t0 = this.now();
       try {
-        const out = await converter.execute(current, strategy, options);
+        const out = await converter.execute(current, strategy, options, { from: step.from, to: step.to, step: index + 1, of: plan.steps.length });
         if (typeof out.output !== 'string') {
           throw new Error(`converter ${converter.spec.id} produced ${typeof out.output}`);
         }
@@ -169,7 +186,10 @@ export class ConvertService {
   }
 }
 
-/** The caller's options over the converter's declared defaults. */
+/** Keys that would reach the prototype instead of the options (JSON.parse keeps an own `__proto__`). */
+const UNSAFE_OPTION_KEYS: ReadonlySet<string> = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** The caller's options over the converter's declared defaults; prototype-shaped keys are dropped. */
 export function mergeOptions(converter: Converter, given: Record<string, unknown> | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const o of converter.spec.options ?? []) {
@@ -177,7 +197,7 @@ export function mergeOptions(converter: Converter, given: Record<string, unknown
   }
   if (given !== null && typeof given === 'object') {
     for (const [k, v] of Object.entries(given)) {
-      if (v !== undefined) out[k] = v;
+      if (v !== undefined && !UNSAFE_OPTION_KEYS.has(k)) out[k] = v;
     }
   }
   return out;

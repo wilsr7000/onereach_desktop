@@ -15,7 +15,7 @@
  * is a rule. Everything else stays a paragraph, line breaks intact.
  */
 
-import type { Converter, ExecuteResult } from '../types.js';
+import { MARKUP_INPUT_BYTES, type Converter, type ExecuteResult } from '../types.js';
 
 const BULLET = /^([ \t]*)[•·◦▪▫●○■□‣⁃*+\-–—]\s+(\S.*)$/;
 const ORDERED = /^([ \t]*)\(?(\d{1,3})[.)]\s+(\S.*)$/;
@@ -180,6 +180,7 @@ export const textToMd: Converter = {
     from: ['text'],
     to: ['md'],
     engine: 'pure',
+    maxInputBytes: MARKUP_INPUT_BYTES,
     strategies: [
       { id: 'minimal', description: 'Paragraphs split on blank lines; nothing else is touched.', when: 'The text is already laid out and must not be reinterpreted.' },
       { id: 'structure', description: 'Headings (underlined, CAPITALS, Title Case), bullet and numbered lists, nesting and rules detected; words never change.', when: 'The text has implicit structure — notes, minutes, outlines — that Markdown should show.' },

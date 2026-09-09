@@ -11,14 +11,24 @@
  * ConvertService the app uses, in its own node process with no Electron
  * import (the api.ts wrapper adds spans inside the app; here the run
  * report is the record).
+ *
+ * Amendment 1: every conversion runs in a worker thread with a kill
+ * timer (CONVERT_TIMEOUT_MS, default 20 s) and a heap limit, so one
+ * hostile input cannot wedge the server; the worker bundle must sit
+ * beside this one or the server refuses to start. HTML output from
+ * md-to-html is sanitised by default; the other HTML producers escape
+ * their input.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { ConvertService } from '../convert/service.js';
 import { createDefaultRegistry } from '../convert/converters/index.js';
 import { ConvertError } from '../convert/errors.js';
+import { WorkerConvertService, parseTimeoutMs, type ConvertRunner } from '../convert/worker-runner.js';
 import type { ConvertResult } from '../convert/types.js';
 
 export function createService(): ConvertService {
@@ -59,12 +69,12 @@ export function report(result: ConvertResult): Record<string, unknown> {
 }
 
 /** Register the three tools. Exported so tests can drive the handlers. */
-export function registerTools(server: McpServer, service: ConvertService): void {
+export function registerTools(server: McpServer, service: ConvertRunner): void {
   server.registerTool(
     'convert_capabilities',
     {
       description:
-        'What the converter can do: every format (with aliases), every converter with its strategies and options, and every reachable (from, to) pair. Start here.',
+        'What the converter can do: every format (with aliases and whether anything reads or writes it), every converter with its strategies, options and input cap, and every reachable (from, to) pair. Start here.',
       inputSchema: {},
     },
     async () => text(service.capabilities())
@@ -92,7 +102,7 @@ export function registerTools(server: McpServer, service: ConvertService): void 
     'convert_text',
     {
       description:
-        'Convert text from one format to another (Markdown, HTML, plain text, CSV/TSV, JSON, YAML, Jupyter, code…). Returns the converted text; add include_report for the steps, sizes and warnings.',
+        'Convert text from one format to another (Markdown, HTML, plain text, CSV/TSV, JSON, YAML, Jupyter, code…). Returns the converted text; add include_report for the steps, sizes and warnings. Limits: 25 MB for the data formats, 8 MB for the tag/marker strippers, 2 MB for the Markdown/HTML/code renderers, and a wall-clock budget per run (CONVERT_TIMEOUT). HTML output: md-to-html is sanitised by default (options.sanitize=false keeps raw HTML — only for Markdown you wrote yourself); treat any HTML made from untrusted input as untrusted.',
       inputSchema: {
         input: z.string().describe('The content to convert, as text'),
         from: z.string().describe('Source format id or alias'),
@@ -121,9 +131,20 @@ export function registerTools(server: McpServer, service: ConvertService): void 
   );
 }
 
+/** The worker bundle esbuild writes beside this file; without it the server refuses to start rather than run unbounded. */
+export function workerPathBeside(dir: string): string {
+  return path.join(dir, 'convert-worker.js');
+}
+
 async function main(): Promise<void> {
-  const server = new McpServer({ name: 'onereach-convert', version: '1.0.0' });
-  registerTools(server, createService());
+  const workerPath = workerPathBeside(__dirname);
+  if (!fs.existsSync(workerPath)) {
+    throw new Error(`convert-worker.js is missing beside ${path.basename(__filename)} — run npm run lite:build`);
+  }
+  const timeoutMs = parseTimeoutMs(process.env['CONVERT_TIMEOUT_MS']);
+  const server = new McpServer({ name: 'onereach-convert', version: '1.1.0' });
+  registerTools(server, new WorkerConvertService({ workerPath, timeoutMs }));
+  process.stderr.write(`[convert-mcp] conversions run in a worker thread (${timeoutMs} ms budget, 512 MB heap)\n`);
   await server.connect(new StdioServerTransport());
 }
 
