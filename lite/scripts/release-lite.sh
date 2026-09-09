@@ -247,12 +247,10 @@ declare -a FILES=("${LITE_DMG}" "${LITE_DMG_BMAP}" "${LITE_ZIP}" "${LITE_ZIP_BMA
 # afterPack hook writes the file into every bundle; this refuses to ship
 # one where it is missing or differs from lite/updater/feed.ts. A missing
 # bundle is itself a failure (review 2026-09-09: an empty find used to skip
-# the gate silently), so look again before giving up.
+# the gate silently) — and only the bundle where this build lands counts,
+# never a stale one elsewhere under dist-lite (second review pass).
 if [ -z "$APP_BUNDLE" ]; then
-    APP_BUNDLE=$(find dist-lite -maxdepth 2 -name "*.app" -not -path "*/build/*" 2>/dev/null | head -1)
-fi
-if [ -z "$APP_BUNDLE" ]; then
-    echo -e "${RED}✗ No packaged .app found under ${MAC_OUT_DIR:-dist-lite/mac-arm64} or dist-lite — nothing to gate. Aborting.${NC}"
+    echo -e "${RED}✗ No packaged .app found under ${MAC_OUT_DIR:-dist-lite/mac-arm64} — nothing to gate. Aborting.${NC}"
     exit 1
 fi
 bash lite/scripts/check-update-descriptor.sh "$APP_BUNDLE" || exit 1

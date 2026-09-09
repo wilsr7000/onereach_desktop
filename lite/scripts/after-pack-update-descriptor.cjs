@@ -62,8 +62,23 @@ function publishConfig(context) {
 function windowsPublisher(context, env) {
   const win = context.packager.config.win || {};
   const names = Array.isArray(win.publisherName) ? win.publisherName : typeof win.publisherName === 'string' ? [win.publisherName] : [];
-  const signing =
-    Boolean(env.WIN_CSC_LINK || env.CSC_LINK || win.certificateSubjectName || win.certificateSha1 || win.sign || win.signtoolOptions);
+  // Every way app-builder-lib can be told to sign a Windows build: the
+  // config-file options (certificateFile/certificatePassword, a store
+  // certificate by subject or SHA-1, a custom sign function, signtool
+  // options) and the environment (CSC_LINK / WIN_CSC_LINK and their
+  // key passwords).
+  const signing = Boolean(
+    env.WIN_CSC_LINK ||
+      env.CSC_LINK ||
+      env.CSC_KEY_PASSWORD ||
+      env.WIN_CSC_KEY_PASSWORD ||
+      win.certificateFile ||
+      win.certificatePassword ||
+      win.certificateSubjectName ||
+      win.certificateSha1 ||
+      win.sign ||
+      win.signtoolOptions
+  );
   if (names.length > 0) return names;
   if (signing) {
     throw new Error(

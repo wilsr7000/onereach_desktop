@@ -87,6 +87,15 @@ export interface CheckRunnerDeps {
    * `updater.check.start` / `.finish` / `.fail` span. ADR-030.
    */
   spanEmitter?: (name: string, data?: unknown) => import('../logging/events.js').Span;
+  /**
+   * ADR-101 — a reason no check should run at all (an install whose
+   * bundle has no usable update descriptor and cannot write one), or
+   * null. Runs before checkForUpdates for every caller — the menu, the
+   * renderer's IPC, the periodic timer — so a check never "looks fine"
+   * and dies at download time. The caller shows its own dialog when
+   * `manual`; the runner emits the error status and returns.
+   */
+  preflight?: (opts: { manual: boolean }) => string | null;
 }
 
 /**
@@ -103,6 +112,13 @@ export function createCheckRunner(deps: CheckRunnerDeps): CheckRunner {
     if (inFlight && inFlightPromise !== null) {
       log.info('updater: check already in flight -- coalescing');
       return inFlightPromise;
+    }
+    const refusal = deps.preflight?.({ manual: opts.manual }) ?? null;
+    if (refusal !== null) {
+      lastManual = opts.manual;
+      log.warn('updater: check refused before it started', { manual: opts.manual, reason: refusal });
+      deps.emitStatus({ status: 'error', info: { error: refusal } });
+      return Promise.resolve({ inFlight: false, timedOut: false, manual: opts.manual });
     }
     inFlight = true;
     lastManual = opts.manual;

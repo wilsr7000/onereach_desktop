@@ -113,6 +113,18 @@ describe('after-pack hook', () => {
     await expect(hook(envSigned.context, { WIN_CSC_LINK: 'file:///cert.pfx' })).rejects.toThrow(/win\.publisherName/);
     fs.rmSync(envSigned.out, { recursive: true, force: true });
 
+    // Second review pass: every signing option app-builder-lib knows, not only the store-certificate ones.
+    for (const win of [{ certificateFile: 'cert.pfx' }, { certificatePassword: 'x' }, { sign: './sign.js' }, { signtoolOptions: {} }]) {
+      const b = winBundle(win);
+      await expect(hook(b.context, {}), JSON.stringify(win)).rejects.toThrow(/win\.publisherName/);
+      fs.rmSync(b.out, { recursive: true, force: true });
+    }
+    for (const env of [{ CSC_LINK: 'file:///c.pfx' }, { CSC_KEY_PASSWORD: 'p' }, { WIN_CSC_KEY_PASSWORD: 'p' }]) {
+      const b = winBundle({});
+      await expect(hook(b.context, env), JSON.stringify(env)).rejects.toThrow(/win\.publisherName/);
+      fs.rmSync(b.out, { recursive: true, force: true });
+    }
+
     const unsigned = winBundle({});
     await hook(unsigned.context, {});
     expect(fs.readFileSync(unsigned.target, 'utf8')).toBe(feedDescriptorYaml());
@@ -139,7 +151,7 @@ describe('release gate', () => {
   it('the check script passes exactly the feed descriptor and fails a missing, drifted or absent bundle', () => {
     const exact = bundleWith(feedDescriptorYaml());
     expect(run(exact)).toMatchObject({ status: 0 });
-    expect(run(exact).out).toContain('Updater descriptor present and exact');
+    expect(run(exact).out).toContain('Updater descriptor names the feed');
 
     const tolerated = bundleWith('# generated\nowner: wilsr7000  \nrepo: Onereach_Lite_Desktop_App\n\nprovider: github\nupdaterCacheDirName: onereach-lite-updater\n');
     expect(run(tolerated).status).toBe(0);
@@ -157,16 +169,27 @@ describe('release gate', () => {
     const unanchored = bundleWith('owner: wilsr7000\nrepo: Onereach_Lite_Desktop_App\nprovider: github\nupdaterCacheDirName: onereach-lite-updater\nupdaterCacheDirName: other\n');
     expect(run(unanchored).status).toBe(1);
 
+    // The gate and the runtime agree on extra keys: what the hook writes for Windows (publisherName) passes, as would a channel.
+    const withPublisher = bundleWith(feedDescriptorYaml() + 'publisherName:\n  - Onereach Inc\nchannel: latest\n');
+    expect(run(withPublisher).status).toBe(0);
+    const commentedOut = bundleWith('owner: wilsr7000\n# repo: Onereach_Lite_Desktop_App\nprovider: github\nupdaterCacheDirName: onereach-lite-updater\n');
+    expect(run(commentedOut).status).toBe(1);
+    const indentedComment = bundleWith(feedDescriptorYaml() + '  # trailing note\n');
+    expect(run(indentedComment).status).toBe(0);
+    const prefixed = bundleWith('owner: wilsr7000\nrepo: Onereach_Lite_Desktop_App_2\nprovider: github\nupdaterCacheDirName: onereach-lite-updater\n');
+    expect(run(prefixed).status).toBe(1);
+
     expect(run('').status).toBe(1);
     expect(run(path.join(os.tmpdir(), 'does-not-exist.app')).status).toBe(1);
 
-    for (const b of [exact, tolerated, missing, drifted, unanchored]) fs.rmSync(path.dirname(b), { recursive: true, force: true });
+    for (const b of [exact, tolerated, missing, drifted, unanchored, withPublisher, commentedOut, indentedComment, prefixed]) fs.rmSync(path.dirname(b), { recursive: true, force: true });
   });
 
-  it('release-lite.sh runs the check on the packaged bundle and aborts when no bundle is found', () => {
+  it('release-lite.sh runs the check on the packaged bundle and aborts when no bundle is found — never a stale one elsewhere', () => {
     const script = fs.readFileSync(path.join(liteRoot, 'scripts/release-lite.sh'), 'utf8');
     expect(script).toContain('bash lite/scripts/check-update-descriptor.sh "$APP_BUNDLE" || exit 1');
     expect(script).toMatch(/if \[ -z "\$APP_BUNDLE" \]; then\n\s+echo -e "\$\{RED\}✗ No packaged \.app found[\s\S]{0,200}exit 1/);
+    expect(script).not.toMatch(/APP_BUNDLE=\$\(find dist-lite -maxdepth 2/);
   });
 
   it('both release scripts are executable (the commit must keep mode 100755)', () => {

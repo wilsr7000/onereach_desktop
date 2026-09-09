@@ -224,11 +224,43 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
     },
   };
 
+  // ADR-101 — an install whose bundle has no usable update descriptor
+  // and cannot write one: a check would look fine and the download would
+  // fail hours later. Every check (menu, renderer IPC, periodic) is
+  // refused up front; a manual one gets a dialog, where the person is
+  // looking.
+  const FEED_UNUSABLE =
+    'This copy of the app cannot download updates: the app bundle has no usable update descriptor and one could not be written to your user data folder. Reinstall the current release from the GitHub releases page; updates work normally from there.';
+  const feedRefusal = (): string | null => {
+    const state = packagedFeedState();
+    if (!app.isPackaged || state === null) return null;
+    return state.descriptor === 'unwritable' || state.descriptor === 'error' ? FEED_UNUSABLE : null;
+  };
   const checkRunner = createCheckRunner({
     autoUpdater,
     emitStatus,
     logger: log,
     ...(opts.spanEmitter !== undefined ? { spanEmitter: opts.spanEmitter } : {}),
+    preflight: ({ manual }) => {
+      const refusal = feedRefusal();
+      if (refusal !== null && manual) {
+        void ui
+          .showMessageBox({
+            type: 'warning',
+            title: 'Updates Cannot Be Applied on This Install',
+            message: 'This copy of the app cannot download updates',
+            detail: refusal,
+            buttons: ['Open Releases Page', 'OK'],
+            defaultId: 0,
+            cancelId: 1,
+          })
+          .then((res) => {
+            if (res.response === 0) void ui.openReleasesPage();
+          })
+          .catch((err: unknown) => log.warn('updater: refusal dialog failed', { error: (err as Error).message }));
+      }
+      return refusal;
+    },
   });
 
   const lifecycle = attachLifecycle({
@@ -303,27 +335,8 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
       // explicitly so dev runs aren't silent. The test harness sets
       // forceDevUpdateConfig=true via LITE_DEV_UPDATE_CONFIG and skips
       // this branch.
-      // ADR-101 — an install whose bundle has no usable update descriptor
-      // and cannot write one: a check would look fine and the download
-      // would fail hours later. Say so here, where the person is looking.
-      const feedState = packagedFeedState();
-      if (app.isPackaged && feedState !== null && (feedState.descriptor === 'unwritable' || feedState.descriptor === 'error')) {
-        void ui
-          .showMessageBox({
-            type: 'warning',
-            title: 'Updates Cannot Be Applied on This Install',
-            message: 'This copy of the app cannot download updates',
-            detail:
-              'The app bundle has no usable update descriptor and one could not be written to your user data folder. Reinstall the current release from the GitHub releases page; updates work normally from there.',
-            buttons: ['Open Releases Page', 'OK'],
-            defaultId: 0,
-            cancelId: 1,
-          })
-          .then((res) => {
-            if (res.response === 0) void ui.openReleasesPage();
-          });
-        return;
-      }
+      // (ADR-101: an unusable update descriptor is refused inside
+      // checkRunner.check() for every caller, with a dialog when manual.)
       if (!app.isPackaged && autoUpdater.forceDevUpdateConfig !== true) {
         void ui
           .showMessageBox({
@@ -338,7 +351,8 @@ export function initUpdater(opts: InitUpdaterModuleOptions): UpdaterHandle {
           })
           .then((res) => {
             if (res.response === 0) void ui.openReleasesPage();
-          });
+          })
+          .catch((err: unknown) => log.warn('updater: dev-build dialog failed', { error: (err as Error).message }));
         return;
       }
       void checkRunner.check({ manual: true });

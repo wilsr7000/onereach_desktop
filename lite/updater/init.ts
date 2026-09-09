@@ -37,6 +37,8 @@ export interface AutoUpdaterLike {
   getFeedURL?: () => string | null | undefined;
   /** electron-updater: set the provider from code instead of app-update.yml. */
   setFeedURL?: (options: Record<string, unknown>) => void;
+  /** EventEmitter's emit; the download guard raises its refusal as the 'error' event the lifecycle's dialog listens to. */
+  emit?: (event: string, ...args: unknown[]) => unknown;
   on: (event: string, listener: (...args: unknown[]) => void) => unknown;
   off?: (event: string, listener: (...args: unknown[]) => void) => unknown;
   removeAllListeners?: (event?: string) => unknown;
@@ -153,6 +155,39 @@ export function applyPackagedFeed(
   log: NonNullable<InitUpdaterOptions['logger']>
 ): PackagedFeedState {
   const state: PackagedFeedState = { feedFromCode: false, descriptor: 'bundle' };
+  // Rewrites the userData descriptor; set once the packaged path has one to own.
+  let refresh: (() => void) | null = null;
+  // Downloads read the descriptor again (updaterCacheDirName decides where
+  // the zip is staged, and install.ts looks there). Refuse when no
+  // trustworthy descriptor exists; rewrite ours first when it does. The
+  // guard is installed before anything below can fail, so the 'error'
+  // state refuses as well, and a refusal is raised as the updater's
+  // 'error' event — the lifecycle's dialog lives there.
+  const originalDownload = autoUpdater.downloadUpdate.bind(autoUpdater);
+  const refuse = (message: string): never => {
+    const err = new Error(message);
+    try {
+      autoUpdater.emit?.('error', err);
+    } catch {
+      // no 'error' listener attached (tests, early boot) — the rejection below still carries it
+    }
+    throw err;
+  };
+  autoUpdater.downloadUpdate = async (): Promise<unknown> => {
+    if (state.descriptor === 'unwritable' || state.descriptor === 'error') {
+      return refuse(
+        'Updates cannot be downloaded on this install: the app bundle has no usable update descriptor and one could not be written. Reinstall from the releases page.'
+      );
+    }
+    if (state.descriptor === 'written' && refresh !== null) {
+      try {
+        refresh();
+      } catch (err) {
+        return refuse(`Updates cannot be downloaded: the update descriptor could not be refreshed (${(err as Error).message}).`);
+      }
+    }
+    return originalDownload();
+  };
   try {
     const fs = packaged.fs ?? nodeFs();
     const bundled = path.join(packaged.resourcesPath, 'app-update.yml');
@@ -172,6 +207,7 @@ export function applyPackagedFeed(
       state.reason = reason;
       try {
         writeFallback();
+        refresh = writeFallback;
         autoUpdater.updateConfigPath = fallback;
         state.descriptor = 'written';
         state.fallbackPath = fallback;
@@ -202,25 +238,6 @@ export function applyPackagedFeed(
       autoUpdater.setFeedURL({ ...LITE_UPDATE_FEED });
       state.feedFromCode = true;
     }
-    // Downloads read the descriptor again (updaterCacheDirName decides
-    // where the zip is staged, and install.ts looks there). Refuse when
-    // no trustworthy descriptor exists; rewrite ours first when it does.
-    const originalDownload = autoUpdater.downloadUpdate.bind(autoUpdater);
-    autoUpdater.downloadUpdate = async (): Promise<unknown> => {
-      if (state.descriptor === 'unwritable' || state.descriptor === 'error') {
-        throw new Error(
-          'Updates cannot be downloaded on this install: the app bundle has no usable update descriptor and one could not be written. Reinstall from the releases page.'
-        );
-      }
-      if (state.descriptor === 'written') {
-        try {
-          writeFallback();
-        } catch (err) {
-          throw new Error(`Updates cannot be downloaded: the update descriptor could not be refreshed (${(err as Error).message}).`);
-        }
-      }
-      return originalDownload();
-    };
   } catch (err) {
     state.descriptor = 'error';
     log.error('updater: packaged feed setup failed — running with the bundle descriptor only', {

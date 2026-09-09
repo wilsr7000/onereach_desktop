@@ -146,13 +146,17 @@ const packagedOpts = (fs: PackagedFs): NonNullable<Parameters<typeof applyPackag
 type SetFeedMock = ReturnType<typeof vi.fn<(options: Record<string, unknown>) => void>>;
 type DownloadMock = ReturnType<typeof vi.fn<() => Promise<string[]>>>;
 
-function packagedFake(): AutoUpdaterLike & { setFeedURL: SetFeedMock; download: DownloadMock } {
+type EmitMock = ReturnType<typeof vi.fn<(event: string, ...args: unknown[]) => unknown>>;
+
+function packagedFake(): AutoUpdaterLike & { setFeedURL: SetFeedMock; download: DownloadMock; emit: EmitMock } {
   const setFeedURL: SetFeedMock = vi.fn((_options: Record<string, unknown>): void => undefined);
   const download: DownloadMock = vi.fn(async (): Promise<string[]> => ['/cache/pending/update.zip']);
+  const emit: EmitMock = vi.fn((_event: string, ..._args: unknown[]): unknown => true);
   const fake = makeFakeUpdater();
   fake.setFeedURL = setFeedURL;
+  fake.emit = emit;
   fake.downloadUpdate = download as unknown as AutoUpdaterLike['downloadUpdate'];
-  return Object.assign(fake, { setFeedURL, download });
+  return Object.assign(fake, { setFeedURL, download, emit });
 }
 
 describe('packaged feed (ADR-101)', () => {
@@ -234,6 +238,8 @@ describe('packaged feed (ADR-101)', () => {
     expect(fake.updateConfigPath).toBeNull();
     await expect(fake.downloadUpdate()).rejects.toThrow(/cannot be downloaded on this install/);
     expect(fake.download).not.toHaveBeenCalled();
+    // The refusal is also the updater's 'error' event — where the lifecycle's dialog lives.
+    expect(fake.emit).toHaveBeenCalledWith('error', expect.objectContaining({ message: expect.stringMatching(/cannot be downloaded on this install/) }));
   });
 
   it('a failing download-time rewrite refuses the download with a legible error', async () => {
@@ -247,7 +253,7 @@ describe('packaged feed (ADR-101)', () => {
     expect(fake.download).not.toHaveBeenCalled();
   });
 
-  it('never throws: a packaged-path failure degrades to the bundle descriptor and is reported', () => {
+  it('never throws: a packaged-path failure degrades to the bundle descriptor and is reported', async () => {
     const fake = packagedFake();
     const fs = fakeFs();
     fs.existsSync = () => {
@@ -261,6 +267,26 @@ describe('packaged feed (ADR-101)', () => {
     expect(result).toEqual({ feedFromCode: false, descriptor: 'error' });
     expect(fake.setFeedURL).not.toHaveBeenCalled();
     expect(log.error).toHaveBeenCalledTimes(1);
+    // The guard was installed before the failure, so the error state refuses downloads too.
+    await expect(fake.downloadUpdate()).rejects.toThrow(/cannot be downloaded on this install/);
+    expect(fake.download).not.toHaveBeenCalled();
+    expect(fake.emit).toHaveBeenCalledWith('error', expect.any(Error));
+  });
+  it('an updater without emit (or without an error listener) still gets the rejection', async () => {
+    const fake = packagedFake();
+    delete (fake as { emit?: unknown }).emit;
+    const fs = fakeFs();
+    fs.writeFileSync = () => {
+      throw new Error('read-only');
+    };
+    applyPackagedFeed(fake, packagedOpts(fs), quietLog());
+    await expect(fake.downloadUpdate()).rejects.toThrow(/cannot be downloaded on this install/);
+    const throwing = packagedFake();
+    throwing.emit = vi.fn((): unknown => {
+      throw new Error('Unhandled error.');
+    });
+    applyPackagedFeed(throwing, packagedOpts(fs), quietLog());
+    await expect(throwing.downloadUpdate()).rejects.toThrow(/cannot be downloaded on this install/);
   });
 
   it('initAutoUpdater applies the packaged feed only when packaged and no dev update config is in effect', () => {
