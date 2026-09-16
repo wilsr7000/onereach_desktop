@@ -128,12 +128,21 @@ const emailAgent = {
 
   async getBriefing() {
     try {
+      // 2026-09-15: an unconnected inbox used to vanish from the brief
+      // silently. The user wants email in the brief, so the truthful state
+      // is one short line with the way to connect it.
+      const notConnected = {
+        section: 'Email',
+        priority: 4,
+        content: 'Email isn\'t connected yet. Say "set up email" to link an inbox.',
+        notConnected: true,
+      };
       const svc = _getEmailService();
-      if (!svc) return { section: 'Email', priority: 4, content: null };
+      if (!svc) return notConnected;
 
       const summary = await svc.getSummary();
       if (!summary.connected) {
-        return { section: 'Email', priority: 4, content: null };
+        return notConnected;
       }
 
       const engine = _getThreadEngine();

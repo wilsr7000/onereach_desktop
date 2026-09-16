@@ -167,9 +167,47 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
   computePanelHeight(ui) {
     const BASE = 540;
     const PER_EVENT = 70;
+    const PER_SECTION = 80;
     const MAX = 900;
     const eventCount = (ui && Array.isArray(ui.events)) ? ui.events.length : 0;
-    return Math.min(MAX, BASE + eventCount * PER_EVENT);
+    const sectionCount = (ui && Array.isArray(ui.sections)) ? ui.sections.length : 0;
+    return Math.min(MAX, BASE + eventCount * PER_EVENT + sectionCount * PER_SECTION);
+  },
+
+  /**
+   * Turn the non-calendar contributions into dayView sections so what the
+   * voice says about weather, tasks, tickets, Slack and the feed is also on
+   * screen. Contributors supply { headline?, items: [{ line, spoken }] };
+   * a contribution with no items falls back to its content text.
+   */
+  _buildSections(contributions) {
+    const out = [];
+    for (const c of contributions || []) {
+      if (!c || c.section === 'Calendar' || c.section === 'Time & Date') continue;
+      const items = Array.isArray(c.items) ? c.items : [];
+      const lines = items
+        .map((i) => i && i.line)
+        .filter((l) => typeof l === 'string' && l.length > 0)
+        .slice(0, 8);
+      if (lines.length === 0 && typeof c.content === 'string' && c.content.trim()) {
+        lines.push(c.content.trim().split('\n')[0].slice(0, 240));
+      }
+      if (lines.length === 0) continue;
+      out.push({ title: c.section, headline: c.headline || null, lines });
+    }
+    return out;
+  },
+
+  /**
+   * Evidence for the answer reflector: the raw section texts the composer
+   * was given. Without this the judge saw only the spoken result and
+   * flagged every real number as "fabricated" (2026-09-15 log), writing a
+   * low-quality note into this agent's memory after every brief.
+   */
+  _buildEvidence(contributions) {
+    return (contributions || [])
+      .filter((c) => c && typeof c.content === 'string' && c.content.trim())
+      .map((c) => `[${c.section}] ${c.content.trim()}`);
   },
 
   /**
@@ -240,9 +278,14 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
     // 3. Collect contributions in parallel with per-agent timeouts
     const briefingContext = { targetDate, isToday, dateLabel };
     const contributionPromises = briefingAgents.map(async (agent) => {
-      const agentTimeout = agent.estimatedExecutionMs
-        ? Math.min(agent.estimatedExecutionMs * 2, PER_AGENT_TIMEOUT_MS)
-        : PER_AGENT_TIMEOUT_MS;
+      // A contributor may declare its own briefing budget (the calendar's
+      // cold Omnical fetch measured 4.8 s on 2026-09-15); otherwise twice
+      // its estimated execution, capped.
+      const agentTimeout = Number.isFinite(agent.briefingTimeoutMs)
+        ? Math.min(agent.briefingTimeoutMs, PER_AGENT_TIMEOUT_MS)
+        : agent.estimatedExecutionMs
+          ? Math.min(agent.estimatedExecutionMs * 2, PER_AGENT_TIMEOUT_MS)
+          : PER_AGENT_TIMEOUT_MS;
       try {
         const result = await Promise.race([
           agent.getBriefing(briefingContext),
@@ -301,15 +344,21 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
     // 6. Log this briefing to memory history
     this._logBriefingToHistory(contributions);
 
-    // 7. Build rich day-view UI from calendar contributions + composed briefing
+    // 7. Build rich day-view UI from the calendar contribution + composed
+    //    briefing + every other contributor's compressed items as sections,
+    //    so what the voice says about weather, tasks and tickets is also on
+    //    screen (2026-09-15: "share each item both visually and in voice").
+    const sections = this._buildSections(contributions);
     let ui;
     const calContrib = contributions.find((c) => c.briefData && c.briefData.timeline?.length > 0);
-    if (calContrib) {
+    if (calContrib || sections.length > 0) {
       try {
-        ui = buildDayViewSpec(calContrib.briefData, fullSpeech);
+        ui = buildDayViewSpec(calContrib ? calContrib.briefData : null, fullSpeech, { sections });
       } catch (e) {
         log.info('agent', '[DailyBrief] dayView spec failed, falling back to eventList', { error: e.message });
-        try { ui = buildBriefUISpec(calContrib.briefData); } catch (_) { /* non-fatal */ }
+        if (calContrib) {
+          try { ui = buildBriefUISpec(calContrib.briefData); } catch (_) { /* non-fatal */ }
+        }
       }
     }
 
@@ -367,10 +416,15 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
       panelWidth: ui ? 480 : undefined,
       panelHeight: panelHeight ?? (ui ? 600 : undefined),
       soundCue: { type: 'one-shot', name: 'morning-motif', volume: 0.4 },
+      // Evidence for the answer reflector (exchange-bridge hands
+      // result.sources to the judge). The spoken brief's numbers all come
+      // from these section texts.
+      sources: this._buildEvidence(contributions),
       data: {
         type: 'morning_brief',
         fullSpeech,
         contributions: contributions.map((c) => ({ section: c.section, priority: c.priority })),
+        sections,
       },
     };
     } catch (err) {
@@ -438,14 +492,29 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
 
     // Build style instructions from preferences
     const style = prefs['Style'] || 'radio-morning-show';
-    const length = prefs['Length'] || 'standard (80-150 words)';
+    const baseLength = prefs['Length'] || 'standard (80-150 words)';
     const signOff = prefs['Sign-Off'] || 'brief forward-looking line';
     const nameInstruction = userName
       ? `Address the user by name ("${userName}") in the greeting.`
       : 'Use a warm but generic greeting.';
+    // One useful sentence per meeting beats the word budget on a busy day.
+    const calItems = contributions.find((c) => c.section === 'Calendar');
+    const meetingCount = Array.isArray(calItems?.items)
+      ? calItems.items.filter((i) => i && i.kind === 'meeting' && i.status !== 'completed').length
+      : 0;
+    const length = meetingCount > 3
+      ? `${baseLength}, but with ${meetingCount} meetings ahead one short sentence per meeting matters more than the word count (up to about 220 words)`
+      : baseLength;
+
+    // Standard profile (Sonnet), no thinking: composition is a data-lookup
+    // task; Opus + thinking produced empty-content failures.
+    const composeOptions = { profile: 'standard', maxTokens: 2000, feature: 'daily-brief-compose' };
 
     try {
-      const composedText = await ai.complete(
+      // `_aiOverride` is a test seam (vi.mock does not reliably intercept the
+      // CJS require chain here).
+      const aiImpl = this._aiOverride || ai;
+      const composedText = await aiImpl.complete(
         `You are a radio morning show host delivering a daily briefing. Your style is ${style} -- casual, warm, and organized, like a trusted morning DJ giving listeners their daily rundown.
 
 BRIEFING DATE: The user asked about ${dateLabel}. Frame everything for that day.${dateLabel !== 'today' ? `\n- This is a FORWARD-LOOKING brief. Use future tense ("You have", "There will be") since the events haven't happened yet.` : ''}
@@ -455,10 +524,17 @@ STYLE RULES:
 - ${nameInstruction}
 - Deliver each topic as its own clear segment with natural spoken transitions.
   Examples: "Now for the weather...", "Looking at your schedule...", "On the email front...", "And for tasks..."
-- Keep each segment concise. Summarize, don't list every detail.
-- If there are calendar conflicts or important meetings, make them stand out.
+- WEATHER: lead with the wear-and-bring tip (what to put on, whether to take an umbrella), then at most one sentence of numbers (high and low). Never read humidity.
+- SCHEDULE: one short, useful sentence per meeting still ahead, in time order, built from the "Schedule items" lines (time, who or where, and any flag). Meetings already done get one summary phrase at most. Blocks such as "Don't book" are not meetings -- mention them only if they matter.
+- CONFLICT versus BACK-TO-BACK -- never merge these two ideas:
+  * A CONFLICT is two meetings that OVERLAP in time. Name both and say the user must choose or shorten one.
+  * BACK-TO-BACK means one meeting ends exactly as the next begins -- there is NO overlap, only no break. Name the pair ("straight from X into Y") and never call it a conflict. Never count the same pair as both.
+  * If the data says the schedule conflicts are none, say there are no conflicts. Do not invent one, and do not describe a back-to-back as one.
+- TASKS: read the morning routine items in order, then count what is later today and what is overdue (name at most two overdue items).
+- TICKETS, EMAIL, SLACK, FEED: one or two sentences each, only what is actionable. If a source is not connected, say so in half a sentence and move on.
+- Never tell the user to "check the logs" or to look elsewhere for details you were given.
 - Close with: ${signOff}
-- This will be spoken aloud via TTS. No markdown, no bullet points, no emojis, no special characters.
+- This will be spoken aloud via TTS. No markdown, no bullet points, no emojis, no special characters, no URLs. Say times the way people speak them ("nine to ten AM", "twelve thirty").
 - Target length: ${length}.
 - If a section says data is unavailable, acknowledge it briefly ("Weather's offline today") and move on.
 - NEVER invent or guess data. Only use what's provided below.
@@ -477,7 +553,7 @@ RAW DATA FROM AGENTS:
 ${sections}
 
 Compose the daily briefing:`,
-        { profile: 'standard', maxTokens: 2000, feature: 'daily-brief-compose' }
+        composeOptions
       );
       if (composedText && composedText.trim().length > 20) {
         return composedText.trim();

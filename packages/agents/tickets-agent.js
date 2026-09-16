@@ -15,6 +15,169 @@ const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
 const tickets = require('../../lib/tickets-client');
 
+// ── Daily-brief read path (2026-09-15) ──────────────────────────────────────
+// Open tickets live in the NEON graph (the Tickets app's :Ticket nodes --
+// 595 of them, with pipeline build stages BELONGS_TO the user's playbooks);
+// the Agentic TMS KV store this agent writes holds one test row. The brief
+// reads the graph read-only through lib/neon-read-client (no local graph
+// credential needed), scoped to the signed-in user: tickets they created,
+// or tickets in playbooks they created. Both stores are merged.
+const OPEN_STATUSES = ['open', 'pending', 'in_progress', 'in progress', 'blocked'];
+const OPEN_TICKETS_FOR_USER = `MATCH (t:Ticket)
+WHERE toLower(coalesce(t.status, '')) IN $statuses
+OPTIONAL MATCH (t)-[:BELONGS_TO]->(pb:Playbook)
+OPTIONAL MATCH (creator:Person)-[:CREATED]->(pb)
+WITH t, collect(DISTINCT coalesce(pb.name, pb.title)) AS playbooks, collect(DISTINCT creator.id) AS creators
+WHERE t.created_by_user = $user OR $user IN creators
+RETURN t.id AS id, t.title AS title, t.status AS status, t.priority AS priority, t.section AS section,
+       t.is_blocked AS isBlocked, t.created_by_user AS createdBy, t.created_by_app_name AS app,
+       coalesce(t.ticket_updated_at, t.updatedAt, t.updated_at, t.created_at) AS updated,
+       [p IN playbooks WHERE p IS NOT NULL][0] AS playbook
+ORDER BY updated DESC
+LIMIT 200`;
+const KV_READ_TIMEOUT_MS = 3000;
+
+let _briefDeps = null;
+function _setBriefDepsForTests(deps) {
+  _briefDeps = deps || null;
+}
+
+function _toMs(v) {
+  if (v === null || v === undefined) return 0;
+  if (typeof v === 'number') return v;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
+function _ago(ms, now) {
+  if (!ms) return 'no date';
+  const h = Math.round((now - ms) / 3600000);
+  if (h < 1) return 'just now';
+  if (h < 24) return `${h} hr${h === 1 ? '' : 's'} ago`;
+  const d = Math.round(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+function _statusLabel(status) {
+  const s = String(status || '').toLowerCase().replace(/\s+/g, '_');
+  if (s === 'in_progress') return 'In progress';
+  if (s === 'blocked') return 'Blocked';
+  if (s === 'pending') return 'Pending';
+  return 'Open';
+}
+
+function _normalizeTicket(row, source) {
+  const status = String((row && row.status) || '').toLowerCase().replace(/\s+/g, '_');
+  const title = String((row && row.title) || '').trim() || 'Untitled ticket';
+  const stage = title.match(/^Stage:\s*(.+)$/i);
+  return {
+    id: row && row.id,
+    title,
+    status,
+    blocked: !!(row && (row.isBlocked === true || row.is_blocked === true)) || status === 'blocked',
+    priority: String((row && row.priority) || '').toLowerCase() || null,
+    section: (row && row.section) || null,
+    playbook: (row && row.playbook) || null,
+    updatedMs: _toMs(row && (row.updated !== undefined ? row.updated : row.updatedAt)),
+    source,
+    stage: stage ? stage[1].trim() : null,
+  };
+}
+
+/**
+ * Compress open tickets into { line, spoken } items and a section text.
+ * Blocked first, then the most recently touched regular tickets, then the
+ * pipeline "Stage: ..." tickets grouped by playbook. Pure; exported for tests.
+ */
+function compressTickets(graphRows, kvRows, { now = Date.now() } = {}) {
+  const seen = new Set();
+  const all = [];
+  for (const r of graphRows || []) {
+    const t = _normalizeTicket(r, 'graph');
+    if (t.id && seen.has(t.id)) continue;
+    if (t.id) seen.add(t.id);
+    all.push(t);
+  }
+  for (const r of kvRows || []) {
+    const t = _normalizeTicket(r, 'tms');
+    if (t.id && seen.has(t.id)) continue;
+    if (t.id) seen.add(t.id);
+    all.push(t);
+  }
+  const blocked = all.filter((t) => t.blocked).sort((a, b) => b.updatedMs - a.updatedMs);
+  const stages = all.filter((t) => t.stage && !t.blocked);
+  const regular = all.filter((t) => !t.stage && !t.blocked).sort((a, b) => b.updatedMs - a.updatedMs);
+
+  const byPlaybook = new Map();
+  for (const s of stages) {
+    const key = s.playbook || 'an unnamed playbook';
+    const g = byPlaybook.get(key) || { playbook: key, stages: [], updatedMs: 0 };
+    g.stages.push(s.stage);
+    g.updatedMs = Math.max(g.updatedMs, s.updatedMs);
+    byPlaybook.set(key, g);
+  }
+  const groups = [...byPlaybook.values()].sort((a, b) => b.updatedMs - a.updatedMs);
+
+  const items = [];
+  for (const t of blocked.slice(0, 3)) {
+    items.push({
+      kind: 'blocked',
+      line: `Blocked · ${t.title}${t.playbook ? ` · ${t.playbook}` : ''} · ${_ago(t.updatedMs, now)}`,
+      spoken: `${t.title} is blocked.`,
+    });
+  }
+  for (const t of regular.slice(0, 3)) {
+    const pri = t.priority && !['normal', 'medium'].includes(t.priority) ? ` · ${t.priority}` : '';
+    items.push({
+      kind: 'open',
+      line: `${_statusLabel(t.status)} · ${t.title}${pri}${t.playbook ? ` · ${t.playbook}` : ''} · ${_ago(t.updatedMs, now)}`,
+      spoken: `${t.title}, ${_statusLabel(t.status).toLowerCase()}.`,
+    });
+  }
+  for (const g of groups.slice(0, 2)) {
+    const distinct = [...new Set(g.stages)];
+    items.push({
+      kind: 'stages',
+      line: `${g.playbook} · ${g.stages.length} build stage ticket${g.stages.length !== 1 ? 's' : ''} open (${distinct.join(', ')})`,
+      spoken: `${g.playbook} has ${g.stages.length} build stage ticket${g.stages.length !== 1 ? 's' : ''} open.`,
+    });
+  }
+
+  const counts = {
+    open: all.length,
+    blocked: blocked.length,
+    regular: regular.length,
+    stages: stages.length,
+    playbooksWithStages: groups.length,
+    graph: (graphRows || []).length,
+    tms: (kvRows || []).length,
+  };
+  let headline;
+  if (all.length === 0) headline = 'No open tickets';
+  else {
+    headline = `${all.length} open ticket${all.length !== 1 ? 's' : ''}`;
+    if (stages.length === all.length) headline += ', all of them pipeline build stages';
+    else if (stages.length) headline += ` (${stages.length} pipeline build stages)`;
+    headline += blocked.length ? `, ${blocked.length} blocked` : ', none blocked';
+  }
+  const lines = [
+    `${headline}${groups.length ? ` across ${groups.length} playbook${groups.length !== 1 ? 's' : ''}` : ''}.`,
+  ];
+  if (items.length) {
+    lines.push('Open items (blocked first, then most recent):');
+    for (const it of items) lines.push(`- ${it.line}`);
+  }
+  if (groups.length > 2) {
+    lines.push(
+      `Other playbooks with open build stages: ${groups
+        .slice(2)
+        .map((g) => `${g.playbook} (${g.stages.length})`)
+        .join(', ')}.`
+    );
+  }
+  return { headline, content: lines.join('\n'), items, counts };
+}
+
 const TICKETS_ACCOUNT_ID = '35254342-4a2e-475b-aec1-18547e517e29';
 const TICKETS_BASE_URL = `https://files.edison.api.onereach.ai/public/${TICKETS_ACCOUNT_ID}/agententic-tms/index.html`;
 
@@ -85,7 +248,71 @@ const ticketsAgent = {
   ],
   executionType: 'action',
   estimatedExecutionMs: 6000,
-  dataSources: ['edison-kv'],
+  // Daily-brief budget: graph read + KV read measured 3.5 s (2026-09-15).
+  briefingTimeoutMs: 8000,
+  dataSources: ['edison-kv', 'neon-graph'],
+
+  /**
+   * Daily-brief contribution: the user's open tickets (NEON :Ticket nodes
+   * scoped to the user + the Agentic TMS KV store), compressed to a few
+   * { line, spoken } items. Read-only.
+   */
+  async getBriefing() {
+    const section = 'Tickets';
+    try {
+      const deps = _briefDeps || {};
+      // resolveUserId reads the keychain; bound it so a stalled keychain
+      // never holds the whole brief.
+      const userId =
+        deps.userId !== undefined
+          ? deps.userId
+          : await Promise.race([
+              tickets.resolveUserId().catch(() => null),
+              new Promise((resolve) => {
+                const t = setTimeout(() => resolve(null), 2500);
+                if (typeof t.unref === 'function') t.unref();
+              }),
+            ]);
+      if (!userId) {
+        return {
+          section,
+          priority: 6,
+          content: "Tickets: I can't tell which tickets are yours yet -- no signed-in OneReach email.",
+          items: [],
+        };
+      }
+      const read = deps.read || require('../../lib/neon-read-client').neonRead;
+      let graphRows = [];
+      let graphError = null;
+      try {
+        graphRows = await read(OPEN_TICKETS_FOR_USER, { user: userId, statuses: OPEN_STATUSES });
+      } catch (err) {
+        graphError = err.message;
+        log.warn('tickets-agent', 'brief: ticket graph read failed', { error: err.message });
+      }
+      let kvRows = [];
+      try {
+        const kvAll = deps.kvAll ? deps.kvAll(userId) : tickets.getAllTickets(userId);
+        const all = await Promise.race([
+          kvAll,
+          new Promise((_, rej) => {
+            setTimeout(() => rej(new Error('KV ticket read timed out')), KV_READ_TIMEOUT_MS).unref?.();
+          }),
+        ]);
+        kvRows = (all || []).filter((t) => t && !t.isCompleted);
+      } catch (err) {
+        log.info('tickets-agent', 'brief: KV ticket read skipped', { error: err.message });
+      }
+      if (graphError && kvRows.length === 0) {
+        return { section, priority: 6, content: 'Tickets are unavailable right now (ticket graph unreachable).', items: [] };
+      }
+      const summary = compressTickets(graphRows, kvRows, { now: deps.now || Date.now() });
+      return { section, priority: 6, content: summary.content, headline: summary.headline, items: summary.items, counts: summary.counts };
+    } catch (err) {
+      log.warn('tickets-agent', 'getBriefing failed', { error: err.message });
+      return { section, priority: 6, content: null };
+    }
+  },
 
   prompt: `Ticketing Agent -- the primary agent for ALL ticket and ticketing requests.
 
@@ -649,5 +876,10 @@ Merge with any existing context. The title is required.`,
     };
   },
 };
+
+// Test seams for the daily-brief read path.
+ticketsAgent._setBriefDepsForTests = _setBriefDepsForTests;
+ticketsAgent._compressTickets = compressTickets;
+ticketsAgent._OPEN_TICKETS_FOR_USER = OPEN_TICKETS_FOR_USER;
 
 module.exports = ticketsAgent;

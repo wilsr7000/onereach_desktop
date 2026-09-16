@@ -123,6 +123,46 @@ function _formatRelativeWhen(fireAtMs, now = Date.now()) {
   return ` on ${when}`;
 }
 
+// Daily-brief read seam: the Tasks section reads the graph through
+// lib/neon-read-client (no local Neo4j credential needed -- the write path
+// above still needs one). Tests inject { read, profileName, userEmail, now }.
+let _briefDeps = null;
+function _setBriefDepsForTests(deps) {
+  _briefDeps = deps || null;
+}
+
+async function _profileFirstName() {
+  try {
+    const { getUserProfile } = require('../../lib/user-profile-store');
+    const profile = getUserProfile();
+    if (!profile.isLoaded()) await profile.load();
+    const facts = profile.getFacts('Identity') || {};
+    const name = facts['Name'] || facts['First Name'];
+    if (name && !String(name).includes('not yet learned')) return String(name).trim().split(/\s+/)[0];
+  } catch (_) {
+    /* profile optional */
+  }
+  return null;
+}
+
+async function _sessionEmail() {
+  try {
+    const credentialManager = require('../../credential-manager');
+    // Keychain reads can stall; the email only narrows TaskItems, so it must
+    // never hold the Tasks section.
+    const creds = await Promise.race([
+      credentialManager.getOneReachCredentials(),
+      new Promise((resolve) => {
+        const t = setTimeout(() => resolve(null), 1500);
+        if (typeof t.unref === 'function') t.unref();
+      }),
+    ]);
+    return creds && typeof creds.email === 'string' ? creds.email : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 const taskQueueAgent = {
   id: 'task-queue-agent',
   name: 'Task Queue',
@@ -165,6 +205,52 @@ const taskQueueAgent = {
       return !!(client && typeof client.isReady === 'function' && client.isReady());
     } catch (_e) {
       return false;
+    }
+  },
+
+  /**
+   * Daily-brief contribution: the user's morning routine and the day's
+   * tasks from the GPS for Life queue in NEON (Child -[:HAS_CHORE]-> Chore),
+   * plus open TaskItems from the graph TaskQueue. Read-only. Degrades to
+   * `content: null` (section omitted) when the graph is unreachable or no
+   * Child node matches the user.
+   */
+  async getBriefing(context = {}) {
+    const section = 'Tasks';
+    try {
+      const { readTasksForBrief } = require('../../lib/gps-for-life/chores-read');
+      const { planDay, buildTasksBriefText } = require('../../lib/gps-for-life/routine');
+      const deps = _briefDeps || {};
+      const profileName = deps.profileName !== undefined ? deps.profileName : await _profileFirstName();
+      const userEmail = deps.userEmail !== undefined ? deps.userEmail : await _sessionEmail();
+      const { child, chores, taskItems } = await readTasksForBrief({ profileName, userEmail, read: deps.read });
+      if (!child && (!taskItems || taskItems.length === 0)) {
+        log.info('agent', '[task-queue-agent] brief: no Child node matched the user; Tasks section skipped', {
+          profileName: profileName || null,
+        });
+        return { section, priority: 5, content: null };
+      }
+      const day = context?.targetDate || new Date();
+      const plan = planDay(chores, { day, now: deps.now || new Date(), taskItems });
+      const { headline, content, items } = buildTasksBriefText(plan, { dateLabel: context?.dateLabel || 'today' });
+      return {
+        section,
+        priority: 5,
+        content,
+        headline,
+        items,
+        plan: {
+          child: child ? child.name || child.phone : null,
+          morning: plan.morning.length,
+          later: plan.later.length,
+          anytime: plan.anytime.length,
+          overdue: plan.overdue.length,
+          doneToday: plan.doneToday,
+        },
+      };
+    } catch (err) {
+      log.warn('agent', '[task-queue-agent] getBriefing failed', { error: err.message });
+      return { section, priority: 5, content: null };
     }
   },
 
@@ -268,6 +354,7 @@ name can't be inferred it emits needsInput for a multi-turn follow-up.`,
 
   // Test hooks
   _setAddTaskItemForTests,
+  _setBriefDepsForTests,
   _setExtractorForTests,
   _priorityToInt,
   _parseFireAtMs,

@@ -18,6 +18,9 @@ const https = require('https');
 const { getAgentMemory } = require('../../lib/agent-memory-store');
 const { getUserProfile } = require('../../lib/user-profile-store');
 const { learnFromInteraction, reviewExecution } = require('../../lib/thinking-agent');
+// What to wear beats what the thermometer says: the daily brief's weather
+// segment is derived from a real forecast by deterministic rules.
+const { buildWearTip } = require('../../lib/weather-tips');
 const ai = require('../../lib/ai-service');
 const { getLogQueue } = require('../../lib/log-event-queue');
 const log = getLogQueue();
@@ -89,6 +92,119 @@ async function fetchOpenMeteo(location, useCelsius = false) {
   } catch (_) {
     return null;
   }
+}
+
+/**
+ * Full-day forecast via Open-Meteo (free, no API key): current conditions,
+ * the target day's hourly curve and the daily summary, normalised for
+ * lib/weather-tips.buildWearTip(). Returns null on any failure.
+ *
+ * @param {string} location - city name
+ * @param {Object} [opts] - { useCelsius, targetDate, fetchJson (test seam) }
+ */
+async function fetchOpenMeteoForecast(location, opts = {}) {
+  const useCelsius = !!opts.useCelsius;
+  const getJson = opts.fetchJson || httpsGetJson;
+  try {
+    const geoUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
+    const geo = await getJson(geoUrl, 5000);
+    if (!geo.ok || !geo.data.results || geo.data.results.length === 0) return null;
+    const { latitude, longitude, name: cityName } = geo.data.results[0];
+
+    const unit = useCelsius ? 'celsius' : 'fahrenheit';
+    const windUnit = useCelsius ? 'kmh' : 'mph';
+    const params = [
+      `latitude=${latitude}`,
+      `longitude=${longitude}`,
+      'current=temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m,precipitation',
+      'hourly=temperature_2m,apparent_temperature,precipitation_probability,weather_code,wind_speed_10m,uv_index',
+      'daily=temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,precipitation_sum,weather_code,wind_speed_10m_max,uv_index_max,sunrise,sunset',
+      `temperature_unit=${unit}`,
+      `wind_speed_unit=${windUnit}`,
+      'precipitation_unit=inch',
+      'timezone=auto',
+      'forecast_days=3',
+    ];
+    const wx = await getJson(`https://api.open-meteo.com/v1/forecast?${params.join('&')}`, 6000);
+    if (!wx.ok || !wx.data || !wx.data.daily) return null;
+    return normalizeOpenMeteoForecast(wx.data, {
+      location: cityName || location,
+      unit: useCelsius ? 'C' : 'F',
+      windUnit,
+      targetDate: opts.targetDate || null,
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+function _localDayKey(d) {
+  const x = new Date(d);
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Shape an Open-Meteo forecast payload into the tip module's input for ONE
+ * target day (default: the first day of the forecast, i.e. today in the
+ * location's own timezone).
+ */
+function normalizeOpenMeteoForecast(data, { location, unit, windUnit, targetDate } = {}) {
+  const daily = (data && data.daily) || {};
+  const days = Array.isArray(daily.time) ? daily.time : [];
+  let idx = 0;
+  if (targetDate) {
+    const found = days.indexOf(_localDayKey(targetDate));
+    idx = found >= 0 ? found : 0;
+  }
+  const dayKey = days[idx] || null;
+  const pick = (arr) => (Array.isArray(arr) ? arr[idx] : undefined);
+  const h = (data && data.hourly) || {};
+  const times = Array.isArray(h.time) ? h.time : [];
+  const hourly = [];
+  for (let i = 0; i < times.length; i++) {
+    if (dayKey && !String(times[i]).startsWith(dayKey)) continue;
+    hourly.push({
+      time: times[i],
+      hour: parseInt(String(times[i]).slice(11, 13), 10),
+      temp: h.temperature_2m?.[i],
+      feels: h.apparent_temperature?.[i],
+      precipProb: h.precipitation_probability?.[i],
+      code: h.weather_code?.[i],
+      wind: h.wind_speed_10m?.[i],
+      uv: h.uv_index?.[i],
+    });
+  }
+  const c = (data && data.current) || {};
+  return {
+    unit: unit || 'F',
+    windUnit: windUnit || 'mph',
+    location: location || null,
+    dayKey,
+    timezone: (data && data.timezone) || null,
+    current: {
+      temp: c.temperature_2m,
+      feelsLike: c.apparent_temperature,
+      humidity: c.relative_humidity_2m,
+      code: c.weather_code,
+      desc: wmoCodeToDescription(c.weather_code),
+      wind: c.wind_speed_10m,
+      precipitation: c.precipitation,
+    },
+    daily: {
+      high: pick(daily.temperature_2m_max),
+      low: pick(daily.temperature_2m_min),
+      feelsHigh: pick(daily.apparent_temperature_max),
+      feelsLow: pick(daily.apparent_temperature_min),
+      precipProbMax: pick(daily.precipitation_probability_max),
+      precipSumInches: pick(daily.precipitation_sum),
+      code: pick(daily.weather_code),
+      windMax: pick(daily.wind_speed_10m_max),
+      uvMax: pick(daily.uv_index_max),
+      sunrise: pick(daily.sunrise),
+      sunset: pick(daily.sunset),
+    },
+    hourly,
+  };
 }
 
 /** Convert WMO weather code to a human-readable description */
@@ -287,15 +403,102 @@ const weatherAgent = {
   keywords: ['weather', 'temperature', 'forecast', 'rain', 'sunny', 'cloudy', 'cold', 'hot', 'humid'],
   executionType: 'action',
   estimatedExecutionMs: 3000,
-  dataSources: ['wttr-in', 'calendar-store', 'user-profile'],
+  dataSources: ['wttr-in', 'open-meteo', 'calendar-store', 'user-profile'],
+
+  /**
+   * Test seam: replace the forecast fetcher (defaults to Open-Meteo).
+   * `null` restores the default.
+   */
+  _forecastFetcher: null,
+  _setForecastFetcherForTests(fn) {
+    this._forecastFetcher = typeof fn === 'function' ? fn : null;
+  },
+
+  /**
+   * Fetch the normalised day forecast for the tip. Open-Meteo by default
+   * (wttr.in's certificate expired in 2026-09 and it never carried a usable
+   * hourly curve anyway).
+   */
+  async _fetchForecastData(location, opts = {}) {
+    const fetcher = this._forecastFetcher || fetchOpenMeteoForecast;
+    try {
+      return await fetcher(location, opts);
+    } catch (err) {
+      log.warn('agent', '[weather-agent] forecast fetch failed', { error: err.message });
+      return null;
+    }
+  },
+
+  /**
+   * Resolve the user's home location + units: agent memory first, then the
+   * global user profile (Home City / City / Home). Returns
+   * { homeLocation: string|null, useCelsius: boolean }.
+   */
+  async _resolveHomeLocation() {
+    if (!this.memory) await this.initialize();
+    const prefs = this.memory.parseSectionAsKeyValue('Learned Preferences') || {};
+    let homeLocation = prefs['Home Location'];
+    const useCelsius = !!prefs['Units']?.toLowerCase().includes('celsius');
+
+    if (!homeLocation || homeLocation === '*Not set - will ask*') {
+      homeLocation = null;
+      try {
+        const profile = getUserProfile();
+        if (!profile.isLoaded()) await profile.load();
+        const profileFacts = profile.getFacts('Locations');
+
+        // Check Home City first (set by weather agent), then City, then Home.
+        // Do NOT read 'Weather Location' -- that field may contain stale IP-geolocated data.
+        const candidates = [profileFacts['Home City'], profileFacts['City'], profileFacts['Home']];
+        for (const candidate of candidates) {
+          if (candidate && !candidate.includes('not yet learned') && _looksLikeCity(candidate)) {
+            homeLocation = candidate;
+            break;
+          }
+        }
+      } catch (_ignored) {
+        /* profile/home city lookup optional */
+      }
+    }
+    return { homeLocation: homeLocation || null, useCelsius };
+  },
 
   /**
    * Briefing contribution. Accepts optional { targetDate, isToday, dateLabel } from daily-brief-agent.
-   * For future dates, requests a forecast instead of current conditions.
+   *
+   * 2026-09-15: leads with WHAT TO WEAR. The brief used to report the
+   * current temperature and humidity, which is true and useless at 7 AM.
+   * Now: the day's forecast (Open-Meteo) -> lib/weather-tips rules ->
+   * "light jacket now, shed it by afternoon, no rain, sunscreen at midday",
+   * plus one { line, spoken } item so the same tip is on screen.
+   * Falls back to the current-conditions path when no forecast is available.
    */
   async getBriefing(context = {}) {
     const label = context?.dateLabel || 'today';
     const isToday = context?.isToday !== false;
+    try {
+      const { homeLocation, useCelsius } = await this._resolveHomeLocation();
+      if (homeLocation) {
+        const forecast = await this._fetchForecastData(homeLocation, {
+          useCelsius,
+          targetDate: context?.targetDate || null,
+        });
+        if (forecast) {
+          const tip = buildWearTip(forecast, { now: new Date(), isToday });
+          const content = [tip.summary, tip.tip].filter(Boolean).join(' ');
+          return {
+            section: 'Weather',
+            priority: 2,
+            content,
+            headline: tip.headline,
+            items: [{ line: tip.line, spoken: tip.spoken }],
+            facts: tip.facts,
+          };
+        }
+      }
+    } catch (err) {
+      log.warn('agent', '[weather-agent] forecast tip failed, falling back', { error: err.message });
+    }
     try {
       const query = isToday ? 'current weather' : `weather forecast for ${label}`;
       const result = await this.execute({ content: query, metadata: {} });
@@ -402,32 +605,8 @@ This agent has live weather data. It reports real-time conditions and forecasts.
         return this._fetchWeather(location, task, { saveAsHome: task.context?.saveAsHome });
       }
 
-      // 3. Get preferences (check agent memory first, then global user profile)
-      const prefs = this.memory.parseSectionAsKeyValue('Learned Preferences') || {};
-      let homeLocation = prefs['Home Location'];
-      const useCelsius = prefs['Units']?.toLowerCase().includes('celsius');
-
-      // Fallback to global user profile for home location
-      if (!homeLocation || homeLocation === '*Not set - will ask*') {
-        try {
-          const profile = getUserProfile();
-          if (!profile.isLoaded()) await profile.load();
-          const profileFacts = profile.getFacts('Locations');
-
-          // Check Home City first (set by weather agent), then City, then Home.
-          // Do NOT read 'Weather Location' -- that field may contain stale IP-geolocated data.
-          const candidates = [profileFacts['Home City'], profileFacts['City'], profileFacts['Home']];
-
-          for (const candidate of candidates) {
-            if (candidate && !candidate.includes('not yet learned') && _looksLikeCity(candidate)) {
-              homeLocation = candidate;
-              break;
-            }
-          }
-        } catch (_ignored) {
-          /* profile/home city lookup optional */
-        }
-      }
+      // 3. Get preferences (agent memory first, then the global user profile)
+      const { homeLocation, useCelsius } = await this._resolveHomeLocation();
 
       // 4. Try to get location from task content
       let location = cleanLocation(this.extractLocation(task.content));

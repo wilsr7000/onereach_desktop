@@ -81,7 +81,9 @@ describe('voice and UI agree (the "said 3, showed 7" regression)', () => {
     expect(out.content).toContain('3 meetings left today');
     expect(out.content).toContain('(2 already done)');
     // The next-up line points at a REAL meeting, not the block/declined
-    expect(out.content).toContain('Next: "Roadmap review"');
+    // 2026-09-15: an in-progress meeting is "Now", the first not-yet-started one is "Next".
+    expect(out.content).toContain('Now: "Roadmap review" until 3:00 PM.');
+    expect(out.content).toContain('Next: "Board prep" at 4:30 PM.');
   });
 
   it('the dayView glance card says the same numbers', () => {

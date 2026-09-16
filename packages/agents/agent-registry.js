@@ -78,6 +78,8 @@ const BUILT_IN_AGENT_IDS = [
   'mcp-bridge-agent', // MCP bridge - routes voice requests to user-configured MCP servers via lib/mcp-client.js
   'screen-vision-agent', // Screen vision - captures the active screen and answers questions via ai.vision
   'live-translate-agent', // Live translate - starts/stops speech translation via /v1/realtime/translations
+  'slack-agent', // Slack - mentions and DMs waiting (user token); briefing contributor
+  'idw-feed-agent', // IDW Feed - what's new in the feeds the Flipboard IDW Feed reads; briefing contributor
 ];
 
 // ==================== VALIDATION ====================

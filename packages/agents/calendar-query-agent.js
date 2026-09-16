@@ -31,6 +31,9 @@ const { buildPrepCard } = require('../../lib/calendar-prep-card');
 const { getTimeContext } = require('../../lib/thinking-agent');
 const { renderAgentUI } = require('../../lib/agent-ui-renderer');
 const { getCalendarStore } = require('../../lib/calendar-store');
+// ONE compression of the schedule for screen + voice (conflict vs
+// back-to-back vocabulary, per-event { line, spoken } items).
+const { buildCalendarBriefText } = require('../../lib/brief-items');
 
 const { getEventsForDay, fetchEventDetails } = require('../../lib/calendar-fetch');
 const { analyzeDay, getNextEvent, findFreeSlots, findConflicts } = require('../../lib/calendar-data');
@@ -43,6 +46,25 @@ const {
   classifyBriefTimeline,
   localDateKey,
 } = require('../../lib/calendar-format');
+
+// Snapshot diff: a prior snapshot older than this cannot say what is "new"
+// about the target day (its 14-day window may not even reach it).
+const MAX_DIFF_AGE_DAYS = 7;
+
+/**
+ * Keep only the snapshot entries whose start falls on `dayKey` (local
+ * YYYY-MM-DD). All-day rows carry a bare date; timed rows an ISO datetime.
+ */
+function _snapshotMapForDay(map, dayKey) {
+  const out = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    const startISO = v && v.startISO;
+    if (!startISO) continue;
+    const key = /^\d{4}-\d{2}-\d{2}$/.test(startISO) ? startISO : localDateKey(new Date(startISO));
+    if (key === dayKey) out[k] = v;
+  }
+  return out;
+}
 
 const calendarQueryAgent = {
   id: 'calendar-query-agent',
@@ -81,6 +103,9 @@ const calendarQueryAgent = {
   ],
   executionType: 'action',
   estimatedExecutionMs: 3000,
+  // Daily-brief budget: a cold Omnical fetch measured 4.8 s (2026-09-15);
+  // the default (2x estimate = 6 s) left no headroom.
+  briefingTimeoutMs: 8000,
   dataSources: ['calendar-api', 'calendar-store'],
 
   prompt: `Calendar Query Agent answers questions about the user's schedule, meetings, and availability.
@@ -157,19 +182,27 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
         ? global.settingsManager.get('calendar.briefMerge.maxLiveEvents')
         : 50;
 
-      let liveEvents = [];
+      let liveEvents = []; // the TARGET DAY's live events (what the brief merges)
+      let liveWindow = []; // the whole fetched window (what the snapshot keeps for tomorrow's diff)
       let staleReason = null;
+      let liveFetched = false;
       if (includeLive) {
         try {
           const timeframe = this._timeframeForDate(date);
           const events = await this._fetchLiveEventsForBrief(timeframe);
-          liveEvents = (events || []).slice(0, maxLive);
+          liveWindow = Array.isArray(events) ? events : [];
+          // calendar-fetch returns a 14-day window. Scope to the target day
+          // BEFORE capping (2026-09-15: the cap used to apply to the window,
+          // so a busy fortnight could push today's own meetings past it).
+          liveEvents = this._eventsOnDay(liveWindow, date || new Date()).slice(0, maxLive);
+          liveFetched = true;
           // Phase 5: events may carry a __stale tag if calendar-fetch fell
           // back to the local cache (Omnical down or circuit open). Bubble
           // that up so the brief can disclose "based on local cache".
           if (events && events.__stale) staleReason = events.__staleReason || 'stale';
           log.info('calendar-query', 'Brief merge fetched live events', {
             timeframe,
+            windowCount: liveWindow.length,
             count: liveEvents.length,
             cappedAt: maxLive,
             stale: !!staleReason,
@@ -183,8 +216,21 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
         }
       }
 
+      // Live-first merge policy (2026-09-15): when the live calendar answered
+      // (fresh or cached), the app-local store stays OUT of the brief. Its
+      // rows are legacy test events ("standup" / "daily standup" at 9:00
+      // every weekday) that collided with the user's real 9 AM meeting and
+      // produced phantom "3 conflicts" every morning. It is only merged when
+      // the live fetch is off or failed, or when the user opts back in with
+      // calendar.briefIncludeLocalEvents = true.
+      const localFlag = global.settingsManager?.get('calendar.briefIncludeLocalEvents');
+      const includeLocal = localFlag === true || !liveFetched;
+      if (!includeLocal) {
+        log.info('calendar-query', 'Brief merge: live calendar answered, app-local store left out');
+      }
+
       const store = this._getStore();
-      const brief = await store.generateMorningBrief(date, liveEvents);
+      const brief = await store.generateMorningBrief(date, liveEvents, { includeLocal });
 
       // Phase 2e: identity-keyed diff against the most recent prior snapshot.
       // The diff line ("Two new since yesterday: ...") is computed before
@@ -196,13 +242,17 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
         log.warn('calendar-query', 'Snapshot diff failed (non-fatal)', { error: err.message });
       }
 
-      const result = this._composeBriefingContribution(brief, label, diffSummary, { staleReason });
+      const selfEmail = await this._selfEmail();
+      const result = this._composeBriefingContribution(brief, label, diffSummary, { staleReason, selfEmail });
 
       // Write today's snapshot AFTER reading the prior one so today doesn't
-      // become its own baseline. Best-effort; failure is non-fatal.
+      // become its own baseline. The snapshot keeps the whole fetched window
+      // so tomorrow's brief can diff TOMORROW against today's view of it.
+      // Best-effort; failure is non-fatal.
       try {
-        if (this.calendarMemory && liveEvents.length > 0) {
-          await this.calendarMemory.writeBriefSnapshot(date || new Date(), liveEvents);
+        const toSnapshot = liveWindow.length > 0 ? liveWindow : liveEvents;
+        if (this.calendarMemory && toSnapshot.length > 0) {
+          await this.calendarMemory.writeBriefSnapshot(date || new Date(), toSnapshot);
         }
       } catch (err) {
         log.warn('calendar-query', 'Snapshot write failed (non-fatal)', { error: err.message });
@@ -228,8 +278,17 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
     const prior = this.calendarMemory.getMostRecentBriefSnapshot(target);
     if (!prior) return null;
 
-    const todayMap = buildSnapshotMap(todayEvents);
-    const diff = diffSnapshots(prior.events, todayMap);
+    // A prior snapshot older than a week cannot say what is "new" about the
+    // target day in any useful sense -- and its 14-day window may not even
+    // reach the target day (2026-09-15: "39 new since 12 days ago; 39
+    // cancelled" was the fortnight sliding, not the day changing).
+    if (Number.isFinite(prior.ageDays) && prior.ageDays > MAX_DIFF_AGE_DAYS) return null;
+
+    // Diff ONLY the target day, on both sides. Both snapshots hold a window.
+    const dayKey = localDateKey(target);
+    const todayMap = _snapshotMapForDay(buildSnapshotMap(todayEvents), dayKey);
+    const priorMap = _snapshotMapForDay(prior.events, dayKey);
+    const diff = diffSnapshots(priorMap, todayMap);
 
     const { added, removed, moved, retitled } = diff;
     if (added.length === 0 && removed.length === 0 && moved.length === 0 && retitled.length === 0) {
@@ -289,75 +348,84 @@ This agent reads calendar data. It does not create, modify, or delete events.`,
     //  - personal blocks/holds are not meetings;
     //  - when the label is "today", the headline is what's LEFT, with the
     //    finished portion mentioned, not a raw all-day tally.
-    // The classifier is SHARED with the dayView glance card
-    // (lib/calendar-format.js) so voice and UI can never disagree again
-    // (the "said 3, showed 7" mismatch).
-    const { meetings, upcoming, completed } = classifyBriefTimeline(brief.timeline);
-
-    const parts = [];
-    if (label === 'today') {
-      if (meetings.length === 0) {
-        const none = { section: 'Calendar', priority: 3, content: `No meetings today.` };
-        if (opts.staleReason) none.content += ' (based on local cache; calendar service is offline)';
-        return none;
-      }
-      if (upcoming.length === 0) {
-        parts.push(`Today's meetings are done — you had ${completed.length}.`);
-      } else {
-        parts.push(`${upcoming.length} meeting${upcoming.length !== 1 ? 's' : ''} left today${completed.length ? ` (${completed.length} already done)` : ''}.`);
-      }
-    } else {
-      parts.push(`${meetings.length} meeting${meetings.length !== 1 ? 's' : ''} ${label}.`);
+    // The classifier is SHARED with the dayView glance card so voice and UI
+    // can never disagree (the "said 3, showed 7" mismatch).
+    const { meetings } = classifyBriefTimeline(brief.timeline);
+    if (label === 'today' && meetings.length === 0) {
+      const none = { section: 'Calendar', priority: 3, content: `No meetings today.` };
+      if (opts.staleReason) none.content += ' (based on local cache; calendar service is offline)';
+      return none;
     }
 
-    // Prefer the next upcoming meeting; fall back to the first timeline entry for
-    // forward-looking briefs (tomorrow / this week) where every entry is upcoming anyway.
-    const firstUpcoming = upcoming[0] || (label !== 'today' ? meetings[0] : null);
-    if (firstUpcoming) {
-      parts.push(`Next: "${firstUpcoming.title}" at ${firstUpcoming.start}.`);
-    }
-
-    if (brief.backToBack?.length) {
-      parts.push(`${brief.backToBack.length} back-to-back.`);
-    }
-
-    if (brief.conflicts?.length) {
-      const conflictCount = brief.conflicts.length;
-      const sample = brief.conflicts[0];
-      const a = sample?.event1?.title;
-      const b = sample?.event2?.title;
-      if (a && b) {
-        parts.push(`${conflictCount} conflict${conflictCount > 1 ? 's' : ''}: "${a}" and "${b}" overlap.`);
-      } else {
-        parts.push(`${conflictCount} conflict${conflictCount > 1 ? 's' : ''}.`);
-      }
-    }
-
-    if (brief.longestFree?.durationMinutes >= 60) {
-      const hours = Math.round(brief.longestFree.durationMinutes / 60);
-      parts.push(`Longest free block: ${hours}h.`);
-    }
-
-    // Phase 2e: append the "what changed since last brief" diff line.
-    // Falsy diffSummary means no prior snapshot, no changes, or feature off.
-    if (diffSummary?.line) {
-      parts.push(diffSummary.line);
-    }
-
-    // Phase 5: stale-source disclosure -- spoken so the user knows the
-    // brief might be incomplete during an Omnical outage.
-    if (opts.staleReason) {
-      parts.push('(based on local cache; calendar service is offline)');
-    }
+    // 2026-09-15: the content used to be "5 meetings left today. Next: X.
+    // 3 back-to-back. 3 conflicts." -- bare counts with no names, and the
+    // overlapping pairs counted in BOTH tallies. lib/brief-items now spells
+    // out every event as one { line, spoken } item plus named, defined
+    // conflict / back-to-back lines, so the composer has nothing to guess.
+    const { content, items } = buildCalendarBriefText({
+      brief,
+      label,
+      diffLine: diffSummary?.line || null,
+      staleReason: opts.staleReason || null,
+      selfEmail: opts.selfEmail || null,
+    });
 
     return {
       section: 'Calendar',
       priority: 3,
-      content: parts.join(' '),
+      content,
       briefData: brief,
+      // Per-event compression shared with the dayView rows.
+      items,
       ...(diffSummary ? { briefDiff: diffSummary.diff } : {}),
       ...(opts.staleReason ? { stale: true, staleReason: opts.staleReason } : {}),
     };
+  },
+
+  /**
+   * Keep only the events that touch the target local day. Events without a
+   * readable start (test fixtures, malformed rows) are kept -- the store's
+   * own range filter is the last word.
+   */
+  _eventsOnDay(events, date) {
+    const target = date instanceof Date ? date : new Date(date || new Date());
+    const dayStart = new Date(target);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart);
+    dayEnd.setDate(dayEnd.getDate() + 1);
+    return (Array.isArray(events) ? events : []).filter((ev) => {
+      if (!ev) return false;
+      const rawStart = ev.start?.dateTime || ev.start?.date || ev.startTime || null;
+      const rawEnd = ev.end?.dateTime || ev.end?.date || ev.endTime || rawStart;
+      if (!rawStart) return true;
+      const s = new Date(rawStart);
+      const e = new Date(rawEnd);
+      if (Number.isNaN(s.getTime())) return true;
+      const end = Number.isNaN(e.getTime()) ? s : e;
+      return s < dayEnd && end > dayStart;
+    });
+  },
+
+  /**
+   * The user's own email, so attendee compression can leave them out of
+   * "with ..." lists. Best-effort: null when no session is available.
+   */
+  async _selfEmail() {
+    try {
+      const credentialManager = require('../../credential-manager');
+      // Keychain reads can stall (a locked keychain, a pending prompt); the
+      // email is cosmetic here, so never let it hold the calendar section.
+      const creds = await Promise.race([
+        credentialManager.getOneReachCredentials(),
+        new Promise((resolve) => {
+          const t = setTimeout(() => resolve(null), 1500);
+          if (typeof t.unref === 'function') t.unref();
+        }),
+      ]);
+      return creds && typeof creds.email === 'string' ? creds.email : null;
+    } catch (_) {
+      return null;
+    }
   },
 
   /**
