@@ -112,10 +112,12 @@ describe('AI Service', () => {
     });
 
     it('fast profile maps to Claude Haiku with OpenAI fallback', () => {
+    // The fast tier is the auction bidder: it must answer inside the 6 s bid
+    // window. Fable 5.1 measured 5.2-6.4 s per bid (2026-09-15), Haiku ~2-3 s.
       const { DEFAULT_MODEL_PROFILES } = require('../../lib/ai-service');
       const fast = DEFAULT_MODEL_PROFILES.fast;
       expect(fast.provider).toBe('anthropic');
-      expect(fast.model).toBe('claude-fable-5-1');
+      expect(fast.model).toBe('claude-haiku-4-5-20251001');
       expect(fast.fallback).toBeDefined();
       expect(fast.fallback.provider).toBe('openai');
     });
