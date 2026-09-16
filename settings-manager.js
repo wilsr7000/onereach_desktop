@@ -88,7 +88,11 @@ class SettingsManager {
       if (next === null) return;
       log.info('settings', 'Migrating stale Claude model pin', { from: this._settings.llmModel, to: next });
       this._settings.llmModel = next;
-      this.saveSettings();
+      // In-memory only. This runs inside the settings getter on first load;
+      // persisting here would also write back any secret that failed to
+      // decrypt (a locked or denied keychain leaves '' in memory), wiping
+      // it on disk. The next user-initiated save persists the new pin, and
+      // the migration re-applies on every load until then.
     } catch (err) {
       log.warn('settings', 'Claude model migration skipped', { error: err && err.message });
     }
