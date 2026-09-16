@@ -351,9 +351,14 @@ This agent produces a spoken daily briefing. It coordinates other agents to gath
     const sections = this._buildSections(contributions);
     let ui;
     const calContrib = contributions.find((c) => c.briefData && c.briefData.timeline?.length > 0);
+    // No calendar contribution with data means the calendar failed, timed
+    // out, or said "unavailable" -- never let the dayView claim a clear day.
+    const calendarUnavailable = !calContrib && !contributions.some(
+      (c) => c.section === 'Calendar' && typeof c.content === 'string' && /^No meetings/i.test(c.content)
+    );
     if (calContrib || sections.length > 0) {
       try {
-        ui = buildDayViewSpec(calContrib ? calContrib.briefData : null, fullSpeech, { sections });
+        ui = buildDayViewSpec(calContrib ? calContrib.briefData : null, fullSpeech, { sections, calendarUnavailable });
       } catch (e) {
         log.info('agent', '[DailyBrief] dayView spec failed, falling back to eventList', { error: e.message });
         if (calContrib) {
@@ -562,14 +567,24 @@ Compose the daily briefing:`,
       log.info('agent', '[DailyBrief] LLM composition failed, using fallback', { reason: e.message });
     }
 
-    // Fallback: simple concatenation with basic transitions
+    // Fallback (LLM unavailable): speak the contributors' own spoken
+    // sentences, not their multi-line section texts -- those carry bullet
+    // lists meant for the composer, not for TTS.
     const now = new Date();
     const h = now.getHours();
     const greeting = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
     const greetName = userName ? `, ${userName}` : '';
     const body = contributions
-      .filter((c) => c.content)
-      .map((c) => c.content)
+      .map((c) => {
+        const spoken = Array.isArray(c.items)
+          ? c.items.map((i) => i && i.spoken).filter((s) => typeof s === 'string' && s.length > 0)
+          : [];
+        if (spoken.length) return [c.headline ? `${c.headline}.` : null, ...spoken.slice(0, 8)].filter(Boolean).join(' ');
+        if (typeof c.headline === 'string' && c.headline) return `${c.headline}.`;
+        if (typeof c.content === 'string') return c.content.split('\n')[0];
+        return null;
+      })
+      .filter(Boolean)
       .join(' ');
     return `${greeting}${greetName}. ${body}`;
   },

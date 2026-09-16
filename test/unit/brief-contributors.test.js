@@ -24,6 +24,16 @@ describe('neon-read-client', () => {
     expect(isReadOnlyCypher('MATCH (n) SET n.x = 1')).toBe(false);
     expect(isReadOnlyCypher('MATCH (n) DETACH DELETE n')).toBe(false);
     expect(isReadOnlyCypher('')).toBe(false);
+    // Reviewer-found bypasses (2026-09-15): a quote inside a comment must not
+    // open a "string" that swallows the keyword; procedures are refused outright.
+    expect(isReadOnlyCypher("/* it's */ CREATE (n) /* don't */")).toBe(false);
+    expect(isReadOnlyCypher("// it's\nCREATE (n) // don't")).toBe(false);
+    expect(isReadOnlyCypher("MATCH (n:`a'`) DETACH DELETE n // '")).toBe(false);
+    expect(isReadOnlyCypher("CALL apoc.periodic.iterate('MATCH (n) RETURN n','DETACH DELETE n',{})")).toBe(false);
+    expect(isReadOnlyCypher("CALL db.labels() YIELD label RETURN label")).toBe(false);
+    expect(isReadOnlyCypher("MATCH (n) WHERE n.x = 'unterminated RETURN n")).toBe(false);
+    expect(isReadOnlyCypher("MATCH (t:Ticket) WHERE t.title = 'CREATE a merge set' RETURN t // set")).toBe(true);
+    expect(isReadOnlyCypher("MATCH (c:`Child`) RETURN c")).toBe(true);
   });
   it('tags the statement, sends no password, returns the records', async () => {
     let sent;
@@ -128,7 +138,7 @@ describe('slack-agent', () => {
       const ok = (data) => ({ ok: true, status: 200, json: async () => ({ ok: true, ...data }) });
       if (m === 'auth.test') return ok({ user_id: 'U1' });
       if (m === 'search.messages') {
-        expect(u.searchParams.get('query')).toMatch(/^<@U1> after:\d{4}-\d{2}-\d{2}$/);
+        expect(u.searchParams.get('query')).toBe('<@U1>');
         return ok({ messages: { matches: [{ user: 'U2', username: 'antony', text: '<@U1> can you review the PR?', ts: String(sinceSec + 100), channel: { name: 'idw-sync' } }, { user: 'U1', text: 'mine', ts: String(sinceSec + 200), channel: { name: 'x' } }] } });
       }
       if (m === 'conversations.list') return ok({ channels: [{ id: 'D1', user: 'U3' }, { id: 'D2', user: 'U4', is_user_deleted: true }] });

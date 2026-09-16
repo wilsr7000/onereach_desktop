@@ -120,8 +120,9 @@ async function readSlackDigest({ token, fetchImpl, now = Date.now() }) {
   const started = Date.now();
   const overBudget = () => Date.now() - started > TOTAL_BUDGET_MS;
   const call = (method, params) => slackCall(method, params, { token, fetchImpl });
+  // The window is enforced on message timestamps below; a date modifier in
+  // the search query would be a UTC day and drop yesterday-evening mentions.
   const sinceSec = Math.floor((now - LOOKBACK_HOURS * 3600000) / 1000);
-  const sinceDay = new Date(now - LOOKBACK_HOURS * 3600000).toISOString().slice(0, 10);
 
   const me = await call('auth.test', {});
   const userId = me.user_id;
@@ -144,7 +145,7 @@ async function readSlackDigest({ token, fetchImpl, now = Date.now() }) {
   const mentions = [];
   try {
     const search = await call('search.messages', {
-      query: `<@${userId}> after:${sinceDay}`,
+      query: `<@${userId}>`,
       sort: 'timestamp',
       sort_dir: 'desc',
       count: 20,

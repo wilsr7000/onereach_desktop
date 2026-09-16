@@ -104,6 +104,23 @@ describe('_composeBriefing prompt', () => {
   });
 });
 
+describe('LLM-unavailable fallback', () => {
+  it('speaks the contributors\' spoken sentences, not their bullet lists', async () => {
+    agent._aiOverride = { complete: async () => { throw new Error('no key'); } };
+    try {
+      const text = await agent._composeBriefing(CONTRIBUTIONS, {}, 'Robb', 'today');
+      expect(text).toMatch(/^Good (morning|afternoon|evening), Robb\. /);
+      expect(text).toContain('Grab a light jacket.');
+      expect(text).toContain('9 to 10 AM, Think Tank on Zoom with 95 people then straight into Library sync-up.');
+      expect(text).toContain('7 AM, Morning Workout.');
+      expect(text).not.toContain('Schedule items (one per event');
+      expect(text).not.toContain('- 9:00');
+    } finally {
+      agent._aiOverride = null;
+    }
+  });
+});
+
 describe('sections, evidence and panel sizing', () => {
   it('_buildSections turns items into on-screen cards, skipping Calendar and Time', () => {
     const sections = agent._buildSections(CONTRIBUTIONS);
@@ -123,6 +140,14 @@ describe('sections, evidence and panel sizing', () => {
     expect(agent.computePanelHeight({ events: [], sections: [] })).toBe(540);
     expect(agent.computePanelHeight({ events: [{}, {}], sections: [{}, {}] })).toBe(540 + 140 + 160);
     expect(agent.computePanelHeight({ events: new Array(10).fill({}), sections: new Array(5).fill({}) })).toBe(900);
+  });
+
+  it('a failed calendar never renders as a clear day (reviewer finding #3)', () => {
+    const { buildDayViewSpec } = require('../../lib/calendar-format');
+    const failed = buildDayViewSpec(null, 'Calendar unavailable.', { sections: [], calendarUnavailable: true });
+    expect(failed.insightCards[0]).toEqual({ title: 'Today at a glance', value: 'Calendar unavailable', sub: 'Could not read your calendar' });
+    const clear = buildDayViewSpec(null, null, { sections: [] });
+    expect(clear.insightCards[0].value).toBe('Clear day');
   });
 
   it('the dayView spec + renderer carry the sections and the back-to-back marker', () => {

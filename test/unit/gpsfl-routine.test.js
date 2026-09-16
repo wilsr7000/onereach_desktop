@@ -6,7 +6,8 @@
 import { describe, it, expect } from 'vitest';
 
 const { parseRule, occursOn, planDay, buildTasksBriefText, compressItem } = require('../../lib/gps-for-life/routine');
-const { readTasksForBrief, resolveChild } = require('../../lib/gps-for-life/chores-read');
+const { readTasksForBrief, resolveChild, CHILD_BY_NAME } = require('../../lib/gps-for-life/chores-read');
+const CHILD_BY_NAME_HAS_UNIQUENESS_GUARD = /size\(matches\) = 1/.test(CHILD_BY_NAME);
 
 // A Tuesday.
 const DAY = new Date(2026, 8, 15, 7, 25);
@@ -54,6 +55,12 @@ describe('planDay', () => {
     expect(plan.overdue.map((i) => i.title)).toEqual(['Empty dishwasher']);
     expect(plan.overdue[0].line).toBe('overdue 149 days · Empty dishwasher');
     expect(plan.doneToday).toBe(1);
+  });
+
+  it('a one-off due today with no scheduled time is on the plan (reviewer finding #4)', () => {
+    const p = planDay([{ id: 'x', title: 'Renew passport', status: 'pending', scheduled_at: null, due_by: local(2026, 9, 15, 16, 0), priority: 'P1', recurrence_rule: null }], { day: DAY, now: DAY });
+    expect(p.later.map((i) => i.line)).toEqual(['4:00 PM \u00B7 Renew passport \u00B7 high priority']);
+    expect(p.overdue).toEqual([]);
   });
 
   it('untitled seed rows are skipped', () => {
@@ -115,16 +122,31 @@ describe('chores-read (injected reader)', () => {
       if (cypher.includes(':TaskItem')) return [];
       return [];
     };
-    const out = await readTasksForBrief({ profileName: 'Robb Wilson', read });
+    const out = await readTasksForBrief({ profileName: 'Robb Wilson', userEmail: 'robb@onereach.com', read });
     expect(out.child).toEqual({ phone: '1003', name: 'Robb' });
     expect(out.chores).toHaveLength(1);
     expect(calls.find((c) => c.cypher.includes('toLower($name)')).params).toEqual({ name: 'Robb' });
     expect(calls.find((c) => c.cypher.includes('HAS_CHORE')).params).toEqual({ phone: '1003' });
+    expect(calls.find((c) => c.cypher.includes(':TaskItem')).params).toEqual({ user: 'robb@onereach.com' });
     // No user text is ever interpolated into the Cypher.
     expect(calls.every((c) => !c.cypher.includes('Robb'))).toBe(true);
   });
   it('no name and no phone -> no child, no chores', async () => {
     const out = await resolveChild({ profileName: null, read: async () => [] });
     expect(out).toBeNull();
+  });
+  it('an anonymous session never reads chores by name, and never reads TaskItems', async () => {
+    const calls = [];
+    const read = async (cypher, params) => { calls.push({ cypher, params }); return [{ phone: '1003', name: 'Robb' }]; };
+    const out = await readTasksForBrief({ profileName: 'Robb', userEmail: null, read });
+    expect(out.child).toBeNull();
+    expect(out.chores).toEqual([]);
+    expect(out.taskItems).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+  it('the name match is only trusted when the graph returns exactly one child', async () => {
+    const read = async (cypher) => (cypher.includes('toLower($name)') ? [{ phone: '1003', name: 'Robb' }, { phone: '2001', name: 'Robb' }] : []);
+    expect(await resolveChild({ profileName: 'Robb', userEmail: 'robb@onereach.com', read })).toBeNull();
+    expect(CHILD_BY_NAME_HAS_UNIQUENESS_GUARD).toBe(true);
   });
 });
